@@ -133,8 +133,25 @@ export async function runDropDraw(request: Request | NextRequest) {
     }
   }
 
+  // store last results for admin inspection (server-global)
+  try {
+    // @ts-ignore
+    if (typeof globalThis !== 'undefined') globalThis.__goyunirLastDraw = resultsSummary;
+  } catch {}
+
   return {
     success: true,
     processedWinners: resultsSummary,
   };
 }
+
+// Save last draw results for admin inspection
+try {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  if (typeof globalThis !== 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    globalThis.__goyunirLastDraw = globalThis.__goyunirLastDraw ?? null;
+  }
+} catch {}
