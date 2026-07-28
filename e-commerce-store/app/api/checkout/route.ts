@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { createRedisClient, createStripeClient, buildAbsoluteUrl } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, buildAbsoluteUrl, addFallbackEntry, getFallbackEntries } from '@/lib/server-config';
 
 const redis = createRedisClient();
 const stripe = createStripeClient();
@@ -74,6 +74,36 @@ export async function POST(request: Request) {
       customerId: customer.id,
       message: 'Complete your card setup to lock in the entry and enable automatic charge if you win.',
     };
+
+    // prevent duplicate registration by address or email in fallback store or Redis
+    const normalizedAddressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
+    if (redis) {
+      try {
+        const isDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, normalizedAddressKey);
+        if (isDuplicate === 1) {
+          return NextResponse.json({ error: 'This address or variant is already registered.' }, { status: 409 });
+        }
+      } catch {}
+    } else {
+      const fallback = getFallbackEntries();
+      const exists = fallback.some((e) => (String(e.variant) === normalizedVariant && String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey) || String(e.email) === normalizedEmail);
+      if (exists) {
+        return NextResponse.json({ error: 'This address or email is already registered (pending).' }, { status: 409 });
+      }
+    }
+
+    // push a fallback entry so admin UI can surface pending entries before the webhook arrives
+    try {
+      addFallbackEntry({
+        email: normalizedEmail,
+        variant: normalizedVariant,
+        size: normalizedSize,
+        address: normalizedAddress,
+        quantity: finalQuantity,
+        registeredAt: Date.now(),
+        customerId: customer.id,
+      });
+    } catch {}
 
     if (!redis) {
       return NextResponse.json({
