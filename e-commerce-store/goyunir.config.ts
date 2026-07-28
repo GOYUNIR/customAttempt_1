@@ -33,10 +33,10 @@ export const GOYUNIR_STORE_SUITE = {
   // COLD SOCIAL MEDIA & CORPORATE FOOTER PANEL METRICS
   brandFooterData: {
     instagramLink: 'https://instagram.com/goyunir',
-    tiktokLink: 'https://tiktok.com',
-    supportEmail: 'contact@goyunir.com',
+    tiktokLink: 'https://tiktok.com/@goyunir',
+    supportEmail: 'goyunir.support@gmail.com',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR MAISON. ALL RIGHTS RESERVED.',
+    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
   },
 
   // 0-EXPERIENCE ENTERPRISE LOTTERY RELEASE CATALOG DATA MATRIX

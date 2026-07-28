@@ -163,7 +163,7 @@ export default function PerfumeStorefront() {
           <div style={{ width: '20px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
           <div style={{ width: '14px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
         </div>
-        <div style={{ fontWeight: 'bold', letterSpacing: '4px', fontSize: '12px', textTransform: 'uppercase' }}>GOYUNIR MAISON</div>
+        <div style={{ fontWeight: 'bold', letterSpacing: '4px', fontSize: '12px', textTransform: 'uppercase' }}>GOYUNIR</div>
         <div style={{ width: '24px' }} />
       </header>
 
@@ -299,12 +299,12 @@ export default function PerfumeStorefront() {
                 {activeMenuTab === 'story' && (
                   <div>
                     <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: '0 0 10px 0' }}>Our Scent Identity</h4>
-                    <p style={{ color: configPalette.textMuted, fontSize: '12px', lineHeight: '1.6' }}>Maison Goyunir engineering blends raw extraction mechanics with hyper-modern chemical balancing to forge fragrances that dominate social timelines and capture individual prestige.</p>
+                    <p style={{ color: configPalette.textMuted, fontSize: '12px', lineHeight: '1.6' }}>GOYUNIR engineering blends raw extraction mechanics with hyper-modern chemical balancing to forge fragrances that dominate social timelines and capture individual prestige.</p>
                   </div>
                 )}
                 {activeMenuTab === 'catalog' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: 0 }}>Maison Labs</h4>
+                    <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: 0 }}>GOYUNIR</h4>
                     <div>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentBlue, letterSpacing: '1px', textTransform: 'uppercase' }}>👔 Clothing Line (Upcoming)</span>
                       <p style={{ fontSize: '12px', margin: '4px 0 0 0', color: configPalette.textMuted, lineHeight: '1.4' }}>Heavyweight custom weave streetwear textiles. Raw drop matrix testing begins late 2026.</p>
@@ -336,7 +336,7 @@ export default function PerfumeStorefront() {
                   </div>
                 )}
               </div>
-              <div style={{ color: '#333', fontSize: '10px', borderTop: `1px solid ${configPalette.cardBorder}`, paddingTop: '15px' }}>GOYUNIR MAISON PRODUCTION SECURED ENGINE</div>
+              <div style={{ color: '#333', fontSize: '10px', borderTop: `1px solid ${configPalette.cardBorder}`, paddingTop: '15px' }}>GOYUNIR PRODUCTION SECURED ENGINE</div>
             </motion.div>
           </motion.div>
         )}

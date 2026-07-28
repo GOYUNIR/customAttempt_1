@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@vercel/kv';
+import { Redis } from '@upstash/redis'; // Textbook native marketplace client integration
 import { GOYUNIR_STORE_SUITE } from '../../../goyunir.config';
 
-// FIXED CLIENT MAPPER: Swaps out old default names for Upstash's official production marketplace keys
-const kv = createClient({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+// AUTOMATED INITIALIZATION: Natively discovers and binds UPSTASH_REDIS_REST_URL out-of-the-box
+const redis = Redis.fromEnv();
 
 export async function POST(request: Request) {
   try {
@@ -24,7 +21,7 @@ export async function POST(request: Request) {
 
     // ANTI-FRAUD ENGINE: Enforces a strict one-entry-per-household limit matching Nike SNKRS architecture
     const addressKey = shippingAddress.trim().toLowerCase().replace(/\s+/g, '');
-    const isAddressDuplicate = await kv.sismember(`drop_fraud_block:${variant}`, addressKey);
+    const isAddressDuplicate = await redis.sismember(`drop_fraud_block:${variant}`, addressKey);
 
     if (isAddressDuplicate === 1) {
       return NextResponse.json({ 
@@ -34,8 +31,10 @@ export async function POST(request: Request) {
     }
 
     const registrationPayload = { email, variant, size, address: shippingAddress, quantity: finalQuantity, registeredAt: Date.now() };
-    await kv.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(registrationPayload));
-    await kv.sadd(`drop_fraud_block:${variant}`, addressKey);
+    
+    // Pure atomic array queueing methods
+    await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(registrationPayload));
+    await redis.sadd(`drop_fraud_block:${variant}`, addressKey);
 
     return NextResponse.json({ 
       success: true, 
