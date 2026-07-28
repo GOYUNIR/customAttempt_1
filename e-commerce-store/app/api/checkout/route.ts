@@ -81,14 +81,15 @@ export async function POST(request: Request) {
       try {
         const isDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, normalizedAddressKey);
         if (isDuplicate === 1) {
-          return NextResponse.json({ error: 'This address or variant is already registered.' }, { status: 409 });
+          // previously returned 409; instead return a warning so users aren't blocked
+          return NextResponse.json({ ...responsePayload, warning: 'This address or variant is already registered.' });
         }
       } catch {}
     } else {
       const fallback = getFallbackEntries();
       const exists = fallback.some((e) => (String(e.variant) === normalizedVariant && String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey) || String(e.email) === normalizedEmail);
       if (exists) {
-        return NextResponse.json({ error: 'This address or email is already registered (pending).' }, { status: 409 });
+        return NextResponse.json({ ...responsePayload, warning: 'This address or email is already registered (pending).' });
       }
     }
 
