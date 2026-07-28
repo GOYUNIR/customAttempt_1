@@ -38,6 +38,15 @@ export async function GET() {
     // @ts-ignore
     if (typeof globalThis !== 'undefined') status.lastDraw = globalThis.__goyunirLastDraw ?? null;
   } catch {}
+  try {
+    // @ts-ignore
+    if (typeof globalThis !== 'undefined') status.lastWebhook = globalThis.__goyunirLastWebhook ?? null;
+  } catch {}
+
+  try {
+    // @ts-ignore
+    if (typeof globalThis !== 'undefined') status.webhookErrors = globalThis.__goyunirWebhookErrors ?? [];
+  } catch {}
 
   return NextResponse.json(status);
 }

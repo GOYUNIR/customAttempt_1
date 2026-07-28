@@ -10,6 +10,7 @@ export interface CheckoutRegistrationPayload {
   registeredAt: number;
   customerId?: string;
   paymentMethodId?: string;
+  sessionId?: string;
   source: 'fallback' | 'redis';
 }
 

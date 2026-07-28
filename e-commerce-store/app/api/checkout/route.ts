@@ -32,23 +32,46 @@ export async function POST(request: Request) {
     const targetedProduct = GOYUNIR_STORE_SUITE.productCatalog.find((product) => product.name === normalizedVariant);
     const allocationBoundary = targetedProduct ? targetedProduct.maxRaffleAllocationLimit : GOYUNIR_STORE_SUITE.dropSchedule.winnersPer50ml;
     const finalQuantity = Math.min(allocationBoundary, Math.max(1, Number.parseInt(String(quantityChosen || 1), 10)));
+    const normalizedAddressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
 
-    const customer = await stripe.customers.create({
-      email: normalizedEmail,
-      metadata: {
-        variant: normalizedVariant,
-        size: normalizedSize,
-        address: normalizedAddress,
-        quantity: String(finalQuantity),
-      },
-    });
+    if (redis) {
+      try {
+        const isDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, normalizedAddressKey);
+        if (isDuplicate === 1) {
+          return NextResponse.json({ error: 'Duplicate entry detected for this variant and address.' }, { status: 409 });
+        }
+      } catch {}
+    } else {
+      const fallback = getFallbackEntries();
+      const exists = fallback.some(
+        (e) =>
+          (String(e.variant) === normalizedVariant && String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey) ||
+          String(e.email).toLowerCase() === normalizedEmail.toLowerCase(),
+      );
+      if (exists) {
+        return NextResponse.json({ error: 'Duplicate entry detected for this variant or email.' }, { status: 409 });
+      }
+    }
+
+    const existingCustomers = await stripe.customers.list({ email: normalizedEmail, limit: 1 });
+    const customer = existingCustomers.data.length > 0
+      ? existingCustomers.data[0]
+      : await stripe.customers.create({
+          email: normalizedEmail,
+          metadata: {
+            variant: normalizedVariant,
+            size: normalizedSize,
+            address: normalizedAddress,
+            quantity: String(finalQuantity),
+          },
+        });
 
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customer.id,
       payment_method_types: ['card'],
       mode: 'setup',
       billing_address_collection: 'required',
-      success_url: buildAbsoluteUrl(request, '/?setup=success'),
+      success_url: buildAbsoluteUrl(request, '/?setup=success&session_id={CHECKOUT_SESSION_ID}'),
       cancel_url: buildAbsoluteUrl(request, '/?setup=cancel'),
       metadata: {
         variant: normalizedVariant,
@@ -75,25 +98,7 @@ export async function POST(request: Request) {
       message: 'Complete your card setup to lock in the entry and enable automatic charge if you win.',
     };
 
-    // prevent duplicate registration by address or email in fallback store or Redis
-    const normalizedAddressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
-    if (redis) {
-      try {
-        const isDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, normalizedAddressKey);
-        if (isDuplicate === 1) {
-          // previously returned 409; instead return a warning so users aren't blocked
-          return NextResponse.json({ ...responsePayload, warning: 'This address or variant is already registered.' });
-        }
-      } catch {}
-    } else {
-      const fallback = getFallbackEntries();
-      const exists = fallback.some((e) => (String(e.variant) === normalizedVariant && String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey) || String(e.email) === normalizedEmail);
-      if (exists) {
-        return NextResponse.json({ ...responsePayload, warning: 'This address or email is already registered (pending).' });
-      }
-    }
-
-    // push a fallback entry so admin UI can surface pending entries before the webhook arrives
+    // push a fallback entry so admin UI can surface pending entries and support manual completion
     try {
       addFallbackEntry({
         email: normalizedEmail,
@@ -103,6 +108,7 @@ export async function POST(request: Request) {
         quantity: finalQuantity,
         registeredAt: Date.now(),
         customerId: customer.id,
+        sessionId: checkoutSession.id,
       });
     } catch {}
 

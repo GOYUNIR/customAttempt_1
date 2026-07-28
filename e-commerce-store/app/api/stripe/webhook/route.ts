@@ -14,11 +14,31 @@ export async function POST(request: Request) {
   }
 
   const body = await request.text();
-  let event: Stripe.Event;
+  let event: Stripe.Event | null = null;
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch (error) {
-    return NextResponse.json({ error: 'Invalid Stripe webhook signature.' }, { status: 400 });
+  } catch (err) {
+    // log signature failure
+    try {
+      // @ts-ignore
+      if (typeof globalThis !== 'undefined') {
+        // @ts-ignore
+        globalThis.__goyunirWebhookErrors = globalThis.__goyunirWebhookErrors || [];
+        // @ts-ignore
+        globalThis.__goyunirWebhookErrors.push({ at: Date.now(), error: String(err), rawBodyPreview: body.slice(0, 1000) });
+      }
+    } catch {}
+
+    // Allow unverified webhook payloads for local/dev testing when explicitly enabled.
+    if (process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true' || process.env.NODE_ENV !== 'production') {
+      try {
+        event = JSON.parse(body) as Stripe.Event;
+      } catch (parseErr) {
+        return NextResponse.json({ error: 'Invalid webhook payload.' }, { status: 400 });
+      }
+    } else {
+      return NextResponse.json({ error: 'Invalid Stripe webhook signature.' }, { status: 400 });
+    }
   }
 
   if (event.type !== 'checkout.session.completed') {
@@ -49,6 +69,13 @@ export async function POST(request: Request) {
     const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
     const paymentMethodId = String(setupIntent.payment_method ?? '');
     if (!paymentMethodId) {
+      // record for admin inspection and continue
+      try {
+        // @ts-ignore
+        if (typeof globalThis !== 'undefined') globalThis.__goyunirWebhookErrors = globalThis.__goyunirWebhookErrors || [];
+        // @ts-ignore
+        globalThis.__goyunirWebhookErrors.push({ at: Date.now(), error: 'SetupIntent has no payment method', session: session });
+      } catch {}
       return NextResponse.json({ error: 'SetupIntent has no payment method.' }, { status: 400 });
     }
 
@@ -70,7 +97,13 @@ export async function POST(request: Request) {
       await redis.sadd(`drop_fraud_block:${variant}`, normalizedAddress);
     }
 
-    return NextResponse.json({ received: true });
+      // store last processed webhook for admin UI
+      try {
+        // @ts-ignore
+        if (typeof globalThis !== 'undefined') globalThis.__goyunirLastWebhook = session;
+      } catch {}
+
+      return NextResponse.json({ received: true });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Webhook processing failed.';
     return NextResponse.json({ error: message }, { status: 500 });

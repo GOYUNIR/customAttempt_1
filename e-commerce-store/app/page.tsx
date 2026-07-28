@@ -68,13 +68,34 @@ export default function PerfumeStorefront() {
       const searchParams = new URLSearchParams(window.location.search);
       const isSuccess = searchParams.get('setup') === 'success';
       const isCancel = searchParams.get('setup') === 'cancel';
+      const sessionId = searchParams.get('session_id');
 
       setSetupSuccess(isSuccess);
       setSetupCancel(isCancel);
 
-      if (isSuccess) {
-        setFeedbackStatus('success');
-        setFeedbackMessage('Your payment method is saved and your entry is confirmed. Good luck on the drop.');
+      if (isSuccess && sessionId) {
+        setFeedbackStatus('idle');
+        setFeedbackMessage('Finalizing your payment method and saving your entry...');
+
+        fetch('/api/checkout/confirm-setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        })
+          .then(async (res) => {
+            const data = await res.json();
+            if (res.ok && data.success) {
+              setFeedbackStatus('success');
+              setFeedbackMessage(data.message || 'Your payment method is saved and your entry is confirmed. Good luck on the drop.');
+            } else {
+              setFeedbackStatus('error');
+              setFeedbackMessage(data.error || 'There was an issue confirming your entry.');
+            }
+          })
+          .catch(() => {
+            setFeedbackStatus('error');
+            setFeedbackMessage('Unable to confirm your entry. Please try again later.');
+          });
       }
 
       if (isCancel) {
