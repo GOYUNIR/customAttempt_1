@@ -1,36 +1,31 @@
-export const GOYUNIR_STORE_SUITE = {
-  // GLOBAL BRAND VISUAL COLOR PALETTE (Hex Codes)
-  themeColors: {
-    primaryBackground: '#0a0a0a',   // Dark main body backdrop
-    cardBackground: '#111111',      // Base tint frame for form boxes
-    cardBorder: '#222222',          // Subtle dividing lines
-    accentPurple: '#a855f7',        // White collection styling accent
-    accentBlue: '#3b82f6',          // Black collection styling accent
-    textMain: '#ffffff',            // Clear structural headings
-    textMuted: '#888888',           // Description and fallback lines
-    checkoutCtaButton: '#635bff',   // Stripe checkout trigger color
-  },
+import { buildStorefrontConfig } from './lib/storefront-config';
 
-  // STUPID-PROOF AUTOMATED DROP SCHEDULE CONTROL MATRIX
-  // Simply change the text parameters below to shift deadlines without code editing!
+export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
+  themeColors: {
+    primaryBackground: '#0a0a0a',
+    cardBackground: '#111111',
+    cardBorder: '#222222',
+    accentPurple: '#a855f7',
+    accentBlue: '#3b82f6',
+    textMain: '#ffffff',
+    textMuted: '#888888',
+    checkoutCtaButton: '#635bff',
+  },
   dropSchedule: {
-    // Standard ISO string format: YYYY-MM-DDTHH:MM:SS (e.g. July 31st, 2026 at Midnight)
-    targetEndDateTime: '2026-07-31T23:59:59', 
-    countdownExpiredText: 'ALLOCATION CLOSED • VARIANT ARCHIVED',
+    targetEndDateTime: '2026-07-27T19:30:00',
+    countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',
     minutesLabel: 'm',
     secondsLabel: 's',
+    winnersPer50ml: 10,
+    winnersPer100ml: 5,
   },
-
-  // 360 HARDWARE ROTATION MECHANICS CONTROL
   animationMechanics: {
-    totalFramesToLoad: 4,           
-    maxRotationDegrees: 360,        
-    spinReverseOnAlternatingProgress: true, 
+    totalFramesToLoad: 4,
+    maxRotationDegrees: 360,
+    spinReverseOnAlternatingProgress: true,
   },
-
-  // STUPID-PROOF LIVE FORM MAKER ENGINE
   raffleRegistrationForm: {
     titleHeader: 'Join The Allocation Draw',
     emailLabel: 'Contact Email Address',
@@ -40,38 +35,47 @@ export const GOYUNIR_STORE_SUITE = {
     submitButtonText: '🏆 Secure Entry Allocation Ticket',
     submitButtonLoadingText: 'Encrypting Entry Base...',
   },
-
-  // COLD SOCIAL MEDIA & CORPORATE FOOTER PANEL METRICS
-  brandFooterData: {
-    instagramLink: 'https://instagram.com',
-    tiktokLink: 'https://tiktok.com',
-    supportEmail: 'contact@goyunir.com',
-    shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR MAISON. ALL RIGHTS RESERVED.',
+  heroContent: {
+    eyebrow: 'The Architecture of Scent',
+    headline: 'A drop that moves faster than attention itself.',
+    body: 'We design fragrances that move faster than time itself. An intentional collision of raw natural essences and electric modern chemistry.',
+    ctaLabel: '↓ Scroll To Explore',
   },
-
-  // ENTERPRISE PRODUCT CATALOG MATRIX
+  socialProof: {
+    label: 'Limited drop access',
+    value: '1,287 early entrants',
+    caption: 'Hype is compounding fast—reserve now before inventory closes.',
+  },
+  brandFooterData: {
+    instagramLink: 'https://instagram.com/goyunir',
+    tiktokLink: 'https://tiktok.com/goyunir',
+    supportEmail: 'goyunir.support@gmail.com',
+    shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
+    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+  },
   productCatalog: [
     {
       id: 'p1',
       name: 'Elysian White',
-      prefix: 'EXAMPLEPICV1', 
+      slug: 'elysian-white',
+      prefix: 'EXAMPLEPICV1',
       tagline: 'WHITE ALLOCATION / 01',
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
       price50ml: 85,
       price100ml: 140,
       stripeId50ml: 'price_1N_ElysianWhite_50ml_LIVE_TOKEN_A',
       stripeId100ml: 'price_1N_ElysianWhite_100ml_LIVE_TOKEN_B',
-      maxRaffleAllocationLimit: 10, 
+      maxRaffleAllocationLimit: 10,
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
-        { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
-      ]
+        { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
+      ],
     },
     {
       id: 'p2',
       name: 'Obsidian Void',
+      slug: 'obsidian-void',
       prefix: 'EXAMPLEPICV2',
       tagline: 'BLACK ALLOCATION / 02',
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
@@ -83,8 +87,8 @@ export const GOYUNIR_STORE_SUITE = {
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
         { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
-        { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
-      ]
-    }
-  ]
-};
+        { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' },
+      ],
+    },
+  ],
+});

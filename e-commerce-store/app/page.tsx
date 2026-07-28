@@ -3,84 +3,91 @@
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { useRef, useEffect, useState } from 'react';
 import { GOYUNIR_STORE_SUITE } from '../goyunir.config';
+import { getProductPrice, getVisibleProducts } from '../lib/storefront-config';
+import { EntryFormState, isValidEmail, normalizeEntryForm } from '../lib/validation';
 
-// DECOUPLED STRUCTURAL DATA TYPE CORES
-interface NoteConfig {
-  label: string;
-  name: string;
-  text: string;
+interface TimeLeftState {
+  d: number;
+  h: number;
+  m: number;
+  s: number;
+  expired: boolean;
 }
 
-interface ProductConfig {
-  id: string;
-  name: string;
-  prefix: string;
-  tagline: string;
-  desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
-  maxRaffleAllocationLimit: number;
-  notes: NoteConfig[];
-}
-
-interface EntryFormState {
-  email: string;
-  shippingAddress: string;
-  quantity: number;
-}
 export default function PerfumeStorefront() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  const [activeProductIndex, setActiveProductIndex] = useState<number>(0);
-  const [selectedSize, setSelectedSize] = useState<string>('50ml');
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
-  const [activeMenuTab, setActiveMenuTab] = useState<string>('story');
-  
-  // NATIVE RAFFLE FORM ENTRY CAPTURE MECHANICS
+  const visibleProducts = getVisibleProducts(GOYUNIR_STORE_SUITE);
+
+  const [activeProductIndex, setActiveProductIndex] = useState(() => {
+    const firstVisibleIndex = visibleProducts.findIndex((product) => product.isActive !== false);
+    return firstVisibleIndex >= 0 ? firstVisibleIndex : 0;
+  });
+  const [selectedSize, setSelectedSize] = useState('50ml');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeMenuTab, setActiveMenuTab] = useState('story');
   const [form, setForm] = useState<EntryFormState>({ email: '', shippingAddress: '', quantity: 1 });
-  const [feedbackMessage, setFeedbackMessage] = useState<string>('');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  
   const [votes, setVotes] = useState<Record<string, number>>({ A: 142, B: 98 });
-  const [hasVoted, setHasVoted] = useState<boolean>(false);
+  const [hasVoted, setHasVoted] = useState(() => (typeof window !== 'undefined' ? Boolean(window.localStorage.getItem('goyunir_has_voted')) : false));
+  const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
 
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  const heroContent = GOYUNIR_STORE_SUITE.heroContent;
+  const currentProduct = visibleProducts[activeProductIndex] ?? visibleProducts[0] ?? GOYUNIR_STORE_SUITE.productCatalog[0];
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
-    offset: ["start start", "end end"]
+    offset: ['start start', 'end end'],
   });
 
-  // FLEXIBLE HARDWARE SPIN TRACKER: Maps limits smoothly from config file values
   const frameIndex = useTransform(
-    scrollYProgress, 
-    [0, 0.35, 0.65, 0.82, 0.88], 
-    GOYUNIR_STORE_SUITE.animationMechanics.spinReverseOnAlternatingProgress 
+    scrollYProgress,
+    [0, 0.35, 0.65, 0.82, 0.88],
+    GOYUNIR_STORE_SUITE.animationMechanics.spinReverseOnAlternatingProgress
       ? [1, TOTAL_IMAGES, 1, TOTAL_IMAGES, 1]
-      : [1, TOTAL_IMAGES, TOTAL_IMAGES, 1, 1]
+      : [1, TOTAL_IMAGES, TOTAL_IMAGES, 1, 1],
   );
-  
+
   const bottleOpacity = useTransform(scrollYProgress, [0.82, 0.88], [1, 0]);
   const scrollIndicatorOpacity = useTransform(scrollYProgress, [0, 0.05], [1, 0]);
 
   useEffect(() => {
-    const localVoteCheck = localStorage.getItem('goyunir_has_voted');
-    if (localVoteCheck) setHasVoted(true);
-    const handleNavigationFix = () => { setIsProcessing(false); };
+    const handleNavigationFix = () => setIsProcessing(false);
     window.addEventListener('popstate', handleNavigationFix);
     return () => window.removeEventListener('popstate', handleNavigationFix);
+  }, []);
+
+  useEffect(() => {
+    const targetTime = new Date(GOYUNIR_STORE_SUITE.dropSchedule.targetEndDateTime).getTime();
+    const timerLoop = window.setInterval(() => {
+      const now = Date.now();
+      const delta = targetTime - now;
+
+      if (delta <= 0) {
+        setTimeLeft((prev) => ({ ...prev, expired: true }));
+        window.clearInterval(timerLoop);
+        return;
+      }
+
+      const d = Math.floor(delta / (1000 * 60 * 60 * 24));
+      const h = Math.floor((delta % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const m = Math.floor((delta % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((delta % (1000 * 60)) / 1000);
+      setTimeLeft({ d, h, m, s, expired: false });
+    }, 1000);
+
+    return () => window.clearInterval(timerLoop);
   }, []);
 
   useEffect(() => {
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
 
-    const currentProduct = GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex];
+    const currentProduct = visibleProducts[activeProductIndex] ?? visibleProducts[0] ?? GOYUNIR_STORE_SUITE.productCatalog[0];
     const preloadedImages: HTMLImageElement[] = [];
     canvasRef.current.width = 600;
     canvasRef.current.height = 600;
@@ -92,40 +99,57 @@ export default function PerfumeStorefront() {
       }
     };
 
-    for (let i = 1; i <= TOTAL_IMAGES; i++) {
+    for (let i = 1; i <= TOTAL_IMAGES; i += 1) {
       const img = new Image();
-      img.src = `/images/${currentProduct.prefix}_${i}.jpg`; 
-      img.onload = () => { if (i === 1) drawFrame(img); };
+      img.src = `/images/${currentProduct.prefix}_${i}.jpg`;
+      img.onload = () => {
+        if (i === 1) {
+          drawFrame(img);
+        }
+      };
       preloadedImages.push(img);
     }
 
-    const unsubscribe = frameIndex.on("change", (v) => {
-      const index = Math.min(Math.max(Math.round(v), 1), TOTAL_IMAGES);
+    const unsubscribe = frameIndex.on('change', (value) => {
+      const index = Math.min(Math.max(Math.round(value), 1), TOTAL_IMAGES);
       const activeFrameImage = preloadedImages[index - 1];
-      if (activeFrameImage) drawFrame(activeFrameImage);
+      if (activeFrameImage) {
+        drawFrame(activeFrameImage);
+      }
     });
 
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES]);
-  // TEXTBOOK NIKE SNKRS QUEUE SUBMITTER
-  const submitRaffleEntry = async (e: React.FormEvent) => {
-    e.preventDefault();
+
+  const submitRaffleEntry = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (isProcessing) return;
+
+    const activeProd = currentProduct;
+    const normalizedForm = normalizeEntryForm(form);
+    const normalizedEmail = normalizedForm.email;
+    const normalizedAddress = normalizedForm.shippingAddress;
+
+    if (!isValidEmail(normalizedEmail) || !normalizedAddress) {
+      setFeedbackStatus('error');
+      setFeedbackMessage('Please provide a valid email and a shipping address.');
+      return;
+    }
+
     setIsProcessing(true);
     setFeedbackStatus('idle');
     setFeedbackMessage('Verifying profile with priority queue allocation...');
 
     try {
-      const activeProd = GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex];
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           variant: activeProd.name,
           size: selectedSize,
-          email: form.email,
-          shippingAddress: form.shippingAddress,
-          quantityChosen: form.quantity
+          email: normalizedEmail,
+          shippingAddress: normalizedAddress,
+          quantityChosen: normalizedForm.quantity,
         }),
       });
 
@@ -138,9 +162,9 @@ export default function PerfumeStorefront() {
         setFeedbackStatus('error');
         setFeedbackMessage(data.message || '⚠️ Drop registration failed.');
       }
-    } catch (err) {
+    } catch {
       setFeedbackStatus('error');
-      setFeedbackMessage('❌ Connection timeout. Vercel KV entry pipeline interrupted.');
+      setFeedbackMessage('❌ Connection timeout. The entry system is using a safe fallback path.');
     } finally {
       setIsProcessing(false);
     }
@@ -175,7 +199,7 @@ export default function PerfumeStorefront() {
       {/* PUSH DIRECTION OVERLAY */}
       <motion.div style={{ position: 'fixed', bottom: '8vh', left: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 15, pointerEvents: 'none', opacity: scrollIndicatorOpacity }}>
         <motion.span animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }} style={{ textTransform: 'uppercase', letterSpacing: '3px', fontSize: '9px', color: configPalette.textMuted, fontWeight: 'bold' }}>
-          ↓ Scroll To Explore
+          {heroContent.ctaLabel}
         </motion.span>
       </motion.div>
 
@@ -183,13 +207,13 @@ export default function PerfumeStorefront() {
       <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
         <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <motion.div initial={{ opacity: 0, y: 15 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-            <span style={{ textTransform: 'uppercase', letterSpacing: '6px', fontSize: '9px', color: '#555', fontWeight: 'bold' }}>The Architecture of Scent</span>
-            <h1 style={{ fontSize: '36px', margin: '10px 0', fontFamily: 'serif', letterSpacing: '1px' }}>{GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].name}</h1>
+            <span style={{ textTransform: 'uppercase', letterSpacing: '6px', fontSize: '9px', color: '#555', fontWeight: 'bold' }}>{heroContent.eyebrow}</span>
+            <h1 style={{ fontSize: '36px', margin: '10px 0', fontFamily: 'serif', letterSpacing: '1px' }}>{currentProduct.name}</h1>
             <p style={{ maxWidth: '300px', color: configPalette.textMuted, lineHeight: '1.7', fontSize: '13px', margin: '0 auto 24px' }}>
-              We design fragrances that move faster than time itself. An intentional collision of raw natural essences and electric modern chemistry.
+              {heroContent.body}
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              {GOYUNIR_STORE_SUITE.productCatalog.map((prod, idx) => (
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              {visibleProducts.map((prod, idx) => (
                 <button key={prod.id} onClick={() => { setActiveProductIndex(idx); setSelectedSize('50ml'); }} style={{ padding: '8px 18px', borderRadius: '20px', border: activeProductIndex === idx ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: activeProductIndex === idx ? configPalette.textMain : 'transparent', color: activeProductIndex === idx ? configPalette.primaryBackground : configPalette.textMuted, fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', letterSpacing: '0.5px' }}>
                   {prod.name}
                 </button>
@@ -199,7 +223,7 @@ export default function PerfumeStorefront() {
         </section>
         {/* SEQUENTIAL RUNWAY CONTAINER */}
         <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
-          {GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].notes.map((note, idx) => {
+          {currentProduct.notes.map((note, idx) => {
             const isLeft = idx % 2 === 0;
             const topOffset = 100 + (idx * 90);
             const activeColor = idx % 2 === 0 ? configPalette.accentPurple : configPalette.accentBlue;
@@ -221,43 +245,24 @@ export default function PerfumeStorefront() {
             
             {/* LIVE COUNTDOWN TICKER BOX CONTAINER */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
-              {(() => {
-                const [timeLeft, setTimeLeft] = useState({ d: 0, h: 0, m: 0, s: 0, expired: false });
-                
-                useEffect(() => {
-                  const targetTime = new Date(GOYUNIR_STORE_SUITE.dropSchedule.targetEndDateTime).getTime();
-                  const timerLoop = setInterval(() => {
-                    const now = new Date().getTime();
-                    const delta = targetTime - now;
+              {timeLeft.expired ? (
+                <span style={{ fontSize: '11px', color: '#ff3b30', fontWeight: 'bold', letterSpacing: '1px' }}>
+                  {GOYUNIR_STORE_SUITE.dropSchedule.countdownExpiredText}
+                </span>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold' }}>
+                  <span>{timeLeft.d}{GOYUNIR_STORE_SUITE.dropSchedule.daysLabel}</span>
+                  <span>{timeLeft.h}{GOYUNIR_STORE_SUITE.dropSchedule.hoursLabel}</span>
+                  <span>{timeLeft.m}{GOYUNIR_STORE_SUITE.dropSchedule.minutesLabel}</span>
+                  <span>{timeLeft.s}{GOYUNIR_STORE_SUITE.dropSchedule.secondsLabel}</span>
+                </div>
+              )}
+            </div>
 
-                    if (delta <= 0) {
-                      setTimeLeft(prev => ({ ...prev, expired: true }));
-                      clearInterval(timerLoop);
-                    } else {
-                      const d = Math.floor(delta / (1000 * 60 * 60 * 24));
-                      const h = Math.floor((delta % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                      const m = Math.floor((delta % (1000 * 60 * 60)) / (1000 * 60));
-                      const s = Math.floor((delta % (1000 * 60)) / 1000);
-                      setTimeLeft({ d, h, m, s, expired: false });
-                    }
-                  }, 1000);
-                  return () => clearInterval(timerLoop);
-                }, []);
-
-                if (timeLeft.expired) {
-                  return <span style={{ fontSize: '11px', color: '#ff3b30', fontWeight: 'bold', letterSpacing: '1px' }}>{GOYUNIR_STORE_SUITE.dropSchedule.countdownExpiredText}</span>;
-                }
-
-                const sched = GOYUNIR_STORE_SUITE.dropSchedule;
-                return (
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold' }}>
-                    <span>{timeLeft.d}{sched.daysLabel}</span>
-                    <span>{timeLeft.h}{sched.hoursLabel}</span>
-                    <span>{timeLeft.m}{sched.minutesLabel}</span>
-                    <span>{timeLeft.s}{sched.secondsLabel}</span>
-                  </div>
-                );
-              })()}
+            <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
+              <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: '6px' }}>{GOYUNIR_STORE_SUITE.socialProof.label}</div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>{GOYUNIR_STORE_SUITE.socialProof.value}</div>
+              <div style={{ fontSize: '11px', color: configPalette.textMuted }}>{GOYUNIR_STORE_SUITE.socialProof.caption}</div>
             </div>
 
             <h2 style={{ fontSize: '24px', textAlign: 'center', fontFamily: 'serif', margin: '0 0 10px 0', letterSpacing: '1px' }}>
@@ -265,15 +270,15 @@ export default function PerfumeStorefront() {
             </h2>
             
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} style={{ background: configPalette.cardBackground, padding: '24px 20px', borderRadius: '24px', border: `1px solid ${configPalette.cardBorder}`, boxSizing: 'border-box' }}>
-              <h3 style={{ fontSize: '20px', margin: '0 0 4px 0', fontFamily: 'serif', textAlign: 'center' }}>{GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].name}</h3>
-              <p style={{ color: configPalette.textMuted, fontSize: '12px', margin: '0 0 20px 0', textAlign: 'center' }}>{GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].desc}</p>
+              <h3 style={{ fontSize: '20px', margin: '0 0 4px 0', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>
+              <p style={{ color: configPalette.textMuted, fontSize: '12px', margin: '0 0 20px 0', textAlign: 'center' }}>{currentProduct.desc}</p>
               
               <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left' }}>
                 <div>
                   <label style={{ fontSize: '10px', fontWeight: 'bold', color: configPalette.textMuted, letterSpacing: '1px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Select Capacity Size</label>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {['50ml', '100ml'].map((sz) => {
-                      const displayPrice = sz === '50ml' ? GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].price50ml : GOYUNIR_STORE_SUITE.productCatalog[activeProductIndex].price100ml;
+                      const displayPrice = getProductPrice(currentProduct, sz);
                       return (
                         <button key={sz} type="button" onClick={() => setSelectedSize(sz)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: selectedSize === sz ? `2px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === sz ? configPalette.textMain : 'transparent', color: selectedSize === sz ? configPalette.primaryBackground : configPalette.textMain, fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
                           {sz} — ${displayPrice}

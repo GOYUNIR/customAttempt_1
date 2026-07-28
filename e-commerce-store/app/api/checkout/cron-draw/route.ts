@@ -1,75 +1,89 @@
 import { NextResponse } from 'next/server';
-import { Redis } from '@upstash/redis';
-import Stripe from 'stripe';
 import { GOYUNIR_STORE_SUITE } from '../../../../goyunir.config';
+import { buildAbsoluteUrl, createRedisClient, createStripeClient, getFallbackEntries } from '../../../../lib/server-config';
+import { getProductStripeId, getWinnerCount } from '../../../../lib/storefront-config';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-01-27.acacia' as any,
-});
-
-// Connected cleanly to your Upstash cloud cluster memory cache
-const redis = Redis.fromEnv();
+const redis = createRedisClient();
+const stripe = createStripeClient();
 
 export async function GET(request: Request) {
-  // SECURITY HANDSHAKE: Validates that incoming triggers match your specific Vercel configuration string
   const authHeader = request.headers.get('authorization');
   const targetSecret = `Bearer ${process.env.CRON_SECRET}`;
 
   if (!authHeader || authHeader !== targetSecret) {
-    return NextResponse.json({ error: "Unauthorized background clock execution." }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized background clock execution.' }, { status: 401 });
   }
 
   try {
-    console.log("🚀 Starting background automated lottery drawing...");
-    const resultsSummary: any[] = [];
+    console.log('🚀 Starting background automated lottery drawing...');
+    const resultsSummary: Array<{ email: string; scent: string; size: string; checkout?: string }> = [];
 
-    for (const prod of GOYUNIR_STORE_SUITE.productCatalog) {
+    if (!redis) {
+      return NextResponse.json({
+        success: true,
+        processedWinners: [],
+        message: 'Redis is not configured. No draw was processed.',
+      });
+    }
+
+    const fallbackEntries = getFallbackEntries();
+    if (fallbackEntries.length > 0) {
+      resultsSummary.push(...fallbackEntries.map((entry) => ({ email: entry.email, scent: entry.variant, size: entry.size })));
+    }
+
+    for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
       for (const size of ['50ml', '100ml']) {
-        const poolKey = `drop_pool:${prod.name}:${size}`;
+        const poolKey = `drop_pool:${product.name}:${size}`;
         const totalEntries = await redis.llen(poolKey);
 
         if (totalEntries === 0) continue;
 
         const allRegistrations = await redis.lrange(poolKey, 0, -1);
-        const parsedPool = allRegistrations.map((entry: any) => typeof entry === 'string' ? JSON.parse(entry) : entry);
+        const parsedPool = allRegistrations.map((entry: unknown) => {
+          if (typeof entry === 'string') {
+            return JSON.parse(entry) as Record<string, unknown>;
+          }
+          return entry as Record<string, unknown>;
+        });
 
-        // Fisher-Yates Random Lottery Selection Math Loop
-        for (let i = parsedPool.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [parsedPool[i], parsedPool[j]] = [parsedPool[j], parsedPool[i]];
+        for (let index = parsedPool.length - 1; index > 0; index -= 1) {
+          const j = Math.floor(Math.random() * (index + 1));
+          [parsedPool[index], parsedPool[j]] = [parsedPool[j], parsedPool[index]];
         }
 
-        const targetLimit = size === '100ml' ? 5 : 10;
+        const targetLimit = getWinnerCount(GOYUNIR_STORE_SUITE, size);
         const winnersCount = Math.min(targetLimit, parsedPool.length);
         const chosenWinners = parsedPool.slice(0, winnersCount);
 
-        const targetStripeId = size === '100ml' ? prod.stripeId100ml : prod.stripeId50ml;
+        const targetStripeId = getProductStripeId(product, size);
 
-        for (const winner of chosenWinners) {
-          const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            customer_email: winner.email,
-            line_items: [{ price: targetStripeId, quantity: 1 }],
-            mode: 'payment',
-            allow_promotion_codes: true,
-            expires_at: Math.floor(Date.now() / 1000) + 1800, // 30-Minute expiration
-            success_url: `${process.env.NEXT_PUBLIC_URL}/?session=success`,
-            cancel_url: `${process.env.NEXT_PUBLIC_URL}/?session=cancel`,
-          });
+        if (stripe) {
+          for (const winner of chosenWinners) {
+            const email = String(winner.email ?? '');
+            const session = await stripe.checkout.sessions.create({
+              payment_method_types: ['card'],
+              customer_email: email,
+              line_items: [{ price: targetStripeId, quantity: 1 }],
+              mode: 'payment',
+              allow_promotion_codes: true,
+              expires_at: Math.floor(Date.now() / 1000) + 1800,
+              success_url: `${buildAbsoluteUrl(request, '/')}?session=success`,
+              cancel_url: `${buildAbsoluteUrl(request, '/')}?session=cancel`,
+            });
 
-          // Output logs directly to your secure Vercel production logs dashboard!
-          console.log(`✉️ WINNING TICKET DISPATCHED -> Email: ${winner.email} | Link: ${session.url}`);
-          resultsSummary.push({ email: winner.email, scent: prod.name, size, checkout: session.url });
+            console.log(`✉️ WINNING TICKET DISPATCHED -> Email: ${email} | Link: ${session.url}`);
+            resultsSummary.push({ email, scent: product.name, size, checkout: session.url ?? undefined });
+          }
         }
 
-        // Clean cache so your site is ready for the next release drop
         await redis.del(poolKey);
       }
     }
 
     return NextResponse.json({ success: true, processedWinners: resultsSummary });
-  } catch (err: any) {
-    console.error("❌ Background Cron Logic Failure:", err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown draw error';
+    console.error('❌ Background Cron Logic Failure:', message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
