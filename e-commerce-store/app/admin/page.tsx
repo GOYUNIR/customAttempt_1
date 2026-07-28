@@ -83,7 +83,7 @@ export default function AdminPortal() {
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
 
-        {/* REQUESTED LIVE DATABASE POOLS (X INT / Y SUB / Z INV METRICS GRID) */}
+        {/* LIVE DATABASE POOLS (X INT / Y SUB / Z INV METRICS GRID) */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Real-time telemetry showing initiated intents, completed submissions, and inventory depth.</p>
@@ -146,7 +146,7 @@ export default function AdminPortal() {
             </div>
           )}
         </section>
-        {/* REQUESTED SEARCHABLE HIGH-VOLUME CUSTOMER LEDGER */}
+        {/* SEARCHABLE HIGH-VOLUME CUSTOMER LEDGER */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -209,15 +209,6 @@ export default function AdminPortal() {
               </button>
             </div>
           )}
-        </section>
-
-        <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Notes</h2>
-          <ul style={{ color: '#c4c4c4', lineHeight: 1.8, fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-            <li>Only the `/admin` route and `/api/admin/*` API are protected.</li>
-            <li>Use HTTP Basic Auth with `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD`.</li>
-            <li>The API also requires `ALLOW_DROP_TRIGGER=true`.</li>
-          </ul>
         </section>
 
         <Link href="/" style={{ color: '#9ca3af', textDecoration: 'underline', fontSize: '13px' }}>Return to storefront</Link>
