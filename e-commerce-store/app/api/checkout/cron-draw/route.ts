@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { buildAbsoluteUrl, createRedisClient, createStripeClient, getFallbackEntries } from '@/lib/server-config';
-import { getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
+import { getProductStripeId, getProductPrice, getWinnerCount } from '@/lib/storefront-config';
 
 const redis = createRedisClient();
 const stripe = createStripeClient();
@@ -53,17 +53,46 @@ export async function GET(request: Request) {
 
         const targetLimit = getWinnerCount(GOYUNIR_STORE_SUITE, size);
         const winnersCount = Math.min(targetLimit, parsedPool.length);
-        const chosenWinners = parsedPool.slice(0, winnersCount);
+        let successCount = 0;
 
-        const targetStripeId = getProductStripeId(product, size);
+        for (const entry of parsedPool) {
+          if (successCount >= winnersCount) break;
 
-        if (stripe) {
-          for (const winner of chosenWinners) {
-            const email = String(winner.email ?? '');
-            const session = await stripe.checkout.sessions.create({
+          const email = String(entry.email ?? '');
+          const customerId = String(entry.customerId ?? '');
+          const paymentMethodId = String(entry.paymentMethodId ?? '');
+          const priceCents = Math.round(getProductPrice(product, size) * 100);
+
+          if (stripe && customerId && paymentMethodId) {
+            try {
+              const paymentIntent = await stripe.paymentIntents.create({
+                amount: priceCents,
+                currency: 'usd',
+                customer: customerId,
+                payment_method: paymentMethodId,
+                off_session: true,
+                confirm: true,
+                metadata: {
+                  product: product.name,
+                  size,
+                  email,
+                },
+                statement_descriptor: `${product.name.slice(0, 22)} ${size}`,
+              });
+
+              console.log(`✅ Auto-charge succeeded for ${email}: ${paymentIntent.id}`);
+              resultsSummary.push({ email, scent: product.name, size, checkout: `charged:${paymentIntent.id}` });
+              successCount += 1;
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : 'Unknown Stripe charge error';
+              console.warn(`⚠️ Auto-charge failed for ${email}: ${message}`);
+              continue;
+            }
+          } else if (stripe) {
+            const fallbackSession = await stripe.checkout.sessions.create({
               payment_method_types: ['card'],
               customer_email: email,
-              line_items: [{ price: targetStripeId, quantity: 1 }],
+              line_items: [{ price: getProductStripeId(product, size), quantity: 1 }],
               mode: 'payment',
               allow_promotion_codes: true,
               expires_at: Math.floor(Date.now() / 1000) + 1800,
@@ -71,8 +100,8 @@ export async function GET(request: Request) {
               cancel_url: `${buildAbsoluteUrl(request, '/')}?session=cancel`,
             });
 
-            console.log(`✉️ WINNING TICKET DISPATCHED -> Email: ${email} | Link: ${session.url}`);
-            resultsSummary.push({ email, scent: product.name, size, checkout: session.url ?? undefined });
+            resultsSummary.push({ email, scent: product.name, size, checkout: fallbackSession.url ?? undefined });
+            successCount += 1;
           }
         }
 

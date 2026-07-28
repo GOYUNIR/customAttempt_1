@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { addFallbackEntry, createRedisClient } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, buildAbsoluteUrl } from '@/lib/server-config';
 
 const redis = createRedisClient();
+const stripe = createStripeClient();
 
 export async function POST(request: Request) {
   try {
@@ -24,54 +25,66 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required entry parameters.' }, { status: 400 });
     }
 
+    if (!stripe) {
+      return NextResponse.json({ error: 'Stripe is not configured. Payment method capture is unavailable.' }, { status: 500 });
+    }
+
     const targetedProduct = GOYUNIR_STORE_SUITE.productCatalog.find((product) => product.name === normalizedVariant);
     const allocationBoundary = targetedProduct ? targetedProduct.maxRaffleAllocationLimit : GOYUNIR_STORE_SUITE.dropSchedule.winnersPer50ml;
     const finalQuantity = Math.min(allocationBoundary, Math.max(1, Number.parseInt(String(quantityChosen || 1), 10)));
 
-    const addressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
-
-    if (redis) {
-      const isAddressDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, addressKey);
-
-      if (isAddressDuplicate === 1) {
-        return NextResponse.json({
-          error: 'DUPLICATE_ENTRY',
-          message: 'Entry flagged: this shipping address has already been registered for this drop pool.',
-        }, { status: 409 });
-      }
-
-      const registrationPayload = {
-        email: normalizedEmail,
+    const customer = await stripe.customers.create({
+      email: normalizedEmail,
+      metadata: {
         variant: normalizedVariant,
         size: normalizedSize,
         address: normalizedAddress,
-        quantity: finalQuantity,
-        registeredAt: Date.now(),
-      };
+        quantity: String(finalQuantity),
+      },
+    });
 
-      await redis.rpush(`drop_pool:${normalizedVariant}:${normalizedSize}`, JSON.stringify(registrationPayload));
-      await redis.sadd(`drop_fraud_block:${normalizedVariant}`, addressKey);
+    const checkoutSession = await stripe.checkout.sessions.create({
+      customer: customer.id,
+      customer_email: normalizedEmail,
+      payment_method_types: ['card'],
+      mode: 'setup',
+      billing_address_collection: 'required',
+      allow_promotion_codes: false,
+      success_url: buildAbsoluteUrl(request, '/?setup=success'),
+      cancel_url: buildAbsoluteUrl(request, '/?setup=cancel'),
+      metadata: {
+        variant: normalizedVariant,
+        size: normalizedSize,
+        address: normalizedAddress,
+        quantity: String(finalQuantity),
+        email: normalizedEmail,
+      },
+      setup_intent_data: {
+        metadata: {
+          variant: normalizedVariant,
+          size: normalizedSize,
+          address: normalizedAddress,
+          quantity: String(finalQuantity),
+          email: normalizedEmail,
+        },
+      },
+    });
 
+    const responsePayload = {
+      success: true,
+      sessionUrl: checkoutSession.url,
+      customerId: customer.id,
+      message: 'Complete your card setup to lock in the entry and enable automatic charge if you win.',
+    };
+
+    if (!redis) {
       return NextResponse.json({
-        success: true,
-        message: '✓ Priority entry confirmed: your registration is queued for the allocation draw.',
+        ...responsePayload,
+        warning: 'Redis is not configured. Your entry will only be queued after webhook confirmation when Redis becomes available.',
       });
     }
 
-    const fallbackEntries = addFallbackEntry({
-      email: normalizedEmail,
-      variant: normalizedVariant,
-      size: normalizedSize,
-      address: normalizedAddress,
-      quantity: finalQuantity,
-      registeredAt: Date.now(),
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: '✓ Priority entry confirmed using the safe fallback queue.',
-      queuedEntries: fallbackEntries.length,
-    });
+    return NextResponse.json(responsePayload);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown checkout error';
     return NextResponse.json({ error: message }, { status: 500 });

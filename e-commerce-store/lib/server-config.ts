@@ -8,6 +8,8 @@ export interface CheckoutRegistrationPayload {
   address: string;
   quantity: number;
   registeredAt: number;
+  customerId?: string;
+  paymentMethodId?: string;
   source: 'fallback' | 'redis';
 }
 

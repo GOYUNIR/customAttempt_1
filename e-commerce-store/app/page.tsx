@@ -1,7 +1,7 @@
 'use client';
 
-import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { useRef, useEffect, useState } from 'react';
+import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getVisibleProducts } from '@/lib/storefront-config';
 import { EntryFormState, isValidEmail, normalizeEntryForm } from '@/lib/validation';
@@ -31,6 +31,8 @@ export default function PerfumeStorefront() {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [votes, setVotes] = useState<Record<string, number>>({ A: 142, B: 98 });
+  const [setupSuccess, setSetupSuccess] = useState(false);
+  const [setupCancel, setSetupCancel] = useState(false);
   const [hasVoted, setHasVoted] = useState(() => (typeof window !== 'undefined' ? Boolean(window.localStorage.getItem('goyunir_has_voted')) : false));
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
 
@@ -59,6 +61,27 @@ export default function PerfumeStorefront() {
     const handleNavigationFix = () => setIsProcessing(false);
     window.addEventListener('popstate', handleNavigationFix);
     return () => window.removeEventListener('popstate', handleNavigationFix);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const isSuccess = searchParams.get('setup') === 'success';
+      const isCancel = searchParams.get('setup') === 'cancel';
+
+      setSetupSuccess(isSuccess);
+      setSetupCancel(isCancel);
+
+      if (isSuccess) {
+        setFeedbackStatus('success');
+        setFeedbackMessage('Your payment method is saved and your entry is confirmed. Good luck on the drop.');
+      }
+
+      if (isCancel) {
+        setFeedbackStatus('error');
+        setFeedbackMessage('Payment setup was canceled. Complete checkout to secure your entry.');
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -155,6 +178,11 @@ export default function PerfumeStorefront() {
 
       const data = await response.json();
       if (response.ok) {
+        if (data.sessionUrl) {
+          window.location.assign(data.sessionUrl);
+          return;
+        }
+
         setFeedbackStatus('success');
         setFeedbackMessage(data.message || '✓ Entry secured successfully.');
         setForm({ email: '', shippingAddress: '', quantity: 1 });
