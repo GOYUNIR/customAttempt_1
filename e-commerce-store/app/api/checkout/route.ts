@@ -45,11 +45,9 @@ export async function POST(request: Request) {
 
     const checkoutSession = await stripe.checkout.sessions.create({
       customer: customer.id,
-      customer_email: normalizedEmail,
       payment_method_types: ['card'],
       mode: 'setup',
       billing_address_collection: 'required',
-      allow_promotion_codes: false,
       success_url: buildAbsoluteUrl(request, '/?setup=success'),
       cancel_url: buildAbsoluteUrl(request, '/?setup=cancel'),
       metadata: {
