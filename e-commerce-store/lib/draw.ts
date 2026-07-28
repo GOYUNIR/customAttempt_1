@@ -68,8 +68,11 @@ export async function runDropDraw(request: Request | NextRequest) {
         const paymentMethodId = String(entry.paymentMethodId ?? '');
         const priceCents = Math.round(getProductPrice(product, size) * 100);
 
+        let directChargeCompleted = false;
+
         if (stripe && customerId && paymentMethodId) {
           try {
+            // TEXTBOOK FIX: Replaced statement_descriptor with statement_descriptor_suffix
             const paymentIntent = await stripe.paymentIntents.create({
               amount: priceCents,
               currency: 'usd',
@@ -82,7 +85,7 @@ export async function runDropDraw(request: Request | NextRequest) {
                 size,
                 email,
               },
-              statement_descriptor: `${product.name.slice(0, 22)} ${size}`,
+              statement_descriptor_suffix: size.slice(0, 10), // Clean statement suffix appending
             });
 
             resultsSummary.push({
@@ -94,7 +97,7 @@ export async function runDropDraw(request: Request | NextRequest) {
               message: 'Auto-charge succeeded.',
             });
             successCount += 1;
-            continue;
+            directChargeCompleted = true;
           } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Charge failed for this payment method.';
             resultsSummary.push({
@@ -104,10 +107,35 @@ export async function runDropDraw(request: Request | NextRequest) {
               status: 'skipped',
               message: `Auto-charge failed: ${message}`,
             });
+            
+            // Failover safety logic: Creates manual email checkout link if card is declined/expired
+            if (stripe) {
+              const fallbackSession = await stripe.checkout.sessions.create({
+                customer: customerId,
+                payment_method_types: ['card'],
+                line_items: [{ price: getProductStripeId(product, size), quantity: 1 }],
+                mode: 'payment',
+                expires_at: Math.floor(Date.now() / 1000) + 1800,
+                success_url: `${buildAbsoluteUrl(request as Request, '/')}?session=success`,
+                cancel_url: `${buildAbsoluteUrl(request as Request, '/')}?session=cancel`,
+              });
+
+              resultsSummary.push({
+                email,
+                scent: product.name,
+                size,
+                checkout: fallbackSession.url ?? undefined,
+                status: 'checkout',
+                message: 'Card declined/error - Failover checkout session created.',
+              });
+              successCount += 1;
+            }
+            directChargeCompleted = true;
           }
         }
 
-        if (stripe) {
+        // Only process standard checkout link generation if direct details didn't exist at all
+        if (!directChargeCompleted && stripe) {
           const fallbackSession = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             customer_email: email,
