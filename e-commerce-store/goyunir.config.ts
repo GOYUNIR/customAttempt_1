@@ -63,8 +63,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
       price50ml: 85,
       price100ml: 140,
-      stripeId50ml: 'price_1N_ElysianWhite_50ml_LIVE_TOKEN_A',
-      stripeId100ml: 'price_1N_ElysianWhite_100ml_LIVE_TOKEN_B',
+      stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
+      stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
       maxRaffleAllocationLimit: 10,
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
@@ -81,8 +81,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
       price50ml: 85,
       price100ml: 140,
-      stripeId50ml: 'price_1N_ObsidianVoid_50ml_LIVE_TOKEN_C',
-      stripeId100ml: 'price_1N_ObsidianVoid_100ml_LIVE_TOKEN_D',
+      stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
+      stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
       maxRaffleAllocationLimit: 5,
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
