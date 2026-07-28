@@ -34,22 +34,25 @@ export async function POST(request: Request) {
     const finalQuantity = Math.min(allocationBoundary, Math.max(1, Number.parseInt(String(quantityChosen || 1), 10)));
     const normalizedAddressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
 
+    const duplicateBlockKey = `drop_fraud_block:${normalizedVariant}:${normalizedSize}`;
+
     if (redis) {
       try {
-        const isDuplicate = await redis.sismember(`drop_fraud_block:${normalizedVariant}`, normalizedAddressKey);
+        const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
         if (isDuplicate === 1) {
-          return NextResponse.json({ error: 'Duplicate entry detected for this variant and address.' }, { status: 409 });
+          return NextResponse.json({ error: 'Duplicate entry detected for this variant and size at this address.' }, { status: 409 });
         }
       } catch {}
     } else {
       const fallback = getFallbackEntries();
       const exists = fallback.some(
         (e) =>
-          (String(e.variant) === normalizedVariant && String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey) ||
-          String(e.email).toLowerCase() === normalizedEmail.toLowerCase(),
+          String(e.variant) === normalizedVariant &&
+          String(e.size) === normalizedSize &&
+          String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey,
       );
       if (exists) {
-        return NextResponse.json({ error: 'Duplicate entry detected for this variant or email.' }, { status: 409 });
+        return NextResponse.json({ error: 'Duplicate entry detected for this variant and size at this address.' }, { status: 409 });
       }
     }
 

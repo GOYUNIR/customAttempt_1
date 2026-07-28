@@ -79,6 +79,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'SetupIntent has no payment method.' }, { status: 400 });
     }
 
+    const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
     const registrationPayload = {
       email,
       variant,
@@ -91,10 +92,10 @@ export async function POST(request: Request) {
       source: 'redis' as const,
     };
 
-    const isAddressDuplicate = await redis.sismember(`drop_fraud_block:${variant}`, normalizedAddress);
+    const isAddressDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddress);
     if (isAddressDuplicate !== 1) {
       await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(registrationPayload));
-      await redis.sadd(`drop_fraud_block:${variant}`, normalizedAddress);
+      await redis.sadd(duplicateBlockKey, normalizedAddress);
     }
 
       // store last processed webhook for admin UI

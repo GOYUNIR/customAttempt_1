@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     }
 
     const normalizedAddressKey = address.toLowerCase().replace(/\s+/g, '');
+    const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
 
     if (!redis) {
       try {
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const isDuplicate = await redis.sismember(`drop_fraud_block:${variant}`, normalizedAddressKey);
+    const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
     if (isDuplicate === 1) {
       try {
         // @ts-ignore
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
     };
 
     await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(registrationPayload));
-    await redis.sadd(`drop_fraud_block:${variant}`, normalizedAddressKey);
+    await redis.sadd(duplicateBlockKey, normalizedAddressKey);
 
     try {
       // @ts-ignore

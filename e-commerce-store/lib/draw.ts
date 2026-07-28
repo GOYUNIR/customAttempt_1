@@ -56,6 +56,7 @@ export async function runDropDraw(request: Request | NextRequest) {
         [parsedPool[index], parsedPool[j]] = [parsedPool[j], parsedPool[index]];
       }
 
+      const duplicateBlockKey = `drop_fraud_block:${product.name}:${size}`;
       const targetLimit = getWinnerCount(GOYUNIR_STORE_SUITE, size);
       let successCount = 0;
 
@@ -130,6 +131,7 @@ export async function runDropDraw(request: Request | NextRequest) {
       }
 
       await redis.del(poolKey);
+      await redis.del(duplicateBlockKey);
     }
   }
 

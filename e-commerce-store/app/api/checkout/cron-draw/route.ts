@@ -51,6 +51,7 @@ export async function GET(request: Request) {
           [parsedPool[index], parsedPool[j]] = [parsedPool[j], parsedPool[index]];
         }
 
+        const duplicateBlockKey = `drop_fraud_block:${product.name}:${size}`;
         const targetLimit = getWinnerCount(GOYUNIR_STORE_SUITE, size);
         const winnersCount = Math.min(targetLimit, parsedPool.length);
         let successCount = 0;
@@ -106,6 +107,7 @@ export async function GET(request: Request) {
         }
 
         await redis.del(poolKey);
+        await redis.del(duplicateBlockKey);
       }
     }
 
