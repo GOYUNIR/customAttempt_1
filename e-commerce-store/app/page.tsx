@@ -218,6 +218,48 @@ export default function PerfumeStorefront() {
         {/* HIGH CONVERSION LOTTERY LAUNCH INPUT CONTROLS ZONE */}
         <section style={{ minHeight: '130vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 15px 40px', background: configPalette.primaryBackground, position: 'relative', zIndex: 10, pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '80px' }}>
+            
+            {/* LIVE COUNTDOWN TICKER BOX CONTAINER */}
+            <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
+              {(() => {
+                const [timeLeft, setTimeLeft] = useState({ d: 0, h: 0, m: 0, s: 0, expired: false });
+                
+                useEffect(() => {
+                  const targetTime = new Date(GOYUNIR_STORE_SUITE.dropSchedule.targetEndDateTime).getTime();
+                  const timerLoop = setInterval(() => {
+                    const now = new Date().getTime();
+                    const delta = targetTime - now;
+
+                    if (delta <= 0) {
+                      setTimeLeft(prev => ({ ...prev, expired: true }));
+                      clearInterval(timerLoop);
+                    } else {
+                      const d = Math.floor(delta / (1000 * 60 * 60 * 24));
+                      const h = Math.floor((delta % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                      const m = Math.floor((delta % (1000 * 60 * 60)) / (1000 * 60));
+                      const s = Math.floor((delta % (1000 * 60)) / 1000);
+                      setTimeLeft({ d, h, m, s, expired: false });
+                    }
+                  }, 1000);
+                  return () => clearInterval(timerLoop);
+                }, []);
+
+                if (timeLeft.expired) {
+                  return <span style={{ fontSize: '11px', color: '#ff3b30', fontWeight: 'bold', letterSpacing: '1px' }}>{GOYUNIR_STORE_SUITE.dropSchedule.countdownExpiredText}</span>;
+                }
+
+                const sched = GOYUNIR_STORE_SUITE.dropSchedule;
+                return (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold' }}>
+                    <span>{timeLeft.d}{sched.daysLabel}</span>
+                    <span>{timeLeft.h}{sched.hoursLabel}</span>
+                    <span>{timeLeft.m}{sched.minutesLabel}</span>
+                    <span>{timeLeft.s}{sched.secondsLabel}</span>
+                  </div>
+                );
+              })()}
+            </div>
+
             <h2 style={{ fontSize: '24px', textAlign: 'center', fontFamily: 'serif', margin: '0 0 10px 0', letterSpacing: '1px' }}>
               {GOYUNIR_STORE_SUITE.raffleRegistrationForm.titleHeader}
             </h2>

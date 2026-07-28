@@ -1,25 +1,36 @@
 export const GOYUNIR_STORE_SUITE = {
   // GLOBAL BRAND VISUAL COLOR PALETTE (Hex Codes)
   themeColors: {
-    primaryBackground: '#0a0a0a',   // Dark cinematic main body canvas backdrop
-    cardBackground: '#111111',      // Base tint frame for form boxes & conversion zones
+    primaryBackground: '#0a0a0a',   // Dark main body backdrop
+    cardBackground: '#111111',      // Base tint frame for form boxes
     cardBorder: '#222222',          // Subtle dividing lines
-    accentPurple: '#a855f7',        // Color footprint for White collection styling/alerts
-    accentBlue: '#3b82f6',          // Color footprint for Black collection styling/alerts
+    accentPurple: '#a855f7',        // White collection styling accent
+    accentBlue: '#3b82f6',          // Black collection styling accent
     textMain: '#ffffff',            // Clear structural headings
     textMuted: '#888888',           // Description and fallback lines
-    checkoutCtaButton: '#635bff',   // Premium Stripe blue-violet checkout trigger color
+    checkoutCtaButton: '#635bff',   // Stripe checkout trigger color
   },
 
-  // 360 HARDWARE ROTATION MECHANICS CONTROL (Simple Math Adjustments)
+  // STUPID-PROOF AUTOMATED DROP SCHEDULE CONTROL MATRIX
+  // Simply change the text parameters below to shift deadlines without code editing!
+  dropSchedule: {
+    // Standard ISO string format: YYYY-MM-DDTHH:MM:SS (e.g. July 31st, 2026 at Midnight)
+    targetEndDateTime: '2026-07-31T23:59:59', 
+    countdownExpiredText: 'ALLOCATION CLOSED • VARIANT ARCHIVED',
+    daysLabel: 'd',
+    hoursLabel: 'h',
+    minutesLabel: 'm',
+    secondsLabel: 's',
+  },
+
+  // 360 HARDWARE ROTATION MECHANICS CONTROL
   animationMechanics: {
-    totalFramesToLoad: 4,           // Your front-snap visual loop frame count
-    maxRotationDegrees: 360,        // The degree boundary constraints mapped on scroll progress
-    spinReverseOnAlternatingProgress: true, // Forces bottle to unwind opposite way on alternative swipes
+    totalFramesToLoad: 4,           
+    maxRotationDegrees: 360,        
+    spinReverseOnAlternatingProgress: true, 
   },
 
   // STUPID-PROOF LIVE FORM MAKER ENGINE
-  // Change labels, placeholder texts, or warning texts below without touching the code!
   raffleRegistrationForm: {
     titleHeader: 'Join The Allocation Draw',
     emailLabel: 'Contact Email Address',
@@ -32,26 +43,26 @@ export const GOYUNIR_STORE_SUITE = {
 
   // COLD SOCIAL MEDIA & CORPORATE FOOTER PANEL METRICS
   brandFooterData: {
-    instagramLink: 'https://instagram.com/goyunir',
-    tiktokLink: 'https://tiktok.com/@goyunir',
-    supportEmail: 'goyunir.support@gmail.com',
+    instagramLink: 'https://instagram.com',
+    tiktokLink: 'https://tiktok.com',
+    supportEmail: 'contact@goyunir.com',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+    corporateEntityCopyright: 'GOYUNIR MAISON. ALL RIGHTS RESERVED.',
   },
 
-  // 0-EXPERIENCE ENTERPRISE LOTTERY RELEASE CATALOG DATA MATRIX
+  // ENTERPRISE PRODUCT CATALOG MATRIX
   productCatalog: [
     {
       id: 'p1',
       name: 'Elysian White',
-      prefix: 'EXAMPLEPICV1', // Points directly to public asset image naming files
+      prefix: 'EXAMPLEPICV1', 
       tagline: 'WHITE ALLOCATION / 01',
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
       price50ml: 85,
       price100ml: 140,
-      stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
-      stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
-      maxRaffleAllocationLimit: 10, // Max bottles allowed for submission inside a single queue entry
+      stripeId50ml: 'price_1N_ElysianWhite_50ml_LIVE_TOKEN_A',
+      stripeId100ml: 'price_1N_ElysianWhite_100ml_LIVE_TOKEN_B',
+      maxRaffleAllocationLimit: 10, 
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
@@ -66,8 +77,8 @@ export const GOYUNIR_STORE_SUITE = {
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
       price50ml: 85,
       price100ml: 140,
-      stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
-      stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
+      stripeId50ml: 'price_1N_ObsidianVoid_50ml_LIVE_TOKEN_C',
+      stripeId100ml: 'price_1N_ObsidianVoid_100ml_LIVE_TOKEN_D',
       maxRaffleAllocationLimit: 5,
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
