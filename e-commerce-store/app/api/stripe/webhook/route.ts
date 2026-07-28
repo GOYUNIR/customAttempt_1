@@ -19,7 +19,6 @@ export async function POST(request: Request) {
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err) {
-    // Allows testing in sandbox without local signature verification if explicitly toggled
     if (process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true' || process.env.NODE_ENV !== 'production') {
       event = JSON.parse(body) as Stripe.Event;
     } else {
@@ -27,7 +26,6 @@ export async function POST(request: Request) {
     }
   }
 
-  // Only handle completed entries
   if (event.type !== 'checkout.session.completed') {
     return NextResponse.json({ received: true });
   }
@@ -41,13 +39,11 @@ export async function POST(request: Request) {
   const email = String(metadata.email ?? '').trim();
   const customerId = String(session.customer ?? '');
 
-  // Extract the card ID directly from the session
   let paymentMethodId = '';
   if (session.setup_intent && typeof session.setup_intent === 'object') {
     paymentMethodId = String((session.setup_intent as Stripe.SetupIntent).payment_method ?? '');
   }
 
-  // Fallback lookup if not expanded automatically
   if (!paymentMethodId && session.setup_intent) {
     try {
       const setupIntent = await stripe.setupIntents.retrieve(session.setup_intent as string);
@@ -65,7 +61,6 @@ export async function POST(request: Request) {
   const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
   const poolKey = `drop_pool:${variant}:${size}`;
 
-  // Check for duplicate address entries (anti-bot protection)
   const isAddressDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddress);
   
   if (isAddressDuplicate !== 1) {

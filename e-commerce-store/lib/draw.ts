@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { buildAbsoluteUrl, createRedisClient, createStripeClient, getFallbackEntries } from '@/lib/server-config';
+import { buildAbsoluteUrl, createRedisClient, createStripeClient } from '@/lib/server-config';
 import { getProductPrice, getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
 
 export interface DrawResult {
@@ -25,17 +25,6 @@ export async function runDropDraw(request: Request | NextRequest) {
     };
   }
 
-  const fallbackEntries = getFallbackEntries();
-  if (fallbackEntries.length > 0) {
-    resultsSummary.push(...fallbackEntries.map((entry) => ({
-      email: entry.email,
-      scent: entry.variant,
-      size: entry.size,
-      status: 'skipped' as const,
-      message: 'Fallback entry was present. No charge executed from fallback.',
-    })));
-  }
-
   for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
     for (const size of ['50ml', '100ml']) {
       const poolKey = `drop_pool:${product.name}:${size}`;
@@ -51,6 +40,7 @@ export async function runDropDraw(request: Request | NextRequest) {
         return entry as Record<string, unknown>;
       });
 
+      // Secure Fisher-Yates element shuffling pattern
       for (let index = parsedPool.length - 1; index > 0; index -= 1) {
         const j = Math.floor(Math.random() * (index + 1));
         [parsedPool[index], parsedPool[j]] = [parsedPool[j], parsedPool[index]];
@@ -72,7 +62,7 @@ export async function runDropDraw(request: Request | NextRequest) {
 
         if (stripe && customerId && paymentMethodId) {
           try {
-            // TEXTBOOK FIX: Replaced statement_descriptor with statement_descriptor_suffix
+            // FIXED: Using statement_descriptor_suffix safely instead of statement_descriptor
             const paymentIntent = await stripe.paymentIntents.create({
               amount: priceCents,
               currency: 'usd',
@@ -80,12 +70,8 @@ export async function runDropDraw(request: Request | NextRequest) {
               payment_method: paymentMethodId,
               off_session: true,
               confirm: true,
-              metadata: {
-                product: product.name,
-                size,
-                email,
-              },
-              statement_descriptor_suffix: size.slice(0, 10), // Clean statement suffix appending
+              metadata: { product: product.name, size, email },
+              statement_descriptor_suffix: size.slice(0, 10), 
             });
 
             resultsSummary.push({
@@ -99,7 +85,7 @@ export async function runDropDraw(request: Request | NextRequest) {
             successCount += 1;
             directChargeCompleted = true;
           } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Charge failed for this payment method.';
+            const message = error instanceof Error ? error.message : 'Charge failed.';
             resultsSummary.push({
               email,
               scent: product.name,
@@ -108,7 +94,7 @@ export async function runDropDraw(request: Request | NextRequest) {
               message: `Auto-charge failed: ${message}`,
             });
             
-            // Failover safety logic: Creates manual email checkout link if card is declined/expired
+            // Backup Failover link generation block
             if (stripe) {
               const fallbackSession = await stripe.checkout.sessions.create({
                 customer: customerId,
@@ -134,7 +120,6 @@ export async function runDropDraw(request: Request | NextRequest) {
           }
         }
 
-        // Only process standard checkout link generation if direct details didn't exist at all
         if (!directChargeCompleted && stripe) {
           const fallbackSession = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
@@ -163,7 +148,6 @@ export async function runDropDraw(request: Request | NextRequest) {
     }
   }
 
-  // store last results for admin inspection (server-global)
   try {
     // @ts-ignore
     if (typeof globalThis !== 'undefined') globalThis.__goyunirLastDraw = resultsSummary;
@@ -175,12 +159,9 @@ export async function runDropDraw(request: Request | NextRequest) {
   };
 }
 
-// Save last draw results for admin inspection
 try {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   if (typeof globalThis !== 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     globalThis.__goyunirLastDraw = globalThis.__goyunirLastDraw ?? null;
   }

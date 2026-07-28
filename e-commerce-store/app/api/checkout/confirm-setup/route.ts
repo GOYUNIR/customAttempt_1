@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
     const poolKey = `drop_pool:${variant}:${size}`;
 
-    // HIGH SCALABILITY TRANSCTION ANTI-FRAUD CHECK
+    // HIGH SCALABILITY TRANSACTION ANTI-FRAUD CHECK
     const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
     if (isDuplicate === 1) {
       return NextResponse.json({
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       address,
       quantity,
       customerId,
-      paymentMethodId, // Token explicitly saved for the high-traffic cron drawing script
+      paymentMethodId, 
       registeredAt: Date.now(),
       source: 'redis' as const,
     };
