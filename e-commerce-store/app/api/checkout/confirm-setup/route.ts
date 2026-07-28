@@ -14,63 +14,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing Stripe checkout session ID.' }, { status: 400 });
     }
 
-    if (!stripe) {
-      return NextResponse.json({ error: 'Stripe is not configured.' }, { status: 500 });
+    if (!stripe || !redis) {
+      return NextResponse.json({ error: 'Critical downstream database infrastructure offline.' }, { status: 500 });
     }
 
+    // Retrieve the session and expand the setup_intent in one network request
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ['setup_intent'],
     });
 
     const metadata = session.metadata ?? {};
-    const variant = String(metadata.variant ?? '');
-    const size = String(metadata.size ?? '');
-    const address = String(metadata.address ?? '');
+    const variant = String(metadata.variant ?? '').trim();
+    const size = String(metadata.size ?? '').trim();
+    const address = String(metadata.address ?? '').trim();
     const quantity = Number(metadata.quantity ?? 1);
-    const email = String(metadata.email ?? '');
+    const email = String(metadata.email ?? '').trim();
     const customerId = typeof session.customer === 'string' ? session.customer : String(session.customer ?? '');
 
     if (!variant || !size || !address || !email || !customerId) {
-      return NextResponse.json({ error: 'Incomplete checkout session metadata.' }, { status: 400 });
+      return NextResponse.json({ error: 'Incomplete checkout session metadata attributes.' }, { status: 400 });
     }
 
-    const setupIntent = session.setup_intent as Stripe.SetupIntent | string | null | undefined;
-    const paymentMethodId = typeof setupIntent === 'string'
-      ? ''
-      : String(setupIntent?.payment_method ?? '');
+    // Securely extract the payment method token from the expanded object
+    const setupIntent = session.setup_intent as Stripe.SetupIntent | null | undefined;
+    const paymentMethodId = typeof setupIntent === 'object' && setupIntent !== null
+      ? String(setupIntent.payment_method ?? '')
+      : '';
 
     if (!paymentMethodId) {
-      return NextResponse.json({ error: 'Setup flow did not complete with a payment method.' }, { status: 400 });
+      return NextResponse.json({ error: 'Setup flow did not complete with a valid payment method.' }, { status: 400 });
     }
 
     const normalizedAddressKey = address.toLowerCase().replace(/\s+/g, '');
     const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
+    const poolKey = `drop_pool:${variant}:${size}`;
 
-    if (!redis) {
-      try {
-        // @ts-ignore
-        if (typeof globalThis !== 'undefined') {
-          // @ts-ignore
-          globalThis.__goyunirLastWebhook = session;
-        }
-      } catch {}
-
-      return NextResponse.json({
-        success: true,
-        warning: 'Redis is not configured. Your entry will remain pending until backend storage is available.',
-      });
-    }
-
+    // HIGH SCALABILITY TRANSCTION ANTI-FRAUD CHECK
     const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
     if (isDuplicate === 1) {
-      try {
-        // @ts-ignore
-        if (typeof globalThis !== 'undefined') {
-          // @ts-ignore
-          globalThis.__goyunirLastWebhook = session;
-        }
-      } catch {}
-
       return NextResponse.json({
         success: true,
         message: 'Entry already recorded for this address. Your payment method is saved.',
@@ -84,28 +65,23 @@ export async function POST(request: Request) {
       address,
       quantity,
       customerId,
-      paymentMethodId,
+      paymentMethodId, // Token explicitly saved for the high-traffic cron drawing script
       registeredAt: Date.now(),
       source: 'redis' as const,
     };
 
-    await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(registrationPayload));
-    await redis.sadd(duplicateBlockKey, normalizedAddressKey);
-
-    try {
-      // @ts-ignore
-      if (typeof globalThis !== 'undefined') {
-        // @ts-ignore
-        globalThis.__goyunirLastWebhook = session;
-      }
-    } catch {}
+    // Execute database operations concurrently to prevent serverless function lag
+    await Promise.all([
+      redis.rpush(poolKey, JSON.stringify(registrationPayload)),
+      redis.sadd(duplicateBlockKey, normalizedAddressKey)
+    ]);
 
     return NextResponse.json({
       success: true,
       message: 'Your payment method is saved and your raffle entry is confirmed.',
     });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unable to confirm setup session.';
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (error: any) {
+    console.error('❌ Confirm Setup Internal Pipeline Failure:', error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
