@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@vercel/kv';
 import { GOYUNIR_STORE_SUITE } from '../../../goyunir.config';
 
+// FIXED CLIENT MAPPER: Swaps out old default names for Upstash's official production marketplace keys
 const kv = createClient({
-  url: process.env.KV_REST_API_URL!,
-  token: process.env.KV_REST_API_TOKEN!,
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
 export async function POST(request: Request) {
