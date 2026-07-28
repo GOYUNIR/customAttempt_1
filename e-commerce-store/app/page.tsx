@@ -2,9 +2,9 @@
 
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { useRef, useEffect, useState } from 'react';
-import { GOYUNIR_STORE_SUITE } from '../goyunir.config';
-import { getProductPrice, getVisibleProducts } from '../lib/storefront-config';
-import { EntryFormState, isValidEmail, normalizeEntryForm } from '../lib/validation';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getProductPrice, getVisibleProducts } from '@/lib/storefront-config';
+import { EntryFormState, isValidEmail, normalizeEntryForm } from '@/lib/validation';
 
 interface TimeLeftState {
   d: number;

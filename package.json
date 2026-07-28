@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "dev": "cd e-commerce-store && npm run dev",
+    "build": "cd e-commerce-store && npm run build",
+    "start": "cd e-commerce-store && npm run start",
+    "lint": "cd e-commerce-store && npm run lint"
+  }
+}

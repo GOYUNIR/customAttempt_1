@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createStripeClient } from '../../../../lib/server-config';
+import { createStripeClient } from '@/lib/server-config';
 
 const stripe = createStripeClient();
 

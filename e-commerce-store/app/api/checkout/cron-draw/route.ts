@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { GOYUNIR_STORE_SUITE } from '../../../../goyunir.config';
-import { buildAbsoluteUrl, createRedisClient, createStripeClient, getFallbackEntries } from '../../../../lib/server-config';
-import { getProductStripeId, getWinnerCount } from '../../../../lib/storefront-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { buildAbsoluteUrl, createRedisClient, createStripeClient, getFallbackEntries } from '@/lib/server-config';
+import { getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
 
 const redis = createRedisClient();
 const stripe = createStripeClient();

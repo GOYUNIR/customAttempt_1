@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "framework": "nextjs",
+  "installCommand": "cd e-commerce-store && npm install",
+  "buildCommand": "cd e-commerce-store && npm run build",
+  "devCommand": "cd e-commerce-store && npm run dev"
+}

@@ -12,7 +12,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
   },
   dropSchedule: {
-    targetEndDateTime: '2026-07-27T19:30:00',
+    targetEndDateTime: '2026-07-28T19:30:00',
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',

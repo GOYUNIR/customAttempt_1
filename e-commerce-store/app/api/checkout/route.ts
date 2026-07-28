@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { GOYUNIR_STORE_SUITE } from '../../../goyunir.config';
-import { addFallbackEntry, createRedisClient } from '../../../lib/server-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { addFallbackEntry, createRedisClient } from '@/lib/server-config';
 
 const redis = createRedisClient();
 
