@@ -205,15 +205,19 @@ export default function PerfumeStorefront() {
         }
 
         setFeedbackStatus('success');
-        setFeedbackMessage(data.message || '✓ Entry secured successfully.');
+        setFeedbackMessage(data.message || data.warning || '✓ Entry secured successfully.');
         setForm({ email: '', shippingAddress: '', quantity: 1 });
       } else {
         setFeedbackStatus('error');
-        setFeedbackMessage(data.message || '⚠️ Drop registration failed.');
+        setFeedbackMessage(data.error || data.message || '⚠️ Drop registration failed.');
       }
-    } catch {
+    } catch (error) {
       setFeedbackStatus('error');
-      setFeedbackMessage('❌ Connection timeout. The entry system is using a safe fallback path.');
+      setFeedbackMessage(
+        error instanceof Error
+          ? `❌ Connection failed: ${error.message}`
+          : '❌ Connection timeout. The entry system is using a safe fallback path.',
+      );
     } finally {
       setIsProcessing(false);
     }
