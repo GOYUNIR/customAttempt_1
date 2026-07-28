@@ -33,11 +33,8 @@ export default function PerfumeStorefront() {
   const [votes, setVotes] = useState<Record<string, number>>({ A: 142, B: 98 });
   const [setupSuccess, setSetupSuccess] = useState(false);
   const [setupCancel, setSetupCancel] = useState(false);
-  const [isTriggeringDraw, setIsTriggeringDraw] = useState(false);
-  const [triggerDrawMessage, setTriggerDrawMessage] = useState('');
   const [hasVoted, setHasVoted] = useState(() => (typeof window !== 'undefined' ? Boolean(window.localStorage.getItem('goyunir_has_voted')) : false));
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
-  const drawTriggerEnabled = process.env.NEXT_PUBLIC_ALLOW_DROP_TRIGGER === 'true';
 
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
@@ -208,26 +205,6 @@ export default function PerfumeStorefront() {
     localStorage.setItem('goyunir_has_voted', 'true');
   };
 
-  const triggerDropNow = async () => {
-    if (isTriggeringDraw) return;
-    setIsTriggeringDraw(true);
-    setTriggerDrawMessage('Attempting immediate draw activation...');
-
-    try {
-      const response = await fetch('/api/admin/trigger-drop', { method: 'POST' });
-      const data = await response.json();
-      if (response.ok) {
-        setTriggerDrawMessage('Drop triggered. Check the draw results in logs or admin dashboard.');
-      } else {
-        setTriggerDrawMessage(data.error || 'Failed to trigger the drop.');
-      }
-    } catch (error) {
-      setTriggerDrawMessage('Unable to reach the draw trigger endpoint.');
-    } finally {
-      setIsTriggeringDraw(false);
-    }
-  };
-
   return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
       
@@ -364,18 +341,6 @@ export default function PerfumeStorefront() {
                 )}
               </form>
 
-              {drawTriggerEnabled && (
-                <div style={{ marginTop: '22px', textAlign: 'center' }}>
-                  <button type="button" onClick={triggerDropNow} disabled={isTriggeringDraw} style={{ width: '100%', padding: '14px', borderRadius: '24px', background: '#e6b110', color: '#111', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: isTriggeringDraw ? 'not-allowed' : 'pointer', transition: 'opacity 0.2s' }}>
-                    {isTriggeringDraw ? 'Triggering drop...' : 'Trigger the drop now'}
-                  </button>
-                  {triggerDrawMessage && (
-                    <p style={{ margin: '12px 0 0 0', fontSize: '12px', color: '#f5f5f7' }}>
-                      {triggerDrawMessage}
-                    </p>
-                  )}
-                </div>
-              )}
             </motion.div>
           </div>
 
