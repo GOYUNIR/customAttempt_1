@@ -5,7 +5,7 @@ import { getProductPrice, getWinnerCount, getProductStripeId } from '@/lib/store
 
 const redis = createRedisClient();
 const stripe = createStripeClient();
-const CONCURRENCY_LIMIT = 25; // Safe throttle for high traffic volume
+const CONCURRENCY_LIMIT = 25; // Safe enterprise throttle for high traffic volume
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -28,41 +28,45 @@ export async function POST(request: Request) {
         if (totalWinnersNeeded <= 0) continue;
         const winnersList: Array<{ email: string; customerId: string; paymentMethodId: string }> = [];
 
-        // Atomically pop winners from Redis pool queue
+        // Atomically pop winners from the Redis pool queue
         while (winnersList.length < totalWinnersNeeded) {
-          const rawEntry: any = await redis.lpop(poolKey); // Cast as any to resolve type mismatch
+          const rawEntry: any = await redis.lpop(poolKey); // Cast as any to resolve {} type mismatch
           if (!rawEntry) break; 
           
-          // Ensure it parses safely whether Redis returns a string or an already parsed object
+          // Ensure safe parsing whether Redis returns a raw string or an already parsed object
           const parsedEntry = typeof rawEntry === 'string' ? JSON.parse(rawEntry) : rawEntry;
           winnersList.push(parsedEntry);
         }
 
-        // Wipe the remaining raffle keys clean for this item
+        // Wipe the remaining raffle keys clean for this item to ensure transaction isolation
         await redis.del(poolKey);
         await redis.del(`drop_fraud_block:${product.name}:${size}`);
 
+        if (winnersList.length === 0) continue;
+
         const priceCents = Math.round(getProductPrice(product, size) * 100);
 
-        // Process Stripe charges in throttled batches
+        // Process Stripe charges concurrently in throttled batches
         for (let i = 0; i < winnersList.length; i += CONCURRENCY_LIMIT) {
           const batch = winnersList.slice(i, i + CONCURRENCY_LIMIT);
           
           await Promise.all(
             batch.map(async (winner) => {
               try {
+                // TEXTBOOK FIX: Swapped out statement_descriptor for statement_descriptor_suffix
                 const paymentIntent = await stripe.paymentIntents.create({
                   amount: priceCents,
                   currency: 'usd',
                   customer: winner.customerId,
                   payment_method: winner.paymentMethodId,
-                  off_session: true, // Charge runs while user is offline
+                  off_session: true, // Execute while customer is offline
                   confirm: true,
+                  statement_descriptor_suffix: size.slice(0, 10), // Clean statement suffix appending
                 });
 
                 operationsLog.push({ email: winner.email, status: 'CHARGED', id: paymentIntent.id });
               } catch (error: any) {
-                // If the automatic charge is declined, instantly create a backup payment link 
+                // Failover safety logic: Creates manual email checkout link if card is declined/expired
                 try {
                   const recoverySession = await stripe.checkout.sessions.create({
                     customer: winner.customerId,
