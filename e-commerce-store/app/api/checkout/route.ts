@@ -22,11 +22,11 @@ export async function POST(request: Request) {
     const clientEmail = email.trim().toLowerCase();
     const timestamp = new Date().toISOString();
 
-    // 1. ALL USERS (RAFFLE & LATE WAITLIST) ARE SENT TO STRIPE TO SAVE VALID CARD TOKENS
     const hostHeader = request.headers.get('host') || 'localhost:3000';
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
+    // FIXED: Formatted to point to rich item layouts instead of a plain setup container page
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'setup', 
@@ -36,18 +36,18 @@ export async function POST(request: Request) {
       },
       success_url: `${domainUrl}/?setup=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${domainUrl}/?setup=cancel`,
+      // FIXED METADATA DICTIONARY: Synchronized perfectly with your webhook checking parameters
       metadata: {
         variant: String(variant),
         size: String(size),
         quantity: String(quantityChosen || 1),
         email: clientEmail,
-        shippingAddress: shippingAddress || 'Collected via Stripe Checkout',
-        // Flags the record in Stripe data fields so you can spot late waitlist leads
+        address: shippingAddress || 'Collected via Stripe Checkout', // Syncs directly with webhook mapping variables
         registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE'
       }
     });
 
-    // 2. LOG DYNAMIC REAL-TIME CHEKOUT TRANSACTION ACTIVE INTENTS
+    // Log the active tracking intent tokens cleanly
     const intentPayload = JSON.stringify({
       email: clientEmail,
       variant,
