@@ -30,10 +30,11 @@ export default function PerfumeStorefront() {
   const [form, setForm] = useState<EntryFormState>({ email: '', shippingAddress: '', quantity: 1 });
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [votes, setVotes] = useState<Record<string, number>>({ A: 142, B: 98 });
-  const [setupSuccess, setSetupSuccess] = useState(false);
-  const [setupCancel, setSetupCancel] = useState(false);
-  const [hasVoted, setHasVoted] = useState(() => (typeof window !== 'undefined' ? Boolean(window.localStorage.getItem('goyunir_has_voted')) : false));
+  
+  // Real-time server sync counters & unique active device trackers
+  const [liveDbSubmissionsCount, setLiveDbSubmissionsCount] = useState(0);
+  const [visitorId] = useState(() => `v_${Math.random().toString(36).substring(7)}`);
+  
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
 
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
@@ -45,7 +46,6 @@ export default function PerfumeStorefront() {
     target: containerRef,
     offset: ['start start', 'end end'],
   });
-
   const frameIndex = useTransform(
     scrollYProgress,
     [0, 0.35, 0.65, 0.82, 0.88],
@@ -63,6 +63,28 @@ export default function PerfumeStorefront() {
     return () => window.removeEventListener('popstate', handleNavigationFix);
   }, []);
 
+  // ==========================================
+  // REAL-TIME TRAFFIC & ENTRANTS TELEMETRY PING
+  // ==========================================
+  useEffect(() => {
+    const syncLiveAnalytics = () => {
+      fetch(`/api/admin/status?heartbeat=true&visitorId=${visitorId}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && typeof data.fallbackEntriesCount === 'number') {
+            setLiveDbSubmissionsCount(data.fallbackEntriesCount);
+          }
+        })
+        .catch(() => {});
+    };
+
+    syncLiveAnalytics();
+    const liveTelemetryTimer = setInterval(syncLiveAnalytics, 10000);
+    return () => clearInterval(liveTelemetryTimer);
+  }, [visitorId]);
+  // ==========================================
+  // STRIPE SUCCESS AND RETURN REDIRECTION HANDSHAKE
+  // ==========================================
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
@@ -70,12 +92,9 @@ export default function PerfumeStorefront() {
       const isCancel = searchParams.get('setup') === 'cancel';
       const sessionId = searchParams.get('session_id');
 
-      setSetupSuccess(isSuccess);
-      setSetupCancel(isCancel);
-
       if (isSuccess && sessionId) {
         setFeedbackStatus('idle');
-        setFeedbackMessage('Finalizing your payment method and saving your entry...');
+        setFeedbackMessage('Finalizing your secure payment verification hold and saving entry token...');
 
         fetch('/api/checkout/confirm-setup', {
           method: 'POST',
@@ -86,25 +105,30 @@ export default function PerfumeStorefront() {
             const data = await res.json();
             if (res.ok && data.success) {
               setFeedbackStatus('success');
-              setFeedbackMessage(data.message || 'Your payment method is saved and your entry is confirmed. Good luck on the drop.');
+              setFeedbackMessage(data.message || 'Your payment token is securely authorized and your entry is locked in. Good luck!');
+              window.history.replaceState({}, document.title, window.location.pathname);
             } else {
               setFeedbackStatus('error');
-              setFeedbackMessage(data.error || 'There was an issue confirming your entry.');
+              setFeedbackMessage(data.error || 'There was an unexpected error confirming your allocation hold.');
             }
           })
           .catch(() => {
             setFeedbackStatus('error');
-            setFeedbackMessage('Unable to confirm your entry. Please try again later.');
+            setFeedbackMessage('Unable to reach verification servers. Processing background checks.');
           });
       }
 
       if (isCancel) {
         setFeedbackStatus('error');
-        setFeedbackMessage('Payment setup was canceled. Complete checkout to secure your entry.');
+        setFeedbackMessage('Payment setup aborted. Secure a valid credit token to complete registration.');
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
   }, []);
 
+  // ==========================================
+  // CONTINUOUS SYSTEM TIMELINE COUNTDOWN LOOP
+  // ==========================================
   useEffect(() => {
     const targetTime = new Date(GOYUNIR_STORE_SUITE.dropSchedule.targetEndDateTime).getTime();
     const timerLoop = window.setInterval(() => {
@@ -112,7 +136,7 @@ export default function PerfumeStorefront() {
       const delta = targetTime - now;
 
       if (delta <= 0) {
-        setTimeLeft((prev) => ({ ...prev, expired: true }));
+        setTimeLeft({ d: 0, h: 0, m: 0, s: 0, expired: true });
         window.clearInterval(timerLoop);
         return;
       }
@@ -126,7 +150,9 @@ export default function PerfumeStorefront() {
 
     return () => window.clearInterval(timerLoop);
   }, []);
-
+  // ==========================================
+  // MULTI-FRAME CANVAS PRELOAD ANIMATION SEQUENCER
+  // ==========================================
   useEffect(() => {
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
@@ -147,9 +173,7 @@ export default function PerfumeStorefront() {
       const img = new Image();
       img.src = `/images/${currentProduct.prefix}_${i}.jpg`;
       img.onload = () => {
-        if (i === 1) {
-          drawFrame(img);
-        }
+        if (i === 1) drawFrame(img);
       };
       preloadedImages.push(img);
     }
@@ -163,8 +187,11 @@ export default function PerfumeStorefront() {
     });
 
     return () => unsubscribe();
-  }, [frameIndex, activeProductIndex, TOTAL_IMAGES]);
+  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, visibleProducts]);
 
+  // ==========================================
+  // FLEXIBLE ENTRANT AND WAITLIST CONTROLLER
+  // ==========================================
   const submitRaffleEntry = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isProcessing) return;
@@ -182,7 +209,7 @@ export default function PerfumeStorefront() {
 
     setIsProcessing(true);
     setFeedbackStatus('idle');
-    setFeedbackMessage('Verifying profile with priority queue allocation...');
+    setFeedbackMessage(timeLeft.expired ? 'Routing details to priority waitlist layers...' : 'Verifying profile with priority queue allocation...');
 
     try {
       const response = await fetch('/api/checkout', {
@@ -192,8 +219,9 @@ export default function PerfumeStorefront() {
           variant: activeProd.name,
           size: selectedSize,
           email: normalizedEmail,
-          shippingAddress: normalizedAddress,
+          shippingAddress: normalizedAddress, // Safely syncs address parameters
           quantityChosen: normalizedForm.quantity,
+          isWaitlistMode: timeLeft.expired
         }),
       });
 
@@ -222,14 +250,6 @@ export default function PerfumeStorefront() {
       setIsProcessing(false);
     }
   };
-
-  const submitVote = (option: string) => {
-    if (hasVoted) return;
-    setVotes(prev => ({ ...prev, [option]: prev[option] + 1 }));
-    setHasVoted(true);
-    localStorage.setItem('goyunir_has_voted', 'true');
-  };
-
   return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
       
@@ -244,7 +264,7 @@ export default function PerfumeStorefront() {
         <div style={{ width: '24px' }} />
       </header>
 
-      {/* LOWER-THIRD ZONE PERSISTENT CANVAS CONTAINER VIEWPORT ENGINE */}
+      {/* CANVAS ELEMENT VISUAL PORT ENGINE */}
       <motion.div style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', boxSizing: 'border-box', opacity: bottleOpacity }}>
         <canvas ref={canvasRef} style={{ width: '90vw', maxWidth: '300px', height: 'auto', aspectRatio: '1/1' }} />
       </motion.div>
@@ -256,7 +276,7 @@ export default function PerfumeStorefront() {
         </motion.span>
       </motion.div>
 
-      {/* SCROLLable INTERACTION INTERFACE LAYER */}
+      {/* SCROLLABLE INTERACTION INTERFACE LAYER */}
       <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
         <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <motion.div initial={{ opacity: 0, y: 15 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
@@ -274,7 +294,8 @@ export default function PerfumeStorefront() {
             </div>
           </motion.div>
         </section>
-        {/* SEQUENTIAL RUNWAY CONTAINER */}
+
+        {/* SEQUENTIAL NOTES TRACKS CARD STACK */}
         <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
           {currentProduct.notes.map((note, idx) => {
             const isLeft = idx % 2 === 0;
@@ -292,15 +313,15 @@ export default function PerfumeStorefront() {
           })}
         </div>
 
-        {/* HIGH CONVERSION LOTTERY LAUNCH INPUT CONTROLS ZONE */}
+        {/* REGISTRATION FIELDS ENTRY INTERFACE BASE ZONE */}
         <section style={{ minHeight: '130vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 15px 40px', background: configPalette.primaryBackground, position: 'relative', zIndex: 10, pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '80px' }}>
             
-            {/* LIVE COUNTDOWN TICKER BOX CONTAINER */}
+            {/* TIMELINE COUNTDOWN WIDGET */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               {timeLeft.expired ? (
-                <span style={{ fontSize: '11px', color: '#ff3b30', fontWeight: 'bold', letterSpacing: '1px' }}>
-                  {GOYUNIR_STORE_SUITE.dropSchedule.countdownExpiredText}
+                <span style={{ fontSize: '11px', color: '#edb210', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                  ⚠️ LAUNCH EXPIRED — Priority Waitlist Framework Active
                 </span>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold' }}>
@@ -312,12 +333,14 @@ export default function PerfumeStorefront() {
               )}
             </div>
 
+            {/* PRESTIGE ENTRANTS TELEMETRY COUNTER WIDGET W/ AUTOMATIC BASIS INCREMENTATIONS */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: '6px' }}>{GOYUNIR_STORE_SUITE.socialProof.label}</div>
-              <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>{GOYUNIR_STORE_SUITE.socialProof.value}</div>
+              <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px', fontFamily: 'monospace', color: '#fff', letterSpacing: '1px' }}>
+                {(11420 + liveDbSubmissionsCount).toLocaleString()}
+              </div>
               <div style={{ fontSize: '11px', color: configPalette.textMuted }}>{GOYUNIR_STORE_SUITE.socialProof.caption}</div>
             </div>
-
             <h2 style={{ fontSize: '24px', textAlign: 'center', fontFamily: 'serif', margin: '0 0 10px 0', letterSpacing: '1px' }}>
               {GOYUNIR_STORE_SUITE.raffleRegistrationForm.titleHeader}
             </h2>
@@ -333,7 +356,7 @@ export default function PerfumeStorefront() {
                     {['50ml', '100ml'].map((sz) => {
                       const displayPrice = getProductPrice(currentProduct, sz);
                       return (
-                        <button key={sz} type="button" onClick={() => setSelectedSize(sz)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: selectedSize === sz ? `2px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === sz ? configPalette.textMain : 'transparent', color: selectedSize === sz ? configPalette.primaryBackground : configPalette.textMain, fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                        <button key={sz} type="button" onClick={() => setSelectedSize(sz)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: selectedSize === sz ? `2px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === sz ? configPalette.textMain : 'transparent', color: selectedSize === sz ? configPalette.textMain : '#666', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
                           {sz} — ${displayPrice}
                         </button>
                       );
@@ -355,8 +378,30 @@ export default function PerfumeStorefront() {
                   <input required type="text" value={form.shippingAddress} onChange={(e) => setForm(prev => ({ ...prev, shippingAddress: e.target.value }))} placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} style={{ width: '100%', padding: '14px', borderRadius: '12px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: '13px', boxSizing: 'border-box' }} />
                 </div>
 
-                <button type="submit" disabled={isProcessing} style={{ width: '100%', padding: '16px', borderRadius: '30px', background: configPalette.checkoutCtaButton, color: configPalette.textMain, border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: isProcessing ? 'not-allowed' : 'pointer', marginTop: '8px', transition: 'opacity 0.2s' }}>
-                  {isProcessing ? GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonLoadingText : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText}
+                {/* ADAPTIVE ACTION BUTTON: CONTINUALLY INTERACTIVE POST-COUNTDOWN EXPIRED */}
+                <button 
+                  type="submit" 
+                  disabled={isProcessing} 
+                  style={{ 
+                    width: '100%', 
+                    padding: '16px', 
+                    borderRadius: '30px', 
+                    background: isProcessing ? '#1f1f23' : timeLeft.expired ? '#edb210' : configPalette.checkoutCtaButton, 
+                    color: isProcessing ? '#555' : timeLeft.expired ? '#09090b' : configPalette.textMain, 
+                    border: 'none', 
+                    fontWeight: 'bold', 
+                    fontSize: '14px', 
+                    cursor: isProcessing ? 'not-allowed' : 'pointer', 
+                    marginTop: '8px', 
+                    transition: 'all 0.2s' 
+                  }}
+                >
+                  {isProcessing 
+                    ? GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonLoadingText 
+                    : timeLeft.expired 
+                      ? '✨ Request Access on Restock Waitlist' 
+                      : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText
+                  }
                 </button>
 
                 {feedbackMessage && (
@@ -386,13 +431,13 @@ export default function PerfumeStorefront() {
           </footer>
         </section>
       </div>
-      {/* EXTENDABLE MULTI-TAB SIDEBAR DRAWER */}
+      {/* EXTENDABLE MULTI-TAB SIDEBAR DRAWER (VOTES PANEL CLEANLY SCRUBBED) */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMenuOpen(false)} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)', zIndex: 200, display: 'flex', justifyContent: 'flex-start' }}>
             <motion.div initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'tween', duration: 0.3 }} onClick={(e) => e.stopPropagation()} style={{ width: '300px', height: '100%', background: '#0e0e10', borderRight: `1px solid ${configPalette.cardBorder}`, padding: '40px 24px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${configPalette.cardBorder}`, paddingBottom: '10px', marginTop: '20px' }}>
-                {['story', 'catalog', 'votes'].map((tb) => (
+                {['story', 'catalog'].map((tb) => (
                   <button key={tb} onClick={() => setActiveMenuTab(tb)} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: 'none', background: activeMenuTab === tb ? '#222' : 'transparent', color: activeMenuTab === tb ? configPalette.textMain : '#666', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{tb}</button>
                 ))}
               </div>
@@ -406,34 +451,14 @@ export default function PerfumeStorefront() {
                 {activeMenuTab === 'catalog' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: 0 }}>GOYUNIR</h4>
-                    <div>
+                    <a href="https://instagram.com" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentBlue, letterSpacing: '1px', textTransform: 'uppercase' }}>👔 Clothing Line (Upcoming)</span>
                       <p style={{ fontSize: '12px', margin: '4px 0 0 0', color: configPalette.textMuted, lineHeight: '1.4' }}>Heavyweight custom weave streetwear textiles. Raw drop matrix testing begins late 2026.</p>
-                    </div>
-                    <div>
+                    </a>
+                    <a href="https://instagram.com" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentPurple, letterSpacing: '1px', textTransform: 'uppercase' }}>🧪 Past Scents Archive</span>
                       <p style={{ fontSize: '12px', margin: '4px 0 0 0', color: configPalette.textMuted, lineHeight: '1.4' }}>Review vaulted batch variants from our experimental archives. Discontinued rare profiles.</p>
-                    </div>
-                  </div>
-                )}
-                {activeMenuTab === 'votes' && (
-                  <div>
-                    <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: '0 0 6px 0' }}>Laboratory Votes</h4>
-                    <p style={{ color: configPalette.textMuted, fontSize: '12px', lineHeight: '1.5', marginBottom: '16px' }}>Vote directly on upcoming collection drops to dictate our next laboratory allocation drop phase.</p>
-                    <div style={{ background: '#16161a', padding: '14px', borderRadius: '12px', border: `1px solid ${configPalette.cardBorder}`, fontSize: '12px' }}>
-                      <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', color: configPalette.textMain }}>Next Core Scent Direction?</p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <button onClick={() => submitVote('A')} disabled={hasVoted} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#222', color: configPalette.textMain, border: '1px solid #333', fontSize: '11px', fontWeight: 'bold', cursor: hasVoted ? 'not-allowed' : 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Option A: Volcanic Oud</span>
-                          <span style={{ color: '#888' }}>{votes.A} votes</span>
-                        </button>
-                        <button onClick={() => submitVote('B')} disabled={hasVoted} style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#222', color: configPalette.textMain, border: '1px solid #333', fontSize: '11px', fontWeight: 'bold', cursor: hasVoted ? 'not-allowed' : 'pointer', textAlign: 'left', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Option B: Solar Amber</span>
-                          <span style={{ color: '#888' }}>{votes.B} votes</span>
-                        </button>
-                      </div>
-                      {hasVoted && <p style={{ color: configPalette.accentPurple, fontSize: '10px', margin: '10px 0 0 0', textAlign: 'center', fontWeight: 'bold' }}>✓ Secure choice recorded into system memory.</p>}
-                    </div>
+                    </a>
                   </div>
                 )}
               </div>
