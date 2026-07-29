@@ -21,33 +21,34 @@ export async function POST(request: Request) {
 
     const clientEmail = email.trim().toLowerCase();
     const timestamp = new Date().toISOString();
-    const intentKey = `intent_pool:${variant}:${size}`;
+    const poolKey = `drop_pool:${variant}:${size}`;
 
-    // 1. IF USER IS JOINING THE WAITLIST POST-COUNTDOWN
+    // ✅ FIXED AUTOMATED FUTURE DROPS ENFORCEMENT: Saves complete registration blocks into pools
     if (isWaitlistMode) {
-      const waitlistPayload = JSON.stringify({
+      const waitlistRafflePayload = JSON.stringify({
         email: clientEmail,
         variant,
         size,
         shippingAddress: shippingAddress || 'No Address Provided',
         quantity: Number(quantityChosen) || 1,
-        paymentMethodId: 'WAITLIST_SUBSCRIBER',
-        stripeCustomerId: 'WAITLIST_PENDING',
+        paymentMethodId: 'PRE_AUTHORIZED_WAITLIST', // Placeholder bypass token layout
+        stripeCustomerId: 'WAITLIST_AUTOMATED_UPCOMING',
+        id: `wait_${Math.random().toString(36).substring(2, 9)}`,
+        price: 120,
         registeredAt: timestamp,
-        type: 'WAITLIST'
+        type: 'WAITLIST' // Tagged clearly so you see them inside your searchable ledger widgets
       });
 
-      // Save straight to the standard drop pool list but flag them as a safe waitlist record row
-      const poolKey = `drop_pool:${variant}:${size}`;
-      await redis.rpush(poolKey, waitlistPayload);
+      // Secure data row directly into dynamic list structures for next launch sweep matrix
+      await redis.rpush(poolKey, waitlistRafflePayload);
 
       return NextResponse.json({ 
         success: true, 
-        message: '✓ RESTOCKED: You have been successfully added to our priority restock waitlist framework.' 
+        message: '✓ AUTOMATED ENTRY SECURED: Saved to restock pools. You will be automatically entered into the next drawing session.' 
       });
     }
 
-    // 2. STANDARD ACTIVE RAFFLE FLOW (WITH STRIPE REDIRECTION MINTING)
+    // STANDARD ACTIVE TIMER RAFFLE CHANNELS
     const hostHeader = request.headers.get('host') || 'localhost:3000';
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
@@ -66,11 +67,10 @@ export async function POST(request: Request) {
         size: String(size),
         quantity: String(quantityChosen || 1),
         email: clientEmail,
-        shippingAddress: shippingAddress || 'Collected via Stripe Checkout' // Forces backup persistence tracking fields
+        shippingAddress: shippingAddress || 'Collected via Stripe Checkout'
       }
     });
 
-    // CRITICAL FIX: Save intent immediately into Redis tracking pools right when they hit the button
     const intentPayload = JSON.stringify({
       email: clientEmail,
       variant,
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
       shippingAddress: shippingAddress || 'Form Input Field Entry',
       registeredAt: timestamp
     });
-    await redis.rpush(intentKey, intentPayload);
+    await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
 
     return NextResponse.json({ success: true, sessionUrl: session.url });
 
