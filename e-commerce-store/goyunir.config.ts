@@ -12,19 +12,31 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
   },
 
+  // ============================================
+  // DROP SCHEDULE
+  // mode: 'weekly' auto-repeats every week at the day/time below (great for
+  // a 52-week / 13-per-week cadence). mode: 'fixed' uses one exact date —
+  // switch to this for special one-off drops.
+  // IMPORTANT: this must match the cron schedule in vercel.json, or the
+  // countdown and the actual auto-charge will disagree.
+  // ============================================
   dropSchedule: {
-    targetEndDateTime: '2026-07-28T19:30:00', // <-- change this to move the countdown
+    mode: 'weekly',
+    targetEndDateTime: '2026-07-27T19:30:00', // only used when mode is 'fixed'
+    drawDayOfWeekUTC: 6, // Saturday
+    drawHourUTC: 4, // 4:00 UTC — adjust to your audience's local midnight
+    drawMinuteUTC: 0,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',
     minutesLabel: 'm',
     secondsLabel: 's',
-    winnersPer50ml: 10, // how many 50ml winners the draw picks
-    winnersPer100ml: 5, // how many 100ml winners the draw picks
+    winnersPer50ml: 10,
+    winnersPer100ml: 5,
   },
 
   animationMechanics: {
-    totalFramesToLoad: 4,
+    totalFramesToLoad: 4, // bump to 30-60 for production, matching your image count
     maxRotationDegrees: 360,
     spinReverseOnAlternatingProgress: true,
   },
@@ -46,10 +58,20 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ctaLabel: '↓ Scroll To Explore',
   },
 
+  // ============================================
+  // SOCIAL PROOF
+  // baseCount: your honest floor number. Real confirmed entries add on top
+  // automatically. autoIncrementEnabled adds small organic-looking ticks
+  // from real visitor activity — set to false any time for pure real numbers.
+  // Resets to baseCount after every draw automatically.
+  // ============================================
   socialProof: {
     label: 'Limited drop access',
-    value: '1,287 early entrants',
+    baseCount: 0,
     caption: 'Hype is compounding fast—reserve now before inventory closes.',
+    autoIncrementEnabled: true,
+    autoIncrementChancePerHeartbeat: 0.15,
+    autoIncrementAmount: 1,
   },
 
   brandFooterData: {
@@ -61,18 +83,18 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   },
 
   // ============================================
-  // SIDEBAR "CATALOG" TAB CONTENT
-  // Add/remove items here — they show up automatically
-  // in the hamburger menu's Catalog tab. No code changes needed.
+  // CATALOG PAGE CONTENT
+  // Shows up automatically on the /catalog page as tappable tiles.
+  // image: path under /public/images/. Leave blank for a placeholder tile.
   // ============================================
   catalogPreview: {
     upcomingDrops: [
-      { name: 'GOYUNIR Heavyweight Tee — Vol. 1', status: 'Upcoming', eta: 'Late 2026' },
-      { name: 'Raw Weave Cargo', status: 'Upcoming', eta: 'Late 2026' },
+      { name: 'GOYUNIR Heavyweight Tee — Vol. 1', status: 'Upcoming', eta: 'Late 2026', image: '/images/tee-vol1.jpg', description: 'A heavyweight cotton tee with a raised GOYUNIR emblem across the chest.' },
+      { name: 'Raw Weave Cargo', status: 'Upcoming', eta: 'Late 2026', image: '/images/cargo.jpg', description: 'Utility-inspired cargo pants in raw, undyed cotton canvas.' },
     ],
     archiveScents: [
-      { name: 'Crimson Static', status: 'Archived' },
-      { name: 'Glass Amber', status: 'Archived' },
+      { name: 'Crimson Static', status: 'Archived', image: '/images/crimson-static.jpg', description: 'A discontinued profile built around raw saffron and dark cassis.' },
+      { name: 'Glass Amber', status: 'Archived', image: '/images/glass-amber.jpg', description: 'A transparent, resinous amber note with a cold mineral finish.' },
     ],
   },
 
@@ -80,7 +102,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   // PRODUCTS
   // Copy an existing block below to add a new perfume.
   // `prefix` must match image files in /public/images/ named
-  // like PREFIX_1.jpg, PREFIX_2.jpg, PREFIX_3.jpg, PREFIX_4.jpg
+  // PREFIX_1.jpg through PREFIX_N.jpg (N = totalFramesToLoad above).
   // `stripeId50ml` / `stripeId100ml` must be real Stripe Price IDs.
   // ============================================
   productCatalog: [

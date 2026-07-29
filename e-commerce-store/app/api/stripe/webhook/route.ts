@@ -78,10 +78,12 @@ export async function POST(request: Request) {
   }
 
   let cardFingerprint = '';
+  let cardLast4 = '';
   if (paymentMethodId) {
     try {
       const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
       cardFingerprint = paymentMethod.card?.fingerprint ?? '';
+      cardLast4 = paymentMethod.card?.last4 ?? '';
     } catch {}
   }
 
@@ -103,9 +105,13 @@ export async function POST(request: Request) {
       variant,
       size,
       shippingAddress: address,
+      address,
       quantity: 1,
       paymentMethodId: paymentMethodId || 'vaulted_token_hold',
+      customerId,
       stripeCustomerId: customerId,
+      cardFingerprint,
+      cardLast4,
       id: session.id || `session_${Math.random().toString(36).substring(2, 7)}`,
       price: 120,
       registeredAt: new Date().toISOString(),

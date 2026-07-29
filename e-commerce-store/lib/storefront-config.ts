@@ -25,6 +25,8 @@ export interface CatalogPreviewItem {
   name: string;
   status: string;
   eta?: string;
+  image?: string;
+  description?: string;
 }
 
 export interface StorefrontConfig {
@@ -39,7 +41,11 @@ export interface StorefrontConfig {
     checkoutCtaButton: string;
   };
   dropSchedule: {
+    mode: 'fixed' | 'weekly';
     targetEndDateTime: string;
+    drawDayOfWeekUTC: number;
+    drawHourUTC: number;
+    drawMinuteUTC: number;
     countdownExpiredText: string;
     daysLabel: string;
     hoursLabel: string;
@@ -70,8 +76,11 @@ export interface StorefrontConfig {
   };
   socialProof: {
     label: string;
-    value: string;
+    baseCount: number;
     caption: string;
+    autoIncrementEnabled: boolean;
+    autoIncrementChancePerHeartbeat: number;
+    autoIncrementAmount: number;
   };
   brandFooterData: {
     instagramLink: string;
@@ -99,7 +108,11 @@ const defaultThemeColors = {
 };
 
 const defaultDropSchedule = {
+  mode: 'weekly' as const,
   targetEndDateTime: '2026-07-27T19:30:00',
+  drawDayOfWeekUTC: 6, // 0=Sun ... 6=Sat
+  drawHourUTC: 4, // adjust to match your audience's timezone
+  drawMinuteUTC: 0,
   countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
   daysLabel: 'd',
   hoursLabel: 'h',
@@ -134,8 +147,11 @@ const defaultHeroContent = {
 
 const defaultSocialProof = {
   label: 'Limited drop access',
-  value: '1,287 early entrants',
+  baseCount: 0,
   caption: 'Hype is compounding fast—reserve now before inventory closes.',
+  autoIncrementEnabled: true,
+  autoIncrementChancePerHeartbeat: 0.15,
+  autoIncrementAmount: 1,
 };
 
 const defaultFooter = {
@@ -162,13 +178,13 @@ function normalizeNumber(value: unknown, fallback: number): number {
 
 function normalizeCatalogItems(items: unknown): CatalogPreviewItem[] {
   if (!Array.isArray(items)) return [];
-  return items
-    .filter(Boolean)
-    .map((item: any) => ({
-      name: normalizeText(item?.name, 'Untitled Item'),
-      status: normalizeText(item?.status, 'Coming Soon'),
-      eta: typeof item?.eta === 'string' ? item.eta : undefined,
-    }));
+  return items.filter(Boolean).map((item: any) => ({
+    name: normalizeText(item?.name, 'Untitled Item'),
+    status: normalizeText(item?.status, 'Coming Soon'),
+    eta: typeof item?.eta === 'string' ? item.eta : undefined,
+    image: typeof item?.image === 'string' ? item.image : undefined,
+    description: typeof item?.description === 'string' ? item.description : undefined,
+  }));
 }
 
 function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string }, index: number): StorefrontProduct {
@@ -235,4 +251,23 @@ export function getProductStripeId(product: StorefrontProduct, size: string): st
 
 export function getWinnerCount(config: StorefrontConfig, size: string): number {
   return size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;
+}
+
+// Computes the next draw timestamp. In 'weekly' mode it finds the next
+// occurrence of the configured weekday/time; in 'fixed' mode it uses the
+// exact date you set. Switch modes any time in goyunir.config.ts.
+export function getNextDrawTimestamp(config: StorefrontConfig): number {
+  if (config.dropSchedule.mode === 'fixed') {
+    return new Date(config.dropSchedule.targetEndDateTime).getTime();
+  }
+  const now = new Date();
+  const target = new Date(now);
+  target.setUTCHours(config.dropSchedule.drawHourUTC, config.dropSchedule.drawMinuteUTC, 0, 0);
+  const currentDay = target.getUTCDay();
+  let daysUntil = (config.dropSchedule.drawDayOfWeekUTC - currentDay + 7) % 7;
+  if (daysUntil === 0 && target.getTime() <= now.getTime()) {
+    daysUntil = 7;
+  }
+  target.setUTCDate(target.getUTCDate() + daysUntil);
+  return target.getTime();
 }

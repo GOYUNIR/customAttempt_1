@@ -27,8 +27,7 @@ export default function PerfumeStorefront() {
   const [activeMenuTab, setActiveMenuTab] = useState('story');
   const [form, setForm] = useState<EntryFormState>({ email: '', shippingAddress: '', quantity: 1 });
   const [feedbackMessage, setFeedbackMessage] = useState('');
-  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
+  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');  const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
 
   const [liveDbSubmissionsCount, setLiveDbSubmissionsCount] = useState(0);
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
@@ -58,9 +57,17 @@ export default function PerfumeStorefront() {
 
   useEffect(() => {
     if (!feedbackMessage) return;
-    const dismissTimer = setTimeout(() => setFeedbackMessage(''), 6000);
-    return () => clearTimeout(dismissTimer);
-  }, [feedbackMessage]);
+    if (feedbackStatus === 'loading') {
+      // Only escalate to a real warning if loading drags on unusually long.
+      const stallTimer = setTimeout(() => {
+        setFeedbackStatus('error');
+        setFeedbackMessage('This is taking longer than expected. Check your connection and try again — if it persists, contact support.');
+      }, 12000);
+      return () => clearTimeout(stallTimer);
+    }
+  const dismissTimer = setTimeout(() => setFeedbackMessage(''), 6000);
+  return () => clearTimeout(dismissTimer);
+}, [feedbackMessage, feedbackStatus]);
 
   // ==========================================
   // LIVE ANALYTICS HEARTBEAT — visibility-aware.
@@ -118,8 +125,8 @@ export default function PerfumeStorefront() {
       const isCancel = searchParams.get('setup') === 'cancel';
       const sessionId = searchParams.get('session_id');
       if (isSuccess && sessionId) {
-        setFeedbackStatus('idle');
-        setFeedbackMessage('Finalizing your secure payment verification hold and saving entry token...');
+        setFeedbackStatus('loading');
+        setFeedbackMessage('Confirming your entry…');
         fetch('/api/checkout/confirm-setup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -211,9 +218,9 @@ export default function PerfumeStorefront() {
       return;
     }
     setIsProcessing(true);
-    setFeedbackStatus('idle');
-    setFeedbackMessage(timeLeft.expired ? 'Routing details to priority waitlist layers...' : 'Verifying profile with priority queue allocation...');
-    try {
+    setFeedbackStatus('loading');
+    setFeedbackMessage(timeLeft.expired ? 'Adding you to the waitlist…' : 'Securing your entry…');    try {
+      
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -271,9 +278,16 @@ export default function PerfumeStorefront() {
             initial={{ opacity: 0, y: -10, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: -10, x: '-50%' }}
-            style={{ position: 'fixed', top: '70px', left: '50%', zIndex: 99, fontSize: '11px', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : '#ff3b30', letterSpacing: '0.5px', textTransform: 'uppercase', background: 'rgba(0,0,0,0.85)', padding: '8px 16px', borderRadius: '20px', border: feedbackStatus === 'success' ? '1px solid #34c759' : '1px solid #ff3b30', whiteSpace: 'nowrap', boxShadow: '0 8px 20px rgba(0,0,0,0.4)' }}
+            style={{
+              position: 'fixed', top: '70px', left: '50%', zIndex: 99,
+              fontSize: '11px', fontWeight: 'bold', letterSpacing: '0.5px', textTransform: 'uppercase',
+              background: 'rgba(0,0,0,0.85)', padding: '8px 16px', borderRadius: '20px', whiteSpace: 'nowrap',
+              boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
+              color: feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#9ca3af',
+              border: `1px solid ${feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#3f3f46'}`,
+            }}
           >
-            {feedbackStatus === 'success' ? '🎯 ENTRY VERIFIED' : '⚠️ STATUS PENDING'}
+            {feedbackStatus === 'success' ? '🎯 Entry Verified' : feedbackStatus === 'error' ? '⚠️ Action Needed' : '⏳ Loading'}
           </motion.div>
         )}
       </AnimatePresence>
@@ -446,7 +460,10 @@ export default function PerfumeStorefront() {
                 <span style={{ color: '#888', display: 'block' }}>{GOYUNIR_STORE_SUITE.brandFooterData.shippingReturnPolicyText}</span>
               </div>
             </div>
-            <div style={{ textAlign: 'center', color: '#333', fontSize: '10px', marginTop: '30px' }}>© {new Date().getFullYear()} {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}</div>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <a href="/account" style={{ color: '#666', fontSize: '11px', textDecoration: 'underline' }}>Manage My Entry</a>
+            </div>
+            <div style={{ textAlign: 'center', color: '#333', fontSize: '10px', marginTop: '30px' }}>© {new Date().getFullYear()} {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}</div>   
           </footer>
         </section>
       </div>

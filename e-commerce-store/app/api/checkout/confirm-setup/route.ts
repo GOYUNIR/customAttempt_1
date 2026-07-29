@@ -25,8 +25,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Critical downstream database infrastructure offline.' }, { status: 500 });
     }
 
-    // Idempotency: the Stripe webhook may ALSO try to process this same
-    // session. Whichever path arrives first wins; the other becomes a no-op.
     const alreadyProcessed = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (alreadyProcessed === 1) {
       return NextResponse.json({
@@ -59,12 +57,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Setup flow did not complete with a valid payment method.' }, { status: 400 });
     }
 
-    // The card's fingerprint identifies the physical card even if someone
-    // tries to re-enter under a different email.
+    // Card fingerprint + last-4 are stored so this exact card can't win twice,
+    // AND so the person can later verify their identity (email + last-4) to
+    // manage their entry without needing a password account.
     let cardFingerprint = '';
+    let cardLast4 = '';
     try {
       const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
       cardFingerprint = paymentMethod.card?.fingerprint ?? '';
+      cardLast4 = paymentMethod.card?.last4 ?? '';
     } catch {}
 
     const emailKey = emailBlockKey(variant, size);
@@ -100,6 +101,8 @@ export async function POST(request: Request) {
       quantity,
       customerId,
       paymentMethodId,
+      cardFingerprint,
+      cardLast4,
       registeredAt: Date.now(),
       source: 'redis' as const,
     };
