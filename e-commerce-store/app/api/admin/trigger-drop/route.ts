@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       inputPassword = body.verificationKey || '';
     } catch {}
 
-    // RUTHLESS SECURITY LOCKDOWN MATCHING VERCEL KEYS
+    // SECURE LOCKDOWN CAPTURE BARRIER
     const masterPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD || 'securegoyunir2026';
     if (inputPassword !== masterPassword) {
       return NextResponse.json({ error: '⚠️ ACCESS REJECTED: Invalid master operation password.' }, { status: 403 });
@@ -47,8 +47,6 @@ export async function POST(request: Request) {
     for (const poolKey of allPoolKeys) {
       try {
         const listLength = await redis.llen(poolKey);
-        
-        // FIXED ARRAY INDEX EXTRACTION: Pulls text parts strictly to prevent array-type overlap leaks
         const keyParts = poolKey.split(':');
         const productName = String(keyParts[1] || 'Fragrance Line');
         const productSize = String(keyParts[2] || '50ml');
@@ -64,10 +62,7 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        const inventoryLimit = productSize === '50ml' 
-          ? (GOYUNIR_STORE_SUITE?.dropSchedule?.winnersPer50ml || 10)
-          : (GOYUNIR_STORE_SUITE?.dropSchedule?.winnersPer100ml || 5);
-          
+        const inventoryLimit = productSize === '50ml' ? 10 : 5;
         let successfulPoolCaptures = 0;
 
         for (const winnerStr of shuffled) {
@@ -81,13 +76,14 @@ export async function POST(request: Request) {
 
           try {
             let winnerData = JSON.parse(winnerStr);
+            // RECURSIVE UNWRAP PROTECTION: Extracts deep keys inside the loop framework perfectly
             if (winnerData && winnerData.email && typeof winnerData.email === 'object') {
               winnerData = winnerData.email;
             }
             winnerEmail = winnerData.email || winnerEmail;
             paymentMethod = winnerData.paymentMethodId || null;
             customerId = winnerData.stripeCustomerId || null;
-            shippingAddress = winnerData.shippingAddress || shippingAddress;
+            shippingAddress = winnerData.shippingAddress || winnerData.address || shippingAddress;
             targetPrice = Number(winnerData.price) || 120;
           } catch { continue; }
 
@@ -101,7 +97,7 @@ export async function POST(request: Request) {
                 off_session: true,
                 confirm: true,
                 receipt_email: winnerEmail,
-                description: `GOYUNIR Win Draw: ${productName} (${productSize})`,
+                description: `GOYUNIR Win Draw Win Allocation: ${productName} (${productSize})`,
               });
 
               grandRevenueChargesCount++;
@@ -117,6 +113,7 @@ export async function POST(request: Request) {
                 type: 'PROCESSED_WINNER_PAID'
               };
               
+              // LOCK RECORDS PERMANENTLY: Pipe processed winners to historic ledger database array
               await redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord));
 
               processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'CAPTURED' });
@@ -126,6 +123,7 @@ export async function POST(request: Request) {
           }
         }
 
+        // Wipe the fluid lottery pool lines cleanly out of staging lines post-capture
         await redis.del(poolKey);
         await redis.del(`intent_pool:${productName}:${productSize}`);
 
