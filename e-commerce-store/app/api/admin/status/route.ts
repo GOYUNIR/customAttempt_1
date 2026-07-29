@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
     if (!redis) return NextResponse.json(status);
 
-    // 1. COMPUTE TRUE SITE TRAFFIC OVER A 5-MINUTE SLIDING WINDOW
+    // 1. EXTRACT UNIQUE USER SIGNS OVER SLIDING WINDOWS
     try {
       const url = new URL(request.url);
       const trafficKey = 'analytics:active_users_online';
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     const combinedCustomerLedger: any[] = [];
     const poolPromises: Promise<void>[] = [];
 
-    // 2. AGGREGATE SUBMISSIONS AND CHECKOUT INTENTS (NO PASSWORD REQ)
+    // 2. PARSE ALL ALLOCATION LOGS
     for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
       for (const size of ['50ml', '100ml']) {
         const poolKey = `drop_pool:${product.name}:${size}`;
@@ -62,13 +62,10 @@ export async function GET(request: Request) {
             maxLimit: size === '50ml' ? 10 : 5
           });
 
-          // Process and completely unwrap double-nested parameters cleanly
           const parseListItems = (items: string[], labelType: 'SUBMISSION' | 'INTENT') => {
             for (const itemStr of items) {
               try {
                 let parsed = JSON.parse(itemStr);
-                
-                // Deep extraction matrix extracts data if wrapped double inside strings
                 if (parsed && typeof parsed === 'object' && parsed.email && typeof parsed.email === 'object') {
                   parsed = parsed.email;
                 }
@@ -78,16 +75,17 @@ export async function GET(request: Request) {
                   variant: product.name,
                   size,
                   shippingAddress: String(parsed?.shippingAddress || parsed?.address || 'No Address Logged'),
-                  id: String(parsed?.id || parsed?.stripeCustomerId || 'Active Track Token'),
+                  id: String(parsed?.id || parsed?.stripeCustomerId || 'Active Token'),
                   registeredAt: parsed?.registeredAt || parsed?.initiatedAt || new Date().toISOString(),
-                  type: parsed?.type || labelType
+                  type: labelType
                 });
               } catch {
+                // UNWRAP EXCEPTION SHIELD: Converts flat string pools to text fields to prevent [object Object] errors
                 combinedCustomerLedger.push({
-                  email: String(itemStr),
+                  email: String(itemStr || 'Legacy Lead Track'),
                   variant: product.name,
                   size,
-                  shippingAddress: 'Legacy Row Text Block',
+                  shippingAddress: 'Form Input field Entry',
                   id: 'Legacy Ref Trace',
                   registeredAt: new Date().toISOString(),
                   type: labelType
@@ -106,19 +104,12 @@ export async function GET(request: Request) {
 
     await Promise.all(poolPromises);
 
-    // 3. READ HISTORICAL ARCHIVES SO CAPTURED DATA IS SAVED PERMANENTLY FOREVER
-    try {
-      const historyItems = await redis.lrange('drop_history:archived_logs', 0, -1);
-      for (const hist of historyItems) {
-        try {
-          const parsedHist = JSON.parse(hist);
-          combinedCustomerLedger.push({
-            ...parsedHist,
-            type: parsedHist.type || 'ARCHIVED_WINNER'
-          });
-        } catch {}
-      }
-    } catch {}
+    // ✅ FIXED: Rigid alphabetical sort forces dashboard display boxes to stay frozen in position
+    status.pools.sort((a, b) => {
+      const stringA = `${a.product} ${a.size}`.toLowerCase();
+      const stringB = `${b.product} ${b.size}`.toLowerCase();
+      return stringA.localeCompare(stringB);
+    });
 
     status.fallbackEntriesCount = totalCombinedCount;
     status.fallbackEntries = combinedCustomerLedger.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());

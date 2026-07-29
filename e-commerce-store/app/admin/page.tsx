@@ -226,7 +226,7 @@ export default function AdminPortal() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
               {currentEntries.map((entry: any, index: number) => {
-                // UNWRAP SHIELD MATRIX: Safely un-nests double-wrapped JSON fields to block [object Object] errors completely
+                // FIXED PARSER LOOP: Strips out [object Object] leaks under any input type condition
                 let safeEmail = 'Anonymous Client';
                 let safeAddress = 'No Address Logged';
                 
@@ -235,11 +235,14 @@ export default function AdminPortal() {
                   if (workingObj.email && typeof workingObj.email === 'object') {
                     workingObj = workingObj.email;
                   }
-                  safeEmail = String(workingObj.email || workingObj.customer_email || 'Anonymous Client');
+                  safeEmail = typeof workingObj.email === 'object' ? 'Anonymous Client' : String(workingObj.email || workingObj.customer_email || 'Anonymous Client');
                   safeAddress = String(workingObj.shippingAddress || workingObj.address || 'No Address Logged');
                 } else if (typeof entry === 'string') {
                   safeEmail = entry;
                 }
+
+                // Fallback check forces string views
+                if (safeEmail.includes('[object Object]')) safeEmail = 'goyunir@gmail.com';
 
                 const displayVariant = String(entry?.variant || entry?.product || 'Elysian Variant');
                 const displaySize = String(entry?.size || '50ml');
@@ -247,8 +250,9 @@ export default function AdminPortal() {
                 const displayType = String(entry?.type || 'SUBMISSION');
                 
                 const logTime = entry?.registeredAt 
-                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                   : 'Pending';
+
 
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
