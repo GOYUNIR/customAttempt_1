@@ -22,32 +22,44 @@ export async function POST(request: Request) {
     const clientEmail = email.trim().toLowerCase();
     const timestamp = new Date().toISOString();
 
+    // 1. FORCE REAL STRIPE CUSTOMER REGISTRATION MINTING
+    let stripeCustomer;
+    const existingCustomers = await stripe.customers.list({ email: clientEmail, limit: 1 });
+    if (existingCustomers.data.length > 0) {
+      stripeCustomer = existingCustomers.data[0];
+    } else {
+      stripeCustomer = await stripe.customers.create({
+        email: clientEmail,
+        description: `GOYUNIR Registrant: ${clientEmail}`,
+        metadata: { initialShippingAddress: shippingAddress || 'Form Input' }
+      });
+    }
+
     const hostHeader = request.headers.get('host') || 'localhost:3000';
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
-    // FIXED: Formatted to point to rich item layouts instead of a plain setup container page
+    // 2. LAUNCH SECURE VAULT CONTAINER TIED TO THAT CUSTOMER
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'setup', 
-      customer_email: clientEmail,
+      customer: stripeCustomer.id, // Fixed: Links profile to customer registry immediately
       shipping_address_collection: {
         allowed_countries: ['US', 'CA', 'GB', 'AU'], 
       },
       success_url: `${domainUrl}/?setup=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${domainUrl}/?setup=cancel`,
-      // FIXED METADATA DICTIONARY: Synchronized perfectly with your webhook checking parameters
       metadata: {
         variant: String(variant),
         size: String(size),
         quantity: String(quantityChosen || 1),
         email: clientEmail,
-        address: shippingAddress || 'Collected via Stripe Checkout', // Syncs directly with webhook mapping variables
+        address: shippingAddress || 'Collected via Stripe Checkout',
         registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE'
       }
     });
 
-    // Log the active tracking intent tokens cleanly
+    // Log the active intent tracking counts immediately
     const intentPayload = JSON.stringify({
       email: clientEmail,
       variant,

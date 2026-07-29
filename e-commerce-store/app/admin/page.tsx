@@ -8,40 +8,47 @@ export default function AdminPortal() {
   const [resultMessage, setResultMessage] = useState('');
   const [status, setStatus] = useState<any>(null);
 
-  // Security locks, filters, and high-volume ledger pagination state vectors
+  // Search parameters, pagination states, and direct-draw verification password fields
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
   const [triggerVerificationPassword, setTriggerVerificationPassword] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  // FIXED: Decoupled statistics from your local deployment password box string variables
+  // ✅ DECOUPLED TELEMETRY FETCH: Freely streams statistical numbers instantly on load
   const fetchStatus = async () => {
     try {
-      // Calls endpoint cleanly without passing active passwords strings
       const res = await fetch(`/api/admin/status?t=${Date.now()}`); 
       const data = await res.json();
       setStatus(data);
     } catch (err) {
-      setStatus({ error: 'Unable to fetch system telemetry values' });
+      setStatus({ error: 'Unable to fetch status telemetry matrix parameters' });
     }
   };
 
+  useEffect(() => {
+    fetchStatus();
+    const pollTimer = setInterval(fetchStatus, 5000); // Poll analytics lines every 5 seconds
+    return () => clearInterval(pollTimer);
+  }, []);
 
   const triggerDrop = async () => {
     if (!triggerVerificationPassword) {
-      alert("🔒 OPERATION REJECTED: Type your admin portal password to unlock and verify draw permissions.");
+      alert("🔒 OPERATION REJECTED: You must type your basic auth portal password to authorize direct card captures.");
       return;
     }
 
-    const confirmRun = confirm("🚨 MASTER LAUNCH CORE TRIGGER: Execute card charges for your active lottery rows?");
-    if (!confirmRun) return;
+    const targetLabel = selectedDrawTarget === 'ALL_POOLS' 
+      ? 'ALL active database product pools' 
+      : `specifically the "${selectedDrawTarget}" pool line`;
+      
+    const doubleCheck = confirm(`🚨 SYSTEM CORE ACTIVATION: Are you sure you want to execute drawing and process charges for ${targetLabel}?`);
+    if (!doubleCheck) return;
 
     setIsRunning(true);
-    setResultMessage('Authorizing variables with Vercel deployment parameters...');
+    setResultMessage('Executing backend drawing algorithms and verification variables...');
 
     try {
-      // ✅ TRIGGER CONTROL PATH EQUALIZED: Connects straight to app/api/admin/trigger-drop/route.ts
       const response = await fetch('/api/admin/trigger-drop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,21 +59,20 @@ export default function AdminPortal() {
       });
       const data = await response.json();
 
-
       if (response.ok) {
-        setResultMessage(`Draw completed. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);
-        setTriggerVerificationPassword(''); // Clear state vector
+        setResultMessage(`Draw triggered successfully. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);
+        setTriggerVerificationPassword(''); // Flush password input box state vector immediately
         await fetchStatus();
       } else {
-        setResultMessage(data.error || 'Failed to trigger draw operations.');
+        setResultMessage(data.error || 'Failed to trigger draw operations or invalid verification keys.');
       }
     } catch (error) {
-      setResultMessage('Unable to reach the serverless drop trigger endpoint.');
+      setResultMessage('Unable to reach the serverless draw drop trigger endpoint path.');
     } finally {
       setIsRunning(false);
     }
   };
-
+  // Dynamic search data filters wrap around raw parameters to guarantee React never receives raw objects
   const allEntries = status?.fallbackEntries || [];
   const filteredEntries = Array.isArray(allEntries) ? allEntries.filter((entry: any) => {
     if (!entry) return false;
@@ -83,6 +89,7 @@ export default function AdminPortal() {
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentEntries = filteredEntries.slice(indexOfFirstItem, indexOfLastItem);
+
   return (
     <main style={{ minHeight: '100vh', padding: '48px 24px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: '720px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -129,7 +136,6 @@ export default function AdminPortal() {
           </button>
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
-
         {/* COMPONENT 2: SPECIFIED LIVE DATABASE INT / SUB / INV READOUT GRID */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
@@ -151,10 +157,18 @@ export default function AdminPortal() {
                 </div>
               );
             })}
+            {(!status?.pools || status.pools.length === 0) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
+              </div>
+            )}
           </div>
         </section>
 
-        {/* COMPONENT 3: HARDWARE CORE OVERVIEW AND VISITOR REALTIME TELEMETRY TRACKER */}
+        {/* COMPONENT 3: INFRASTRUCTURE HARDWARE MATRIX CARDS OVERVIEW */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>System Status Overview</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', fontSize: '13px', color: '#cbd5e1', marginBottom: '16px' }}>
@@ -183,7 +197,7 @@ export default function AdminPortal() {
             </div>
           </div>
         </section>
-        {/* COMPONENT 4: ADVANCED HIGH-VOLUME SEARCHABLE CUSTOMER LEDGER MATRIX */}
+        {/* COMPONENT 4: ADVANCED SEARCHABLE CUSTOMER LEDGER MATRIX */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -212,21 +226,35 @@ export default function AdminPortal() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
               {currentEntries.map((entry: any, index: number) => {
-                const displayEmail = typeof entry === 'object' ? String(entry.email || 'Anonymous') : String(entry);
-                const displayVariant = typeof entry === 'object' ? String(entry.variant || entry.product || 'Elysian Variant') : 'Elysian Variant';
-                const displaySize = typeof entry === 'object' ? String(entry.size || '50ml') : '50ml';
-                const displayAddress = typeof entry === 'object' ? String(entry.shippingAddress || 'No Address Logged') : 'No Address Logged';
-                const displayId = typeof entry === 'object' ? String(entry.id || entry.stripeCustomerId || 'Active Track') : 'Legacy Ref';
-                const displayType = typeof entry === 'object' ? String(entry.type || 'SUBMISSION') : 'SUBMISSION';
+                // UNWRAP SHIELD MATRIX: Safely un-nests double-wrapped JSON fields to block [object Object] errors completely
+                let safeEmail = 'Anonymous Client';
+                let safeAddress = 'No Address Logged';
                 
-                // Format transaction timeline logging date stamps beautifully
-                const logTime = entry.registeredAt ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Pending';
+                if (entry && typeof entry === 'object') {
+                  let workingObj = entry;
+                  if (workingObj.email && typeof workingObj.email === 'object') {
+                    workingObj = workingObj.email;
+                  }
+                  safeEmail = String(workingObj.email || workingObj.customer_email || 'Anonymous Client');
+                  safeAddress = String(workingObj.shippingAddress || workingObj.address || 'No Address Logged');
+                } else if (typeof entry === 'string') {
+                  safeEmail = entry;
+                }
+
+                const displayVariant = String(entry?.variant || entry?.product || 'Elysian Variant');
+                const displaySize = String(entry?.size || '50ml');
+                const displayId = String(entry?.id || entry?.stripeCustomerId || 'Active Track');
+                const displayType = String(entry?.type || 'SUBMISSION');
+                
+                const logTime = entry?.registeredAt 
+                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+                  : 'Pending';
 
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>{displayEmail}</span>
+                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>{safeEmail}</span>
                         <span style={{ color: '#555', fontSize: '11px', fontFamily: 'monospace' }}>Hash: {displayId}</span>
                       </div>
                       <div style={{ textAlign: 'right' }}>
@@ -235,10 +263,9 @@ export default function AdminPortal() {
                       </div>
                     </div>
                     
-                    {/* RICH DATA DETAILS METRIC BANNER */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#050507', padding: '8px 12px', borderRadius: '8px', border: '1px solid #141416', fontSize: '11px' }}>
                       <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
-                        📍 Address: <span style={{ color: '#aaa' }}>{displayAddress}</span>
+                        📍 Address: <span style={{ color: '#aaa' }}>{safeAddress}</span>
                       </span>
                       <span style={{ 
                         padding: '2px 6px', 
@@ -272,7 +299,7 @@ export default function AdminPortal() {
           )}
         </section>
 
-        {/* COMPONENT 5: NOTES SECTION */}
+        {/* ORIGINAL HARDCODED SYSTEM NOTES INFRASTRUCTURE */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem' }}>Notes</h2>
           <ul style={{ color: '#c4c4c4', lineHeight: 1.8, fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
