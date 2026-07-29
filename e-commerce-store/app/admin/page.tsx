@@ -17,7 +17,8 @@ export default function AdminPortal() {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/admin/status');
+      // ✅ ENDPOINT TARGET LOCKED: Connects straight to app/api/admin/status/route.ts
+      const res = await fetch('/api/admin/status'); 
       const data = await res.json();
       setStatus(data);
     } catch (err) {
@@ -25,39 +26,30 @@ export default function AdminPortal() {
     }
   };
 
-  useEffect(() => {
-    fetchStatus();
-    const pollTimer = setInterval(fetchStatus, 5000);
-    return () => clearInterval(pollTimer);
-  }, []);
-
   const triggerDrop = async () => {
-    // BRUTE FORCE GUARD RECONNAISSANCE LAYER
     if (!triggerVerificationPassword) {
-      alert("🔒 OPERATION REJECTED: You must type your verification password to authorize direct card captures.");
+      alert("🔒 OPERATION REJECTED: Type your admin portal password to unlock and verify draw permissions.");
       return;
     }
 
-    const targetLabel = selectedDrawTarget === 'ALL_POOLS' 
-      ? 'ALL active database allocations' 
-      : `specifically the "${selectedDrawTarget}" pool line`;
-      
-    const doubleCheck = confirm(`🚨 SYSTEM CORE ACTIVATION: Are you sure you want to execute drawing capturing for ${targetLabel}?`);
-    if (!doubleCheck) return;
+    const confirmRun = confirm("🚨 MASTER LAUNCH CORE TRIGGER: Execute card charges for your active lottery rows?");
+    if (!confirmRun) return;
 
     setIsRunning(true);
-    setResultMessage('Verifying operational tokens and shufflers...');
+    setResultMessage('Authorizing variables with Vercel deployment parameters...');
 
     try {
-      const response = await fetch('/api/trigger-drop', {
+      // ✅ TRIGGER CONTROL PATH EQUALIZED: Connects straight to app/api/admin/trigger-drop/route.ts
+      const response = await fetch('/api/admin/trigger-drop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           targetPool: selectedDrawTarget,
-          verificationKey: triggerVerificationPassword // Pass validation key downwards to route parameters
+          verificationKey: triggerVerificationPassword 
         })
       });
       const data = await response.json();
+
 
       if (response.ok) {
         setResultMessage(`Draw completed. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);

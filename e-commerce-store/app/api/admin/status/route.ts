@@ -15,38 +15,33 @@ export async function GET(request: Request) {
       fallbackEntriesCount: 0,
       fallbackEntries: [] as any[],
       pools: [] as any[],
-      liveActiveUsersOnline: 0 // Injected real-time user counter metric parameter fields
+      liveActiveUsersOnline: 1
     };
 
-    if (!redis) {
-      return NextResponse.json(status);
-    }
+    if (!redis) return NextResponse.json(status);
 
-    // 1. CALCULATE ANONYMOUS REAL-TIME HEARTBEAT TELEMETRY TRAFFIC
+    // 1. EXTRACT REAL-TIME USER TELEMETRY OVER A 5-MINUTE WINDOW
     try {
       const url = new URL(request.url);
-      const isHeartbeatPing = url.searchParams.get('heartbeat') === 'true';
       const trafficKey = 'analytics:active_users_online';
       const currentTimeClock = Date.now();
 
-      if (isHeartbeatPing) {
+      if (url.searchParams.get('heartbeat') === 'true') {
         const dummyVisitorId = url.searchParams.get('visitorId') || `v_${Math.random().toString(36).substring(7)}`;
         await redis.zadd(trafficKey, { score: currentTimeClock, member: dummyVisitorId });
       }
 
-      // Sweep and remove any historical records older than 30 seconds ago to keep data pure
-      const cutoffTimeThreshold = currentTimeClock - 30 * 1000;
-      await redis.zremrangebyscore(trafficKey, 0, cutoffTimeThreshold);
-      
+      // Keep user tracks cached for up to 5 full minutes to account for incognito/mobile delays
+      await redis.zremrangebyscore(trafficKey, 0, currentTimeClock - 300 * 1000);
       const totalActiveUsersCount = await redis.zcard(trafficKey);
       status.liveActiveUsersOnline = Math.max(1, totalActiveUsersCount);
     } catch {}
 
-    // 2. AGGREGATE POOLS AND REGISTRANT META DATA
     let totalCombinedCount = 0;
     const combinedCustomerLedger: any[] = [];
     const poolPromises: Promise<void>[] = [];
 
+    // 2. PARSE AND MAP ALL SUBMISSIONS AND INTENTS (CRASH SHIELD APPLIED)
     for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
       for (const size of ['50ml', '100ml']) {
         const poolKey = `drop_pool:${product.name}:${size}`;
@@ -68,45 +63,42 @@ export async function GET(request: Request) {
             maxLimit: size === '50ml' ? 10 : 5
           });
 
-          if (sCount > 0) {
-            const rawSubs = await redis.lrange(poolKey, 0, -1);
-            for (const itemStr of rawSubs) {
+          const processRows = async (key: string, labelType: 'SUBMISSION' | 'INTENT') => {
+            const items = await redis.lrange(key, 0, -1);
+            for (const itemStr of items) {
               try {
-                const parsed = JSON.parse(itemStr);
-                combinedCustomerLedger.push({
-                  email: parsed.email || 'Anonymous',
-                  variant: product.name,
-                  size,
-                  shippingAddress: parsed.shippingAddress || 'No Address Logged',
-                  id: parsed.id || parsed.stripeCustomerId || 'Active Track',
-                  registeredAt: parsed.registeredAt || new Date().toISOString(),
-                  type: parsed.type || 'SUBMISSION'
-                });
-              } catch {
-                combinedCustomerLedger.push({ email: itemStr, variant: product.name, size, type: 'SUBMISSION', id: 'Legacy Row', shippingAddress: 'No Address Logged', registeredAt: new Date().toISOString() });
-              }
-            }
-          }
+                let parsed = JSON.parse(itemStr);
+                
+                // CRITICAL FIX: Recursively unwrap double-nested data properties
+                if (parsed && typeof parsed === 'object' && parsed.email && typeof parsed.email === 'object') {
+                  parsed = parsed.email;
+                }
 
-          if (iCount > 0) {
-            const rawIntents = await redis.lrange(intentKey, 0, -1);
-            for (const itemStr of rawIntents) {
-              try {
-                const parsed = JSON.parse(itemStr);
                 combinedCustomerLedger.push({
-                  email: parsed.email || 'Anonymous',
+                  email: String(parsed?.email || parsed?.customer_email || 'Anonymous Client'),
                   variant: product.name,
                   size,
-                  shippingAddress: parsed.shippingAddress || 'Form Input Captured',
-                  id: 'Pending Authorization Hold',
-                  registeredAt: parsed.registeredAt || new Date().toISOString(),
-                  type: 'INTENT'
+                  shippingAddress: String(parsed?.shippingAddress || parsed?.address || 'No Address Logged'),
+                  id: String(parsed?.id || parsed?.stripeCustomerId || 'Active Track Token'),
+                  registeredAt: parsed?.registeredAt || parsed?.initiatedAt || new Date().toISOString(),
+                  type: labelType
                 });
               } catch {
-                combinedCustomerLedger.push({ email: itemStr, variant: product.name, size, type: 'INTENT', id: 'Incomplete Intent', shippingAddress: 'Form Input Captured', registeredAt: new Date().toISOString() });
+                combinedCustomerLedger.push({
+                  email: String(itemStr),
+                  variant: product.name,
+                  size,
+                  shippingAddress: 'Legacy Row Text Block',
+                  id: 'Legacy Ref Trace',
+                  registeredAt: new Date().toISOString(),
+                  type: labelType
+                });
               }
             }
-          }
+          };
+
+          if (sCount > 0) await processRows(poolKey, 'SUBMISSION');
+          if (iCount > 0) await processRows(intentKey, 'INTENT');
         }).catch(() => {});
 
         poolPromises.push(promise);
@@ -114,6 +106,21 @@ export async function GET(request: Request) {
     }
 
     await Promise.all(poolPromises);
+
+    // 3. READ PERMANENT HISTORY DIRECTLY SO DEPLOYED LAUNCHES NEVER DISAPPEAR
+    try {
+      const historyItems = await redis.lrange('drop_history:archived_logs', 0, -1);
+      for (const hist of historyItems) {
+        try {
+          const parsedHist = JSON.parse(hist);
+          combinedCustomerLedger.push({
+            ...parsedHist,
+            type: parsedHist.type || 'ARCHIVED_WINNER'
+          });
+        } catch {}
+      }
+    } catch {}
+
     status.fallbackEntriesCount = totalCombinedCount;
     status.fallbackEntries = combinedCustomerLedger.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
 

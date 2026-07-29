@@ -14,44 +14,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'System processing architecture offline.' }, { status: 500 });
     }
 
-    // Read variant target parameters out of the incoming message body securely
     let targetPoolSignature = 'ALL_POOLS';
+    let inputPassword = '';
+
     try {
       const body = await request.json();
-      if (body.targetPool) targetPoolSignature = body.targetPool;
+      targetPoolSignature = body.targetPool || 'ALL_POOLS';
+      inputPassword = body.verificationKey || '';
     } catch {}
+
+    // RUTHLESS SECURITY LOCKDOWN MATCHING VERCEL KEYS
+    const masterPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD || 'securegoyunir2026';
+    if (inputPassword !== masterPassword) {
+      return NextResponse.json({ error: '⚠️ ACCESS REJECTED: Invalid master operation password.' }, { status: 403 });
+    }
 
     const processedWinners: any[] = [];
     const scannedPoolLogs: any[] = [];
     let grandRevenueChargesCount = 0;
 
-    let allPoolKeys = await redis.keys('*drop_pool*');
+    const allPoolKeysRaw = await redis.keys('*drop_pool*');
+    let allPoolKeys = Array.isArray(allPoolKeysRaw) ? allPoolKeysRaw : [];
     
-    // TARGETED FILTER: Isolate a specific fragrance if chosen from your admin dropdown menu
     if (targetPoolSignature !== 'ALL_POOLS') {
-      allPoolKeys = allPoolKeys.filter(k => k === targetPoolSignature);
+      allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
 
-    if (!allPoolKeys || allPoolKeys.length === 0) {
-      return NextResponse.json({ 
-        success: true, 
-        drawSummary: { totalScannedPools: 0, processedWinners: [], totalSuccessfulCharges: 0 }
-      });
+    if (allPoolKeys.length === 0) {
+      return NextResponse.json({ success: true, drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] } });
     }
 
     for (const poolKey of allPoolKeys) {
       try {
         const listLength = await redis.llen(poolKey);
+        
+        // FIXED ARRAY INDEX EXTRACTION: Pulls text parts strictly to prevent array-type overlap leaks
         const keyParts = poolKey.split(':');
-        const productName = keyParts[1] || 'Fragrance Line';
-        const productSize = keyParts[2] || '50ml';
+        const productName = String(keyParts[1] || 'Fragrance Line');
+        const productSize = String(keyParts[2] || '50ml');
 
         scannedPoolLogs.push({ keySignature: poolKey, entriesFound: listLength });
         if (listLength === 0) continue;
 
         const entries = await redis.lrange(poolKey, 0, -1);
         
-        // Fisher-Yates lottery shuffle randomizer algorithm
         const shuffled = [...entries];
         for (let i = shuffled.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -59,9 +65,9 @@ export async function POST(request: Request) {
         }
 
         const inventoryLimit = productSize === '50ml' 
-          ? GOYUNIR_STORE_SUITE.dropSchedule.winnersPer50ml 
-          : GOYUNIR_STORE_SUITE.dropSchedule.winnersPer100ml;
-
+          ? (GOYUNIR_STORE_SUITE?.dropSchedule?.winnersPer50ml || 10)
+          : (GOYUNIR_STORE_SUITE?.dropSchedule?.winnersPer100ml || 5);
+          
         let successfulPoolCaptures = 0;
 
         for (const winnerStr of shuffled) {
@@ -70,75 +76,64 @@ export async function POST(request: Request) {
           let winnerEmail = 'User';
           let paymentMethod = null;
           let customerId = null;
+          let shippingAddress = 'No Address Logged';
           let targetPrice = 120;
 
           try {
-            if (winnerStr.trim().startsWith('{')) {
-              let winnerData = JSON.parse(winnerStr);
-              if (winnerData.email && typeof winnerData.email === 'object') winnerData = winnerData.email;
-              winnerEmail = winnerData.email || winnerEmail;
-              paymentMethod = winnerData.paymentMethodId || null;
-              customerId = winnerData.stripeCustomerId || null;
-              targetPrice = Number(winnerData.price) || 120;
+            let winnerData = JSON.parse(winnerStr);
+            if (winnerData && winnerData.email && typeof winnerData.email === 'object') {
+              winnerData = winnerData.email;
             }
+            winnerEmail = winnerData.email || winnerEmail;
+            paymentMethod = winnerData.paymentMethodId || null;
+            customerId = winnerData.stripeCustomerId || null;
+            shippingAddress = winnerData.shippingAddress || shippingAddress;
+            targetPrice = Number(winnerData.price) || 120;
           } catch { continue; }
 
-          const targetAmount = Math.round(targetPrice * 100);
-          
           try {
             if (paymentMethod && customerId && !paymentMethod.startsWith('mock_')) {
-              const chargeIntent = await stripe.paymentIntents.create({
-                amount: targetAmount,
+              await stripe.paymentIntents.create({
+                amount: Math.round(targetPrice * 100),
                 currency: 'usd',
                 customer: customerId,
                 payment_method: paymentMethod,
                 off_session: true,
                 confirm: true,
                 receipt_email: winnerEmail,
-                description: `GOYUNIR Draw Win Allocation: ${productName} (${productSize})`,
+                description: `GOYUNIR Win Draw: ${productName} (${productSize})`,
               });
 
               grandRevenueChargesCount++;
               successfulPoolCaptures++;
+
+              const archivedRecord = {
+                email: winnerEmail,
+                variant: productName,
+                size: productSize,
+                shippingAddress,
+                id: customerId,
+                registeredAt: new Date().toISOString(),
+                type: 'PROCESSED_WINNER_PAID'
+              };
               
-              processedWinners.push({
-                email: String(winnerEmail),
-                product: productName,
-                size: productSize,
-                chargeId: chargeIntent.id,
-                status: 'SUCCESSFULLY_CAPTURED'
-              });
-            } else {
-              processedWinners.push({
-                email: String(winnerEmail),
-                product: productName,
-                size: productSize,
-                status: 'FALLBACK_LEDGER_WINNER_RECORD'
-              });
+              await redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord));
+
+              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'CAPTURED' });
             }
-          } catch (chargeError: any) {
-            processedWinners.push({
-              email: String(winnerEmail),
-              product: productName,
-              size: productSize,
-              status: `DROPPED_VIA_DECLINE: ${chargeError.message || 'Transaction rejected'}`
-            });
+          } catch (err: any) {
+            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: `DECLINED: ${err.message}` });
           }
         }
 
-        // Targeted Purge: Only clear out the list keys that were just processed
         await redis.del(poolKey);
-        const correspondingIntentKey = `intent_pool:${productName}:${productSize}`;
-        await redis.del(correspondingIntentKey);
+        await redis.del(`intent_pool:${productName}:${productSize}`);
 
-      } catch (poolErr) {}
+      } catch {}
     }
 
     const drawSummary = {
       executionTime: new Date().toISOString(),
-      targetScopeSelection: targetPoolSignature,
-      totalScannedPools: allPoolKeys.length,
-      poolBreakdown: scannedPoolLogs,
       processedWinners,
       totalSuccessfulCharges: grandRevenueChargesCount
     };
