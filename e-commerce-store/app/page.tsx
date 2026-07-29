@@ -355,14 +355,33 @@ export default function PerfumeStorefront() {
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {['50ml', '100ml'].map((sz) => {
                       const displayPrice = getProductPrice(currentProduct, sz);
+                      const isSelected = selectedSize === sz;
                       return (
-                        <button key={sz} type="button" onClick={() => setSelectedSize(sz)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: selectedSize === sz ? `2px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === sz ? configPalette.textMain : 'transparent', color: selectedSize === sz ? configPalette.textMain : '#666', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+                        <button 
+                          key={sz} 
+                          type="button" 
+                          onClick={() => setSelectedSize(sz)} 
+                          style={{ 
+                            flex: 1, 
+                            padding: '12px', 
+                            borderRadius: '12px', 
+                            border: isSelected ? '2px solid #fff' : `1px solid ${configPalette.cardBorder}`, 
+                            background: isSelected ? '#ffffff' : 'transparent', 
+                            // FIXED TEXT CONTRAST: Highlighting uses crisp black font so it remains 100% readable
+                            color: isSelected ? '#000000' : configPalette.textMain, 
+                            fontSize: '13px', 
+                            fontWeight: 'bold', 
+                            cursor: 'pointer', 
+                            transition: 'all 0.2s' 
+                          }}
+                        >
                           {sz} — ${displayPrice}
                         </button>
                       );
                     })}
                   </div>
                 </div>
+
 
                 <div>
                   <label style={{ fontSize: '10px', fontWeight: 'bold', color: configPalette.textMuted, letterSpacing: '1px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>

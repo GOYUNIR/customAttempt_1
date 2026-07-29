@@ -71,18 +71,21 @@ export async function POST(request: Request) {
   const isAddressDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddress);
   
   if (isAddressDuplicate !== 1) {
-    const payload = JSON.stringify({
-      email,
-      variant,
-      size,
-      shippingAddress: address,
-      quantity: 1,
-      paymentMethodId,
-      stripeCustomerId: customerId,
-      id: session.id || `sub_token_${Math.random().toString(36).substring(7)}`,
-      price: 120,
-      registeredAt: new Date().toISOString() // Captures exact submission timestamp
-    });
+  const payload = JSON.stringify({
+    email,
+    variant,
+    size,
+    shippingAddress: address,
+    quantity: 1,
+    paymentMethodId,
+    stripeCustomerId: customerId,
+    id: session.id,
+    price: 120,
+    registeredAt: new Date().toISOString(),
+    // Safely reads incoming type tokens from stripe metadata lines
+    type: metadata.registrationType === 'WAITLIST_BACKORDER' ? 'WAITLIST' : 'SUBMISSION'
+  });
+
 
     await redis.rpush(poolKey, payload);
     await redis.sadd(duplicateBlockKey, normalizedAddress);

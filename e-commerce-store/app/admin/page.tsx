@@ -15,16 +15,18 @@ export default function AdminPortal() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
+  // FIXED: Decoupled statistics from your local deployment password box string variables
   const fetchStatus = async () => {
     try {
-      // ✅ ENDPOINT TARGET LOCKED: Connects straight to app/api/admin/status/route.ts
-      const res = await fetch('/api/admin/status'); 
+      // Calls endpoint cleanly without passing active passwords strings
+      const res = await fetch(`/api/admin/status?t=${Date.now()}`); 
       const data = await res.json();
       setStatus(data);
     } catch (err) {
-      setStatus({ error: 'Unable to fetch status' });
+      setStatus({ error: 'Unable to fetch system telemetry values' });
     }
   };
+
 
   const triggerDrop = async () => {
     if (!triggerVerificationPassword) {

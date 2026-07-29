@@ -21,34 +21,8 @@ export async function POST(request: Request) {
 
     const clientEmail = email.trim().toLowerCase();
     const timestamp = new Date().toISOString();
-    const poolKey = `drop_pool:${variant}:${size}`;
 
-    // ✅ FIXED AUTOMATED FUTURE DROPS ENFORCEMENT: Saves complete registration blocks into pools
-    if (isWaitlistMode) {
-      const waitlistRafflePayload = JSON.stringify({
-        email: clientEmail,
-        variant,
-        size,
-        shippingAddress: shippingAddress || 'No Address Provided',
-        quantity: Number(quantityChosen) || 1,
-        paymentMethodId: 'PRE_AUTHORIZED_WAITLIST', // Placeholder bypass token layout
-        stripeCustomerId: 'WAITLIST_AUTOMATED_UPCOMING',
-        id: `wait_${Math.random().toString(36).substring(2, 9)}`,
-        price: 120,
-        registeredAt: timestamp,
-        type: 'WAITLIST' // Tagged clearly so you see them inside your searchable ledger widgets
-      });
-
-      // Secure data row directly into dynamic list structures for next launch sweep matrix
-      await redis.rpush(poolKey, waitlistRafflePayload);
-
-      return NextResponse.json({ 
-        success: true, 
-        message: '✓ AUTOMATED ENTRY SECURED: Saved to restock pools. You will be automatically entered into the next drawing session.' 
-      });
-    }
-
-    // STANDARD ACTIVE TIMER RAFFLE CHANNELS
+    // 1. ALL USERS (RAFFLE & LATE WAITLIST) ARE SENT TO STRIPE TO SAVE VALID CARD TOKENS
     const hostHeader = request.headers.get('host') || 'localhost:3000';
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
@@ -67,10 +41,13 @@ export async function POST(request: Request) {
         size: String(size),
         quantity: String(quantityChosen || 1),
         email: clientEmail,
-        shippingAddress: shippingAddress || 'Collected via Stripe Checkout'
+        shippingAddress: shippingAddress || 'Collected via Stripe Checkout',
+        // Flags the record in Stripe data fields so you can spot late waitlist leads
+        registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE'
       }
     });
 
+    // 2. LOG DYNAMIC REAL-TIME CHEKOUT TRANSACTION ACTIVE INTENTS
     const intentPayload = JSON.stringify({
       email: clientEmail,
       variant,
