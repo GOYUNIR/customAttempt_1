@@ -79,7 +79,6 @@ export async function POST(request: Request) {
 
           try {
             if (paymentMethod && customerId) {
-              // EXECUTE LIVE REVENUE CAPTURE ON STRIPE CARD ACCOUNTS
               const chargeIntent = await stripe.paymentIntents.create({
                 amount: 12000,
                 currency: 'usd',
@@ -105,10 +104,10 @@ export async function POST(request: Request) {
               };
               
               await redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord));
-              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, chargeId: chargeIntent.id, status: 'SUCCESS' });
+              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'SUCCESS_CHARGED' });
             }
           } catch (err: any) {
-            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: `FAILED: ${err.message}` });
+            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: `DECLINED: ${err.message}` });
           }
         }
 
@@ -125,7 +124,7 @@ export async function POST(request: Request) {
     };
 
     if (typeof globalThis !== 'undefined') {
-      (globalThis as any).__goyunirLastDraw = drawSummary.processedWinners; // Feeds the matrix panel array directly
+      (globalThis as any).__goyunirLastDraw = drawSummary.processedWinners;
     }
 
     return NextResponse.json({ success: true, drawSummary });

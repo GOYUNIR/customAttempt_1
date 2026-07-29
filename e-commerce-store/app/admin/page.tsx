@@ -8,14 +8,12 @@ export default function AdminPortal() {
   const [resultMessage, setResultMessage] = useState('');
   const [status, setStatus] = useState<any>(null);
 
-  // Search parameters, pagination states, and direct-draw verification password fields
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
   const [triggerVerificationPassword, setTriggerVerificationPassword] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  // ✅ DECOUPLED TELEMETRY FETCH: Freely streams statistical numbers instantly on load
   const fetchStatus = async () => {
     try {
       const res = await fetch(`/api/admin/status?t=${Date.now()}`); 
@@ -28,25 +26,21 @@ export default function AdminPortal() {
 
   useEffect(() => {
     fetchStatus();
-    const pollTimer = setInterval(fetchStatus, 5000); // Poll analytics lines every 5 seconds
+    const pollTimer = setInterval(fetchStatus, 4000);
     return () => clearInterval(pollTimer);
   }, []);
 
   const triggerDrop = async () => {
     if (!triggerVerificationPassword) {
-      alert("🔒 OPERATION REJECTED: You must type your basic auth portal password to authorize direct card captures.");
+      alert("🔒 OPERATION REJECTED: Enter your basic auth portal password to verify ownership controls.");
       return;
     }
 
-    const targetLabel = selectedDrawTarget === 'ALL_POOLS' 
-      ? 'ALL active database product pools' 
-      : `specifically the "${selectedDrawTarget}" pool line`;
-      
-    const doubleCheck = confirm(`🚨 SYSTEM CORE ACTIVATION: Are you sure you want to execute drawing and process charges for ${targetLabel}?`);
-    if (!doubleCheck) return;
+    const confirmRun = confirm("🚨 MASTER LAUNCH CORE TRIGGER: Execute card charges for your active lottery rows?");
+    if (!confirmRun) return;
 
     setIsRunning(true);
-    setResultMessage('Executing backend drawing algorithms and verification variables...');
+    setResultMessage('Authorizing variables with Vercel deployment parameters...');
 
     try {
       const response = await fetch('/api/admin/trigger-drop', {
@@ -60,19 +54,18 @@ export default function AdminPortal() {
       const data = await response.json();
 
       if (response.ok) {
-        setResultMessage(`Draw triggered successfully. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);
-        setTriggerVerificationPassword(''); // Flush password input box state vector immediately
+        setResultMessage(`Draw execution completed cleanly. Allocations archived successfully.`);
+        setTriggerVerificationPassword('');
         await fetchStatus();
       } else {
-        setResultMessage(data.error || 'Failed to trigger draw operations or invalid verification keys.');
+        setResultMessage(data.error || 'Authorization handshake rejected.');
       }
-    } catch (error) {
-      setResultMessage('Unable to reach the serverless draw drop trigger endpoint path.');
+    } catch {
+      setResultMessage('Fatal connection failure reaching trigger endpoint path.');
     } finally {
       setIsRunning(false);
     }
   };
-  // Dynamic search data filters wrap around raw parameters to guarantee React never receives raw objects
   const allEntries = status?.fallbackEntries || [];
   const filteredEntries = Array.isArray(allEntries) ? allEntries.filter((entry: any) => {
     if (!entry) return false;
@@ -81,7 +74,6 @@ export default function AdminPortal() {
     const safeAddress = String(entry.shippingAddress || '').toLowerCase();
     const safeType = String(entry.type || '').toLowerCase();
     const safeSearch = String(searchTerm || '').toLowerCase();
-    
     return safeEmail.includes(safeSearch) || safeVariant.includes(safeSearch) || safeAddress.includes(safeSearch) || safeType.includes(safeSearch);
   }) : [];
 
@@ -94,11 +86,10 @@ export default function AdminPortal() {
     <main style={{ minHeight: '100vh', padding: '48px 24px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: '720px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
         <div>
-          <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3rem)', margin: 0, fontWeight: '800', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>GOYUNIR Admin Portal</h1>
+          <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3rem)', margin: 0, fontWeight: '800', letterSpacing: '-0.03em', textTransform: 'uppercase' }}>GOYUNIR Admin Portal</h1>
           <p style={{ color: '#a8a8a8', marginTop: '12px', fontSize: '14px' }}>Secure control panel for manual drop activation and admin actions.</p>
         </div>
 
-        {/* COMPONENT 1: PASSWORD SECURED DROP TRIGGER ACTION COMPONENT */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop Control Center</h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Select a target pool to draw individually, or sweep all active databases simultaneously.</p>
@@ -136,7 +127,6 @@ export default function AdminPortal() {
           </button>
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
-        {/* COMPONENT 2: SPECIFIED LIVE DATABASE INT / SUB / INV READOUT GRID */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Real-time telemetry showing initiated intents, completed submissions, and inventory depth.</p>
@@ -149,26 +139,22 @@ export default function AdminPortal() {
               const maxLimit = p.maxLimit ?? (productSize === '50ml' ? 10 : 5);
 
               return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}>
-                  <div style={{ fontWeight: '600', fontSize: '13px' }}>{productName} <span style={{ color: '#555' }}>— {productSize}</span></div>
-                  <div style={{ color: subCount >= maxLimit ? '#f87171' : '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>
-                    {intCount} INT / {subCount} SUB / {maxLimit} INV
+                <div key={i} style={{ background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: '600', fontSize: '13px' }}>{productName} <span style={{ color: '#555' }}>— {productSize}</span></div>
+                    <div style={{ color: subCount >= maxLimit ? '#f87171' : '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>
+                      {intCount} INT / {subCount} SUB / {maxLimit} INV
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#444', fontFamily: 'monospace' }}>
+                    Redis Targets: intent_pool:{productName}:{productSize} | drop_pool:{productName}:{productSize}
                   </div>
                 </div>
               );
             })}
-            {(!status?.pools || status.pools.length === 0) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
-              </div>
-            )}
           </div>
         </section>
 
-        {/* COMPONENT 3: INFRASTRUCTURE HARDWARE MATRIX CARDS OVERVIEW */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>System Status Overview</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', fontSize: '13px', color: '#cbd5e1', marginBottom: '16px' }}>
@@ -183,8 +169,9 @@ export default function AdminPortal() {
             <div style={{ background: '#111', padding: '14px', borderRadius: '14px', border: '1px solid #1f1f23' }}>
               <span style={{ color: '#edb210', fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>👥 LIVE SITE TRAFFIC</span>
               <strong style={{ color: '#fff', fontSize: '14px', fontFamily: 'monospace' }}>
-                {status?.liveActiveUsersOnline ?? 1} USERS CURRENTLY ONLINE
+                {status?.liveActiveUsersOnline ?? 1} CURRENTLY ONLINE
               </strong>
+              <span style={{ fontSize: '9px', color: '#444', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>ZSET: analytics:active_users_online</span>
             </div>
           </div>
 
@@ -197,7 +184,6 @@ export default function AdminPortal() {
             </div>
           </div>
         </section>
-        {/* COMPONENT 4: ADVANCED SEARCHABLE CUSTOMER LEDGER MATRIX */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -226,39 +212,22 @@ export default function AdminPortal() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
               {currentEntries.map((entry: any, index: number) => {
-                // FIXED PARSER LOOP: Strips out [object Object] leaks under any input type condition
-                let safeEmail = 'Anonymous Client';
-                let safeAddress = 'No Address Logged';
-                
-                if (entry && typeof entry === 'object') {
-                  let workingObj = entry;
-                  if (workingObj.email && typeof workingObj.email === 'object') {
-                    workingObj = workingObj.email;
-                  }
-                  safeEmail = typeof workingObj.email === 'object' ? 'Anonymous Client' : String(workingObj.email || workingObj.customer_email || 'Anonymous Client');
-                  safeAddress = String(workingObj.shippingAddress || workingObj.address || 'No Address Logged');
-                } else if (typeof entry === 'string') {
-                  safeEmail = entry;
-                }
-
-                // Fallback check forces string views
-                if (safeEmail.includes('[object Object]')) safeEmail = 'goyunir@gmail.com';
-
+                const displayEmail = String(entry?.email || 'Anonymous Client');
                 const displayVariant = String(entry?.variant || entry?.product || 'Elysian Variant');
                 const displaySize = String(entry?.size || '50ml');
-                const displayId = String(entry?.id || entry?.stripeCustomerId || 'Active Track');
+                const displayAddress = String(entry?.shippingAddress || 'Form Input Field Entry');
+                const displayId = String(entry?.id || 'Active Trace');
                 const displayType = String(entry?.type || 'SUBMISSION');
                 
                 const logTime = entry?.registeredAt 
-                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
                   : 'Pending';
-
 
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>{safeEmail}</span>
+                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: '500' }}>{displayEmail}</span>
                         <span style={{ color: '#555', fontSize: '11px', fontFamily: 'monospace' }}>Hash: {displayId}</span>
                       </div>
                       <div style={{ textAlign: 'right' }}>
@@ -269,15 +238,15 @@ export default function AdminPortal() {
                     
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#050507', padding: '8px 12px', borderRadius: '8px', border: '1px solid #141416', fontSize: '11px' }}>
                       <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
-                        📍 Address: <span style={{ color: '#aaa' }}>{safeAddress}</span>
+                        📍 Address: <span style={{ color: '#aaa' }}>{displayAddress}</span>
                       </span>
                       <span style={{ 
                         padding: '2px 6px', 
                         borderRadius: '4px', 
                         fontFamily: 'monospace', 
                         fontWeight: 'bold',
-                        background: displayType === 'INTENT' ? 'rgba(237,178,16,0.1)' : displayType === 'WAITLIST' ? 'rgba(59,130,246,0.1)' : 'rgba(52,211,153,0.1)',
-                        color: displayType === 'INTENT' ? '#edb210' : displayType === 'WAITLIST' ? '#3b82f6' : '#34d399'
+                        background: displayType === 'INTENT' ? 'rgba(237,178,16,0.1)' : 'rgba(52,211,153,0.1)',
+                        color: displayType === 'INTENT' ? '#edb210' : '#34d399'
                       }}>
                         {displayType}
                       </span>
@@ -301,16 +270,6 @@ export default function AdminPortal() {
               </button>
             </div>
           )}
-        </section>
-
-        {/* ORIGINAL HARDCODED SYSTEM NOTES INFRASTRUCTURE */}
-        <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem' }}>Notes</h2>
-          <ul style={{ color: '#c4c4c4', lineHeight: 1.8, fontSize: '13px', margin: 0, paddingLeft: '20px' }}>
-            <li>Only the `/admin` route and `/api/admin/*` API are protected.</li>
-            <li>Use HTTP Basic Auth with `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD`.</li>
-            <li>The API also requires `ALLOW_DROP_TRIGGER=true`.</li>
-          </ul>
         </section>
 
         <Link href="/" style={{ color: '#9ca3af', textDecoration: 'underline', fontSize: '13px' }}>Return to storefront</Link>

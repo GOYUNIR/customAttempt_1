@@ -20,7 +20,6 @@ export async function GET(request: Request) {
 
     if (!redis) return NextResponse.json(status);
 
-    // 1. TIGHTENED LIVE DEVICE TELEMETRY WINDOW (30-SECOND CACHE FLUSH)
     try {
       const url = new URL(request.url);
       const trafficKey = 'analytics:active_users_online';
@@ -31,7 +30,6 @@ export async function GET(request: Request) {
         await redis.zadd(trafficKey, { score: currentTimeClock, member: dummyVisitorId });
       }
 
-      // Automatically removes device signatures older than 30 seconds for snappy updates
       await redis.zremrangebyscore(trafficKey, 0, currentTimeClock - 30 * 1000);
       const totalActiveUsersCount = await redis.zcard(trafficKey);
       status.liveActiveUsersOnline = Math.max(1, totalActiveUsersCount);
@@ -41,7 +39,6 @@ export async function GET(request: Request) {
     const combinedCustomerLedger: any[] = [];
     const poolPromises: Promise<void>[] = [];
 
-    // 2. AGGREGATE LOGS AND INGEST STRING SHIELDS
     for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
       for (const size of ['50ml', '100ml']) {
         const poolKey = `drop_pool:${product.name}:${size}`;
@@ -104,10 +101,8 @@ export async function GET(request: Request) {
 
     await Promise.all(poolPromises);
 
-    // Alphabetical fixed sort lock
     status.pools.sort((a, b) => `${a.product} ${a.size}`.localeCompare(`${b.product} ${b.size}`));
 
-    // Ingest persistent archive memory logs so deployments are never erased
     try {
       const historyItems = await redis.lrange('drop_history:archived_logs', 0, -1);
       for (const hist of historyItems) {
