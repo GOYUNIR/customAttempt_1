@@ -56,7 +56,6 @@ export default function PerfumeStorefront() {
     return () => window.removeEventListener('popstate', handleNavigationFix);
   }, []);
 
-  // Auto-dismiss the status toast so it never permanently hides the header.
   useEffect(() => {
     if (!feedbackMessage) return;
     const dismissTimer = setTimeout(() => setFeedbackMessage(''), 6000);
@@ -64,7 +63,10 @@ export default function PerfumeStorefront() {
   }, [feedbackMessage]);
 
   // ==========================================
-  // PUBLIC LIVE ANALYTICS HEARTBEAT (no admin auth required)
+  // LIVE ANALYTICS HEARTBEAT — visibility-aware.
+  // Mobile browsers throttle/pause timers on backgrounded tabs, which is
+  // exactly what caused the online count to flicker. Pausing while hidden
+  // and firing immediately on return fixes it AND cuts Redis command usage.
   // ==========================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -83,14 +85,32 @@ export default function PerfumeStorefront() {
         })
         .catch(() => {});
     };
-    syncLiveAnalytics();
-    const liveTelemetryTimer = setInterval(syncLiveAnalytics, 12000);
-    return () => clearInterval(liveTelemetryTimer);
+
+    let liveTelemetryTimer: ReturnType<typeof setInterval> | null = null;
+    const startHeartbeat = () => {
+      if (liveTelemetryTimer) return;
+      syncLiveAnalytics();
+      liveTelemetryTimer = setInterval(syncLiveAnalytics, 25000);
+    };
+    const stopHeartbeat = () => {
+      if (liveTelemetryTimer) {
+        clearInterval(liveTelemetryTimer);
+        liveTelemetryTimer = null;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') startHeartbeat();
+      else stopHeartbeat();
+    };
+
+    startHeartbeat();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      stopHeartbeat();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
-  // ==========================================
-  // STRIPE SUCCESS AND RETURN REDIRECTION HANDSHAKE
-  // ==========================================
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
@@ -129,9 +149,6 @@ export default function PerfumeStorefront() {
     }
   }, []);
 
-  // ==========================================
-  // CONTINUOUS SYSTEM TIMELINE COUNTDOWN TIMER LOOP
-  // ==========================================
   useEffect(() => {
     const targetTime = new Date(GOYUNIR_STORE_SUITE.dropSchedule.targetEndDateTime).getTime();
     const timerLoop = window.setInterval(() => {
@@ -151,9 +168,6 @@ export default function PerfumeStorefront() {
     return () => window.clearInterval(timerLoop);
   }, []);
 
-  // ==========================================
-  // MULTI-FRAME CANVAS PRELOAD ANIMATION SEQUENCER
-  // ==========================================
   useEffect(() => {
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
@@ -184,9 +198,6 @@ export default function PerfumeStorefront() {
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES, visibleProducts, currentProduct.prefix]);
 
-  // ==========================================
-  // ADAPTIVE FORM REGISTRATION HANDLER
-  // ==========================================
   const submitRaffleEntry = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isProcessing) return;
@@ -241,46 +252,42 @@ export default function PerfumeStorefront() {
   };return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
 
-      {/* GLOBAL MINI FIXED NAVIGATION HEADER BAR — GOYUNIR wordmark is ALWAYS visible now */}
       <header style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '60px', borderBottom: `1px solid ${configPalette.cardBorder}`, background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(15px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', zIndex: 100, boxSizing: 'border-box' }}>
         <div onClick={() => setIsMenuOpen(true)} style={{ display: 'flex', flexDirection: 'column', gap: '4px', cursor: 'pointer', padding: '10px 0', width: '24px' }}>
           <div style={{ width: '20px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
           <div style={{ width: '20px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
           <div style={{ width: '14px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
         </div>
-
         <div style={{ fontWeight: 'bold', letterSpacing: '4px', fontSize: '12px', textTransform: 'uppercase' }}>GOYUNIR</div>
-
         <div style={{ width: '24px' }} />
       </header>
 
-      {/* STATUS TOAST — floats below the header, never replaces GOYUNIR, auto-dismisses */}
+      {/* STATUS TOAST — x is animated by Framer Motion (not raw CSS transform),
+          which is what fixes the off-center bug: Framer Motion overwrites
+          any transform you set in the style prop with its own. */}
       <AnimatePresence>
         {feedbackMessage && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            style={{ position: 'fixed', top: '70px', left: '50%', transform: 'translateX(-50%)', zIndex: 99, fontSize: '11px', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : '#ff3b30', letterSpacing: '0.5px', textTransform: 'uppercase', background: 'rgba(0,0,0,0.85)', padding: '8px 16px', borderRadius: '20px', border: feedbackStatus === 'success' ? '1px solid #34c759' : '1px solid #ff3b30', whiteSpace: 'nowrap', boxShadow: '0 8px 20px rgba(0,0,0,0.4)' }}
+            initial={{ opacity: 0, y: -10, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -10, x: '-50%' }}
+            style={{ position: 'fixed', top: '70px', left: '50%', zIndex: 99, fontSize: '11px', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : '#ff3b30', letterSpacing: '0.5px', textTransform: 'uppercase', background: 'rgba(0,0,0,0.85)', padding: '8px 16px', borderRadius: '20px', border: feedbackStatus === 'success' ? '1px solid #34c759' : '1px solid #ff3b30', whiteSpace: 'nowrap', boxShadow: '0 8px 20px rgba(0,0,0,0.4)' }}
           >
             {feedbackStatus === 'success' ? '🎯 ENTRY VERIFIED' : '⚠️ STATUS PENDING'}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* CANVAS CONTAINER VIEWPORT ENGINE */}
       <motion.div style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', boxSizing: 'border-box', opacity: bottleOpacity }}>
         <canvas ref={canvasRef} style={{ width: '90vw', maxWidth: '300px', height: 'auto', aspectRatio: '1/1' }} />
       </motion.div>
 
-      {/* PUSH DIRECTION OVERLAY */}
       <motion.div style={{ position: 'fixed', bottom: '8vh', left: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 15, pointerEvents: 'none', opacity: scrollIndicatorOpacity }}>
         <motion.span animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }} style={{ textTransform: 'uppercase', letterSpacing: '3px', fontSize: '9px', color: configPalette.textMuted, fontWeight: 'bold' }}>
           {heroContent.ctaLabel}
         </motion.span>
       </motion.div>
 
-      {/* SCROLLABLE INTERACTION INTERFACE LAYER */}
       <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
         <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <motion.div initial={{ opacity: 0, y: 15 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
@@ -299,7 +306,6 @@ export default function PerfumeStorefront() {
           </motion.div>
         </section>
 
-        {/* SEQUENTIAL NOTES TRACKS CARD STACK */}
         <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
           {currentProduct.notes.map((note, idx) => {
             const isLeft = idx % 2 === 0;
@@ -320,7 +326,6 @@ export default function PerfumeStorefront() {
         <section style={{ minHeight: '130vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 15px 40px', background: configPalette.primaryBackground, position: 'relative', zIndex: 10, pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '80px' }}>
 
-            {/* TIMELINE COUNTDOWN TIMER INTERFACE */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               {timeLeft.expired ? (
                 <span style={{ fontSize: '11px', color: '#edb210', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
@@ -336,7 +341,6 @@ export default function PerfumeStorefront() {
               )}
             </div>
 
-            {/* PRESTIGE INTEGRATED INCREMENTER COUNTER */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: '6px' }}>{GOYUNIR_STORE_SUITE.socialProof.label}</div>
               <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px', fontFamily: 'monospace', color: '#fff', letterSpacing: '1px' }}>
@@ -447,7 +451,6 @@ export default function PerfumeStorefront() {
         </section>
       </div>
 
-      {/* EXTENDABLE MULTI-TAB SIDEBAR DRAWER */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMenuOpen(false)} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)', zIndex: 200, display: 'flex', justifyContent: 'flex-start' }}>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, emailBlockKey, poolStatField, POOL_STATS_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,20 +18,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing critical registration data parameters.' }, { status: 400 });
     }
 
-    const clientEmail = email.trim().toLowerCase();
+    const clientEmail = String(email).trim().toLowerCase();
     const timestamp = new Date().toISOString();
 
-    // Block duplicate addresses BEFORE opening a Stripe session, not after.
-    const normalizedAddressKey = String(shippingAddress || '').toLowerCase().replace(/\s+/g, '');
-    const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
-    if (normalizedAddressKey) {
-      const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
-      if (isDuplicate === 1) {
-        return NextResponse.json({
-          success: true,
-          message: 'This shipping address already has a confirmed entry for this drop — good luck!',
-        });
-      }
+    // One confirmed entry per email per drop — checked BEFORE opening a Stripe
+    // session so a known-duplicate email never even reaches Stripe.
+    const isEmailAlreadyEntered = await redis.sismember(emailBlockKey(variant, size), clientEmail);
+    if (isEmailAlreadyEntered === 1) {
+      return NextResponse.json({
+        success: true,
+        message: 'This email already has a confirmed entry for this drop — good luck!',
+      });
     }
 
     let stripeCustomer;
@@ -77,6 +74,7 @@ export async function POST(request: Request) {
       registeredAt: timestamp,
     });
     await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
+    await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), 1);
 
     return NextResponse.json({ success: true, sessionUrl: session.url });
   } catch (err: any) {

@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, safeParseRedisItem } from '@/lib/server-config';
+import {
+  createRedisClient,
+  createStripeClient,
+  safeParseRedisItem,
+  archiveEntry,
+  poolStatField,
+  POOL_STATS_KEY,
+  LAST_DRAW_KEY,
+} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice } from '@/lib/storefront-config';
+import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -24,10 +32,7 @@ export async function POST(request: Request) {
 
     const masterPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD;
     if (!masterPassword) {
-      return NextResponse.json(
-        { error: 'Server misconfigured: ADMIN_BASIC_AUTH_PASSWORD is not set.' },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: 'Server misconfigured: ADMIN_BASIC_AUTH_PASSWORD is not set.' }, { status: 500 });
     }
     if (inputPassword !== masterPassword) {
       return NextResponse.json({ error: '⚠️ ACCESS REJECTED: Invalid master operation password.' }, { status: 403 });
@@ -61,12 +66,12 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        const inventoryLimit = productSize === '50ml' ? 10 : 5;
+        // Winner count now comes from goyunir.config.ts, matching the cron
+        // draw path so the two draw mechanisms never disagree again.
+        const inventoryLimit = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         let successfulPoolCaptures = 0;
 
         for (const winnerStr of shuffled) {
-          if (successfulPoolCaptures >= inventoryLimit) break;
-
           const rawWinnerData = safeParseRedisItem<any>(winnerStr);
           if (!rawWinnerData) continue;
           const winnerData = rawWinnerData.email && typeof rawWinnerData.email === 'object' ? rawWinnerData.email : rawWinnerData;
@@ -75,6 +80,15 @@ export async function POST(request: Request) {
           const paymentMethod = winnerData.paymentMethodId || null;
           const customerId = winnerData.stripeCustomerId || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
+
+          // Anyone beyond the inventory limit is archived as NOT_SELECTED — never dropped.
+          if (successfulPoolCaptures >= inventoryLimit) {
+            await archiveEntry(redis, {
+              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'NOT_SELECTED',
+            });
+            continue;
+          }
 
           try {
             if (paymentMethod && customerId) {
@@ -92,24 +106,53 @@ export async function POST(request: Request) {
               successfulPoolCaptures++;
 
               const archivedRecord = {
-                email: winnerEmail,
-                variant: productName,
-                size: productSize,
-                shippingAddress,
-                id: customerId,
-                registeredAt: new Date().toISOString(),
-                type: 'PROCESSED_WINNER_PAID',
+                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+                id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
               };
-              await redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord));
+              await Promise.all([
+                redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord)),
+                archiveEntry(redis, archivedRecord),
+              ]);
               processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'SUCCESS_CHARGED' });
+            } else {
+              await archiveEntry(redis, {
+                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+                id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'NOT_SELECTED',
+              });
             }
           } catch (err: any) {
             processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: `DECLINED: ${err.message}` });
+            await archiveEntry(redis, {
+              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED',
+            });
           }
         }
 
+        // Archive anyone who started checkout but never finished, before resetting.
+        const intentKey = `intent_pool:${productName}:${productSize}`;
+        try {
+          const remainingIntents = await redis.lrange(intentKey, 0, -1);
+          for (const item of remainingIntents) {
+            const parsed = safeParseRedisItem<any>(item);
+            if (parsed) {
+              await archiveEntry(redis, {
+                email: String(parsed.email || 'Unknown'), variant: productName, size: productSize,
+                shippingAddress: String(parsed.shippingAddress || parsed.address || 'Unknown'),
+                id: 'n/a', registeredAt: new Date().toISOString(), type: 'INTENT_EXPIRED',
+              });
+            }
+          }
+        } catch {}
+
+        // Reset only the LIVE current-drop tracking keys — full history stays
+        // in the permanent archive forever.
         await redis.del(poolKey);
-        await redis.del(`intent_pool:${productName}:${productSize}`);
+        await redis.del(intentKey);
+        await redis.hset(POOL_STATS_KEY, {
+          [poolStatField('sub', productName, productSize)]: '0',
+          [poolStatField('int', productName, productSize)]: '0',
+        });
       } catch {}
     }
 
@@ -118,9 +161,12 @@ export async function POST(request: Request) {
       processedWinners,
       totalSuccessfulCharges: grandRevenueChargesCount,
     };
-    if (typeof globalThis !== 'undefined') {
-      (globalThis as any).__goyunirLastDraw = drawSummary.processedWinners;
-    }
+
+    // Persisted to Redis, not a JS global — Vercel serverless functions
+    // don't share memory between invocations.
+    try {
+      await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
+    } catch {}
 
     return NextResponse.json({ success: true, drawSummary });
   } catch (err: any) {

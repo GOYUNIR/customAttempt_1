@@ -1,60 +1,107 @@
 'use client';
-
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function AdminPortal() {
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   const [status, setStatus] = useState<any>(null);
-
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
   const [triggerVerificationPassword, setTriggerVerificationPassword] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`/api/admin/status?t=${Date.now()}`); 
+      const res = await fetch(`/api/admin/status?t=${Date.now()}`);
       const data = await res.json();
       setStatus(data);
-    } catch (err) {
+    } catch {
       setStatus({ error: 'Unable to fetch status telemetry matrix parameters' });
     }
   };
 
+  // Polls every 10s instead of every 4s, and pauses entirely while the tab
+  // is hidden — a big lever for cutting Redis command usage.
   useEffect(() => {
     fetchStatus();
-    const pollTimer = setInterval(fetchStatus, 4000);
-    return () => clearInterval(pollTimer);
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (pollTimer) return;
+      pollTimer = setInterval(fetchStatus, 10000);
+    };
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchStatus();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
+
+  // Debounced search across the FULL permanent archive — nothing is ever
+  // deleted, so this can always answer "what happened with this email/address."
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    const term = searchTerm.trim();
+    if (!term) {
+      setSearchResults(null);
+      setCurrentPage(1);
+      return;
+    }
+    setIsSearching(true);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
+        const data = await res.json();
+        setSearchResults(Array.isArray(data.results) ? data.results : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+        setCurrentPage(1);
+      }
+    }, 400);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchTerm]);
 
   const triggerDrop = async () => {
     if (!triggerVerificationPassword) {
-      alert("🔒 OPERATION REJECTED: Enter your basic auth portal password to verify ownership controls.");
+      alert('🔒 OPERATION REJECTED: Enter your basic auth portal password to verify ownership controls.');
       return;
     }
-
-    const confirmRun = confirm("🚨 MASTER LAUNCH CORE TRIGGER: Execute card charges for your active lottery rows?");
+    const confirmRun = confirm('🚨 MASTER LAUNCH CORE TRIGGER: Execute card charges for your active lottery rows?');
     if (!confirmRun) return;
-
     setIsRunning(true);
     setResultMessage('Authorizing variables with Vercel deployment parameters...');
-
     try {
       const response = await fetch('/api/admin/trigger-drop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          targetPool: selectedDrawTarget,
-          verificationKey: triggerVerificationPassword 
-        })
+        body: JSON.stringify({ targetPool: selectedDrawTarget, verificationKey: triggerVerificationPassword }),
       });
       const data = await response.json();
-
       if (response.ok) {
-        setResultMessage(`Draw execution completed cleanly. Allocations archived successfully.`);
+        setResultMessage('Draw execution completed cleanly. Allocations archived successfully.');
         setTriggerVerificationPassword('');
         await fetchStatus();
       } else {
@@ -66,17 +113,9 @@ export default function AdminPortal() {
       setIsRunning(false);
     }
   };
-  const allEntries = status?.fallbackEntries || [];
-  const filteredEntries = Array.isArray(allEntries) ? allEntries.filter((entry: any) => {
-    if (!entry) return false;
-    const safeEmail = String(entry.email || '').toLowerCase();
-    const safeVariant = String(entry.variant || entry.product || '').toLowerCase();
-    const safeAddress = String(entry.shippingAddress || '').toLowerCase();
-    const safeType = String(entry.type || '').toLowerCase();
-    const safeSearch = String(searchTerm || '').toLowerCase();
-    return safeEmail.includes(safeSearch) || safeVariant.includes(safeSearch) || safeAddress.includes(safeSearch) || safeType.includes(safeSearch);
-  }) : [];
 
+  const allEntries = searchResults !== null ? searchResults : (status?.fallbackEntries || []);
+  const filteredEntries = Array.isArray(allEntries) ? allEntries : [];
   const totalPages = Math.ceil(filteredEntries.length / itemsPerPage) || 1;
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
@@ -92,12 +131,12 @@ export default function AdminPortal() {
 
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop Control Center</h2>
-          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Select a target pool to draw individually, or sweep all active databases simultaneously.</p>
-          
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Select a target pool to draw individually, or sweep all active databases simultaneously. Non-winners and expired intents are archived automatically — nothing is ever deleted.</p>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase' }}>Target Execution Scope</label>
-              <select 
+              <select
                 value={selectedDrawTarget}
                 onChange={(e) => setSelectedDrawTarget(e.target.value)}
                 style={{ width: '100%', padding: '12px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
@@ -109,11 +148,10 @@ export default function AdminPortal() {
                 <option value="drop_pool:Obsidian Void:100ml">🧪 Obsidian Void — 100ml Pool</option>
               </select>
             </div>
-            
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '11px', color: '#f87171', textTransform: 'uppercase', fontWeight: 'bold' }}>🔒 Type Portal Password to Unlock</label>
-              <input 
-                type="password" 
+              <input
+                type="password"
                 placeholder="Verify master key..."
                 value={triggerVerificationPassword}
                 onChange={(e) => setTriggerVerificationPassword(e.target.value)}
@@ -121,15 +159,15 @@ export default function AdminPortal() {
               />
             </div>
           </div>
-
           <button onClick={triggerDrop} disabled={isRunning} style={{ width: '100%', padding: '16px', borderRadius: '18px', border: 'none', background: '#edb210', color: '#09090b', fontWeight: '700', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
             {isRunning ? 'Triggering draw…' : '🚨 Authorize & Trigger Draw Drop Now'}
           </button>
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
+
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
-          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Real-time telemetry showing initiated intents, completed submissions, and inventory depth.</p>
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Current open-drop status only — resets after each draw. Full history lives in the ledger below.</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {status?.pools && status.pools.map((p: any, i: number) => {
               const productName = p.product || 'Elysian White';
@@ -137,7 +175,6 @@ export default function AdminPortal() {
               const intCount = p.intCount ?? 0;
               const subCount = p.subCount ?? p.count ?? 0;
               const maxLimit = p.maxLimit ?? (productSize === '50ml' ? 10 : 5);
-
               return (
                 <div key={i} style={{ background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -174,37 +211,35 @@ export default function AdminPortal() {
               <span style={{ fontSize: '9px', color: '#444', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>ZSET: analytics:active_users_online</span>
             </div>
           </div>
-
           <div>
             <span style={{ color: '#888', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>Real-Time Draw Processing Matrix</span>
             <div style={{ background: '#09090b', padding: '16px', borderRadius: '16px', border: '1px solid #1c1c1e', fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa', overflowX: 'auto', maxHeight: '180px' }}>
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#34d399' }}>
-                {status?.lastDraw ? JSON.stringify(status.lastDraw, null, 2) : '[]'}
+                {status?.lastDraw ? JSON.stringify(status.lastDraw, null, 2) : 'No draw has been executed yet.'}
               </pre>
             </div>
           </div>
         </section>
+
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '1.25rem', textTransform: 'uppercase' }}>👥 Searchable Customer Ledger</h2>
-                <p style={{ color: '#888', fontSize: '12px', margin: '4px 0 0 0' }}>Streaming registrants in memory-safe chunks.</p>
+                <p style={{ color: '#888', fontSize: '12px', margin: '4px 0 0 0' }}>Shows the 50 most recent entries by default. Search reaches the FULL permanent history.</p>
               </div>
               <span style={{ fontSize: '12px', fontFamily: 'monospace', background: '#27272a', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
-                FOUND: {filteredEntries.length}
+                {isSearching ? 'SEARCHING…' : `FOUND: ${filteredEntries.length}`}
               </span>
             </div>
-
-            <input 
-              type="text" 
-              placeholder="🔍 Search entries by email, variant, address, or status tag..." 
+            <input
+              type="text"
+              placeholder="🔍 Search ALL-TIME entries by email, variant, or address..."
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              onChange={(e) => setSearchTerm(e.target.value)}
               style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px' }}
             />
           </div>
-
           {currentEntries.length === 0 ? (
             <p style={{ color: '#555', fontSize: '13px', margin: '10px 0', textAlign: 'center', border: '1px dashed #222', padding: '24px', borderRadius: '14px' }}>
               No client registration tracks match your search keywords.
@@ -218,11 +253,15 @@ export default function AdminPortal() {
                 const displayAddress = String(entry?.shippingAddress || 'Form Input Field Entry');
                 const displayId = String(entry?.id || 'Active Trace');
                 const displayType = String(entry?.type || 'SUBMISSION');
-                
-                const logTime = entry?.registeredAt 
-                  ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+                const logTime = entry?.registeredAt
+                  ? new Date(entry.registeredAt).toLocaleString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                   : 'Pending';
-
+                const typeColor =
+                  displayType === 'WINNER_CHARGED' ? '#34d399' :
+                  displayType === 'NOT_SELECTED' ? '#888' :
+                  displayType === 'WINNER_DECLINED' ? '#f87171' :
+                  displayType === 'INTENT_EXPIRED' ? '#666' :
+                  displayType === 'INTENT' ? '#edb210' : '#34d399';
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -235,19 +274,11 @@ export default function AdminPortal() {
                         <span style={{ color: '#888', fontSize: '11px' }}>{displaySize} — {logTime}</span>
                       </div>
                     </div>
-                    
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#050507', padding: '8px 12px', borderRadius: '8px', border: '1px solid #141416', fontSize: '11px' }}>
                       <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
                         📍 Address: <span style={{ color: '#aaa' }}>{displayAddress}</span>
                       </span>
-                      <span style={{ 
-                        padding: '2px 6px', 
-                        borderRadius: '4px', 
-                        fontFamily: 'monospace', 
-                        fontWeight: 'bold',
-                        background: displayType === 'INTENT' ? 'rgba(237,178,16,0.1)' : 'rgba(52,211,153,0.1)',
-                        color: displayType === 'INTENT' ? '#edb210' : '#34d399'
-                      }}>
+                      <span style={{ padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 'bold', background: `${typeColor}1a`, color: typeColor }}>
                         {displayType}
                       </span>
                     </div>
@@ -256,7 +287,6 @@ export default function AdminPortal() {
               })}
             </div>
           )}
-
           {totalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #1c1c1e' }}>
               <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid #27272a', background: currentPage === 1 ? 'transparent' : '#1c1c1e', color: currentPage === 1 ? '#444' : '#fff', fontSize: '12px', cursor: 'pointer' }}>
