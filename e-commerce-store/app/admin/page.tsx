@@ -8,9 +8,10 @@ export default function AdminPortal() {
   const [resultMessage, setResultMessage] = useState('');
   const [status, setStatus] = useState<any>(null);
 
-  // Advanced search filtering and high-volume ledger pagination parameters
+  // Security locks, filters, and high-volume ledger pagination state vectors
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
+  const [triggerVerificationPassword, setTriggerVerificationPassword] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
@@ -30,41 +31,48 @@ export default function AdminPortal() {
     return () => clearInterval(pollTimer);
   }, []);
 
-   const triggerDrop = async () => {
+  const triggerDrop = async () => {
+    // BRUTE FORCE GUARD RECONNAISSANCE LAYER
+    if (!triggerVerificationPassword) {
+      alert("🔒 OPERATION REJECTED: You must type your verification password to authorize direct card captures.");
+      return;
+    }
+
     const targetLabel = selectedDrawTarget === 'ALL_POOLS' 
-      ? 'ALL active database product pools' 
+      ? 'ALL active database allocations' 
       : `specifically the "${selectedDrawTarget}" pool line`;
       
-    const doubleCheck = confirm(`🚨 SYSTEM CORE ACTIVATION: Are you sure you want to execute the drawing and process charges for ${targetLabel}?`);
+    const doubleCheck = confirm(`🚨 SYSTEM CORE ACTIVATION: Are you sure you want to execute drawing capturing for ${targetLabel}?`);
     if (!doubleCheck) return;
 
     setIsRunning(true);
-    setResultMessage('Executing backend drawing algorithms...');
+    setResultMessage('Verifying operational tokens and shufflers...');
 
     try {
-      // ✅ ALIGNED FLAT PATHWAY: Matches your repository structure exactly
       const response = await fetch('/api/trigger-drop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetPool: selectedDrawTarget })
+        body: JSON.stringify({ 
+          targetPool: selectedDrawTarget,
+          verificationKey: triggerVerificationPassword // Pass validation key downwards to route parameters
+        })
       });
       const data = await response.json();
 
-
       if (response.ok) {
-        setResultMessage(`Draw triggered successfully. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);
+        setResultMessage(`Draw completed. Processed ${data.drawSummary?.totalSuccessfulCharges ?? 0} successful revenue allocations.`);
+        setTriggerVerificationPassword(''); // Clear state vector
         await fetchStatus();
       } else {
-        setResultMessage(data.error || 'Failed to trigger draw.');
+        setResultMessage(data.error || 'Failed to trigger draw operations.');
       }
     } catch (error) {
-      setResultMessage('Unable to reach the admin trigger endpoint.');
+      setResultMessage('Unable to reach the serverless drop trigger endpoint.');
     } finally {
       setIsRunning(false);
     }
   };
 
-  // Safe data array filters wrap around strings to guarantee React never receives raw objects
   const allEntries = status?.fallbackEntries || [];
   const filteredEntries = Array.isArray(allEntries) ? allEntries.filter((entry: any) => {
     if (!entry) return false;
@@ -89,33 +97,46 @@ export default function AdminPortal() {
           <p style={{ color: '#a8a8a8', marginTop: '12px', fontSize: '14px' }}>Secure control panel for manual drop activation and admin actions.</p>
         </div>
 
-        {/* COMPONENT 1: DROP CONTROL PANEL WITH INDIVIDUAL VARIANT SELECTOR */}
+        {/* COMPONENT 1: PASSWORD SECURED DROP TRIGGER ACTION COMPONENT */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop ControlCenter</h2>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop Control Center</h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Select a target pool to draw individually, or sweep all active databases simultaneously.</p>
           
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-            <label style={{ fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target Execution Scope</label>
-            <select 
-              value={selectedDrawTarget}
-              onChange={(e) => setSelectedDrawTarget(e.target.value)}
-              style={{ width: '100%', padding: '14px', borderRadius: '12px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
-            >
-              <option value="ALL_POOLS">🌎 SWEEP ALL PRODUCT CONFIGURATIONS</option>
-              <option value="drop_pool:Elysian White:50ml">🧪 Elysian White — 50ml Pool Only</option>
-              <option value="drop_pool:Elysian White:100ml">🧪 Elysian White — 100ml Pool Only</option>
-              <option value="drop_pool:Obsidian Void:50ml">🧪 Obsidian Void — 50ml Pool Only</option>
-              <option value="drop_pool:Obsidian Void:100ml">🧪 Obsidian Void — 100ml Pool Only</option>
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', color: '#a1a1aa', textTransform: 'uppercase' }}>Target Execution Scope</label>
+              <select 
+                value={selectedDrawTarget}
+                onChange={(e) => setSelectedDrawTarget(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
+              >
+                <option value="ALL_POOLS">🌎 SWEEP ALL PRODUCT CONFIGURATIONS</option>
+                <option value="drop_pool:Elysian White:50ml">🧪 Elysian White — 50ml Pool</option>
+                <option value="drop_pool:Elysian White:100ml">🧪 Elysian White — 100ml Pool</option>
+                <option value="drop_pool:Obsidian Void:50ml">🧪 Obsidian Void — 50ml Pool</option>
+                <option value="drop_pool:Obsidian Void:100ml">🧪 Obsidian Void — 100ml Pool</option>
+              </select>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', color: '#f87171', textTransform: 'uppercase', fontWeight: 'bold' }}>🔒 Type Portal Password to Unlock</label>
+              <input 
+                type="password" 
+                placeholder="Verify master key..."
+                value={triggerVerificationPassword}
+                onChange={(e) => setTriggerVerificationPassword(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px' }}
+              />
+            </div>
           </div>
 
           <button onClick={triggerDrop} disabled={isRunning} style={{ width: '100%', padding: '16px', borderRadius: '18px', border: 'none', background: '#edb210', color: '#09090b', fontWeight: '700', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-            {isRunning ? 'Triggering draw…' : 'Trigger draw now'}
+            {isRunning ? 'Triggering draw…' : '🚨 Authorize & Trigger Draw Drop Now'}
           </button>
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
 
-        {/* COMPONENT 2: SPECIFIED LIVE DATABASE METRICS GRID */}
+        {/* COMPONENT 2: SPECIFIED LIVE DATABASE INT / SUB / INV READOUT GRID */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Real-time telemetry showing initiated intents, completed submissions, and inventory depth.</p>
@@ -136,21 +157,13 @@ export default function AdminPortal() {
                 </div>
               );
             })}
-            {(!status?.pools || status.pools.length === 0) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Elysian White — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 50ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 10 INV</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}><span style={{ fontWeight: '600', fontSize: '13px' }}>Obsidian Void — 100ml</span><span style={{ color: '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>0 INT / 0 SUB / 5 INV</span></div>
-              </div>
-            )}
           </div>
         </section>
 
-        {/* COMPONENT 3: SYSTEM HARDWARE STATUS METRICS OVERVIEW */}
+        {/* COMPONENT 3: HARDWARE CORE OVERVIEW AND VISITOR REALTIME TELEMETRY TRACKER */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>System Status Overview</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '13px', color: '#cbd5e1', marginBottom: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', fontSize: '13px', color: '#cbd5e1', marginBottom: '16px' }}>
             <div style={{ background: '#111', padding: '14px', borderRadius: '14px', border: '1px solid #1f1f23' }}>
               <span style={{ color: '#888', fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>STRIPE INTERFACE</span>
               <strong style={{ color: '#34d399', fontSize: '14px', fontFamily: 'monospace' }}>● LINKED (ONLINE)</strong>
@@ -159,18 +172,24 @@ export default function AdminPortal() {
               <span style={{ color: '#888', fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>REDIS ENGINES</span>
               <strong style={{ color: '#34d399', fontSize: '14px', fontFamily: 'monospace' }}>● DISTRIBUTED</strong>
             </div>
+            <div style={{ background: '#111', padding: '14px', borderRadius: '14px', border: '1px solid #1f1f23' }}>
+              <span style={{ color: '#edb210', fontSize: '11px', display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>👥 LIVE SITE TRAFFIC</span>
+              <strong style={{ color: '#fff', fontSize: '14px', fontFamily: 'monospace' }}>
+                {status?.liveActiveUsersOnline ?? 1} USERS CURRENTLY ONLINE
+              </strong>
+            </div>
           </div>
 
           <div>
             <span style={{ color: '#888', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontSize: '11px', fontWeight: 'bold' }}>Real-Time Draw Processing Matrix</span>
-            <div style={{ background: '#09090b', padding: '16px', borderRadius: '16px', border: '1px solid #1c1c1e', fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa', overflowX: 'auto', maxHeight: '250px' }}>
+            <div style={{ background: '#09090b', padding: '16px', borderRadius: '16px', border: '1px solid #1c1c1e', fontFamily: 'monospace', fontSize: '12px', color: '#a1a1aa', overflowX: 'auto', maxHeight: '180px' }}>
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#34d399' }}>
                 {status?.lastDraw ? JSON.stringify(status.lastDraw, null, 2) : '[]'}
               </pre>
             </div>
           </div>
         </section>
-        {/* COMPONENT 4: SPECIFIED SEARCHABLE HIGH-VOLUME CUSTOMER LEDGER MATRIX */}
+        {/* COMPONENT 4: ADVANCED HIGH-VOLUME SEARCHABLE CUSTOMER LEDGER MATRIX */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -185,7 +204,7 @@ export default function AdminPortal() {
 
             <input 
               type="text" 
-              placeholder="🔍 Search entries by email, variant name, shipping address, or status..." 
+              placeholder="🔍 Search entries by email, variant, address, or status tag..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px' }}
@@ -205,6 +224,9 @@ export default function AdminPortal() {
                 const displayAddress = typeof entry === 'object' ? String(entry.shippingAddress || 'No Address Logged') : 'No Address Logged';
                 const displayId = typeof entry === 'object' ? String(entry.id || entry.stripeCustomerId || 'Active Track') : 'Legacy Ref';
                 const displayType = typeof entry === 'object' ? String(entry.type || 'SUBMISSION') : 'SUBMISSION';
+                
+                // Format transaction timeline logging date stamps beautifully
+                const logTime = entry.registeredAt ? new Date(entry.registeredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Pending';
 
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
@@ -215,11 +237,11 @@ export default function AdminPortal() {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <span style={{ color: '#34d399', fontSize: '12px', fontWeight: 'bold', display: 'block' }}>{displayVariant}</span>
-                        <span style={{ color: '#888', fontSize: '11px' }}>{displaySize}</span>
+                        <span style={{ color: '#888', fontSize: '11px' }}>{displaySize} — {logTime}</span>
                       </div>
                     </div>
                     
-                    {/* EXPANDED RICH DATA DETAIL LAYER */}
+                    {/* RICH DATA DETAILS METRIC BANNER */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#050507', padding: '8px 12px', borderRadius: '8px', border: '1px solid #141416', fontSize: '11px' }}>
                       <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
                         📍 Address: <span style={{ color: '#aaa' }}>{displayAddress}</span>
@@ -229,8 +251,8 @@ export default function AdminPortal() {
                         borderRadius: '4px', 
                         fontFamily: 'monospace', 
                         fontWeight: 'bold',
-                        background: displayType === 'INTENT' ? 'rgba(237,178,16,0.1)' : 'rgba(52,211,153,0.1)',
-                        color: displayType === 'INTENT' ? '#edb210' : '#34d399'
+                        background: displayType === 'INTENT' ? 'rgba(237,178,16,0.1)' : displayType === 'WAITLIST' ? 'rgba(59,130,246,0.1)' : 'rgba(52,211,153,0.1)',
+                        color: displayType === 'INTENT' ? '#edb210' : displayType === 'WAITLIST' ? '#3b82f6' : '#34d399'
                       }}>
                         {displayType}
                       </span>
@@ -256,7 +278,7 @@ export default function AdminPortal() {
           )}
         </section>
 
-        {/* ORIGINAL HARDCODED SYSTEM NOTES INFRASTRUCTURE */}
+        {/* COMPONENT 5: NOTES SECTION */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem' }}>Notes</h2>
           <ul style={{ color: '#c4c4c4', lineHeight: 1.8, fontSize: '13px', margin: 0, paddingLeft: '20px' }}>

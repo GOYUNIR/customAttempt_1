@@ -1,130 +1,89 @@
 import { NextResponse } from 'next/server';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { createRedisClient, createStripeClient, buildAbsoluteUrl, addFallbackEntry, getFallbackEntries } from '@/lib/server-config';
+import { createRedisClient, createStripeClient } from '@/lib/server-config';
 
-const redis = createRedisClient();
-const stripe = createStripeClient();
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    const redis = createRedisClient();
+    const stripe = createStripeClient();
+
+    if (!redis || !stripe) {
+      return NextResponse.json({ error: 'Infrastructure network interfaces offline.' }, { status: 500 });
+    }
+
     const body = await request.json();
-    const { variant, size, email, shippingAddress, quantityChosen } = body as {
-      variant?: string;
-      size?: string;
-      email?: string;
-      shippingAddress?: string;
-      quantityChosen?: number;
-    };
+    const { variant, size, email, shippingAddress, quantityChosen, isWaitlistMode } = body;
 
-    const normalizedEmail = email?.trim();
-    const normalizedVariant = variant?.trim();
-    const normalizedSize = size?.trim();
-    const normalizedAddress = shippingAddress?.trim();
-
-    if (!normalizedEmail || !normalizedVariant || !normalizedSize || !normalizedAddress) {
-      return NextResponse.json({ error: 'Missing required entry parameters.' }, { status: 400 });
+    if (!email || !variant || !size) {
+      return NextResponse.json({ error: 'Missing critical registration data parameters.' }, { status: 400 });
     }
 
-    if (!stripe) {
-      return NextResponse.json({ error: 'Stripe is not configured. Payment method capture is unavailable.' }, { status: 500 });
+    const clientEmail = email.trim().toLowerCase();
+    const timestamp = new Date().toISOString();
+    const intentKey = `intent_pool:${variant}:${size}`;
+
+    // 1. IF USER IS JOINING THE WAITLIST POST-COUNTDOWN
+    if (isWaitlistMode) {
+      const waitlistPayload = JSON.stringify({
+        email: clientEmail,
+        variant,
+        size,
+        shippingAddress: shippingAddress || 'No Address Provided',
+        quantity: Number(quantityChosen) || 1,
+        paymentMethodId: 'WAITLIST_SUBSCRIBER',
+        stripeCustomerId: 'WAITLIST_PENDING',
+        registeredAt: timestamp,
+        type: 'WAITLIST'
+      });
+
+      // Save straight to the standard drop pool list but flag them as a safe waitlist record row
+      const poolKey = `drop_pool:${variant}:${size}`;
+      await redis.rpush(poolKey, waitlistPayload);
+
+      return NextResponse.json({ 
+        success: true, 
+        message: '✓ RESTOCKED: You have been successfully added to our priority restock waitlist framework.' 
+      });
     }
 
-    const targetedProduct = GOYUNIR_STORE_SUITE.productCatalog.find((product) => product.name === normalizedVariant);
-    const allocationBoundary = targetedProduct ? targetedProduct.maxRaffleAllocationLimit : GOYUNIR_STORE_SUITE.dropSchedule.winnersPer50ml;
-    const finalQuantity = Math.min(allocationBoundary, Math.max(1, Number.parseInt(String(quantityChosen || 1), 10)));
-    const normalizedAddressKey = normalizedAddress.toLowerCase().replace(/\s+/g, '');
+    // 2. STANDARD ACTIVE RAFFLE FLOW (WITH STRIPE REDIRECTION MINTING)
+    const hostHeader = request.headers.get('host') || 'localhost:3000';
+    const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
+    const domainUrl = `${protocol}://${hostHeader}`;
 
-    const duplicateBlockKey = `drop_fraud_block:${normalizedVariant}:${normalizedSize}`;
-
-    if (redis) {
-      try {
-        const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
-        if (isDuplicate === 1) {
-          return NextResponse.json({ error: 'Duplicate entry detected for this variant and size at this address.' }, { status: 409 });
-        }
-      } catch {}
-    } else {
-      const fallback = getFallbackEntries();
-      const exists = fallback.some(
-        (e) =>
-          String(e.variant) === normalizedVariant &&
-          String(e.size) === normalizedSize &&
-          String(e.address).toLowerCase().replace(/\s+/g, '') === normalizedAddressKey,
-      );
-      if (exists) {
-        return NextResponse.json({ error: 'Duplicate entry detected for this variant and size at this address.' }, { status: 409 });
-      }
-    }
-
-    const existingCustomers = await stripe.customers.list({ email: normalizedEmail, limit: 1 });
-    const customer = existingCustomers.data.length > 0
-      ? existingCustomers.data[0]
-      : await stripe.customers.create({
-          email: normalizedEmail,
-          metadata: {
-            variant: normalizedVariant,
-            size: normalizedSize,
-            address: normalizedAddress,
-            quantity: String(finalQuantity),
-          },
-        });
-
-    const checkoutSession = await stripe.checkout.sessions.create({
-      customer: customer.id,
+    const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      mode: 'setup',
-      billing_address_collection: 'required',
-      success_url: buildAbsoluteUrl(request, '/?setup=success&session_id={CHECKOUT_SESSION_ID}'),
-      cancel_url: buildAbsoluteUrl(request, '/?setup=cancel'),
+      mode: 'setup', 
+      customer_email: clientEmail,
+      shipping_address_collection: {
+        allowed_countries: ['US', 'CA', 'GB', 'AU'], 
+      },
+      success_url: `${domainUrl}/?setup=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${domainUrl}/?setup=cancel`,
       metadata: {
-        variant: normalizedVariant,
-        size: normalizedSize,
-        address: normalizedAddress,
-        quantity: String(finalQuantity),
-        email: normalizedEmail,
-      },
-      setup_intent_data: {
-        metadata: {
-          variant: normalizedVariant,
-          size: normalizedSize,
-          address: normalizedAddress,
-          quantity: String(finalQuantity),
-          email: normalizedEmail,
-        },
-      },
+        variant: String(variant),
+        size: String(size),
+        quantity: String(quantityChosen || 1),
+        email: clientEmail,
+        shippingAddress: shippingAddress || 'Collected via Stripe Checkout' // Forces backup persistence tracking fields
+      }
     });
 
-    const responsePayload = {
-      success: true,
-      sessionUrl: checkoutSession.url,
-      customerId: customer.id,
-      message: 'Complete your card setup to lock in the entry and enable automatic charge if you win.',
-    };
+    // CRITICAL FIX: Save intent immediately into Redis tracking pools right when they hit the button
+    const intentPayload = JSON.stringify({
+      email: clientEmail,
+      variant,
+      size,
+      shippingAddress: shippingAddress || 'Form Input Field Entry',
+      registeredAt: timestamp
+    });
+    await redis.rpush(intentKey, intentPayload);
 
-    // push a fallback entry so admin UI can surface pending entries and support manual completion
-    try {
-      addFallbackEntry({
-        email: normalizedEmail,
-        variant: normalizedVariant,
-        size: normalizedSize,
-        address: normalizedAddress,
-        quantity: finalQuantity,
-        registeredAt: Date.now(),
-        customerId: customer.id,
-        sessionId: checkoutSession.id,
-      });
-    } catch {}
+    return NextResponse.json({ success: true, sessionUrl: session.url });
 
-    if (!redis) {
-      return NextResponse.json({
-        ...responsePayload,
-        warning: 'Redis is not configured. Your entry will only be queued after webhook confirmation when Redis becomes available.',
-      });
-    }
-
-    return NextResponse.json(responsePayload);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown checkout error';
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (err: any) {
+    console.error("CRITICAL CHECKOUT ENDPOINT CRASH:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

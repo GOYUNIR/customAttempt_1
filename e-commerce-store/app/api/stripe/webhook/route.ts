@@ -2,10 +2,10 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient } from '@/lib/server-config';
 import Stripe from 'stripe';
 
-const redis = createRedisClient();
-const stripe = createStripeClient();
-
 export async function POST(request: Request) {
+  const redis = createRedisClient();
+  const stripe = createStripeClient();
+  
   const signature = request.headers.get('stripe-signature') ?? '';
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -30,14 +30,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   }
 
-  const session = event.data.object as Stripe.Checkout.Session;
+  const session = event.data.object as any;
   const metadata = session.metadata ?? {};
   
   const variant = String(metadata.variant ?? '').trim();
   const size = String(metadata.size ?? '').trim();
-  const address = String(metadata.address ?? '').trim();
-  const email = String(metadata.email ?? '').trim();
+  const email = String(metadata.email ?? session.customer_details?.email ?? '').trim();
   const customerId = String(session.customer ?? '');
+
+  // FIXED: Expanded dynamic search checks both incoming metadata labels and stripe checkout addresses safely
+  let address = String(metadata.shippingAddress || metadata.address || '').trim();
+  if ((!address || address === 'Collected via Stripe Checkout') && session.shipping_details?.address) {
+    const addr = session.shipping_details.address;
+    address = `${addr.line1 || ''}, ${addr.city || ''}, ${addr.state || ''} ${addr.postal_code || ''}`;
+  }
 
   let paymentMethodId = '';
   if (session.setup_intent && typeof session.setup_intent === 'object') {
@@ -60,15 +66,38 @@ export async function POST(request: Request) {
   const normalizedAddress = address.toLowerCase().replace(/\s+/g, '');
   const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
   const poolKey = `drop_pool:${variant}:${size}`;
+  const intentKey = `intent_pool:${variant}:${size}`;
 
   const isAddressDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddress);
   
   if (isAddressDuplicate !== 1) {
-    const payload = JSON.stringify({ email, customerId, paymentMethodId });
-    await Promise.all([
-      redis.rpush(poolKey, payload),
-      redis.sadd(duplicateBlockKey, normalizedAddress)
-    ]);
+    const payload = JSON.stringify({
+      email,
+      variant,
+      size,
+      shippingAddress: address,
+      quantity: 1,
+      paymentMethodId,
+      stripeCustomerId: customerId,
+      id: session.id || `sub_token_${Math.random().toString(36).substring(7)}`,
+      price: 120,
+      registeredAt: new Date().toISOString() // Captures exact submission timestamp
+    });
+
+    await redis.rpush(poolKey, payload);
+    await redis.sadd(duplicateBlockKey, normalizedAddress);
+
+    // CLEANUP INTENT: Remove matching intent out of active list counters since they finished checkout successfully
+    try {
+      const intentItems = await redis.lrange(intentKey, 0, -1);
+      for (let i = 0; i < intentItems.length; i++) {
+        const parsedIntent = JSON.parse(intentItems[i]);
+        if (parsedIntent.email === email) {
+          await redis.lrem(intentKey, 1, intentItems[i]);
+          break;
+        }
+      }
+    } catch {}
   }
 
   return NextResponse.json({ received: true });
