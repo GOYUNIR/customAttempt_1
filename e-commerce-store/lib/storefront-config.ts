@@ -21,6 +21,12 @@ export interface StorefrontProduct {
   notes: StorefrontNote[];
 }
 
+export interface CatalogPreviewItem {
+  name: string;
+  status: string;
+  eta?: string;
+}
+
 export interface StorefrontConfig {
   themeColors: {
     primaryBackground: string;
@@ -73,6 +79,10 @@ export interface StorefrontConfig {
     supportEmail: string;
     shippingReturnPolicyText: string;
     corporateEntityCopyright: string;
+  };
+  catalogPreview: {
+    upcomingDrops: CatalogPreviewItem[];
+    archiveScents: CatalogPreviewItem[];
   };
   productCatalog: StorefrontProduct[];
 }
@@ -136,6 +146,11 @@ const defaultFooter = {
   corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
 };
 
+const defaultCatalogPreview = {
+  upcomingDrops: [] as CatalogPreviewItem[],
+  archiveScents: [] as CatalogPreviewItem[],
+};
+
 function normalizeText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -145,14 +160,20 @@ function normalizeNumber(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function normalizeBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
+function normalizeCatalogItems(items: unknown): CatalogPreviewItem[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter(Boolean)
+    .map((item: any) => ({
+      name: normalizeText(item?.name, 'Untitled Item'),
+      status: normalizeText(item?.status, 'Coming Soon'),
+      eta: typeof item?.eta === 'string' ? item.eta : undefined,
+    }));
 }
 
 function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string }, index: number): StorefrontProduct {
   const fallbackName = `Perfume ${index + 1}`;
   const fallbackSlug = `${product.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-
   return {
     id: normalizeText(product.id, `p${index + 1}`),
     name: normalizeText(product.name, fallbackName),
@@ -181,33 +202,16 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     : [];
 
   return {
-    themeColors: {
-      ...defaultThemeColors,
-      ...(input.themeColors ?? {}),
-    },
-    dropSchedule: {
-      ...defaultDropSchedule,
-      ...(input.dropSchedule ?? {}),
-    },
-    animationMechanics: {
-      ...defaultAnimationMechanics,
-      ...(input.animationMechanics ?? {}),
-    },
-    raffleRegistrationForm: {
-      ...defaultFormCopy,
-      ...(input.raffleRegistrationForm ?? {}),
-    },
-    heroContent: {
-      ...defaultHeroContent,
-      ...(input.heroContent ?? {}),
-    },
-    socialProof: {
-      ...defaultSocialProof,
-      ...(input.socialProof ?? {}),
-    },
-    brandFooterData: {
-      ...defaultFooter,
-      ...(input.brandFooterData ?? {}),
+    themeColors: { ...defaultThemeColors, ...(input.themeColors ?? {}) },
+    dropSchedule: { ...defaultDropSchedule, ...(input.dropSchedule ?? {}) },
+    animationMechanics: { ...defaultAnimationMechanics, ...(input.animationMechanics ?? {}) },
+    raffleRegistrationForm: { ...defaultFormCopy, ...(input.raffleRegistrationForm ?? {}) },
+    heroContent: { ...defaultHeroContent, ...(input.heroContent ?? {}) },
+    socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },
+    brandFooterData: { ...defaultFooter, ...(input.brandFooterData ?? {}) },
+    catalogPreview: {
+      upcomingDrops: normalizeCatalogItems(input.catalogPreview?.upcomingDrops) ?? defaultCatalogPreview.upcomingDrops,
+      archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents) ?? defaultCatalogPreview.archiveScents,
     },
     productCatalog,
   };

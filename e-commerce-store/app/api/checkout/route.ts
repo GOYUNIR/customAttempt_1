@@ -7,7 +7,6 @@ export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
     const stripe = createStripeClient();
-
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure network interfaces offline.' }, { status: 500 });
     }
@@ -22,7 +21,19 @@ export async function POST(request: Request) {
     const clientEmail = email.trim().toLowerCase();
     const timestamp = new Date().toISOString();
 
-    // 1. FORCE REAL STRIPE CUSTOMER REGISTRATION MINTING
+    // Block duplicate addresses BEFORE opening a Stripe session, not after.
+    const normalizedAddressKey = String(shippingAddress || '').toLowerCase().replace(/\s+/g, '');
+    const duplicateBlockKey = `drop_fraud_block:${variant}:${size}`;
+    if (normalizedAddressKey) {
+      const isDuplicate = await redis.sismember(duplicateBlockKey, normalizedAddressKey);
+      if (isDuplicate === 1) {
+        return NextResponse.json({
+          success: true,
+          message: 'This shipping address already has a confirmed entry for this drop — good luck!',
+        });
+      }
+    }
+
     let stripeCustomer;
     const existingCustomers = await stripe.customers.list({ email: clientEmail, limit: 1 });
     if (existingCustomers.data.length > 0) {
@@ -31,7 +42,7 @@ export async function POST(request: Request) {
       stripeCustomer = await stripe.customers.create({
         email: clientEmail,
         description: `GOYUNIR Registrant: ${clientEmail}`,
-        metadata: { initialShippingAddress: shippingAddress || 'Form Input' }
+        metadata: { initialShippingAddress: shippingAddress || 'Form Input' },
       });
     }
 
@@ -39,13 +50,12 @@ export async function POST(request: Request) {
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
-    // 2. LAUNCH SECURE VAULT CONTAINER TIED TO THAT CUSTOMER
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      mode: 'setup', 
-      customer: stripeCustomer.id, // Fixed: Links profile to customer registry immediately
+      mode: 'setup',
+      customer: stripeCustomer.id,
       shipping_address_collection: {
-        allowed_countries: ['US', 'CA', 'GB', 'AU'], 
+        allowed_countries: ['US', 'CA', 'GB', 'AU'],
       },
       success_url: `${domainUrl}/?setup=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${domainUrl}/?setup=cancel`,
@@ -55,24 +65,22 @@ export async function POST(request: Request) {
         quantity: String(quantityChosen || 1),
         email: clientEmail,
         address: shippingAddress || 'Collected via Stripe Checkout',
-        registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE'
-      }
+        registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE',
+      },
     });
 
-    // Log the active intent tracking counts immediately
     const intentPayload = JSON.stringify({
       email: clientEmail,
       variant,
       size,
       shippingAddress: shippingAddress || 'Form Input Field Entry',
-      registeredAt: timestamp
+      registeredAt: timestamp,
     });
     await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
 
     return NextResponse.json({ success: true, sessionUrl: session.url });
-
   } catch (err: any) {
-    console.error("CRITICAL CHECKOUT ENDPOINT CRASH:", err);
+    console.error('CRITICAL CHECKOUT ENDPOINT CRASH:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

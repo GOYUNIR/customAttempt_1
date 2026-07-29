@@ -11,21 +11,24 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     textMuted: '#888888',
     checkoutCtaButton: '#635bff',
   },
+
   dropSchedule: {
-    targetEndDateTime: '2026-07-28T19:30:00',
+    targetEndDateTime: '2026-07-28T19:30:00', // <-- change this to move the countdown
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',
     minutesLabel: 'm',
     secondsLabel: 's',
-    winnersPer50ml: 10,
-    winnersPer100ml: 5,
+    winnersPer50ml: 10, // how many 50ml winners the draw picks
+    winnersPer100ml: 5, // how many 100ml winners the draw picks
   },
+
   animationMechanics: {
     totalFramesToLoad: 4,
     maxRotationDegrees: 360,
     spinReverseOnAlternatingProgress: true,
   },
+
   raffleRegistrationForm: {
     titleHeader: 'Join The Allocation Draw',
     emailLabel: 'Contact Email Address',
@@ -35,17 +38,20 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     submitButtonText: '🏆 Secure Entry Allocation Ticket',
     submitButtonLoadingText: 'Encrypting Entry Base...',
   },
+
   heroContent: {
     eyebrow: 'The Architecture of Scent',
     headline: 'A drop that moves faster than attention itself.',
     body: 'We design fragrances that move faster than time itself. An intentional collision of raw natural essences and electric modern chemistry.',
     ctaLabel: '↓ Scroll To Explore',
   },
+
   socialProof: {
     label: 'Limited drop access',
     value: '1,287 early entrants',
     caption: 'Hype is compounding fast—reserve now before inventory closes.',
   },
+
   brandFooterData: {
     instagramLink: 'https://instagram.com/goyunir',
     tiktokLink: 'https://tiktok.com/goyunir',
@@ -53,6 +59,30 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
     corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
   },
+
+  // ============================================
+  // SIDEBAR "CATALOG" TAB CONTENT
+  // Add/remove items here — they show up automatically
+  // in the hamburger menu's Catalog tab. No code changes needed.
+  // ============================================
+  catalogPreview: {
+    upcomingDrops: [
+      { name: 'GOYUNIR Heavyweight Tee — Vol. 1', status: 'Upcoming', eta: 'Late 2026' },
+      { name: 'Raw Weave Cargo', status: 'Upcoming', eta: 'Late 2026' },
+    ],
+    archiveScents: [
+      { name: 'Crimson Static', status: 'Archived' },
+      { name: 'Glass Amber', status: 'Archived' },
+    ],
+  },
+
+  // ============================================
+  // PRODUCTS
+  // Copy an existing block below to add a new perfume.
+  // `prefix` must match image files in /public/images/ named
+  // like PREFIX_1.jpg, PREFIX_2.jpg, PREFIX_3.jpg, PREFIX_4.jpg
+  // `stripeId50ml` / `stripeId100ml` must be real Stripe Price IDs.
+  // ============================================
   productCatalog: [
     {
       id: 'p1',
@@ -66,6 +96,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
       stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
       maxRaffleAllocationLimit: 10,
+      isActive: true,
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
@@ -84,6 +115,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
       stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
       maxRaffleAllocationLimit: 5,
+      isActive: true,
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
         { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },

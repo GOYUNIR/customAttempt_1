@@ -22,11 +22,9 @@ function getFallbackStore(): CheckoutRegistrationPayload[] {
   if (typeof globalThis === 'undefined') {
     return [];
   }
-
   if (!globalThis.__goyunirFallbackEntries) {
     globalThis.__goyunirFallbackEntries = [];
   }
-
   return globalThis.__goyunirFallbackEntries;
 }
 
@@ -36,7 +34,6 @@ export function addFallbackEntry(entry: Omit<CheckoutRegistrationPayload, 'sourc
     ...entry,
     source: 'fallback',
   };
-
   store.push(payload);
   return store;
 }
@@ -45,14 +42,29 @@ export function getFallbackEntries(): CheckoutRegistrationPayload[] {
   return getFallbackStore();
 }
 
+// Upstash's Redis client auto-deserializes JSON strings into objects on read.
+// If you call JSON.parse() again on an already-parsed object, JS calls
+// .toString() on it first, producing the literal string "[object Object]",
+// which then fails to parse. This helper handles both cases safely.
+export function safeParseRedisItem<T = any>(item: unknown): T | null {
+  if (item == null) return null;
+  if (typeof item === 'object') return item as T;
+  if (typeof item === 'string') {
+    try {
+      return JSON.parse(item) as T;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function createRedisClient(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.REDIS_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.REDIS_TOKEN;
-
   if (!url || !token) {
     return null;
   }
-
   try {
     return new Redis({ url, token });
   } catch {
@@ -62,11 +74,9 @@ export function createRedisClient(): Redis | null {
 
 export function createStripeClient(): Stripe | null {
   const secretKey = process.env.STRIPE_SECRET_KEY;
-
   if (!secretKey) {
     return null;
   }
-
   try {
     return new Stripe(secretKey, {
       apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion,
@@ -79,6 +89,5 @@ export function createStripeClient(): Stripe | null {
 export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
   const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? 'localhost:3000';
   const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.VERCEL_ENV === 'production' ? 'https' : 'http');
-
   return new URL(path, `${protocol}://${host}`).toString();
 }

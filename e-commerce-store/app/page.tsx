@@ -1,5 +1,4 @@
 'use client';
-
 import { useRef, useEffect, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -18,7 +17,6 @@ export default function PerfumeStorefront() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const visibleProducts = getVisibleProducts(GOYUNIR_STORE_SUITE);
-
   const [activeProductIndex, setActiveProductIndex] = useState(() => {
     const firstVisibleIndex = visibleProducts.findIndex((product) => product.isActive !== false);
     return firstVisibleIndex >= 0 ? firstVisibleIndex : 0;
@@ -31,14 +29,12 @@ export default function PerfumeStorefront() {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
-  
-  // Real-Time Analytics Vectors
-  const [liveDbSubmissionsCount, setLiveDbSubmissionsCount] = useState(0);
 
+  const [liveDbSubmissionsCount, setLiveDbSubmissionsCount] = useState(0);
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   const heroContent = GOYUNIR_STORE_SUITE.heroContent;
-  const currentProduct = visibleProducts[activeProductIndex] ?? visibleProducts ?? GOYUNIR_STORE_SUITE.productCatalog;
+  const currentProduct = visibleProducts[activeProductIndex] ?? visibleProducts[0] ?? GOYUNIR_STORE_SUITE.productCatalog[0];
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -51,7 +47,6 @@ export default function PerfumeStorefront() {
       ? [1, TOTAL_IMAGES, 1, TOTAL_IMAGES, 1]
       : [1, TOTAL_IMAGES, TOTAL_IMAGES, 1, 1],
   );
-
   const bottleOpacity = useTransform(scrollYProgress, [0.82, 0.88], [1, 0]);
   const scrollIndicatorOpacity = useTransform(scrollYProgress, [0, 0.05], [1, 0]);
 
@@ -61,21 +56,25 @@ export default function PerfumeStorefront() {
     return () => window.removeEventListener('popstate', handleNavigationFix);
   }, []);
 
+  // Auto-dismiss the status toast so it never permanently hides the header.
+  useEffect(() => {
+    if (!feedbackMessage) return;
+    const dismissTimer = setTimeout(() => setFeedbackMessage(''), 6000);
+    return () => clearTimeout(dismissTimer);
+  }, [feedbackMessage]);
+
   // ==========================================
-  // UNIFIED PERSISTENT DEVICE TELEMETRY TRANSPORTER
+  // PUBLIC LIVE ANALYTICS HEARTBEAT (no admin auth required)
   // ==========================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    let tabTokenId = window.localStorage.getItem('goyunir_device_fingerprint');
+    let tabTokenId = window.sessionStorage.getItem('goyunir_device_fingerprint');
     if (!tabTokenId) {
       tabTokenId = 'usr_' + Math.random().toString(36).substring(2, 9);
-      window.localStorage.setItem('goyunir_device_fingerprint', tabTokenId);
+      window.sessionStorage.setItem('goyunir_device_fingerprint', tabTokenId);
     }
-
     const syncLiveAnalytics = () => {
-      // Targets the active nested route status path cleanly to prevent refresh traffic spikes
-      fetch(`/api/admin/status?heartbeat=true&visitorId=${tabTokenId}`)
+      fetch(`/api/analytics/heartbeat?visitorId=${tabTokenId}`)
         .then((res) => res.json())
         .then((data) => {
           if (data && typeof data.fallbackEntriesCount === 'number') {
@@ -84,11 +83,11 @@ export default function PerfumeStorefront() {
         })
         .catch(() => {});
     };
-
     syncLiveAnalytics();
-    const liveTelemetryTimer = setInterval(syncLiveAnalytics, 12000); // Pulse presence every 12 seconds
+    const liveTelemetryTimer = setInterval(syncLiveAnalytics, 12000);
     return () => clearInterval(liveTelemetryTimer);
   }, []);
+
   // ==========================================
   // STRIPE SUCCESS AND RETURN REDIRECTION HANDSHAKE
   // ==========================================
@@ -98,11 +97,9 @@ export default function PerfumeStorefront() {
       const isSuccess = searchParams.get('setup') === 'success';
       const isCancel = searchParams.get('setup') === 'cancel';
       const sessionId = searchParams.get('session_id');
-
       if (isSuccess && sessionId) {
         setFeedbackStatus('idle');
         setFeedbackMessage('Finalizing your secure payment verification hold and saving entry token...');
-
         fetch('/api/checkout/confirm-setup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -124,7 +121,6 @@ export default function PerfumeStorefront() {
             setFeedbackMessage('Unable to reach verification servers. Processing background checks.');
           });
       }
-
       if (isCancel) {
         setFeedbackStatus('error');
         setFeedbackMessage('Payment setup was canceled. Complete checkout to secure your entry.');
@@ -141,40 +137,35 @@ export default function PerfumeStorefront() {
     const timerLoop = window.setInterval(() => {
       const now = Date.now();
       const delta = targetTime - now;
-
       if (delta <= 0) {
         setTimeLeft({ d: 0, h: 0, m: 0, s: 0, expired: true });
         window.clearInterval(timerLoop);
         return;
       }
-
       const d = Math.floor(delta / (1000 * 60 * 60 * 24));
       const h = Math.floor((delta % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const m = Math.floor((delta % (1000 * 60 * 60)) / (1000 * 60));
       const s = Math.floor((delta % (1000 * 60)) / 1000);
       setTimeLeft({ d, h, m, s, expired: false });
     }, 1000);
-
     return () => window.clearInterval(timerLoop);
   }, []);
+
   // ==========================================
   // MULTI-FRAME CANVAS PRELOAD ANIMATION SEQUENCER
   // ==========================================
   useEffect(() => {
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
-
     const preloadedImages: HTMLImageElement[] = [];
     canvasRef.current.width = 600;
     canvasRef.current.height = 600;
-
     const drawFrame = (img: HTMLImageElement) => {
       if (img.complete && img.naturalWidth > 0) {
         context.clearRect(0, 0, 600, 600);
         context.drawImage(img, 0, 0, 600, 600);
       }
     };
-
     for (let i = 1; i <= TOTAL_IMAGES; i += 1) {
       const img = new Image();
       img.src = `/images/${currentProduct.prefix}_${i}.jpg`;
@@ -183,7 +174,6 @@ export default function PerfumeStorefront() {
       };
       preloadedImages.push(img);
     }
-
     const unsubscribe = frameIndex.on('change', (value) => {
       const index = Math.min(Math.max(Math.round(value), 1), TOTAL_IMAGES);
       const activeFrameImage = preloadedImages[index - 1];
@@ -191,7 +181,6 @@ export default function PerfumeStorefront() {
         drawFrame(activeFrameImage);
       }
     });
-
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES, visibleProducts, currentProduct.prefix]);
 
@@ -201,22 +190,18 @@ export default function PerfumeStorefront() {
   const submitRaffleEntry = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isProcessing) return;
-
     const activeProd = currentProduct;
     const normalizedForm = normalizeEntryForm(form);
     const normalizedEmail = normalizedForm.email;
     const normalizedAddress = normalizedForm.shippingAddress;
-
     if (!isValidEmail(normalizedEmail) || !normalizedAddress) {
       setFeedbackStatus('error');
       setFeedbackMessage('Please provide a valid email and a shipping address.');
       return;
     }
-
     setIsProcessing(true);
     setFeedbackStatus('idle');
     setFeedbackMessage(timeLeft.expired ? 'Routing details to priority waitlist layers...' : 'Verifying profile with priority queue allocation...');
-
     try {
       const response = await fetch('/api/checkout', {
         method: 'POST',
@@ -225,19 +210,17 @@ export default function PerfumeStorefront() {
           variant: activeProd.name,
           size: selectedSize,
           email: normalizedEmail,
-          shippingAddress: normalizedAddress, // Safely maps parameters to avoid blank database rows
+          shippingAddress: normalizedAddress,
           quantityChosen: normalizedForm.quantity,
-          isWaitlistMode: timeLeft.expired // Allows entries to proceed under the offchance rules
+          isWaitlistMode: timeLeft.expired,
         }),
       });
-
       const data = await response.json();
       if (response.ok) {
         if (data.sessionUrl) {
           window.location.assign(data.sessionUrl);
           return;
         }
-
         setFeedbackStatus('success');
         setFeedbackMessage(data.message || data.warning || '✓ Entry secured successfully.');
         setForm({ email: '', shippingAddress: '', quantity: 1 });
@@ -255,29 +238,35 @@ export default function PerfumeStorefront() {
     } finally {
       setIsProcessing(false);
     }
-  };
-  return (
+  };return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
-      
-      {/* GLOBAL MINI FIXED NAVIGATION HEADER BAR */}
+
+      {/* GLOBAL MINI FIXED NAVIGATION HEADER BAR — GOYUNIR wordmark is ALWAYS visible now */}
       <header style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '60px', borderBottom: `1px solid ${configPalette.cardBorder}`, background: 'rgba(10,10,10,0.8)', backdropFilter: 'blur(15px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', zIndex: 100, boxSizing: 'border-box' }}>
         <div onClick={() => setIsMenuOpen(true)} style={{ display: 'flex', flexDirection: 'column', gap: '4px', cursor: 'pointer', padding: '10px 0', width: '24px' }}>
           <div style={{ width: '20px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
           <div style={{ width: '20px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
           <div style={{ width: '14px', height: '2px', background: configPalette.textMain, borderRadius: '1px' }} />
         </div>
-        
-        {/* HIGH-VISIBILITY NAV TOP STATUS BANNER NOTIFICATION */}
-        {feedbackMessage ? (
-          <div style={{ fontSize: '11px', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : '#ff3b30', letterSpacing: '0.5px', textTransform: 'uppercase', background: 'rgba(0,0,0,0.4)', padding: '6px 14px', borderRadius: '20px', border: feedbackStatus === 'success' ? '1px solid #34c759' : '1px solid #ff3b30' }}>
-            {feedbackStatus === 'success' ? '🎯 ENTRY VERIFIED' : '⚠️ STATUS PENDING'}
-          </div>
-        ) : (
-          <div style={{ fontWeight: 'bold', letterSpacing: '4px', fontSize: '12px', textTransform: 'uppercase' }}>GOYUNIR</div>
-        )}
-        
+
+        <div style={{ fontWeight: 'bold', letterSpacing: '4px', fontSize: '12px', textTransform: 'uppercase' }}>GOYUNIR</div>
+
         <div style={{ width: '24px' }} />
       </header>
+
+      {/* STATUS TOAST — floats below the header, never replaces GOYUNIR, auto-dismisses */}
+      <AnimatePresence>
+        {feedbackMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            style={{ position: 'fixed', top: '70px', left: '50%', transform: 'translateX(-50%)', zIndex: 99, fontSize: '11px', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : '#ff3b30', letterSpacing: '0.5px', textTransform: 'uppercase', background: 'rgba(0,0,0,0.85)', padding: '8px 16px', borderRadius: '20px', border: feedbackStatus === 'success' ? '1px solid #34c759' : '1px solid #ff3b30', whiteSpace: 'nowrap', boxShadow: '0 8px 20px rgba(0,0,0,0.4)' }}
+          >
+            {feedbackStatus === 'success' ? '🎯 ENTRY VERIFIED' : '⚠️ STATUS PENDING'}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CANVAS CONTAINER VIEWPORT ENGINE */}
       <motion.div style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', boxSizing: 'border-box', opacity: bottleOpacity }}>
@@ -286,10 +275,11 @@ export default function PerfumeStorefront() {
 
       {/* PUSH DIRECTION OVERLAY */}
       <motion.div style={{ position: 'fixed', bottom: '8vh', left: 0, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 15, pointerEvents: 'none', opacity: scrollIndicatorOpacity }}>
-        <motion.span animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }} style={{ textTransform: 'uppercase', letterSpacing: '3px', fontSize: '9px', color: configPalette.textMuted, fontWeight: 'bold' }}>
+        <motion.span animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }} style={{ textTransform: 'uppercase', letterSpacing: '3px', fontSize: '9px', color: configPalette.textMuted, fontWeight: 'bold' }}>
           {heroContent.ctaLabel}
         </motion.span>
       </motion.div>
+
       {/* SCROLLABLE INTERACTION INTERFACE LAYER */}
       <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
         <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', pointerEvents: 'auto', boxSizing: 'border-box' }}>
@@ -329,12 +319,12 @@ export default function PerfumeStorefront() {
 
         <section style={{ minHeight: '130vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 15px 40px', background: configPalette.primaryBackground, position: 'relative', zIndex: 10, pointerEvents: 'auto', boxSizing: 'border-box' }}>
           <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '80px' }}>
-            
+
             {/* TIMELINE COUNTDOWN TIMER INTERFACE */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               {timeLeft.expired ? (
                 <span style={{ fontSize: '11px', color: '#edb210', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>
-                  ⚠️ LAUNCH EXPIRED — Priority Waitlist Framework Active
+                  🔒 This Drop Has Closed — Join the Restock Waitlist
                 </span>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', fontFamily: 'monospace', fontSize: '16px', fontWeight: 'bold' }}>
@@ -346,7 +336,7 @@ export default function PerfumeStorefront() {
               )}
             </div>
 
-            {/* PRESTIGE INTEGRATED INCREMENTER COUNTER (Adds real orders on top of false baseline) */}
+            {/* PRESTIGE INTEGRATED INCREMENTER COUNTER */}
             <div style={{ background: '#141416', padding: '14px', borderRadius: '14px', border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: '6px' }}>{GOYUNIR_STORE_SUITE.socialProof.label}</div>
               <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '4px', fontFamily: 'monospace', color: '#fff', letterSpacing: '1px' }}>
@@ -354,14 +344,15 @@ export default function PerfumeStorefront() {
               </div>
               <div style={{ fontSize: '11px', color: configPalette.textMuted }}>{GOYUNIR_STORE_SUITE.socialProof.caption}</div>
             </div>
+
             <h2 style={{ fontSize: '24px', textAlign: 'center', fontFamily: 'serif', margin: '0 0 10px 0', letterSpacing: '1px' }}>
               {GOYUNIR_STORE_SUITE.raffleRegistrationForm.titleHeader}
             </h2>
-            
+
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} style={{ background: configPalette.cardBackground, padding: '24px 20px', borderRadius: '24px', border: `1px solid ${configPalette.cardBorder}`, boxSizing: 'border-box' }}>
               <h3 style={{ fontSize: '20px', margin: '0 0 4px 0', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>
               <p style={{ color: configPalette.textMuted, fontSize: '12px', margin: '0 0 20px 0', textAlign: 'center' }}>{currentProduct.desc}</p>
-              
+
               <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left' }}>
                 <div>
                   <label style={{ fontSize: '10px', fontWeight: 'bold', color: configPalette.textMuted, letterSpacing: '1px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Select Capacity Size</label>
@@ -370,22 +361,21 @@ export default function PerfumeStorefront() {
                       const displayPrice = getProductPrice(currentProduct, sz);
                       const isSelected = selectedSize === sz;
                       return (
-                        <button 
-                          key={sz} 
-                          type="button" 
-                          onClick={() => setSelectedSize(sz)} 
-                          style={{ 
-                            flex: 1, 
-                            padding: '12px', 
-                            borderRadius: '12px', 
-                            border: isSelected ? '2px solid #fff' : `1px solid ${configPalette.cardBorder}`, 
-                            background: isSelected ? '#ffffff' : 'transparent', 
-                            // TEXT CONTRAST FIXED: Highlight prints solid black text layout so it is 100% readable
-                            color: isSelected ? '#000000' : configPalette.textMain, 
-                            fontSize: '13px', 
-                            fontWeight: 'bold', 
-                            cursor: 'pointer', 
-                            transition: 'all 0.2s' 
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setSelectedSize(sz)}
+                          style={{
+                            flex: 1,
+                            padding: '12px',
+                            borderRadius: '12px',
+                            border: isSelected ? '2px solid #fff' : `1px solid ${configPalette.cardBorder}`,
+                            background: isSelected ? '#ffffff' : 'transparent',
+                            color: isSelected ? '#000000' : configPalette.textMain,
+                            fontSize: '13px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
                           }}
                         >
                           {sz} — ${displayPrice}
@@ -394,14 +384,12 @@ export default function PerfumeStorefront() {
                     })}
                   </div>
                 </div>
-
                 <div>
                   <label style={{ fontSize: '10px', fontWeight: 'bold', color: configPalette.textMuted, letterSpacing: '1px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
                     {GOYUNIR_STORE_SUITE.raffleRegistrationForm.emailLabel}
                   </label>
                   <input required type="email" value={form.email} onChange={(e) => setForm(prev => ({ ...prev, email: e.target.value }))} placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.emailPlaceholder} style={{ width: '100%', padding: '14px', borderRadius: '12px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: '13px', boxSizing: 'border-box' }} />
                 </div>
-
                 <div>
                   <label style={{ fontSize: '10px', fontWeight: 'bold', color: configPalette.textMuted, letterSpacing: '1px', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
                     {GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressLabel}
@@ -409,41 +397,38 @@ export default function PerfumeStorefront() {
                   <input required type="text" value={form.shippingAddress} onChange={(e) => setForm(prev => ({ ...prev, shippingAddress: e.target.value }))} placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} style={{ width: '100%', padding: '14px', borderRadius: '12px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: '13px', boxSizing: 'border-box' }} />
                 </div>
 
-                {/* DYNAMIC CONTINUOUS FORM ACTION SUBMIT TRIGGER BUTTON */}
-                <button 
-                  type="submit" 
-                  disabled={isProcessing} 
-                  style={{ 
-                    width: '100%', 
-                    padding: '16px', 
-                    borderRadius: '30px', 
-                    background: isProcessing ? '#1f1f23' : timeLeft.expired ? '#edb210' : configPalette.checkoutCtaButton, 
-                    color: isProcessing ? '#555' : timeLeft.expired ? '#09090b' : configPalette.textMain, 
-                    border: 'none', 
-                    fontWeight: 'bold', 
-                    fontSize: '14px', 
-                    cursor: isProcessing ? 'not-allowed' : 'pointer', 
-                    marginTop: '8px', 
-                    transition: 'all 0.2s' 
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    borderRadius: '30px',
+                    background: isProcessing ? '#1f1f23' : timeLeft.expired ? '#edb210' : configPalette.checkoutCtaButton,
+                    color: isProcessing ? '#555' : timeLeft.expired ? '#09090b' : configPalette.textMain,
+                    border: 'none',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    cursor: isProcessing ? 'not-allowed' : 'pointer',
+                    marginTop: '8px',
+                    transition: 'all 0.2s',
                   }}
                 >
-                  {isProcessing 
-                    ? GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonLoadingText 
-                    : timeLeft.expired 
-                      ? '✨ Request Access on Restock Waitlist' 
-                      : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText
-                  }
+                  {isProcessing
+                    ? GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonLoadingText
+                    : timeLeft.expired
+                      ? 'Join the Restock Waitlist'
+                      : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText}
                 </button>
-
                 {feedbackMessage && (
                   <p style={{ margin: '12px 0 0 0', fontSize: '11px', textAlign: 'center', fontWeight: 'bold', color: feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#888' }}>
                     {feedbackMessage}
                   </p>
                 )}
               </form>
-
             </motion.div>
           </div>
+
           <footer style={{ width: '100%', maxWidth: '380px', borderTop: `1px solid ${configPalette.cardBorder}`, paddingTop: '40px', color: configPalette.textMuted, fontFamily: 'sans-serif', fontSize: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div>
@@ -462,7 +447,7 @@ export default function PerfumeStorefront() {
         </section>
       </div>
 
-      {/* EXTENDABLE MULTI-TAB SIDEBAR DRAWER (VOTES PANEL CLEANLY REMOVED) */}
+      {/* EXTENDABLE MULTI-TAB SIDEBAR DRAWER */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMenuOpen(false)} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)', zIndex: 200, display: 'flex', justifyContent: 'flex-start' }}>
@@ -481,15 +466,34 @@ export default function PerfumeStorefront() {
                 )}
                 {activeMenuTab === 'catalog' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: 0 }}>GOYUNIR</h4>
-                    <a href={GOYUNIR_STORE_SUITE.brandFooterData.instagramLink} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentBlue, letterSpacing: '1px', textTransform: 'uppercase' }}>👔 Clothing Line (Upcoming)</span>
-                      <p style={{ fontSize: '12px', margin: '4px 0 0 0', color: configPalette.textMuted, lineHeight: '1.4' }}>Heavyweight custom weave streetwear textiles. Raw drop matrix testing begins late 2026.</p>
-                    </a>
-                    <a href={GOYUNIR_STORE_SUITE.brandFooterData.instagramLink} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'block', cursor: 'pointer' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentPurple, letterSpacing: '1px', textTransform: 'uppercase' }}>🧪 Past Scents Archive</span>
-                      <p style={{ fontSize: '12px', margin: '4px 0 0 0', color: configPalette.textMuted, lineHeight: '1.4' }}>Review vaulted batch variants from our experimental archives. Discontinued rare profiles.</p>
-                    </a>
+                    <div>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentBlue, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '8px' }}>👔 Clothing Line</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops.length === 0 && (
+                          <p style={{ fontSize: '11px', color: '#555' }}>Nothing announced yet — check back soon.</p>
+                        )}
+                        {GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops.map((item) => (
+                          <div key={item.name} style={{ background: '#141416', padding: '10px 12px', borderRadius: '10px', border: '1px solid #222' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold' }}>{item.name}</div>
+                            <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>{item.status}{item.eta ? ` · ${item.eta}` : ''}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', display: 'block', color: configPalette.accentPurple, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '8px' }}>🧪 Past Scents Archive</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {GOYUNIR_STORE_SUITE.catalogPreview.archiveScents.length === 0 && (
+                          <p style={{ fontSize: '11px', color: '#555' }}>No archived scents yet.</p>
+                        )}
+                        {GOYUNIR_STORE_SUITE.catalogPreview.archiveScents.map((item) => (
+                          <div key={item.name} style={{ background: '#141416', padding: '10px 12px', borderRadius: '10px', border: '1px solid #222' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold' }}>{item.name}</div>
+                            <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>{item.status}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -498,7 +502,6 @@ export default function PerfumeStorefront() {
           </motion.div>
         )}
       </AnimatePresence>
-
     </div>
   );
 }
