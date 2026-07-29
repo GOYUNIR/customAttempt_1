@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
     if (!redis) return NextResponse.json(status);
 
-    // 1. EXTRACT UNIQUE USER SIGNS OVER SLIDING WINDOWS
+    // 1. TIGHTENED LIVE DEVICE TELEMETRY WINDOW (30-SECOND CACHE FLUSH)
     try {
       const url = new URL(request.url);
       const trafficKey = 'analytics:active_users_online';
@@ -31,7 +31,8 @@ export async function GET(request: Request) {
         await redis.zadd(trafficKey, { score: currentTimeClock, member: dummyVisitorId });
       }
 
-      await redis.zremrangebyscore(trafficKey, 0, currentTimeClock - 300 * 1000);
+      // Automatically removes device signatures older than 30 seconds for snappy updates
+      await redis.zremrangebyscore(trafficKey, 0, currentTimeClock - 30 * 1000);
       const totalActiveUsersCount = await redis.zcard(trafficKey);
       status.liveActiveUsersOnline = Math.max(1, totalActiveUsersCount);
     } catch {}
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const combinedCustomerLedger: any[] = [];
     const poolPromises: Promise<void>[] = [];
 
-    // 2. PARSE ALL ALLOCATION LOGS
+    // 2. AGGREGATE LOGS AND INGEST STRING SHIELDS
     for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
       for (const size of ['50ml', '100ml']) {
         const poolKey = `drop_pool:${product.name}:${size}`;
@@ -71,21 +72,20 @@ export async function GET(request: Request) {
                 }
 
                 combinedCustomerLedger.push({
-                  email: String(parsed?.email || parsed?.customer_email || 'Anonymous Client'),
+                  email: String(parsed?.email || 'goyunir@gmail.com'),
                   variant: product.name,
                   size,
-                  shippingAddress: String(parsed?.shippingAddress || parsed?.address || 'No Address Logged'),
-                  id: String(parsed?.id || parsed?.stripeCustomerId || 'Active Token'),
-                  registeredAt: parsed?.registeredAt || parsed?.initiatedAt || new Date().toISOString(),
+                  shippingAddress: String(parsed?.shippingAddress || parsed?.address || 'Form Input Captured'),
+                  id: String(parsed?.id || parsed?.stripeCustomerId || 'Legacy Ref Trace'),
+                  registeredAt: parsed?.registeredAt || new Date().toISOString(),
                   type: labelType
                 });
               } catch {
-                // UNWRAP EXCEPTION SHIELD: Converts flat string pools to text fields to prevent [object Object] errors
                 combinedCustomerLedger.push({
-                  email: String(itemStr || 'Legacy Lead Track'),
+                  email: String(itemStr || 'goyunir@gmail.com'),
                   variant: product.name,
                   size,
-                  shippingAddress: 'Form Input field Entry',
+                  shippingAddress: 'Form Input Captured',
                   id: 'Legacy Ref Trace',
                   registeredAt: new Date().toISOString(),
                   type: labelType
@@ -104,12 +104,19 @@ export async function GET(request: Request) {
 
     await Promise.all(poolPromises);
 
-    // ✅ FIXED: Rigid alphabetical sort forces dashboard display boxes to stay frozen in position
-    status.pools.sort((a, b) => {
-      const stringA = `${a.product} ${a.size}`.toLowerCase();
-      const stringB = `${b.product} ${b.size}`.toLowerCase();
-      return stringA.localeCompare(stringB);
-    });
+    // Alphabetical fixed sort lock
+    status.pools.sort((a, b) => `${a.product} ${a.size}`.localeCompare(`${b.product} ${b.size}`));
+
+    // Ingest persistent archive memory logs so deployments are never erased
+    try {
+      const historyItems = await redis.lrange('drop_history:archived_logs', 0, -1);
+      for (const hist of historyItems) {
+        try {
+          const parsedHist = JSON.parse(hist);
+          combinedCustomerLedger.push({ ...parsedHist, type: parsedHist.type || 'PROCESSED_WINNER_PAID' });
+        } catch {}
+      }
+    } catch {}
 
     status.fallbackEntriesCount = totalCombinedCount;
     status.fallbackEntries = combinedCustomerLedger.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
