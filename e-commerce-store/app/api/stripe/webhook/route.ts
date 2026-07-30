@@ -8,6 +8,7 @@ import {
   poolStatField,
   POOL_STATS_KEY,
   PROCESSED_SESSIONS_KEY,
+  cleanupMatchingIntent,
 } from '@/lib/server-config';
 import Stripe from 'stripe';
 
@@ -96,10 +97,10 @@ export async function POST(request: Request) {
   ]);
 
   if (sessionId) await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+  await cleanupMatchingIntent(redis, variant, size, email);
 
   if (isEmailDuplicate !== 1 && isCardDuplicate !== 1) {
     const poolKey = `drop_pool:${variant}:${size}`;
-    const intentKey = `intent_pool:${variant}:${size}`;
     const payload = JSON.stringify({
       email,
       variant,
@@ -128,19 +129,11 @@ export async function POST(request: Request) {
         id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED',
       }),
     ]);
-
-    try {
-      const intentItems = await redis.lrange(intentKey, 0, -1);
-      for (const item of intentItems) {
-        try {
-          const parsedIntent = typeof item === 'string' ? JSON.parse(item) : (item as any);
-          if (parsedIntent.email === email) {
-            await redis.lrem(intentKey, 1, item);
-            await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), -1);
-          }
-        } catch {}
-      }
-    } catch {}
+  } else {
+    await archiveEntry(redis, {
+      email, variant, size, shippingAddress: address,
+      id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED',
+    });
   }
 
   return NextResponse.json({ received: true });

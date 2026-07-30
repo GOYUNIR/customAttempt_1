@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, emailBlockKey, poolStatField, POOL_STATS_KEY } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, emailBlockKey, poolStatField, POOL_STATS_KEY, archiveEntry } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,8 +21,6 @@ export async function POST(request: Request) {
     const clientEmail = String(email).trim().toLowerCase();
     const timestamp = new Date().toISOString();
 
-    // One confirmed entry per email per drop — checked BEFORE opening a Stripe
-    // session so a known-duplicate email never even reaches Stripe.
     const isEmailAlreadyEntered = await redis.sismember(emailBlockKey(variant, size), clientEmail);
     if (isEmailAlreadyEntered === 1) {
       return NextResponse.json({
@@ -75,6 +73,18 @@ export async function POST(request: Request) {
     });
     await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
     await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), 1);
+
+    // Archived immediately — the admin ledger no longer waits for a draw
+    // to run before an in-progress checkout becomes visible.
+    await archiveEntry(redis, {
+      email: clientEmail,
+      variant,
+      size,
+      shippingAddress: shippingAddress || 'Form Input Field Entry',
+      id: stripeCustomer.id,
+      registeredAt: timestamp,
+      type: 'INTENT_STARTED',
+    });
 
     return NextResponse.json({ success: true, sessionUrl: session.url });
   } catch (err: any) {

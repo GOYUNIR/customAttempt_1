@@ -27,6 +27,8 @@ export interface CatalogPreviewItem {
   eta?: string;
   image?: string;
   description?: string;
+  availableFrom?: string;
+  availableUntil?: string;
 }
 
 export interface StorefrontConfig {
@@ -110,8 +112,8 @@ const defaultThemeColors = {
 const defaultDropSchedule = {
   mode: 'weekly' as const,
   targetEndDateTime: '2026-07-27T19:30:00',
-  drawDayOfWeekUTC: 6, // 0=Sun ... 6=Sat
-  drawHourUTC: 4, // adjust to match your audience's timezone
+  drawDayOfWeekUTC: 6,
+  drawHourUTC: 4,
   drawMinuteUTC: 0,
   countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
   daysLabel: 'd',
@@ -184,6 +186,8 @@ function normalizeCatalogItems(items: unknown): CatalogPreviewItem[] {
     eta: typeof item?.eta === 'string' ? item.eta : undefined,
     image: typeof item?.image === 'string' ? item.image : undefined,
     description: typeof item?.description === 'string' ? item.description : undefined,
+    availableFrom: typeof item?.availableFrom === 'string' ? item.availableFrom : undefined,
+    availableUntil: typeof item?.availableUntil === 'string' ? item.availableUntil : undefined,
   }));
 }
 
@@ -253,9 +257,6 @@ export function getWinnerCount(config: StorefrontConfig, size: string): number {
   return size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;
 }
 
-// Computes the next draw timestamp. In 'weekly' mode it finds the next
-// occurrence of the configured weekday/time; in 'fixed' mode it uses the
-// exact date you set. Switch modes any time in goyunir.config.ts.
 export function getNextDrawTimestamp(config: StorefrontConfig): number {
   if (config.dropSchedule.mode === 'fixed') {
     return new Date(config.dropSchedule.targetEndDateTime).getTime();

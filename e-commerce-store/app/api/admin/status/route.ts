@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, safeParseRedisItem, POOL_STATS_KEY, LAST_DRAW_KEY, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, safeParseRedisItem, POOL_STATS_KEY, LAST_DRAW_KEY, ARCHIVE_LEDGER_KEY, getOnlineVisitors } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -15,19 +15,19 @@ export async function GET() {
       fallbackEntries: [] as any[],
       pools: [] as any[],
       liveActiveUsersOnline: 1,
+      onlineVisitors: [] as { visitorId: string; lastSeenSecondsAgo: number }[],
       lastDraw: null as any,
     };
     if (!redis) return NextResponse.json(status);
 
+    const trafficKey = 'analytics:active_users_online';
     try {
-      const trafficKey = 'analytics:active_users_online';
       await redis.zremrangebyscore(trafficKey, 0, Date.now() - 45 * 1000);
       const totalActiveUsersCount = await redis.zcard(trafficKey);
       status.liveActiveUsersOnline = Math.max(1, totalActiveUsersCount);
+      status.onlineVisitors = await getOnlineVisitors(redis, trafficKey);
     } catch {}
 
-    // ONE hash read instead of 8 separate list scans — the biggest single
-    // command-count reduction on the whole site.
     try {
       const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
       let totalSubs = 0;
@@ -48,11 +48,8 @@ export async function GET() {
       status.lastDraw = safeParseRedisItem<any>(lastDrawRaw) ?? null;
     } catch {}
 
-    // Bounded default view: most recent 50 archive records, so the admin
-    // sees something on load without scanning the entire permanent history
-    // every time this route is polled.
     try {
-      const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -50, -1);
+      const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -80, -1);
       status.fallbackEntries = recentRaw
         .map((item) => safeParseRedisItem<any>(item))
         .filter(Boolean)

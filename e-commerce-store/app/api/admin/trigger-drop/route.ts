@@ -4,8 +4,8 @@ import {
   createStripeClient,
   safeParseRedisItem,
   archiveEntry,
-  poolStatField,
-  POOL_STATS_KEY,
+  resolveCustomerId,
+  resetPoolAndBlocks,
   LAST_DRAW_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -66,8 +66,6 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // Winner count now comes from goyunir.config.ts, matching the cron
-        // draw path so the two draw mechanisms never disagree again.
         const inventoryLimit = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         let successfulPoolCaptures = 0;
 
@@ -78,10 +76,11 @@ export async function POST(request: Request) {
 
           const winnerEmail = String(winnerData.email || 'goyunir@gmail.com');
           const paymentMethod = winnerData.paymentMethodId || null;
-          const customerId = winnerData.stripeCustomerId || null;
+          // Reads BOTH possible customer-ID field names — this is the fix
+          // for charges silently failing to execute.
+          const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
 
-          // Anyone beyond the inventory limit is archived as NOT_SELECTED — never dropped.
           if (successfulPoolCaptures >= inventoryLimit) {
             await archiveEntry(redis, {
               email: winnerEmail, variant: productName, size: productSize, shippingAddress,
@@ -105,20 +104,17 @@ export async function POST(request: Request) {
               grandRevenueChargesCount++;
               successfulPoolCaptures++;
 
-              const archivedRecord = {
+              await archiveEntry(redis, {
                 email: winnerEmail, variant: productName, size: productSize, shippingAddress,
                 id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
-              };
-              await Promise.all([
-                redis.rpush('drop_history:archived_logs', JSON.stringify(archivedRecord)),
-                archiveEntry(redis, archivedRecord),
-              ]);
+              });
               processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'SUCCESS_CHARGED' });
             } else {
               await archiveEntry(redis, {
                 email: winnerEmail, variant: productName, size: productSize, shippingAddress,
-                id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'NOT_SELECTED',
+                id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED',
               });
+              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: 'MISSING_PAYMENT_METHOD' });
             }
           } catch (err: any) {
             processedWinners.push({ email: winnerEmail, product: productName, size: productSize, status: `DECLINED: ${err.message}` });
@@ -129,7 +125,6 @@ export async function POST(request: Request) {
           }
         }
 
-        // Archive anyone who started checkout but never finished, before resetting.
         const intentKey = `intent_pool:${productName}:${productSize}`;
         try {
           const remainingIntents = await redis.lrange(intentKey, 0, -1);
@@ -145,14 +140,9 @@ export async function POST(request: Request) {
           }
         } catch {}
 
-        // Reset only the LIVE current-drop tracking keys — full history stays
-        // in the permanent archive forever.
-        await redis.del(poolKey);
-        await redis.del(intentKey);
-        await redis.hset(POOL_STATS_KEY, {
-          [poolStatField('sub', productName, productSize)]: '0',
-          [poolStatField('int', productName, productSize)]: '0',
-        });
+        // Resets the live pool AND the email/card duplicate-block sets, so
+        // people can enter the NEXT drop window for the same product.
+        await resetPoolAndBlocks(redis, productName, productSize);
       } catch {}
     }
 
@@ -162,8 +152,6 @@ export async function POST(request: Request) {
       totalSuccessfulCharges: grandRevenueChargesCount,
     };
 
-    // Persisted to Redis, not a JS global — Vercel serverless functions
-    // don't share memory between invocations.
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
     } catch {}

@@ -36,8 +36,7 @@ export function getFallbackEntries(): CheckoutRegistrationPayload[] {
 
 // Upstash's Redis client auto-deserializes JSON strings into objects on read.
 // Calling JSON.parse() again on an already-parsed object turns it into the
-// literal string "[object Object]" before parsing fails. This helper handles
-// both a raw string AND an already-parsed object safely.
+// literal string "[object Object]" before parsing fails.
 export function safeParseRedisItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
   if (typeof item === 'object') return item as T;
@@ -51,10 +50,19 @@ export function safeParseRedisItem<T = any>(item: unknown): T | null {
   return null;
 }
 
+// Pool entries have been written by three different code paths over time,
+// and not all of them used the same field name for the Stripe customer ID.
+// This is the single fix that makes charges actually execute reliably:
+// always check BOTH possible field names, no matter which path wrote the entry.
+export function resolveCustomerId(entry: any): string {
+  return String(entry?.customerId || entry?.stripeCustomerId || '');
+}
+
 // ============================================
-// PERMANENT ARCHIVE — nothing is ever deleted from here.
-// Every entry, win, loss, cancellation, and expired intent gets logged here
-// forever, so the admin search bar can always answer "what happened with X."
+// PERMANENT ARCHIVE — nothing is ever deleted. Every entry, win, loss,
+// cancellation, started-but-abandoned checkout, and duplicate attempt gets
+// logged here forever, so the admin search bar can always answer
+// "what happened with X."
 // ============================================
 export const ARCHIVE_LEDGER_KEY = 'archive:ledger';
 
@@ -65,7 +73,9 @@ export interface ArchiveRecord {
   shippingAddress: string;
   id: string;
   registeredAt: string;
-  type: string; // 'ENTERED' | 'WINNER_CHARGED' | 'WINNER_DECLINED' | 'NOT_SELECTED' | 'INTENT_EXPIRED' | 'CANCELLED_BY_USER'
+  type: string;
+  // 'INTENT_STARTED' | 'ENTERED' | 'DUPLICATE_BLOCKED' | 'WINNER_CHARGED' |
+  // 'WINNER_DECLINED' | 'NOT_SELECTED' | 'INTENT_EXPIRED' | 'CANCELLED_BY_USER'
 }
 
 export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
@@ -75,8 +85,7 @@ export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
 }
 
 // ============================================
-// LIVE POOL STATS — a single Redis Hash instead of dozens of LLEN/LRANGE
-// calls. Biggest lever for cutting command usage.
+// LIVE POOL STATS — a single Redis Hash instead of dozens of LLEN/LRANGE calls.
 // ============================================
 export const POOL_STATS_KEY = 'stats:pools';
 
@@ -84,13 +93,11 @@ export function poolStatField(kind: 'sub' | 'int', variant: string, size: string
   return `${kind}:${variant}:${size}`;
 }
 
-// Randomized social-proof "boost" counter — resets after every draw.
 export const SOCIAL_PROOF_BOOST_KEY = 'stats:social_proof_boost';
 
 // ============================================
-// FRAUD PREVENTION — one entry per EMAIL, one entry per CARD.
-// Deliberately NOT address-based: roommates/family legitimately share
-// addresses. This is how SNKRS/adidas CONFIRMED handle it.
+// FRAUD PREVENTION — one entry per EMAIL, one entry per CARD (not address —
+// families/roommates legitimately share addresses; this is the SNKRS pattern).
 // ============================================
 export function emailBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:emails`;
@@ -99,19 +106,51 @@ export function cardBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:cards`;
 }
 
-// Idempotency guard: confirm-setup (client redirect) AND the Stripe webhook
-// can both try to process the same completed session. Ensures only one wins.
 export const PROCESSED_SESSIONS_KEY = 'drop_processed_sessions';
-
-// Persisted last-draw summary — NOT a JS global, since Vercel serverless
-// functions don't share memory between invocations.
 export const LAST_DRAW_KEY = 'drop_last_draw_summary';
 
+// Removes any "in-progress checkout" intent(s) matching this email once that
+// checkout has actually resolved (success OR duplicate-blocked), so it never
+// lingers to be double-logged as an abandoned cart at draw time.
+export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string): Promise<number> {
+  const intentKey = `intent_pool:${variant}:${size}`;
+  let removedCount = 0;
+  try {
+    const intentItems = await redis.lrange(intentKey, 0, -1);
+    for (const item of intentItems) {
+      const parsed = safeParseRedisItem<any>(item);
+      if (parsed && String(parsed.email || '').toLowerCase() === email.toLowerCase()) {
+        await redis.lrem(intentKey, 1, item);
+        removedCount++;
+      }
+    }
+    if (removedCount > 0) {
+      await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), -removedCount);
+    }
+  } catch {}
+  return removedCount;
+}
+
+// Resets a product/size's LIVE pool, intent list, stats, AND duplicate-block
+// sets — this is what makes re-entry possible for the next drop window.
+// Nothing here touches the permanent archive.
+export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
+  const poolKey = `drop_pool:${productName}:${size}`;
+  const intentKey = `intent_pool:${productName}:${size}`;
+  await Promise.all([
+    redis.del(poolKey),
+    redis.del(intentKey),
+    redis.del(emailBlockKey(productName, size)),
+    redis.del(cardBlockKey(productName, size)),
+    redis.hset(POOL_STATS_KEY, {
+      [poolStatField('sub', productName, size)]: '0',
+      [poolStatField('int', productName, size)]: '0',
+    }),
+  ]);
+}
+
 // ============================================
-// ACCOUNT-FREE ENTRY MANAGEMENT
-// Finds a person's active raffle entries by email, so they can view/cancel/
-// edit them using email + last-4-of-card as verification (no password
-// database needed — same pattern as "confirmation number + last name").
+// ACCOUNT-FREE ENTRY MANAGEMENT — email + last-4-of-card verification.
 // ============================================
 export interface FoundPoolEntry {
   poolKey: string;
@@ -143,14 +182,62 @@ export async function findPoolEntriesByEmail(
   return matches;
 }
 
-// Remove-by-index idiom for Redis lists: overwrite the slot with a unique
-// tombstone value, then remove that tombstone. Safer than trying to re-match
-// the original JSON string exactly (key ordering isn't guaranteed to survive
-// a parse+restringify round trip).
 export async function removeListEntryAtIndex(redis: Redis, key: string, index: number) {
   const tombstone = `__DELETED_ENTRY_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
   await redis.lset(key, index, tombstone);
   await redis.lrem(key, 1, tombstone);
+}
+
+// ============================================
+// CATALOG ARCHIVE — lets an admin move a finished product's run into the
+// public Catalog page's archive section, with the dates it was available.
+// ============================================
+export const CATALOG_ARCHIVE_KEY = 'catalog:archive_state';
+
+export interface CatalogArchiveRecord {
+  productId: string;
+  name: string;
+  image?: string;
+  description?: string;
+  availableFrom: string;
+  archivedAt: string;
+}
+
+export async function archiveProductToCatalog(redis: Redis, record: CatalogArchiveRecord) {
+  await redis.hset(CATALOG_ARCHIVE_KEY, { [record.productId]: JSON.stringify(record) });
+}
+
+export async function getCatalogArchiveRecords(redis: Redis): Promise<CatalogArchiveRecord[]> {
+  try {
+    const hash = (await redis.hgetall(CATALOG_ARCHIVE_KEY)) as Record<string, string> | null;
+    if (!hash) return [];
+    return Object.values(hash)
+      .map((raw) => safeParseRedisItem<CatalogArchiveRecord>(raw))
+      .filter(Boolean) as CatalogArchiveRecord[];
+  } catch {
+    return [];
+  }
+}
+
+// ============================================
+// ONLINE VISITORS — lets the admin see who (anonymized session IDs, no PII)
+// is currently on the site, not just a count.
+// ============================================
+export async function getOnlineVisitors(redis: Redis, trafficKey: string) {
+  try {
+    const raw = (await redis.zrange(trafficKey, 0, -1, { withScores: true })) as (string | number)[];
+    const now = Date.now();
+    const visitors: { visitorId: string; lastSeenSecondsAgo: number }[] = [];
+    for (let i = 0; i < raw.length; i += 2) {
+      const visitorId = String(raw[i]);
+      const score = Number(raw[i + 1]);
+      visitors.push({ visitorId, lastSeenSecondsAgo: Math.max(0, Math.round((now - score) / 1000)) });
+    }
+    visitors.sort((a, b) => a.lastSeenSecondsAgo - b.lastSeenSecondsAgo);
+    return visitors;
+  } catch {
+    return [];
+  }
 }
 
 export function createRedisClient(): Redis | null {

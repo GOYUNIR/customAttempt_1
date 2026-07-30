@@ -6,8 +6,8 @@ import {
   createStripeClient,
   safeParseRedisItem,
   archiveEntry,
-  poolStatField,
-  POOL_STATS_KEY,
+  resolveCustomerId,
+  resetPoolAndBlocks,
   LAST_DRAW_KEY,
 } from '@/lib/server-config';
 import { getProductPrice, getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
@@ -51,7 +51,7 @@ export async function runDropDraw(request: Request | NextRequest) {
 
       for (const entry of parsedPool) {
         const email = String(entry.email ?? '');
-        const customerId = String(entry.customerId ?? '');
+        const customerId = resolveCustomerId(entry) || '';
         const paymentMethodId = String(entry.paymentMethodId ?? '');
         const shippingAddress = String(entry.shippingAddress ?? entry.address ?? 'No Address Logged');
         const priceCents = Math.round(getProductPrice(product, size) * 100);
@@ -143,12 +143,7 @@ export async function runDropDraw(request: Request | NextRequest) {
         }
       } catch {}
 
-      await redis.del(poolKey);
-      await redis.del(intentKey);
-      await redis.hset(POOL_STATS_KEY, {
-        [poolStatField('sub', product.name, size)]: '0',
-        [poolStatField('int', product.name, size)]: '0',
-      });
+      await resetPoolAndBlocks(redis, product.name, size);
     }
   }
 

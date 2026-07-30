@@ -1,6 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import type { StorefrontProduct } from '@/lib/storefront-config';
 
 export default function AdminPortal() {
   const [isRunning, setIsRunning] = useState(false);
@@ -15,18 +18,26 @@ export default function AdminPortal() {
   const itemsPerPage = 50;
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [pulseTick, setPulseTick] = useState(0);
+  const [secondsAgo, setSecondsAgo] = useState(0);
+
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [availableFromInput, setAvailableFromInput] = useState('');
+  const [catalogMessage, setCatalogMessage] = useState('');
+
   const fetchStatus = async () => {
     try {
       const res = await fetch(`/api/admin/status?t=${Date.now()}`);
       const data = await res.json();
       setStatus(data);
+      setLastUpdatedAt(Date.now());
+      setPulseTick((t) => t + 1);
     } catch {
       setStatus({ error: 'Unable to fetch status telemetry matrix parameters' });
     }
   };
 
-  // Polls every 10s instead of every 4s, and pauses entirely while the tab
-  // is hidden — a big lever for cutting Redis command usage.
   useEffect(() => {
     fetchStatus();
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -56,8 +67,13 @@ export default function AdminPortal() {
     };
   }, []);
 
-  // Debounced search across the FULL permanent archive — nothing is ever
-  // deleted, so this can always answer "what happened with this email/address."
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (lastUpdatedAt) setSecondsAgo(Math.round((Date.now() - lastUpdatedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [lastUpdatedAt]);
+
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     const term = searchTerm.trim();
@@ -102,7 +118,6 @@ export default function AdminPortal() {
       const data = await response.json();
       if (response.ok) {
         setResultMessage('Draw execution completed cleanly. Allocations archived successfully.');
-        setTriggerVerificationPassword('');
         await fetchStatus();
       } else {
         setResultMessage(data.error || 'Authorization handshake rejected.');
@@ -111,6 +126,37 @@ export default function AdminPortal() {
       setResultMessage('Fatal connection failure reaching trigger endpoint path.');
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const archiveProduct = async (product: StorefrontProduct) => {
+    if (!triggerVerificationPassword) {
+      alert('🔒 Enter your admin password in the Drop Control Center above first.');
+      return;
+    }
+    if (!confirm(`Archive "${product.name}" from the active catalog? It moves to the Catalog page's archive section.`)) return;
+    try {
+      const res = await fetch('/api/admin/catalog-archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          name: product.name,
+          description: product.desc,
+          availableFrom: availableFromInput || 'Unknown',
+          verificationKey: triggerVerificationPassword,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCatalogMessage(`${product.name} archived successfully.`);
+        setArchivingId(null);
+        setAvailableFromInput('');
+      } else {
+        setCatalogMessage(data.error || 'Could not archive product.');
+      }
+    } catch {
+      setCatalogMessage('Connection failed.');
     }
   };
 
@@ -131,7 +177,7 @@ export default function AdminPortal() {
 
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop Control Center</h2>
-          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Select a target pool to draw individually, or sweep all active databases simultaneously. Non-winners and expired intents are archived automatically — nothing is ever deleted.</p>
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Non-winners and expired intents are archived automatically — nothing is ever deleted. Re-entry for the same product opens automatically once the draw completes.</p>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -165,9 +211,28 @@ export default function AdminPortal() {
           {resultMessage && <p style={{ marginTop: '16px', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px', border: '1px solid #1c1c1e' }}>ℹ️ {resultMessage}</p>}
         </section>
 
+        <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+            <motion.div key={pulseTick} initial={{ scale: 1.8, opacity: 0.3 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.5 }} style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#34d399', marginRight: '8px' }} />
+            <h2 style={{ margin: 0, fontSize: '1.25rem', textTransform: 'uppercase' }}>👥 Currently Online</h2>
+          </div>
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>
+            {lastUpdatedAt ? `Live • updated ${secondsAgo}s ago` : 'Loading…'} — visitors are tracked as anonymous browser sessions, not by identity.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+            {(status?.onlineVisitors || []).length === 0 && <p style={{ fontSize: '12px', color: '#555' }}>No active visitors right now.</p>}
+            {(status?.onlineVisitors || []).map((v: any) => (
+              <div key={v.visitorId} style={{ display: 'flex', justifyContent: 'space-between', background: '#09090b', padding: '8px 12px', borderRadius: '8px', border: '1px solid #1c1c1e', fontSize: '11px' }}>
+                <span style={{ color: '#aaa', fontFamily: 'monospace' }}>{v.visitorId}</span>
+                <span style={{ color: v.lastSeenSecondsAgo < 15 ? '#34d399' : '#888' }}>{v.lastSeenSecondsAgo}s ago</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🧪 Live Database Pools</h2>
-          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Current open-drop status only — resets after each draw. Full history lives in the ledger below.</p>
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>Current open-drop status. Resets after each draw — full history always lives in the ledger below.</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {status?.pools && status.pools.map((p: any, i: number) => {
               const productName = p.product || 'Elysian White';
@@ -208,7 +273,6 @@ export default function AdminPortal() {
               <strong style={{ color: '#fff', fontSize: '14px', fontFamily: 'monospace' }}>
                 {status?.liveActiveUsersOnline ?? 1} CURRENTLY ONLINE
               </strong>
-              <span style={{ fontSize: '9px', color: '#444', display: 'block', marginTop: '2px', fontFamily: 'monospace' }}>ZSET: analytics:active_users_online</span>
             </div>
           </div>
           <div>
@@ -222,11 +286,48 @@ export default function AdminPortal() {
         </section>
 
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>🗂️ Catalog Management</h2>
+          <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>
+            Archive a product once its run is finished — it moves to the public Catalog page's archive section along with its available-from/until dates. Uses the same admin password as above.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {GOYUNIR_STORE_SUITE.productCatalog.map((product) => (
+              <div key={product.id} style={{ background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontWeight: '600', fontSize: '13px' }}>{product.name}</div>
+                  <button
+                    onClick={() => setArchivingId(archivingId === product.id ? null : product.id)}
+                    style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #f59e0b', background: 'transparent', color: '#f59e0b', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    {archivingId === product.id ? 'Cancel' : 'Archive This Product'}
+                  </button>
+                </div>
+                {archivingId === product.id && (
+                  <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      placeholder="Available from (e.g. Jan 2026)"
+                      value={availableFromInput}
+                      onChange={(e) => setAvailableFromInput(e.target.value)}
+                      style={{ flex: 1, padding: '10px', borderRadius: '8px', background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: '12px' }}
+                    />
+                    <button onClick={() => archiveProduct(product)} style={{ padding: '10px 14px', borderRadius: '8px', border: 'none', background: '#f59e0b', color: '#000', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}>
+                      Confirm
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {catalogMessage && <p style={{ marginTop: '12px', fontSize: '12px', color: '#cbd5e1' }}>{catalogMessage}</p>}
+        </section>
+
+        <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: '1.25rem', textTransform: 'uppercase' }}>👥 Searchable Customer Ledger</h2>
-                <p style={{ color: '#888', fontSize: '12px', margin: '4px 0 0 0' }}>Shows the 50 most recent entries by default. Search reaches the FULL permanent history.</p>
+                <p style={{ color: '#888', fontSize: '12px', margin: '4px 0 0 0' }}>Shows the 80 most recent entries by default — including in-progress checkouts immediately, not just after a draw. Search reaches the FULL permanent history.</p>
               </div>
               <span style={{ fontSize: '12px', fontFamily: 'monospace', background: '#27272a', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
                 {isSearching ? 'SEARCHING…' : `FOUND: ${filteredEntries.length}`}
@@ -261,7 +362,10 @@ export default function AdminPortal() {
                   displayType === 'NOT_SELECTED' ? '#888' :
                   displayType === 'WINNER_DECLINED' ? '#f87171' :
                   displayType === 'INTENT_EXPIRED' ? '#666' :
-                  displayType === 'INTENT' ? '#edb210' : '#34d399';
+                  displayType === 'INTENT_STARTED' ? '#edb210' :
+                  displayType === 'DUPLICATE_BLOCKED' ? '#fb923c' :
+                  displayType === 'CANCELLED_BY_USER' ? '#94a3b8' :
+                  '#34d399';
                 return (
                   <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#09090b', border: '1px solid #1c1c1e', padding: '16px', borderRadius: '12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
