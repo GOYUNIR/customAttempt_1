@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  turbopack: {
-    root: __dirname,
-  },
+  // leave empty or add other options as needed
 };
 
 export default nextConfig;
