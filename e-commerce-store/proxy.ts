@@ -31,7 +31,7 @@ function verifyBasicAuth(authorization: string | null) {
   return user === ADMIN_USER && pass === ADMIN_PASSWORD;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     if (!ADMIN_USER || !ADMIN_PASSWORD || !verifyBasicAuth(request.headers.get('authorization'))) {
