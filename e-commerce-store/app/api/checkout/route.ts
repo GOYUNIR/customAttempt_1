@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { variant, size, email, shippingAddress, quantityChosen, isWaitlistMode } = body;
 
-    if (!email || !variant || !size) {
+    if (!email || !variant || !size || !shippingAddress) {
       return NextResponse.json({ error: 'Missing critical registration data parameters.' }, { status: 400 });
     }
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       stripeCustomer = await stripe.customers.create({
         email: clientEmail,
         description: `GOYUNIR Registrant: ${clientEmail}`,
-        metadata: { initialShippingAddress: shippingAddress || 'Form Input' },
+        metadata: { initialShippingAddress: shippingAddress },
       });
     }
 
@@ -45,13 +45,15 @@ export async function POST(request: Request) {
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
+    // NOTE: shipping_address_collection intentionally removed. The address
+    // typed on our own form (above) is now the ONLY address that can exist
+    // for this entry — Stripe no longer gets its own separate address field,
+    // which is what previously let two different addresses be submitted for
+    // one entry.
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'setup',
       customer: stripeCustomer.id,
-      shipping_address_collection: {
-        allowed_countries: ['US', 'CA', 'GB', 'AU'],
-      },
       success_url: `${domainUrl}/?setup=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${domainUrl}/?setup=cancel`,
       metadata: {
@@ -59,31 +61,20 @@ export async function POST(request: Request) {
         size: String(size),
         quantity: String(quantityChosen || 1),
         email: clientEmail,
-        address: shippingAddress || 'Collected via Stripe Checkout',
+        address: shippingAddress,
         registrationType: isWaitlistMode ? 'WAITLIST_BACKORDER' : 'STANDARD_RAFFLE',
       },
     });
 
     const intentPayload = JSON.stringify({
-      email: clientEmail,
-      variant,
-      size,
-      shippingAddress: shippingAddress || 'Form Input Field Entry',
-      registeredAt: timestamp,
+      email: clientEmail, variant, size, shippingAddress, registeredAt: timestamp,
     });
     await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
     await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), 1);
 
-    // Archived immediately — the admin ledger no longer waits for a draw
-    // to run before an in-progress checkout becomes visible.
     await archiveEntry(redis, {
-      email: clientEmail,
-      variant,
-      size,
-      shippingAddress: shippingAddress || 'Form Input Field Entry',
-      id: stripeCustomer.id,
-      registeredAt: timestamp,
-      type: 'INTENT_STARTED',
+      email: clientEmail, variant, size, shippingAddress,
+      id: stripeCustomer.id, registeredAt: timestamp, type: 'INTENT_STARTED',
     });
 
     return NextResponse.json({ success: true, sessionUrl: session.url });

@@ -7,13 +7,10 @@ export async function GET(request: Request) {
   try {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ results: [] });
-
     const url = new URL(request.url);
     const query = (url.searchParams.get('q') || '').trim().toLowerCase();
     if (!query) return NextResponse.json({ results: [] });
 
-    // Scans the FULL permanent archive — only runs when an admin actually
-    // types a search, never on automatic polling, keeping command usage low.
     const allRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     const matches = allRaw
       .map((item) => safeParseRedisItem<any>(item))

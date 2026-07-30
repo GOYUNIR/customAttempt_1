@@ -1,5 +1,22 @@
 import { buildStorefrontConfig } from './lib/storefront-config';
 
+// ============================================================
+// GOYUNIR CONFIG — THE ONLY FILE YOU SHOULD EVER NEED TO TOUCH
+// ============================================================
+// Everything about products, pricing, drop timing, and site copy lives
+// here. You should never need to open any other code file to run the
+// site day to day.
+//
+// TIMEZONE: All times below are in the timezone you set (default: PST /
+// "America/Los_Angeles"). You can change it once here and every countdown
+// updates automatically.
+//
+// IMPORTANT — the automatic charge cron in vercel.json runs on Vercel's
+// servers, which only understand UTC, not PST. If you change the draw
+// time below, you must ALSO update the "schedule" line in vercel.json to
+// the matching UTC hour (see README.md for the conversion table).
+// ============================================================
+
 export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   themeColors: {
     primaryBackground: '#0a0a0a',
@@ -12,33 +29,37 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
   },
 
-  // ============================================
-  // DROP SCHEDULE
-  // mode: 'weekly' auto-repeats every week at the day/time below (great for
-  // a 52-week / 13-per-week cadence). mode: 'fixed' uses one exact date —
-  // switch to this for special one-off drops.
-  // IMPORTANT: this must match the cron schedule in vercel.json, or the
-  // countdown and the actual auto-charge will disagree.
-  // ============================================
+  // ============================================================
+  // GLOBAL DROP SCHEDULE — applies to every product UNLESS that product
+  // has its own "customDropSchedule" set (see the product examples below).
+  // ============================================================
   dropSchedule: {
-    mode: 'weekly',
+    mode: 'weekly',                    // 'weekly' repeats forever. 'fixed' uses one exact date/time below.
+    timezone: 'America/Los_Angeles',   // Change to your timezone, e.g. 'America/New_York', 'Europe/London'.
     targetEndDateTime: '2026-07-27T19:30:00', // only used when mode is 'fixed'
-    drawDayOfWeekUTC: 6, // Saturday
-    drawHourUTC: 4, // 4:00 UTC — adjust to your audience's local midnight
-    drawMinuteUTC: 0,
+    drawDayOfWeek: 6,                  // 0=Sunday, 1=Monday, 2=Tuesday, 3=Wed, 4=Thu, 5=Fri, 6=Saturday
+    drawHour: 21,                      // 0-23, local to the timezone above (21 = 9:00 PM)
+    drawMinute: 0,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
-    daysLabel: 'd',
-    hoursLabel: 'h',
-    minutesLabel: 'm',
-    secondsLabel: 's',
-    winnersPer50ml: 10,
-    winnersPer100ml: 5,
+    daysLabel: 'd', hoursLabel: 'h', minutesLabel: 'm', secondsLabel: 's',
+    winnersPer50ml: 10,                // how many 50ml winners get picked and charged each drop
+    winnersPer100ml: 5,                // how many 100ml winners get picked and charged each drop
   },
 
+  // ============================================================
+  // BOTTLE ANIMATION
+  // totalFramesToLoad: how many rotation photos you have. Name your image
+  // files PREFIX_1.jpg through PREFIX_N.jpg in /public/images/ (PREFIX is
+  // set per-product below). Use 30-60 for a smooth spin.
+  // spinCyclesTopToCheckout: how many full spins happen while someone
+  // scrolls from the top of the page down to the entry form. Raise this
+  // number to make the bottle spin faster/more.
+  // ============================================================
   animationMechanics: {
-    totalFramesToLoad: 4, // bump to 30-60 for production, matching your image count
+    totalFramesToLoad: 4,
     maxRotationDegrees: 360,
     spinReverseOnAlternatingProgress: true,
+    spinCyclesTopToCheckout: 6,
   },
 
   raffleRegistrationForm: {
@@ -58,19 +79,21 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ctaLabel: '↓ Scroll To Explore',
   },
 
-  // ============================================
-  // SOCIAL PROOF
-  // baseCount: your honest floor number. Real confirmed entries add on top
-  // automatically. autoIncrementEnabled adds small organic-looking ticks
-  // from real visitor activity — set to false any time for pure real numbers.
-  // Resets to baseCount after every draw automatically.
-  // ============================================
+  // ============================================================
+  // SOCIAL PROOF COUNTER ("X people entered")
+  // baseCount: your honest starting floor number. Real confirmed entries
+  // are added to this automatically and always accurately.
+  // autoIncrementEnabled: turn on/off a small extra "organic looking"
+  // number that ticks up on its own from real visitor activity, purely
+  // for hype. Set to false any time for 100% real numbers only.
+  // Resets to baseCount automatically after every draw.
+  // ============================================================
   socialProof: {
     label: 'Limited drop access',
     baseCount: 0,
     caption: 'Hype is compounding fast—reserve now before inventory closes.',
     autoIncrementEnabled: true,
-    autoIncrementChancePerHeartbeat: 0.15,
+    autoIncrementChancePerHeartbeat: 0.15, // 0 = never, 1 = every single heartbeat (~every 25s per visitor)
     autoIncrementAmount: 1,
   },
 
@@ -82,11 +105,11 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
   },
 
-  // ============================================
-  // CATALOG PAGE CONTENT
-  // Shows up automatically on the /catalog page as tappable tiles.
-  // image: path under /public/images/. Leave blank for a placeholder tile.
-  // ============================================
+  // ============================================================
+  // CATALOG PAGE — CLOTHING / UPCOMING ITEMS (not raffled, just shown)
+  // Shows up as tappable tiles on the /catalog page automatically.
+  // image: path under /public/images/. Leave off for a placeholder tile.
+  // ============================================================
   catalogPreview: {
     upcomingDrops: [
       { name: 'GOYUNIR Heavyweight Tee — Vol. 1', status: 'Upcoming', eta: 'Late 2026', image: '/images/tee-vol1.jpg', description: 'A heavyweight cotton tee with a raised GOYUNIR emblem across the chest.' },
@@ -94,17 +117,41 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ],
     archiveScents: [
       { name: 'Crimson Static', status: 'Archived', image: '/images/crimson-static.jpg', description: 'A discontinued profile built around raw saffron and dark cassis.' },
-      { name: 'Glass Amber', status: 'Archived', image: '/images/glass-amber.jpg', description: 'A transparent, resinous amber note with a cold mineral finish.' },
     ],
   },
 
-  // ============================================
-  // PRODUCTS
-  // Copy an existing block below to add a new perfume.
-  // `prefix` must match image files in /public/images/ named
-  // PREFIX_1.jpg through PREFIX_N.jpg (N = totalFramesToLoad above).
-  // `stripeId50ml` / `stripeId100ml` must be real Stripe Price IDs.
-  // ============================================
+  // ============================================================
+  // PRODUCTS — YOUR RAFFLED PERFUMES
+  // Copy an entire { ... } block below to add a new perfume.
+  //
+  // REQUIRED FIELDS:
+  //   id             — unique short code, never reuse an old one, e.g. 'p3'
+  //   name           — display name
+  //   slug           — used in the share link, e.g. 'elysian-white' becomes
+  //                    yoursite.com/elysian-white — lowercase, no spaces
+  //   prefix         — must match your image files: PREFIX_1.jpg ... PREFIX_N.jpg
+  //   stripeId50ml / stripeId100ml — real Stripe Price IDs from your Stripe Dashboard
+  //   isActive       — false hides it from the site entirely (no deploy-free
+  //                    toggle for this one — for LIVE archive/unarchive
+  //                    without a deploy, use the Admin Portal instead)
+  //
+  // OPTIONAL FIELDS (safe to delete if you don't need them):
+  //   customDropSchedule       — gives THIS product its own countdown,
+  //                              independent of the global one above.
+  //                              Only include the fields you want to
+  //                              override; anything you omit uses the
+  //                              global dropSchedule.
+  //   scheduledArchiveAt       — 'YYYY-MM-DDTHH:MM:SS' wall-clock time
+  //                              (in the schedule's timezone). When this
+  //                              time passes, the product automatically
+  //                              moves to the Catalog page's archive —
+  //                              no admin action needed.
+  //   scheduledUnarchiveAt     — same format. When this time passes, an
+  //                              archived product automatically comes back
+  //                              as an active, enterable drop.
+  //   catalogImage             — image shown once this product is archived
+  //                              onto the /catalog page.
+  // ============================================================
   productCatalog: [
     {
       id: 'p1',
@@ -124,6 +171,11 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
         { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
       ],
+      // Example: this product draws every Saturday at 9pm PST (uses the
+      // global schedule above, no override needed) — this block is left
+      // here commented as a template for when you want a DIFFERENT time
+      // for just this one product:
+      // customDropSchedule: { drawDayOfWeek: 5, drawHour: 18, drawMinute: 30 },
     },
     {
       id: 'p2',

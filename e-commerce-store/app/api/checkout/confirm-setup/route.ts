@@ -1,14 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
-  createStripeClient,
-  archiveEntry,
-  emailBlockKey,
-  cardBlockKey,
-  poolStatField,
-  POOL_STATS_KEY,
-  PROCESSED_SESSIONS_KEY,
-  cleanupMatchingIntent,
+  createRedisClient, createStripeClient, archiveEntry, emailBlockKey, cardBlockKey,
+  poolStatField, POOL_STATS_KEY, PROCESSED_SESSIONS_KEY, cleanupMatchingIntent,
 } from '@/lib/server-config';
 import Stripe from 'stripe';
 
@@ -19,25 +12,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const sessionId = String(body?.sessionId ?? '').trim();
-    if (!sessionId) {
-      return NextResponse.json({ error: 'Missing Stripe checkout session ID.' }, { status: 400 });
-    }
-    if (!stripe || !redis) {
-      return NextResponse.json({ error: 'Critical downstream database infrastructure offline.' }, { status: 500 });
-    }
+    if (!sessionId) return NextResponse.json({ error: 'Missing Stripe checkout session ID.' }, { status: 400 });
+    if (!stripe || !redis) return NextResponse.json({ error: 'Critical downstream database infrastructure offline.' }, { status: 500 });
 
     const alreadyProcessed = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (alreadyProcessed === 1) {
-      return NextResponse.json({
-        success: true,
-        message: 'Your payment method is saved and your raffle entry is confirmed.',
-      });
+      return NextResponse.json({ success: true, message: 'Your payment method is saved and your raffle entry is confirmed.' });
     }
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ['setup_intent'],
-    });
-
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['setup_intent'] });
     const metadata = session.metadata ?? {};
     const variant = String(metadata.variant ?? '').trim();
     const size = String(metadata.size ?? '').trim();
@@ -51,12 +34,8 @@ export async function POST(request: Request) {
     }
 
     const setupIntent = session.setup_intent as Stripe.SetupIntent | null | undefined;
-    const paymentMethodId = typeof setupIntent === 'object' && setupIntent !== null
-      ? String(setupIntent.payment_method ?? '')
-      : '';
-    if (!paymentMethodId) {
-      return NextResponse.json({ error: 'Setup flow did not complete with a valid payment method.' }, { status: 400 });
-    }
+    const paymentMethodId = typeof setupIntent === 'object' && setupIntent !== null ? String(setupIntent.payment_method ?? '') : '';
+    if (!paymentMethodId) return NextResponse.json({ error: 'Setup flow did not complete with a valid payment method.' }, { status: 400 });
 
     let cardFingerprint = '';
     let cardLast4 = '';
@@ -68,55 +47,29 @@ export async function POST(request: Request) {
 
     const emailKey = emailBlockKey(variant, size);
     const cardKey = cardBlockKey(variant, size);
-
     const [isEmailDuplicate, isCardDuplicate] = await Promise.all([
       redis.sismember(emailKey, email),
       cardFingerprint ? redis.sismember(cardKey, cardFingerprint) : Promise.resolve(0),
     ]);
 
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
-
-    // Whatever happens next, this checkout attempt is resolved — clean up
-    // its matching "in progress" intent so it never lingers and gets
-    // double-counted as an abandoned cart at draw time.
     await cleanupMatchingIntent(redis, variant, size, email);
 
-    if (isEmailDuplicate === 1) {
-      await archiveEntry(redis, {
-        email, variant, size, shippingAddress: address,
-        id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED',
-      });
+    if (isEmailDuplicate === 1 || isCardDuplicate === 1) {
+      await archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED' });
       return NextResponse.json({
         success: true,
-        message: 'This email already has a confirmed entry for this drop. Your card is saved either way.',
-      });
-    }
-    if (isCardDuplicate === 1) {
-      await archiveEntry(redis, {
-        email, variant, size, shippingAddress: address,
-        id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED',
-      });
-      return NextResponse.json({
-        success: true,
-        message: 'This payment card is already registered to an entry for this drop.',
+        message: isEmailDuplicate === 1
+          ? 'This email already has a confirmed entry for this drop. Your card is saved either way.'
+          : 'This payment card is already registered to an entry for this drop.',
       });
     }
 
     const poolKey = `drop_pool:${variant}:${size}`;
     const registrationPayload = {
-      email,
-      variant,
-      size,
-      shippingAddress: address,
-      address,
-      quantity,
-      customerId,
-      stripeCustomerId: customerId,
-      paymentMethodId,
-      cardFingerprint,
-      cardLast4,
-      registeredAt: Date.now(),
-      source: 'redis' as const,
+      email, variant, size, shippingAddress: address, address, quantity,
+      customerId, stripeCustomerId: customerId, paymentMethodId, cardFingerprint, cardLast4,
+      registeredAt: Date.now(), source: 'redis' as const,
     };
 
     await Promise.all([
@@ -124,16 +77,10 @@ export async function POST(request: Request) {
       redis.sadd(emailKey, email),
       cardFingerprint ? redis.sadd(cardKey, cardFingerprint) : Promise.resolve(),
       redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1),
-      archiveEntry(redis, {
-        email, variant, size, shippingAddress: address,
-        id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED',
-      }),
+      archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED' }),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      message: 'Your payment method is saved and your raffle entry is confirmed.',
-    });
+    return NextResponse.json({ success: true, message: 'Your payment method is saved and your raffle entry is confirmed.' });
   } catch (error: any) {
     console.error('❌ Confirm Setup Internal Pipeline Failure:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });

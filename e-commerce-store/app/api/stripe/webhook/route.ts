@@ -1,14 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
-  createStripeClient,
-  archiveEntry,
-  emailBlockKey,
-  cardBlockKey,
-  poolStatField,
-  POOL_STATS_KEY,
-  PROCESSED_SESSIONS_KEY,
-  cleanupMatchingIntent,
+  createRedisClient, createStripeClient, archiveEntry, emailBlockKey, cardBlockKey,
+  poolStatField, POOL_STATS_KEY, PROCESSED_SESSIONS_KEY, cleanupMatchingIntent,
 } from '@/lib/server-config';
 import Stripe from 'stripe';
 
@@ -36,41 +29,29 @@ export async function POST(request: Request) {
     }
   }
 
-  if (event.type !== 'checkout.session.completed') {
-    return NextResponse.json({ received: true });
-  }
+  if (event.type !== 'checkout.session.completed') return NextResponse.json({ received: true });
 
   const session = event.data.object as any;
   const sessionId = String(session.id || '');
-
   const alreadyProcessed = sessionId ? await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId) : 0;
-  if (alreadyProcessed === 1) {
-    return NextResponse.json({ received: true, note: 'Already processed by confirm-setup.' });
-  }
+  if (alreadyProcessed === 1) return NextResponse.json({ received: true, note: 'Already processed by confirm-setup.' });
 
   const metadata = session.metadata ?? {};
   const variant = String(metadata.variant || '').trim();
   const size = String(metadata.size || '').trim();
   const email = String(metadata.email || session.customer_details?.email || '').trim().toLowerCase();
   const customerId = String(session.customer || '');
-
-  let address = String(metadata.address || metadata.shippingAddress || '').trim();
-  if ((!address || address === 'Collected via Stripe Checkout') && session.shipping_details?.address) {
-    const addr = session.shipping_details.address;
-    address = `${addr.line1 || ''}, ${addr.city || ''}, ${addr.state || ''} ${addr.postal_code || ''}`;
-  }
+  // Address comes ONLY from metadata now — Stripe no longer collects its
+  // own separate shipping address for this flow.
+  const address = String(metadata.address || '').trim();
 
   let paymentMethodId = '';
   const setupIntentId = typeof session.setup_intent === 'string' ? session.setup_intent : session.setup_intent?.id || '';
   if (setupIntentId) {
     try {
       const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
-      paymentMethodId = typeof setupIntent.payment_method === 'string'
-        ? setupIntent.payment_method
-        : setupIntent.payment_method?.id || '';
-    } catch {
-      paymentMethodId = '';
-    }
+      paymentMethodId = typeof setupIntent.payment_method === 'string' ? setupIntent.payment_method : setupIntent.payment_method?.id || '';
+    } catch { paymentMethodId = ''; }
   }
 
   if (!variant || !size || !address || !email || !customerId) {
@@ -90,7 +71,6 @@ export async function POST(request: Request) {
 
   const emailKey = emailBlockKey(variant, size);
   const cardKey = cardBlockKey(variant, size);
-
   const [isEmailDuplicate, isCardDuplicate] = await Promise.all([
     redis.sismember(emailKey, email),
     cardFingerprint ? redis.sismember(cardKey, cardFingerprint) : Promise.resolve(0),
@@ -102,38 +82,22 @@ export async function POST(request: Request) {
   if (isEmailDuplicate !== 1 && isCardDuplicate !== 1) {
     const poolKey = `drop_pool:${variant}:${size}`;
     const payload = JSON.stringify({
-      email,
-      variant,
-      size,
-      shippingAddress: address,
-      address,
-      quantity: 1,
+      email, variant, size, shippingAddress: address, address, quantity: 1,
       paymentMethodId: paymentMethodId || 'vaulted_token_hold',
-      customerId,
-      stripeCustomerId: customerId,
-      cardFingerprint,
-      cardLast4,
+      customerId, stripeCustomerId: customerId, cardFingerprint, cardLast4,
       id: session.id || `session_${Math.random().toString(36).substring(2, 7)}`,
-      price: 120,
       registeredAt: new Date().toISOString(),
       type: metadata.registrationType === 'WAITLIST_BACKORDER' ? 'WAITLIST' : 'SUBMISSION',
     });
-
     await Promise.all([
       redis.rpush(poolKey, payload),
       redis.sadd(emailKey, email),
       cardFingerprint ? redis.sadd(cardKey, cardFingerprint) : Promise.resolve(),
       redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1),
-      archiveEntry(redis, {
-        email, variant, size, shippingAddress: address,
-        id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED',
-      }),
+      archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED' }),
     ]);
   } else {
-    await archiveEntry(redis, {
-      email, variant, size, shippingAddress: address,
-      id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED',
-    });
+    await archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED' });
   }
 
   return NextResponse.json({ received: true });

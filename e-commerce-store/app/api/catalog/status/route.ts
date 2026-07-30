@@ -1,31 +1,62 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getCatalogArchiveRecords } from '@/lib/server-config';
+import {
+  createRedisClient, getCatalogArchiveRecords, archiveProductToCatalog, unarchiveProductFromCatalog,
+} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getVisibleProducts } from '@/lib/storefront-config';
+import { resolveProductSchedule, scheduledDateToTimestamp } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const redis = createRedisClient();
-  const archivedFromRedis = redis ? await getCatalogArchiveRecords(redis) : [];
-  const archivedProductIds = new Set(archivedFromRedis.map((r) => r.productId));
+  if (!redis) {
+    return NextResponse.json({
+      activeDrops: GOYUNIR_STORE_SUITE.productCatalog.filter((p) => p.isActive !== false),
+      upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
+      archiveScents: GOYUNIR_STORE_SUITE.catalogPreview.archiveScents,
+      archivedProductIds: [],
+    });
+  }
 
-  const activeDrops = getVisibleProducts(GOYUNIR_STORE_SUITE)
-    .filter((p) => !archivedProductIds.has(p.id))
-    .map((p) => ({ id: p.id, name: p.name, tagline: p.tagline, desc: p.desc }));
+  const now = Date.now();
+  const archivedRecords = await getCatalogArchiveRecords(redis);
+  const archivedIds = new Set(archivedRecords.map((r) => r.productId));
 
-  const dynamicArchive = archivedFromRedis.map((r) => ({
-    name: r.name,
-    status: 'Archived',
-    image: r.image,
-    description: r.description,
-    availableFrom: r.availableFrom,
-    availableUntil: r.archivedAt,
-  }));
+  // Self-healing scheduled archive/unarchive check.
+  for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
+    const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
+    if (product.scheduledArchiveAt && !archivedIds.has(product.id)) {
+      const ts = scheduledDateToTimestamp(product.scheduledArchiveAt, schedule.timezone);
+      if (now >= ts) {
+        await archiveProductToCatalog(redis, {
+          productId: product.id, name: product.name,
+          image: product.catalogImage, description: product.desc,
+          availableFrom: 'See product schedule', archivedAt: new Date().toISOString(),
+        });
+        archivedIds.add(product.id);
+      }
+    }
+    if (product.scheduledUnarchiveAt && archivedIds.has(product.id)) {
+      const ts = scheduledDateToTimestamp(product.scheduledUnarchiveAt, schedule.timezone);
+      if (now >= ts) {
+        await unarchiveProductFromCatalog(redis, product.id);
+        archivedIds.delete(product.id);
+      }
+    }
+  }
+
+  const activeDrops = GOYUNIR_STORE_SUITE.productCatalog.filter((p) => p.isActive !== false && !archivedIds.has(p.id));
+  const dynamicArchive = (await getCatalogArchiveRecords(redis))
+    .filter((r) => archivedIds.has(r.productId))
+    .map((r) => ({
+      name: r.name, status: 'Archived', image: r.image, description: r.description,
+      availableFrom: r.availableFrom, availableUntil: r.archivedAt,
+    }));
 
   return NextResponse.json({
     activeDrops,
     upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
     archiveScents: [...GOYUNIR_STORE_SUITE.catalogPreview.archiveScents, ...dynamicArchive],
+    archivedProductIds: Array.from(archivedIds),
   });
 }
