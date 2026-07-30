@@ -1,10 +1,9 @@
-import { Suspense } from 'react';
-import Storefront from '@/components/Storefront';
+import { redirect } from 'next/navigation';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getVisibleProducts } from '@/lib/storefront-config';
 
 export default function HomePage() {
-  return (
-    <Suspense fallback={null}>
-      <Storefront />
-    </Suspense>
-  );
+  const first = getVisibleProducts(GOYUNIR_STORE_SUITE)[0];
+  if (first?.slug) redirect(`/${first.slug}`);
+  return null;
 }

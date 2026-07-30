@@ -6,10 +6,10 @@ export interface StorefrontNote {
 
 export interface DropScheduleConfig {
   mode: 'fixed' | 'weekly';
-  timezone: string; // IANA name, e.g. 'America/Los_Angeles'
-  targetEndDateTime: string; // wall-clock in `timezone`, used when mode is 'fixed'
-  drawDayOfWeek: number; // 0=Sun...6=Sat, wall-clock in `timezone`, used when mode is 'weekly'
-  drawHour: number; // 0-23, wall-clock in `timezone`
+  timezone: string;
+  targetEndDateTime: string;
+  drawDayOfWeek: number;
+  drawHour: number;
   drawMinute: number;
   countdownExpiredText: string;
   daysLabel: string;
@@ -35,11 +35,7 @@ export interface StorefrontProduct {
   isActive?: boolean;
   accent?: string;
   notes: StorefrontNote[];
-  // Optional per-product schedule override. Any field you omit falls back
-  // to the global dropSchedule below.
   customDropSchedule?: Partial<DropScheduleConfig>;
-  // Optional auto-archive/unarchive dates, wall-clock in the effective
-  // schedule's timezone. Leave blank to manage archiving manually only.
   scheduledArchiveAt?: string;
   scheduledUnarchiveAt?: string;
   catalogImage?: string;
@@ -53,6 +49,7 @@ export interface CatalogPreviewItem {
   description?: string;
   availableFrom?: string;
   availableUntil?: string;
+  slug?: string;
 }
 
 export interface StorefrontConfig {
@@ -66,6 +63,7 @@ export interface StorefrontConfig {
     textMuted: string;
     checkoutCtaButton: string;
   };
+  availableSizes: string[];
   dropSchedule: DropScheduleConfig;
   animationMechanics: {
     totalFramesToLoad: number;
@@ -178,11 +176,6 @@ const defaultFooter = {
   corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
 };
 
-const defaultCatalogPreview = {
-  upcomingDrops: [] as CatalogPreviewItem[],
-  archiveScents: [] as CatalogPreviewItem[],
-};
-
 function normalizeText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -200,6 +193,7 @@ function normalizeCatalogItems(items: unknown): CatalogPreviewItem[] {
     description: typeof item?.description === 'string' ? item.description : undefined,
     availableFrom: typeof item?.availableFrom === 'string' ? item.availableFrom : undefined,
     availableUntil: typeof item?.availableUntil === 'string' ? item.availableUntil : undefined,
+    slug: typeof item?.slug === 'string' ? item.slug : undefined,
   }));
 }
 
@@ -237,8 +231,13 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     ? input.productCatalog.filter(Boolean).map((product, index) => normalizeProduct(product as any, index))
     : [];
 
+  const sizes = Array.isArray(input.availableSizes) && input.availableSizes.length > 0
+    ? input.availableSizes.map(String)
+    : ['50ml'];
+
   return {
     themeColors: { ...defaultThemeColors, ...(input.themeColors ?? {}) },
+    availableSizes: sizes,
     dropSchedule: { ...defaultDropSchedule, ...(input.dropSchedule ?? {}) },
     animationMechanics: { ...defaultAnimationMechanics, ...(input.animationMechanics ?? {}) },
     raffleRegistrationForm: { ...defaultFormCopy, ...(input.raffleRegistrationForm ?? {}) },
@@ -246,8 +245,8 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },
     brandFooterData: { ...defaultFooter, ...(input.brandFooterData ?? {}) },
     catalogPreview: {
-      upcomingDrops: normalizeCatalogItems(input.catalogPreview?.upcomingDrops) ?? defaultCatalogPreview.upcomingDrops,
-      archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents) ?? defaultCatalogPreview.archiveScents,
+      upcomingDrops: normalizeCatalogItems(input.catalogPreview?.upcomingDrops),
+      archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents),
     },
     productCatalog,
   };
@@ -268,17 +267,14 @@ export function getProductStripeId(product: StorefrontProduct, size: string): st
 export function getWinnerCount(config: StorefrontConfig, size: string): number {
   return size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;
 }
+export function getAvailableSizes(config: StorefrontConfig): string[] {
+  return config.availableSizes?.length ? config.availableSizes : ['50ml'];
+}
 
 export function resolveProductSchedule(config: StorefrontConfig, product: StorefrontProduct): DropScheduleConfig {
   return { ...config.dropSchedule, ...(product.customDropSchedule ?? {}) };
 }
 
-// ============================================
-// TIMEZONE-AWARE SCHEDULING
-// Converts a wall-clock date/time in a given IANA timezone (e.g. PST) into
-// an accurate UTC timestamp, using only the built-in Intl API — no extra
-// date library needed.
-// ============================================
 function zonedTimeToTimestamp(opts: { timezone: string; year: number; month: number; day: number; hour: number; minute: number }): number {
   const { timezone, year, month, day, hour, minute } = opts;
   const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
@@ -337,7 +333,6 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   return candidate;
 }
 
-// Back-compat helper for the global schedule specifically.
 export function getNextDrawTimestamp(config: StorefrontConfig): number {
   return getNextDrawTimestampForSchedule(config.dropSchedule);
 }
