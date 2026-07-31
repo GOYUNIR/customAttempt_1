@@ -47,8 +47,15 @@ export default function CatalogPage() {
   }, []);
 
   const handleTileClick = (item: CatalogItem) => {
-    if (item.slug) {
-      window.location.href = `/${item.slug}`;
+    let slug = item.slug;
+    if (!slug) {
+      const match = GOYUNIR_STORE_SUITE.productCatalog.find(
+        (p) => p.name.toLowerCase() === item.name.toLowerCase(),
+      );
+      slug = match?.slug;
+    }
+    if (slug) {
+      window.location.href = `/${slug}`;
       return;
     }
     setSelectedItem(item);
@@ -95,12 +102,6 @@ export default function CatalogPage() {
               {item.status}
               {item.eta ? ` · ${item.eta}` : ''}
             </div>
-            {(item.availableFrom || item.availableUntil) && (
-              <div style={{ fontSize: '9px', color: '#555', marginTop: '4px' }}>
-                {item.availableFrom || '?'} —{' '}
-                {item.availableUntil ? new Date(item.availableUntil).toLocaleDateString() : '?'}
-              </div>
-            )}
           </div>
         </button>
       ))}
@@ -132,7 +133,7 @@ export default function CatalogPage() {
         </Link>
         <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
-          Current allocations, upcoming pieces, and past scent variants — tap any archived scent to open its page.
+          Tap an archived scent to open its page and save a spot for the return.
         </p>
 
         {activeDrops.length > 0 && (
@@ -150,7 +151,11 @@ export default function CatalogPage() {
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
               {activeDrops.map((drop) => (
-                <Link key={drop.id} href={drop.slug ? `/${drop.slug}` : '/'} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <Link
+                  key={drop.id}
+                  href={drop.slug ? `/${drop.slug}` : '/'}
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
                   <div
                     style={{
                       background: configPalette.cardBackground,
@@ -240,14 +245,7 @@ export default function CatalogPage() {
               <h3 style={{ fontSize: '18px', fontFamily: 'serif', margin: '0 0 4px 0' }}>{selectedItem.name}</h3>
               <div style={{ fontSize: '11px', color: configPalette.textMuted, marginBottom: '12px' }}>
                 {selectedItem.status}
-                {selectedItem.eta ? ` · ${selectedItem.eta}` : ''}
               </div>
-              {(selectedItem.availableFrom || selectedItem.availableUntil) && (
-                <div style={{ fontSize: '11px', color: '#888', marginBottom: '12px' }}>
-                  Available: {selectedItem.availableFrom || '?'} —{' '}
-                  {selectedItem.availableUntil ? new Date(selectedItem.availableUntil).toLocaleDateString() : '?'}
-                </div>
-              )}
               {selectedItem.description && (
                 <p style={{ fontSize: '13px', lineHeight: '1.6', color: '#ccc', margin: '0 0 20px 0' }}>
                   {selectedItem.description}

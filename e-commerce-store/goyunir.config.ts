@@ -17,9 +17,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   availableSizes: ['50ml'],
 
   dropSchedule: {
-    mode: 'weekly',
+    mode: 'fixed',//weekly/fixed
     timezone: 'America/Los_Angeles',
-    targetEndDateTime: '2026-07-27T19:30:00',
+    targetEndDateTime: '2026-07-31T2:20:00',
     drawDayOfWeek: 6,
     drawHour: 21,
     drawMinute: 0,

@@ -41,7 +41,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     : false;
 
   const sizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
-  const defaultSize = sizes.includes('100ml') && searchParams?.get('size') === '100ml' ? '100ml' : sizes[0] || '50ml';
+  const defaultSize =
+    sizes.includes('100ml') && searchParams?.get('size') === '100ml' ? '100ml' : sizes[0] || '50ml';
 
   const [activeProductIndex, setActiveProductIndex] = useState(() => {
     if (requestedProduct && !requestedIsArchived) {
@@ -55,7 +56,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [selectedSize, setSelectedSize] = useState(defaultSize);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [activeMenuTab, setActiveMenuTab] = useState('story');
   const [form, setForm] = useState<EntryFormState>({ email: '', shippingAddress: '', quantity: 1 });
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -66,7 +66,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   const heroContent = GOYUNIR_STORE_SUITE.heroContent;
 
-  // If URL is an archived product, still show THAT product (enterable for return)
   const currentProduct =
     requestedProduct && requestedIsArchived
       ? requestedProduct
@@ -75,7 +74,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
   const effectiveSchedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct);
 
-  // Keep URL in sync with active product (shareable links)
   useEffect(() => {
     if (typeof window === 'undefined' || !currentProduct?.slug) return;
     const path = `/${currentProduct.slug}`;
@@ -108,7 +106,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (feedbackStatus === 'loading') {
       const stallTimer = setTimeout(() => {
         setFeedbackStatus('error');
-        setFeedbackMessage('This is taking longer than expected. Check your connection and try again — if it persists, contact support.');
+        setFeedbackMessage('This is taking longer than expected. Check your connection and try again.');
       }, 12000);
       return () => clearTimeout(stallTimer);
     }
@@ -260,7 +258,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     setIsProcessing(true);
     setFeedbackStatus('loading');
-    setFeedbackMessage(timeLeft.expired || isCurrentArchived ? 'Saving your entry for the next window…' : 'Securing your entry…');
+    setFeedbackMessage(
+      timeLeft.expired || isCurrentArchived ? 'Saving your entry for the next window…' : 'Securing your entry…',
+    );
     try {
       const response = await fetch('/api/checkout', {
         method: 'POST',
@@ -365,8 +365,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               borderRadius: '20px',
               whiteSpace: 'nowrap',
               boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
-              color:
-                feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#9ca3af',
+              color: feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#9ca3af',
               border: `1px solid ${
                 feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#3f3f46'
               }`,
@@ -496,9 +495,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                         ? `1px solid ${configPalette.textMain}`
                         : `1px solid ${configPalette.cardBorder}`,
                     background:
-                      !isCurrentArchived && activeProductIndex === idx
-                        ? configPalette.textMain
-                        : 'transparent',
+                      !isCurrentArchived && activeProductIndex === idx ? configPalette.textMain : 'transparent',
                     color:
                       !isCurrentArchived && activeProductIndex === idx
                         ? configPalette.primaryBackground
@@ -583,7 +580,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             boxSizing: 'border-box',
           }}
         >
-          <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '80px' }}>
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '380px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '24px',
+              marginBottom: '80px',
+            }}
+          >
             <div
               style={{
                 background: '#141416',
@@ -707,7 +713,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 {currentProduct.desc}
               </p>
               <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left' }}>
-                {sizes.length > 1 && (
+                {sizes.length > 1 ? (
                   <div>
                     <label
                       style={{
@@ -741,7 +747,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                               fontSize: '13px',
                               fontWeight: 'bold',
                               cursor: 'pointer',
-                              transition: 'all 0.2s',
                             }}
                           >
                             {sz} — ${displayPrice}
@@ -750,17 +755,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                       })}
                     </div>
                   </div>
-                )}
-                {sizes.length === 1 && (
-                  <div
-                    style={{
-                      textAlign: 'center',
-                      fontSize: '13px',
-                      fontWeight: 'bold',
-                      color: configPalette.textMain,
-                      marginBottom: '4px',
-                    }}
-                  >
+                ) : (
+                  <div style={{ textAlign: 'center', fontSize: '13px', fontWeight: 'bold', marginBottom: '4px' }}>
                     {sizes[0]} — ${getProductPrice(currentProduct, sizes[0])}
                   </div>
                 )}
@@ -850,7 +846,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     fontSize: '14px',
                     cursor: isProcessing ? 'not-allowed' : 'pointer',
                     marginTop: '8px',
-                    transition: 'all 0.2s',
                   }}
                 >
                   {isProcessing
@@ -859,24 +854,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                       ? 'Save Spot for Return / Waitlist'
                       : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText}
                 </button>
-                {feedbackMessage && (
-                  <p
-                    style={{
-                      margin: '12px 0 0 0',
-                      fontSize: '11px',
-                      textAlign: 'center',
-                      fontWeight: 'bold',
-                      color:
-                        feedbackStatus === 'success'
-                          ? '#34c759'
-                          : feedbackStatus === 'error'
-                            ? '#ff3b30'
-                            : '#888',
-                    }}
-                  >
-                    {feedbackMessage}
-                  </p>
-                )}
               </form>
             </motion.div>
           </div>
@@ -888,15 +865,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               borderTop: `1px solid ${configPalette.cardBorder}`,
               paddingTop: '40px',
               color: configPalette.textMuted,
-              fontFamily: 'sans-serif',
               fontSize: '12px',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div>
-                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px 0', letterSpacing: '1px' }}>
-                  CONNECT
-                </p>
+                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px 0' }}>CONNECT</p>
                 <a
                   href={GOYUNIR_STORE_SUITE.brandFooterData.instagramLink}
                   target="_blank"
@@ -915,9 +889,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 </a>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px 0', letterSpacing: '1px' }}>
-                  SUPPORT
-                </p>
+                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px 0' }}>SUPPORT</p>
                 <span style={{ color: '#888', display: 'block', marginBottom: '6px' }}>
                   {GOYUNIR_STORE_SUITE.brandFooterData.supportEmail}
                 </span>
@@ -975,61 +947,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 flexDirection: 'column',
               }}
             >
-              <div
+              <a
+                href="/catalog"
                 style={{
-                  display: 'flex',
-                  gap: '4px',
-                  borderBottom: `1px solid ${configPalette.cardBorder}`,
-                  paddingBottom: '10px',
                   marginTop: '20px',
+                  color: configPalette.textMain,
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  textDecoration: 'none',
                 }}
               >
-                <button
-                  onClick={() => setActiveMenuTab('story')}
-                  style={{
-                    flex: 1,
-                    padding: '6px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: activeMenuTab === 'story' ? '#222' : 'transparent',
-                    color: activeMenuTab === 'story' ? configPalette.textMain : '#666',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Story
-                </button>
-                <a
-                  href="/catalog"
-                  style={{
-                    flex: 1,
-                    padding: '6px',
-                    borderRadius: '6px',
-                    textAlign: 'center',
-                    textDecoration: 'none',
-                    background: 'transparent',
-                    color: '#666',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Catalog
-                </a>
-              </div>
+                Catalog →
+              </a>
               <div style={{ flex: 1, overflowY: 'auto', padding: '20px 0' }}>
                 <h4 style={{ fontFamily: 'serif', fontSize: '18px', margin: '0 0 10px 0' }}>Our Scent Identity</h4>
                 <p style={{ color: configPalette.textMuted, fontSize: '12px', lineHeight: '1.6' }}>
-                  GOYUNIR engineering blends raw extraction mechanics with hyper-modern chemical balancing to forge
-                  fragrances that dominate social timelines and capture individual prestige.
+                  GOYUNIR engineering blends raw extraction mechanics with hyper-modern chemical balancing.
                 </p>
-              </div>
-              <div style={{ color: '#333', fontSize: '10px', borderTop: `1px solid ${configPalette.cardBorder}`, paddingTop: '15px' }}>
-                GOYUNIR PRODUCTION SECURED ENGINE
               </div>
             </motion.div>
           </motion.div>

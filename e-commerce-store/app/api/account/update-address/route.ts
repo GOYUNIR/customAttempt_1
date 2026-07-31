@@ -3,6 +3,7 @@ import {
   createRedisClient,
   findPoolEntriesByEmail,
   safeParseRedisItem,
+  archiveEntry,
   ARCHIVE_LEDGER_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -49,6 +50,16 @@ export async function POST(request: Request) {
         }
       }
     } catch {}
+
+    await archiveEntry(redis, {
+      email,
+      variant,
+      size,
+      shippingAddress: newAddress,
+      id: String(target.parsed.customerId || target.parsed.stripeCustomerId || 'n/a'),
+      registeredAt: new Date().toISOString(),
+      type: 'ADDRESS_UPDATED',
+    });
 
     return NextResponse.json({ success: true, message: 'Shipping address updated.' });
   } catch (err: any) {
