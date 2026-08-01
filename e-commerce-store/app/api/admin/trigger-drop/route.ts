@@ -10,13 +10,13 @@ import {
   poolStatField,
   emailBlockKey,
   cardBlockKey,
-  SOCIAL_PROOF_BOOST_KEY,
   getOrSeedLiveState,
   saveLiveState,
   archiveProductToCatalog,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
+import { sendWinnerEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const redis = createRedisClient();
     const stripe = createStripeClient();
     if (!redis || !stripe) {
-      return NextResponse.json({ error: 'System processing nodes offline.' }, { status: 500 });
+      return NextResponse.json({ error: 'System offline.' }, { status: 500 });
     }
 
     let targetPoolSignature = 'ALL_POOLS';
@@ -34,21 +34,12 @@ export async function POST(request: Request) {
     try {
       const body = await request.json();
       targetPoolSignature = body.targetPool || 'ALL_POOLS';
-      inputPassword = body.verificationKey || '';
+      inputPassword = body.verificationKey || body.password || '';
     } catch {}
 
     const masterPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD;
-    if (!masterPassword) {
-      return NextResponse.json(
-        { error: 'Server misconfigured: ADMIN_BASIC_AUTH_PASSWORD is not set.' },
-        { status: 500 },
-      );
-    }
-    if (inputPassword !== masterPassword) {
-      return NextResponse.json(
-        { error: '⚠️ ACCESS REJECTED: Invalid master operation password.' },
-        { status: 403 },
-      );
+    if (!masterPassword || inputPassword !== masterPassword) {
+      return NextResponse.json({ error: 'Invalid password.' }, { status: 403 });
     }
 
     const processedWinners: any[] = [];
@@ -57,7 +48,7 @@ export async function POST(request: Request) {
     if (targetPoolSignature !== 'ALL_POOLS') {
       allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
-    if (!allPoolKeys || allPoolKeys.length === 0) {
+    if (!allPoolKeys?.length) {
       return NextResponse.json({
         success: true,
         drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] },
@@ -68,16 +59,15 @@ export async function POST(request: Request) {
       try {
         const listLength = await redis.llen(poolKey);
         const keyParts = poolKey.split(':');
-        const productName = String(keyParts[1] || 'Elysian White');
+        const productName = String(keyParts[1] || '');
         const productSize = String(keyParts[2] || '50ml');
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
-        if (!productDefinition) continue;
+        if (!productDefinition || listLength === 0) continue;
 
         const priceCents = Math.round(getProductPrice(productDefinition, productSize) * 100);
         const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);
-
-        if (live.inventoryRemaining <= 0 || listLength === 0) continue;
+        if (live.inventoryRemaining <= 0) continue;
 
         const entries = await redis.lrange(poolKey, 0, -1);
         const shuffled = [...entries];
@@ -86,7 +76,6 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // This draw: min(winnersPerDraw, remaining inventory)
         const inventoryLimit = Math.min(live.winnersPerDraw || winnersPerDraw, live.inventoryRemaining);
         let successfulPoolCaptures = 0;
         const remainingEntries: string[] = [];
@@ -127,11 +116,10 @@ export async function POST(request: Request) {
                 off_session: true,
                 confirm: true,
                 receipt_email: winnerEmail,
-                description: `GOYUNIR Lottery Win: ${productName} (${productSize})`,
+                description: `GOYUNIR: ${productName} (${productSize})`,
               });
               grandRevenueChargesCount++;
               successfulPoolCaptures++;
-
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
 
@@ -143,13 +131,23 @@ export async function POST(request: Request) {
                 id: customerId,
                 registeredAt: new Date().toISOString(),
                 type: 'WINNER_CHARGED',
+                shippingStatus: 'PENDING_FULFILLMENT',
               });
+
+              await sendWinnerEmail({
+                to: winnerEmail,
+                product: productName,
+                size: productSize,
+                amountLabel: `$${(priceCents / 100).toFixed(0)}`,
+              });
+
               processedWinners.push({
                 email: winnerEmail,
                 product: productName,
                 size: productSize,
                 shippingAddress,
                 status: 'SUCCESS_CHARGED',
+                shippingStatus: 'PENDING_FULFILLMENT',
               });
             } else {
               remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
@@ -194,11 +192,8 @@ export async function POST(request: Request) {
         live.drawsCompleted = (live.drawsCompleted || 0) + 1;
         await saveLiveState(redis, live);
 
-        // Keep non-winners in pool for next draw
         await redis.del(poolKey);
-        for (const entry of remainingEntries) {
-          await redis.rpush(poolKey, entry);
-        }
+        for (const entry of remainingEntries) await redis.rpush(poolKey, entry);
 
         await redis.del(emailBlockKey(productName, productSize));
         await redis.del(cardBlockKey(productName, productSize));
@@ -250,10 +245,6 @@ export async function POST(request: Request) {
         }
       } catch {}
     }
-
-    try {
-      await redis.set(SOCIAL_PROOF_BOOST_KEY, '0');
-    } catch {}
 
     const drawSummary = {
       executionTime: new Date().toLocaleString(),

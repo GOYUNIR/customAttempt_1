@@ -28,6 +28,7 @@ export interface ArchiveRecord {
   id: string;
   registeredAt: string;
   type: string;
+  shippingStatus?: string;
 }
 
 export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
