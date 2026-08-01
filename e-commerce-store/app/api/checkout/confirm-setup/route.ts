@@ -2,35 +2,38 @@ import { NextResponse } from 'next/server';
 import {
   createRedisClient,
   createStripeClient,
+  safeParseRedisItem,
   archiveEntry,
-  cleanupMatchingIntent,
+  resolveCustomerId,
   emailBlockKey,
   cardBlockKey,
   poolStatField,
   POOL_STATS_KEY,
   PROCESSED_SESSIONS_KEY,
+  cleanupMatchingIntent,
 } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+
+const PROMOS_KEY = 'config:promos';
 
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
     const stripe = createStripeClient();
     if (!redis || !stripe) {
-      return NextResponse.json({ error: 'Database or Stripe offline.' }, { status: 500 });
+      return NextResponse.json({ error: 'System offline.' }, { status: 500 });
     }
 
     const body = await request.json();
-    const sessionId = String(body?.sessionId || '').trim();
+    const sessionId = String(body?.sessionId || '');
     if (!sessionId) {
-      return NextResponse.json({ error: 'Missing sessionId.' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
 
-    // Idempotent: already confirmed
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      return NextResponse.json({ success: true, message: 'Your entry is already locked in. Good luck!' });
+      return NextResponse.json({ success: true, message: 'Entry already confirmed.' });
     }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -38,47 +41,49 @@ export async function POST(request: Request) {
     });
 
     if (session.mode !== 'setup' || session.status !== 'complete') {
-      return NextResponse.json({ error: 'Checkout session is not complete yet.' }, { status: 400 });
+      return NextResponse.json({ error: 'Session not complete.' }, { status: 400 });
     }
 
     const meta = session.metadata || {};
-    const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
-    const variant = String(meta.variant || '').trim();
-    const size = String(meta.size || '50ml').trim();
-    const shippingAddress = String(meta.address || '').trim();
-    const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || '';
+    const email = String(meta.email || session.customer_email || '')
+      .trim()
+      .toLowerCase();
+    const variant = String(meta.variant || '');
+    const size = String(meta.size || '50ml');
+    const shippingAddress = String(meta.address || '');
+    const promoCode = String(meta.promoCode || '')
+      .trim()
+      .toUpperCase();
 
     if (!email || !variant) {
-      return NextResponse.json({ error: 'Session metadata incomplete.' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing metadata on session.' }, { status: 400 });
     }
-
-    let paymentMethodId = '';
-    let cardLast4 = '';
-    let cardFingerprint = '';
 
     const setupIntent = session.setup_intent as any;
-    if (setupIntent?.payment_method) {
-      const pm =
-        typeof setupIntent.payment_method === 'string'
-          ? await stripe.paymentMethods.retrieve(setupIntent.payment_method)
-          : setupIntent.payment_method;
-      paymentMethodId = pm.id;
-      cardLast4 = pm.card?.last4 || '';
-      cardFingerprint = pm.card?.fingerprint || '';
-    }
+    const paymentMethodId =
+      typeof setupIntent === 'object'
+        ? setupIntent?.payment_method?.id || setupIntent?.payment_method
+        : null;
+    const customerId =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id || '';
 
-    // Dupe guards
-    const emailBlocked = await redis.sismember(emailBlockKey(variant, size), email);
-    if (emailBlocked === 1) {
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
-      return NextResponse.json({ success: true, message: 'This email already has a confirmed entry. Good luck!' });
-    }
-    if (cardFingerprint) {
-      const cardBlocked = await redis.sismember(cardBlockKey(variant, size), cardFingerprint);
-      if (cardBlocked === 1) {
-        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
-        return NextResponse.json({ success: true, message: 'This card already has a confirmed entry. Good luck!' });
+    let cardFingerprint = '';
+    try {
+      if (paymentMethodId && typeof paymentMethodId === 'string') {
+        const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+        cardFingerprint = String(pm.card?.fingerprint || '');
       }
+    } catch {}
+
+    // Dupe guard
+    const blocked = await redis.sismember(emailBlockKey(variant, size), email);
+    if (blocked === 1) {
+      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      return NextResponse.json({
+        success: true,
+        alreadyEntered: true,
+        message: 'Already registered for this allocation.',
+      });
     }
 
     const entry = {
@@ -86,22 +91,19 @@ export async function POST(request: Request) {
       variant,
       size,
       shippingAddress,
-      address: shippingAddress,
       customerId,
-      stripeCustomerId: customerId,
       paymentMethodId,
-      cardLast4,
       cardFingerprint,
-      sessionId,
+      promoCode: promoCode || undefined,
       registeredAt: new Date().toISOString(),
-      type: 'ENTERED',
     };
 
     await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
-    await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
     await redis.sadd(emailBlockKey(variant, size), email);
     if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
+    await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
     await cleanupMatchingIntent(redis, variant, size, email);
+
     await archiveEntry(redis, {
       email,
       variant,
@@ -111,11 +113,37 @@ export async function POST(request: Request) {
       registeredAt: entry.registeredAt,
       type: 'ENTERED',
     });
+
+    // Attribute promo on successful entry (revenue counted on charge in trigger-drop)
+    if (promoCode) {
+      try {
+        const raw = await redis.hget(PROMOS_KEY, promoCode);
+        const promo = safeParseRedisItem<any>(raw);
+        if (promo && promo.active !== false) {
+          // block self-use
+          if (
+            promo.promoterEmail &&
+            String(promo.promoterEmail).toLowerCase() === email
+          ) {
+            // still entered; no promo credit
+          } else {
+            promo.uses = (promo.uses || 0) + 1;
+            await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promo) });
+          }
+        }
+      } catch {}
+    }
+
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
 
-    return NextResponse.json({ success: true, message: 'Your entry is locked in. Good luck on the drop!' });
+    return NextResponse.json({
+      success: true,
+      message: 'Entry locked in. Good luck.',
+      email,
+      address: shippingAddress,
+    });
   } catch (err: any) {
-    console.error('confirm-setup error:', err);
-    return NextResponse.json({ error: err.message || 'Confirm failed.' }, { status: 500 });
+    console.error('confirm-setup', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
