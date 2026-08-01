@@ -80,13 +80,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
   const effectiveSchedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct);
 
-  // Keep highlighted button in sync with the URL slug (e.g. /obsidian-void)
   useEffect(() => {
     if (!initialSlug) return;
     const idx = allVisible.findIndex((p) => p.slug === initialSlug);
-    if (idx >= 0 && idx !== activeProductIndex) {
-      setActiveProductIndex(idx);
-    }
+    if (idx >= 0 && idx !== activeProductIndex) setActiveProductIndex(idx);
   }, [initialSlug, archivedProductIds.join(',')]);
 
   useEffect(() => {
@@ -125,7 +122,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       }, 12000);
       return () => clearTimeout(stallTimer);
     }
-    const dismissTimer = setTimeout(() => setFeedbackMessage(''), 6000);
+    const dismissTimer = setTimeout(() => setFeedbackMessage(''), 8000);
     return () => clearTimeout(dismissTimer);
   }, [feedbackMessage, feedbackStatus]);
 
@@ -291,6 +288,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }),
       });
       const data = await response.json();
+      if (data.alreadyEntered) {
+        setFeedbackStatus('error');
+        setFeedbackMessage(
+          data.error ||
+            'This email is already registered for this allocation. One entry per email — you’re all set. Good luck.',
+        );
+        return;
+      }
       if (response.ok) {
         if (data.sessionUrl) {
           window.location.assign(data.sessionUrl);
@@ -311,12 +316,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  // Full navigation so archived → active (or product A → B) always reloads correct product
   const switchProduct = (idx: number) => {
-    setActiveProductIndex(idx);
-    setSelectedSize(sizes[0] || '50ml');
     const prod = allVisible[idx];
-    if (prod?.slug && typeof window !== 'undefined') {
-      window.history.replaceState({}, '', `/${prod.slug}`);
+    if (!prod?.slug) return;
+    if (typeof window !== 'undefined') {
+      window.location.href = `/${prod.slug}`;
     }
   };
 
@@ -380,6 +385,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               padding: '8px 16px',
               borderRadius: '20px',
               whiteSpace: 'nowrap',
+              maxWidth: '90vw',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
               boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
               color: feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'error' ? '#ff3b30' : '#9ca3af',
               border: `1px solid ${
@@ -387,7 +395,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               }`,
             }}
           >
-            {feedbackStatus === 'success' ? '🎯 Entry Verified' : feedbackStatus === 'error' ? '⚠️ Action Needed' : '⏳ Loading'}
+            {feedbackStatus === 'success' ? '🎯 Entry Verified' : feedbackStatus === 'error' ? '⚠️ Notice' : '⏳ Loading'}
+            {' · '}
+            {feedbackMessage}
           </motion.div>
         )}
       </AnimatePresence>
@@ -615,19 +625,29 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               }}
             >
               {timeLeft.expired || isCurrentArchived ? (
-                <span
-                  style={{
-                    fontSize: '11px',
-                    color: '#edb210',
-                    fontWeight: 'bold',
-                    letterSpacing: '1px',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {isCurrentArchived
-                    ? '🔒 Archived — Save your spot for the return'
-                    : '🔒 This Drop Has Closed — Join the Restock Waitlist'}
-                </span>
+                <div>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: '#edb210',
+                      fontWeight: 'bold',
+                      letterSpacing: '1px',
+                      textTransform: 'uppercase',
+                      display: 'block',
+                      marginBottom: 8,
+                    }}
+                  >
+                    {isCurrentArchived
+                      ? '🔒 Archived — Save your spot for the return'
+                      : '🔒 Allocation window closed'}
+                  </span>
+                  {!isCurrentArchived && (
+                    <p style={{ margin: 0, fontSize: 11, color: '#aaa', lineHeight: 1.5 }}>
+                      If you entered, watch your email for a charge receipt if selected. Results are final once
+                      processing completes — you can also check Manage My Entry.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div
                   style={{

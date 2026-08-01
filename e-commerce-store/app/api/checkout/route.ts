@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, emailBlockKey, poolStatField, POOL_STATS_KEY, archiveEntry } from '@/lib/server-config';
+import {
+  createRedisClient,
+  createStripeClient,
+  emailBlockKey,
+  poolStatField,
+  POOL_STATS_KEY,
+  archiveEntry,
+} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +31,10 @@ export async function POST(request: Request) {
     const isEmailAlreadyEntered = await redis.sismember(emailBlockKey(variant, size), clientEmail);
     if (isEmailAlreadyEntered === 1) {
       return NextResponse.json({
-        success: true,
-        message: 'This email already has a confirmed entry for this drop — good luck!',
+        success: false,
+        alreadyEntered: true,
+        error:
+          'This email is already registered for this allocation. One entry per email — you’re all set. Good luck.',
       });
     }
 
@@ -45,7 +54,6 @@ export async function POST(request: Request) {
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
-    // Return to / with setup params — page.tsx preserves them when redirecting to /slug
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'setup',
@@ -63,14 +71,23 @@ export async function POST(request: Request) {
     });
 
     const intentPayload = JSON.stringify({
-      email: clientEmail, variant, size, shippingAddress, registeredAt: timestamp,
+      email: clientEmail,
+      variant,
+      size,
+      shippingAddress,
+      registeredAt: timestamp,
     });
     await redis.rpush(`intent_pool:${variant}:${size}`, intentPayload);
     await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), 1);
 
     await archiveEntry(redis, {
-      email: clientEmail, variant, size, shippingAddress,
-      id: stripeCustomer.id, registeredAt: timestamp, type: 'INTENT_STARTED',
+      email: clientEmail,
+      variant,
+      size,
+      shippingAddress,
+      id: stripeCustomer.id,
+      registeredAt: timestamp,
+      type: 'INTENT_STARTED',
     });
 
     return NextResponse.json({ success: true, sessionUrl: session.url });

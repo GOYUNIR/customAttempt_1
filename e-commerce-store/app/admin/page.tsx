@@ -4,6 +4,16 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
+function typeColor(type: string | undefined) {
+  if (!type) return '#a1a1aa';
+  if (type === 'ENTERED' || type === 'WINNER_CHARGED') return '#34d399';
+  if (type === 'INTENT_STARTED') return '#edb210';
+  if (type === 'NOT_SELECTED' || type === 'INTENT_EXPIRED') return '#888888';
+  if (type === 'WINNER_DECLINED' || type === 'ADDRESS_UPDATED') return '#60a5fa';
+  if (type.includes('CANCEL')) return '#f87171';
+  return '#a1a1aa';
+}
+
 export default function AdminPortal() {
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -231,18 +241,47 @@ export default function AdminPortal() {
   const totalPages = Math.ceil(filteredEntries.length / itemsPerPage) || 1;
   const currentEntries = filteredEntries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  const pools = status?.pools || [];
+  const totalInt = pools.reduce((s: number, p: any) => s + (p.intCount || 0), 0);
+  const totalSub = pools.reduce((s: number, p: any) => s + (p.subCount || 0), 0);
+  const totalSales = pools.reduce((s: number, p: any) => s + (p.salesCount || 0), 0);
+  const totalInv = pools.reduce((s: number, p: any) => s + (p.maxLimit || 0), 0);
+  const maxBar = Math.max(totalInt, totalSub, totalSales, totalInv, 1);
+  const maxSubPool = Math.max(...pools.map((x: any) => x.subCount || 0), 1);
+
   return (
-    <main style={{ minHeight: '100vh', padding: '48px 24px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
+    <main
+      style={{
+        minHeight: '100vh',
+        padding: '48px 24px',
+        background: '#060606',
+        color: '#f7f7f7',
+        fontFamily: 'system-ui, sans-serif',
+      }}
+    >
       <div style={{ maxWidth: '720px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
         <div>
-          <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3rem)', margin: 0, fontWeight: '800', letterSpacing: '-0.03em', textTransform: 'uppercase' }}>
+          <h1
+            style={{
+              fontSize: 'clamp(2rem, 5vw, 3rem)',
+              margin: 0,
+              fontWeight: '800',
+              letterSpacing: '-0.03em',
+              textTransform: 'uppercase',
+            }}
+          >
             GOYUNIR Admin Portal
           </h1>
-          <p style={{ color: '#a8a8a8', marginTop: '12px', fontSize: '14px' }}>Drop execution, inventory, and ledger.</p>
+          <p style={{ color: '#a8a8a8', marginTop: '12px', fontSize: '14px' }}>
+            Drop execution, inventory, insights, and ledger.
+          </p>
         </div>
 
+        {/* Drop control */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Drop &amp; Product Control Center</h2>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>
+            Drop &amp; Product Control Center
+          </h2>
           <p style={{ color: '#888', fontSize: '12px', margin: '0 0 16px 0' }}>
             Password unlocks draw, archive, and address reveal.
           </p>
@@ -253,7 +292,15 @@ export default function AdminPortal() {
               <select
                 value={selectedDrawTarget}
                 onChange={(e) => setSelectedDrawTarget(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px' }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  background: '#09090b',
+                  border: '1px solid #27272a',
+                  color: '#fff',
+                  fontSize: '13px',
+                }}
               >
                 <option value="ALL_POOLS">ALL POOLS</option>
                 {GOYUNIR_STORE_SUITE.productCatalog.flatMap((p) =>
@@ -266,13 +313,23 @@ export default function AdminPortal() {
               </select>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '11px', color: '#f87171', textTransform: 'uppercase', fontWeight: 'bold' }}>Admin Password</label>
+              <label style={{ fontSize: '11px', color: '#f87171', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                Admin Password
+              </label>
               <input
                 type="password"
                 placeholder="Verify master key..."
                 value={triggerVerificationPassword}
                 onChange={(e) => setTriggerVerificationPassword(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '10px', background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: '13px' }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  background: '#09090b',
+                  border: '1px solid #27272a',
+                  color: '#fff',
+                  fontSize: '13px',
+                }}
               />
             </div>
           </div>
@@ -280,7 +337,17 @@ export default function AdminPortal() {
           <button
             onClick={triggerDrop}
             disabled={isRunning}
-            style={{ width: '100%', padding: '16px', borderRadius: '18px', border: 'none', background: '#edb210', color: '#09090b', fontWeight: '700', cursor: 'pointer', marginBottom: '12px' }}
+            style={{
+              width: '100%',
+              padding: '16px',
+              borderRadius: '18px',
+              border: 'none',
+              background: '#edb210',
+              color: '#09090b',
+              fontWeight: '700',
+              cursor: 'pointer',
+              marginBottom: '12px',
+            }}
           >
             {isRunning ? 'Triggering…' : 'Authorize & Trigger Draw'}
           </button>
@@ -300,11 +367,24 @@ export default function AdminPortal() {
               marginBottom: '16px',
             }}
           >
-            {revealBusy ? 'Verifying…' : revealAddresses ? '🔒 Hide addresses' : '👁 Reveal addresses (password required)'}
+            {revealBusy
+              ? 'Verifying…'
+              : revealAddresses
+                ? '🔒 Hide addresses'
+                : '👁 Reveal addresses (password required)'}
           </button>
 
           {resultMessage && (
-            <p style={{ margin: '0 0 16px 0', color: '#cbd5e1', fontSize: '13px', padding: '12px', background: '#09090b', borderRadius: '12px' }}>
+            <p
+              style={{
+                margin: '0 0 16px 0',
+                color: '#cbd5e1',
+                fontSize: '13px',
+                padding: '12px',
+                background: '#09090b',
+                borderRadius: '12px',
+              }}
+            >
               {resultMessage}
             </p>
           )}
@@ -314,26 +394,94 @@ export default function AdminPortal() {
             {GOYUNIR_STORE_SUITE.productCatalog.map((product) => {
               const isArchived = archivedIds.includes(product.id);
               return (
-                <div key={product.id} style={{ background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e', marginBottom: 10 }}>
+                <div
+                  key={product.id}
+                  style={{
+                    background: '#09090b',
+                    padding: '14px 16px',
+                    borderRadius: '12px',
+                    border: '1px solid #1c1c1e',
+                    marginBottom: 10,
+                  }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>
-                      {product.name} {isArchived && <span style={{ color: '#94a3b8', fontSize: 10 }}>(ARCHIVED)</span>}
+                      {product.name}{' '}
+                      {isArchived && <span style={{ color: '#94a3b8', fontSize: 10 }}>(ARCHIVED)</span>}
                     </div>
                     {isArchived ? (
-                      <button onClick={() => unarchiveProduct(product)} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #34d399', background: 'transparent', color: '#34d399', fontSize: 11, cursor: 'pointer' }}>
+                      <button
+                        onClick={() => unarchiveProduct(product)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #34d399',
+                          background: 'transparent',
+                          color: '#34d399',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
                         Restore
                       </button>
                     ) : (
-                      <button onClick={() => setArchivingId(archivingId === product.id ? null : product.id)} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: 'transparent', color: '#f59e0b', fontSize: 11, cursor: 'pointer' }}>
+                      <button
+                        onClick={() => setArchivingId(archivingId === product.id ? null : product.id)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #f59e0b',
+                          background: 'transparent',
+                          color: '#f59e0b',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
                         {archivingId === product.id ? 'Cancel' : 'Archive'}
                       </button>
                     )}
                   </div>
                   {archivingId === product.id && (
                     <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <input placeholder="Available from" value={availableFromInput} onChange={(e) => setAvailableFromInput(e.target.value)} style={{ padding: 10, borderRadius: 8, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }} />
-                      <input placeholder="Archive notes (shown on product page)" value={archiveNotes} onChange={(e) => setArchiveNotes(e.target.value)} style={{ padding: 10, borderRadius: 8, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }} />
-                      <button onClick={() => archiveProduct(product)} style={{ padding: 10, borderRadius: 8, border: 'none', background: '#f59e0b', color: '#000', fontWeight: 'bold', fontSize: 11, cursor: 'pointer' }}>
+                      <input
+                        placeholder="Available from"
+                        value={availableFromInput}
+                        onChange={(e) => setAvailableFromInput(e.target.value)}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          background: '#000',
+                          border: '1px solid #27272a',
+                          color: '#fff',
+                          fontSize: 12,
+                        }}
+                      />
+                      <input
+                        placeholder="Archive notes (shown on product page)"
+                        value={archiveNotes}
+                        onChange={(e) => setArchiveNotes(e.target.value)}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          background: '#000',
+                          border: '1px solid #27272a',
+                          color: '#fff',
+                          fontSize: 12,
+                        }}
+                      />
+                      <button
+                        onClick={() => archiveProduct(product)}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          border: 'none',
+                          background: '#f59e0b',
+                          color: '#000',
+                          fontWeight: 'bold',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
                         Confirm archive
                       </button>
                     </div>
@@ -345,11 +493,123 @@ export default function AdminPortal() {
           </div>
         </section>
 
+        {/* Ops Insights graphs */}
+        <section style={{ padding: 24, borderRadius: 24, background: '#111', border: '1px solid #27272a' }}>
+          <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Ops Insights</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#edb210' }}>INT (started, not finished)</span>
+                <span style={{ fontFamily: 'monospace' }}>{totalInt}</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: '#1c1c1e', overflow: 'hidden', marginTop: 4 }}>
+                <div
+                  style={{
+                    width: `${Math.round((totalInt / maxBar) * 100)}%`,
+                    height: '100%',
+                    background: '#edb210',
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#34d399' }}>SUB (confirmed entries)</span>
+                <span style={{ fontFamily: 'monospace' }}>{totalSub}</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: '#1c1c1e', overflow: 'hidden', marginTop: 4 }}>
+                <div
+                  style={{
+                    width: `${Math.round((totalSub / maxBar) * 100)}%`,
+                    height: '100%',
+                    background: '#34d399',
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#60a5fa' }}>SLS (charged winners)</span>
+                <span style={{ fontFamily: 'monospace' }}>{totalSales}</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: '#1c1c1e', overflow: 'hidden', marginTop: 4 }}>
+                <div
+                  style={{
+                    width: `${Math.round((totalSales / maxBar) * 100)}%`,
+                    height: '100%',
+                    background: '#60a5fa',
+                  }}
+                />
+              </div>
+            </div>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: '#fff' }}>INV remaining</span>
+                <span style={{ fontFamily: 'monospace' }}>{totalInv}</span>
+              </div>
+              <div style={{ height: 10, borderRadius: 6, background: '#1c1c1e', overflow: 'hidden', marginTop: 4 }}>
+                <div
+                  style={{
+                    width: `${Math.round((totalInv / maxBar) * 100)}%`,
+                    height: '100%',
+                    background: '#ffffff',
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+              Conversion INT→SUB:{' '}
+              <strong style={{ color: '#fff' }}>
+                {totalInt + totalSub > 0 ? Math.round((totalSub / (totalInt + totalSub)) * 100) : 0}%
+              </strong>
+              {' · '}
+              Online now:{' '}
+              <strong style={{ color: '#34d399' }}>{status?.liveActiveUsersOnline ?? 0}</strong>
+            </div>
+            <div style={{ borderTop: '1px solid #27272a', paddingTop: 12, marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: '#888', marginBottom: 8, textTransform: 'uppercase' }}>
+                SUB by pool
+              </div>
+              {pools.map((p: any, i: number) => (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                    <span>
+                      {p.product} {p.size}
+                    </span>
+                    <span style={{ fontFamily: 'monospace', color: '#34d399' }}>{p.subCount || 0}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 4, background: '#1c1c1e', overflow: 'hidden', marginTop: 3 }}>
+                    <div
+                      style={{
+                        width: `${Math.round(((p.subCount || 0) / maxSubPool) * 100)}%`,
+                        height: '100%',
+                        background: '#34d399',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {pools.length === 0 && <p style={{ fontSize: 12, color: '#555' }}>No pool data yet.</p>}
+            </div>
+          </div>
+        </section>
+
+        {/* Live pools */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Live Database Pools</h2>
+          <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>
+            Live Database Pools
+          </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(status?.pools || []).map((p: any, i: number) => (
-              <div key={i} style={{ background: '#09090b', padding: '14px 16px', borderRadius: 12, border: '1px solid #1c1c1e' }}>
+            {pools.map((p: any, i: number) => (
+              <div
+                key={i}
+                style={{
+                  background: '#09090b',
+                  padding: '14px 16px',
+                  borderRadius: 12,
+                  border: '1px solid #1c1c1e',
+                }}
+              >
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
                   {p.product} — {p.size}
                   <div style={{ fontSize: 10, color: '#666', fontWeight: 400 }}>{p.productId}</div>
@@ -361,16 +621,31 @@ export default function AdminPortal() {
                   {' / '}
                   <span style={{ color: '#60a5fa' }}>{p.salesCount ?? 0} SLS</span>
                   {' / '}
-                  <span style={{ color: (p.maxLimit ?? 0) <= 0 ? '#f87171' : '#fff' }}>{p.maxLimit ?? 0} INV</span>
+                  <span style={{ color: (p.maxLimit ?? 0) <= 0 ? '#f87171' : '#fff' }}>
+                    {p.maxLimit ?? 0} INV
+                  </span>
                 </div>
               </div>
             ))}
           </div>
         </section>
 
+        {/* Draw matrix */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
-          <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>Real-Time Draw Processing Matrix</h2>
-          <div style={{ background: '#09090b', padding: 16, borderRadius: 16, border: '1px solid #1c1c1e', fontSize: 12, maxHeight: 280, overflowY: 'auto' }}>
+          <h2 style={{ margin: '0 0 12px 0', fontSize: '1.25rem', textTransform: 'uppercase' }}>
+            Real-Time Draw Processing Matrix
+          </h2>
+          <div
+            style={{
+              background: '#09090b',
+              padding: 16,
+              borderRadius: 16,
+              border: '1px solid #1c1c1e',
+              fontSize: 12,
+              maxHeight: 280,
+              overflowY: 'auto',
+            }}
+          >
             {status?.lastDraw ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ color: '#888', fontSize: 11 }}>
@@ -394,6 +669,7 @@ export default function AdminPortal() {
           </div>
         </section>
 
+        {/* Activity & Ledger */}
         <section style={{ padding: '24px', borderRadius: '24px', background: '#111', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
             <motion.div
@@ -405,24 +681,44 @@ export default function AdminPortal() {
             <h2 style={{ margin: 0, fontSize: '1.25rem', textTransform: 'uppercase' }}>Activity &amp; Ledger</h2>
           </div>
           <p style={{ color: '#888', fontSize: 12, margin: '0 0 16px 0' }}>
-            {lastUpdatedAt ? `Live • updated ${secondsAgo}s ago` : 'Loading…'} · Stripe {status?.stripeConfigured ? '● LINKED' : '○'} · Redis{' '}
-            {status?.redisConfigured ? '● DISTRIBUTED' : '○'}
+            {lastUpdatedAt ? `Live • updated ${secondsAgo}s ago` : 'Loading…'} · Stripe{' '}
+            {status?.stripeConfigured ? '● LINKED' : '○'} · Redis {status?.redisConfigured ? '● DISTRIBUTED' : '○'}
           </p>
 
           <input
             placeholder="Search email / address / product…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ width: '100%', padding: 12, borderRadius: 10, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 13, marginBottom: 12, boxSizing: 'border-box' }}
+            style={{
+              width: '100%',
+              padding: 12,
+              borderRadius: 10,
+              background: '#09090b',
+              border: '1px solid #27272a',
+              color: '#fff',
+              fontSize: 13,
+              marginBottom: 12,
+              boxSizing: 'border-box',
+            }}
           />
           {isSearching && <p style={{ fontSize: 11, color: '#666' }}>Searching…</p>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
             {currentEntries.map((e: any, i: number) => (
-              <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, border: '1px solid #1c1c1e', fontSize: 12 }}>
+              <div
+                key={i}
+                style={{
+                  background: '#09090b',
+                  padding: 12,
+                  borderRadius: 10,
+                  border: '1px solid #1c1c1e',
+                  fontSize: 12,
+                }}
+              >
                 <div style={{ fontWeight: 600 }}>{e.email}</div>
                 <div style={{ color: '#888' }}>
-                  {e.variant} · {e.size} · <span style={{ color: '#edb210' }}>{e.type}</span>
+                  {e.variant} · {e.size} ·{' '}
+                  <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{e.type}</span>
                 </div>
                 <div style={{ color: '#666', marginTop: 4 }}>
                   📍 {revealAddresses ? e.shippingAddress || 'n/a' : '••••'}
@@ -432,14 +728,22 @@ export default function AdminPortal() {
             {currentEntries.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No ledger rows yet.</p>}
           </div>
           {totalPages > 1 && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} style={{ padding: '8px 12px', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+              <button
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+                style={{ padding: '8px 12px', cursor: 'pointer' }}
+              >
                 Prev
               </button>
               <span style={{ fontSize: 12, color: '#888' }}>
                 {currentPage}/{totalPages}
               </span>
-              <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} style={{ padding: '8px 12px', cursor: 'pointer' }}>
+              <button
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => p + 1)}
+                style={{ padding: '8px 12px', cursor: 'pointer' }}
+              >
                 Next
               </button>
             </div>
