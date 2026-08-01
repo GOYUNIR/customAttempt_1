@@ -1,4 +1,6 @@
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import Link from 'next/dist/client/link';
+const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
 export default function StoryPage() {
   return (
@@ -15,8 +17,7 @@ export default function StoryPage() {
         Enter once per scent. Card is saved; you are charged only if selected. When a drop returns, existing entries stay in the pool so you don’t start over.
       </p>
       <a href="/" style={{ display: 'inline-block', marginTop: 32, color: '#fff', fontSize: 13 }}>
-        ← Back to allocation
-      </a>
+        <Link href="/" style={{ fontSize: '13px', color: configPalette.textMuted, textDecoration: 'none', display: 'inline-block', marginBottom: '24px', padding: '10px 14px', borderRadius: '20px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}` }}>← Back to storefront</Link>      </a>
       <p style={{ marginTop: 48, fontSize: 11, color: '#555' }}>
         {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}
       </p>
