@@ -4,6 +4,32 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
+const PORTAL_CONFIG_CACHE_KEY = 'stripe:billing_portal_config_id';
+
+async function getOrCreatePortalConfigId(stripe: any, redis: any): Promise<string> {
+  try {
+    const cached = await redis.get(PORTAL_CONFIG_CACHE_KEY);
+    if (cached) return String(cached);
+  } catch {}
+
+  const configuration = await stripe.billingPortal.configurations.create({
+    business_profile: { headline: 'Update your card for GOYUNIR' },
+    features: {
+      payment_method_update: { enabled: true },
+      customer_update: { enabled: false },
+      invoice_history: { enabled: false },
+      subscription_cancel: { enabled: false },
+      subscription_update: { enabled: false },
+    },
+  });
+
+  try {
+    await redis.set(PORTAL_CONFIG_CACHE_KEY, configuration.id);
+  } catch {}
+
+  return configuration.id;
+}
+
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -31,24 +57,12 @@ export async function POST(request: Request) {
 
     const hostHeader = request.headers.get('host') || 'localhost:3000';
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
-
-    const configuration = await stripe.billingPortal.configurations.create({
-      business_profile: {
-        headline: 'Update your card for GOYUNIR',
-      },
-      features: {
-        payment_method_update: { enabled: true },
-        customer_update: { enabled: false },
-        invoice_history: { enabled: false },
-        subscription_cancel: { enabled: false },
-        subscription_update: { enabled: false },
-      },
-    });
+    const configurationId = await getOrCreatePortalConfigId(stripe, redis);
 
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: `${protocol}://${hostHeader}/account`,
-      configuration: configuration.id,
+      configuration: configurationId,
     });
 
     return NextResponse.json({ success: true, url: portalSession.url });

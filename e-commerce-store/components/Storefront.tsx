@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useEffect, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   getProductPrice,
@@ -16,6 +16,7 @@ interface TimeLeftState { d: number; h: number; m: number; s: number; expired: b
 
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -74,13 +75,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
   const effectiveSchedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct);
 
+  // Keep the URL in sync with whatever product is showing — uses Next's
+  // own router (not raw window.history) so it reliably updates the
+  // address bar instead of silently being ignored.
   useEffect(() => {
     if (typeof window === 'undefined' || !currentProduct?.slug) return;
     const path = `/${currentProduct.slug}`;
     if (window.location.pathname !== path) {
-      window.history.replaceState({}, '', path + window.location.search);
+      router.replace(path + window.location.search, { scroll: false });
     }
-  }, [currentProduct?.slug]);
+  }, [currentProduct?.slug, router]);
 
   const { scrollYProgress } = useScroll({ target: containerRef, offset: ['start start', 'end end'] });
   const cycles = Math.max(1, GOYUNIR_STORE_SUITE.animationMechanics.spinCyclesTopToCheckout);
@@ -213,6 +217,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     effectiveSchedule.mode,
     effectiveSchedule.targetEndDateTime,
     effectiveSchedule.drawDayOfWeek,
+    effectiveSchedule.drawDayOfMonth,
     effectiveSchedule.drawHour,
     effectiveSchedule.drawMinute,
     effectiveSchedule.timezone,
@@ -299,8 +304,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     setActiveProductIndex(idx);
     setSelectedSize(sizes[0] || '50ml');
     const prod = allVisible[idx];
-    if (prod?.slug && typeof window !== 'undefined') {
-      window.history.replaceState({}, '', `/${prod.slug}`);
+    if (prod?.slug) {
+      router.replace(`/${prod.slug}`, { scroll: false });
     }
   };
 

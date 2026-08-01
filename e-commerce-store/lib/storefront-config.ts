@@ -5,10 +5,11 @@ export interface StorefrontNote {
 }
 
 export interface DropScheduleConfig {
-  mode: 'fixed' | 'weekly';
+  mode: 'fixed' | 'weekly' | 'monthly';
   timezone: string;
-  targetEndDateTime: string;
-  drawDayOfWeek: number;
+  targetEndDateTime: string; // used when mode is 'fixed'
+  drawDayOfWeek: number;     // 0=Sun...6=Sat, used when mode is 'weekly'
+  drawDayOfMonth: number;    // 1-31, used when mode is 'monthly' (clamped to the last real day of shorter months)
   drawHour: number;
   drawMinute: number;
   countdownExpiredText: string;
@@ -64,6 +65,7 @@ export interface StorefrontConfig {
     checkoutCtaButton: string;
   };
   availableSizes: string[];
+  homeRedirectSlug?: string;
   dropSchedule: DropScheduleConfig;
   animationMechanics: {
     totalFramesToLoad: number;
@@ -124,6 +126,7 @@ const defaultDropSchedule: DropScheduleConfig = {
   timezone: 'America/Los_Angeles',
   targetEndDateTime: '2026-07-27T19:30:00',
   drawDayOfWeek: 6,
+  drawDayOfMonth: 1,
   drawHour: 21,
   drawMinute: 0,
   countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
@@ -238,6 +241,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
   return {
     themeColors: { ...defaultThemeColors, ...(input.themeColors ?? {}) },
     availableSizes: sizes,
+    homeRedirectSlug: input.homeRedirectSlug,
     dropSchedule: { ...defaultDropSchedule, ...(input.dropSchedule ?? {}) },
     animationMechanics: { ...defaultAnimationMechanics, ...(input.animationMechanics ?? {}) },
     raffleRegistrationForm: { ...defaultFormCopy, ...(input.raffleRegistrationForm ?? {}) },
@@ -293,19 +297,38 @@ function zonedTimeToTimestamp(opts: { timezone: string; year: number; month: num
 
 function parseISOLocal(iso: string) {
   const [datePart, timePart] = iso.split('T');
-  const [year, month, day] = datePart.split('-').map(Number);
+  const [year, month, day] = (datePart || '').split('-').map(Number);
   const [hour, minute] = (timePart || '00:00').split(':').map(Number);
   return { year, month, day, hour, minute };
 }
 
+function daysInMonth(year: number, month: number): number {
+  // Date(year, month, 0) rolls back to the last day of the PREVIOUS month
+  // relative to `month` — since `month` here is 1-based, this correctly
+  // gives the last day of the month we actually want.
+  return new Date(year, month, 0).getDate();
+}
+
 export function scheduledDateToTimestamp(isoWallClock: string, timezone: string): number {
-  return zonedTimeToTimestamp({ timezone, ...parseISOLocal(isoWallClock) });
+  const parsed = parseISOLocal(isoWallClock);
+  const isInvalid =
+    Number.isNaN(parsed.year) || Number.isNaN(parsed.month) || Number.isNaN(parsed.day) ||
+    Number.isNaN(parsed.hour) || Number.isNaN(parsed.minute);
+  if (isInvalid) {
+    console.warn(
+      `[GOYUNIR] Invalid fixed drop date "${isoWallClock}". Expected format: YYYY-MM-DDTHH:MM:SS ` +
+      `(e.g. 2026-07-31T21:00:00). Falling back to 24 hours from now so the site doesn't break.`,
+    );
+    return Date.now() + 24 * 60 * 60 * 1000;
+  }
+  return zonedTimeToTimestamp({ timezone, ...parsed });
 }
 
 export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): number {
   if (schedule.mode === 'fixed') {
     return scheduledDateToTimestamp(schedule.targetEndDateTime, schedule.timezone);
   }
+
   const now = new Date();
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: schedule.timezone,
@@ -314,19 +337,40 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   const parts = dtf.formatToParts(now);
   const map: Record<string, string> = {};
   parts.forEach((p) => { if (p.type !== 'literal') map[p.type] = p.value; });
+  const year = Number(map.year);
+  const month = Number(map.month);
+  const day = Number(map.day);
+
+  if (schedule.mode === 'monthly') {
+    const clampedDay = Math.min(Math.max(1, schedule.drawDayOfMonth || 1), daysInMonth(year, month));
+    let candidate = zonedTimeToTimestamp({
+      timezone: schedule.timezone, year, month, day: clampedDay,
+      hour: schedule.drawHour, minute: schedule.drawMinute,
+    });
+    if (candidate <= now.getTime()) {
+      let nextMonth = month + 1;
+      let nextYear = year;
+      if (nextMonth > 12) { nextMonth = 1; nextYear += 1; }
+      const nextClampedDay = Math.min(Math.max(1, schedule.drawDayOfMonth || 1), daysInMonth(nextYear, nextMonth));
+      candidate = zonedTimeToTimestamp({
+        timezone: schedule.timezone, year: nextYear, month: nextMonth, day: nextClampedDay,
+        hour: schedule.drawHour, minute: schedule.drawMinute,
+      });
+    }
+    return candidate;
+  }
+
+  // 'weekly' (default)
   const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   const currentDay = weekdayMap[map.weekday];
   let daysUntil = (schedule.drawDayOfWeek - currentDay + 7) % 7;
-
   let candidate = zonedTimeToTimestamp({
-    timezone: schedule.timezone,
-    year: Number(map.year), month: Number(map.month), day: Number(map.day) + daysUntil,
+    timezone: schedule.timezone, year, month, day: day + daysUntil,
     hour: schedule.drawHour, minute: schedule.drawMinute,
   });
   if (candidate <= now.getTime()) {
     candidate = zonedTimeToTimestamp({
-      timezone: schedule.timezone,
-      year: Number(map.year), month: Number(map.month), day: Number(map.day) + daysUntil + 7,
+      timezone: schedule.timezone, year, month, day: day + daysUntil + 7,
       hour: schedule.drawHour, minute: schedule.drawMinute,
     });
   }

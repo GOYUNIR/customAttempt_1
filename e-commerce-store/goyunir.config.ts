@@ -1,5 +1,13 @@
 import { buildStorefrontConfig } from './lib/storefront-config';
 
+// ============================================================
+// GOYUNIR CONFIG — THE ONLY FILE YOU SHOULD EVER NEED TO TOUCH
+// ============================================================
+// IMPORTANT: this file is baked into the site at BUILD time. After
+// editing anything here, you must commit + push so Vercel redeploys —
+// just saving the file locally does nothing to the live site.
+// ============================================================
+
 export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   themeColors: {
     primaryBackground: '#0a0a0a',
@@ -16,12 +24,41 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   // availableSizes: ['50ml', '100ml'],
   availableSizes: ['50ml'],
 
+  // ============================================================
+  // HOME_REDIRECT_SLUG — optional. Pins "/" to always land on ONE specific
+  // product (must match a `slug` below exactly). Leave commented out to
+  // always land on the first active, non-archived product instead. If
+  // nothing is active/available, "/" always falls back to "/catalog".
+  // ============================================================
+  // homeRedirectSlug: 'elysian-white',
+
+  // ============================================================
+  // DROP SCHEDULE — three modes, pick ONE:
+  //
+  //   mode: 'fixed'   — one exact date/time (targetEndDateTime below).
+  //                     Format MUST be: YYYY-MM-DDTHH:MM:SS
+  //                     (24-hour clock, always 2 digits — "09" not "9").
+  //                     Example: '2026-07-31T21:00:00' = July 31, 9:00 PM.
+  //
+  //   mode: 'weekly'  — repeats forever on the same day-of-week/time.
+  //                     Set drawDayOfWeek (0=Sun...6=Sat), drawHour,
+  //                     drawMinute.
+  //
+  //   mode: 'monthly' — repeats forever on the same day-of-month/time.
+  //                     Set drawDayOfMonth (1-31), drawHour, drawMinute.
+  //                     If a month is shorter than the day you picked
+  //                     (e.g. drawDayOfMonth: 31 in February), it
+  //                     automatically uses that month's last real day.
+  //
+  // `timezone` applies to ALL three modes — change it once here.
+  // ============================================================
   dropSchedule: {
-    mode: 'fixed',//weekly/fixed
+    mode: 'fixed',
     timezone: 'America/Los_Angeles',
-    targetEndDateTime: '2026-07-31T2:20:00',
-    drawDayOfWeek: 6,
-    drawHour: 21,
+    targetEndDateTime: '2026-07-31T21:00:00',
+    drawDayOfWeek: 6,   // only used in 'weekly' mode
+    drawDayOfMonth: 1,  // only used in 'monthly' mode
+    drawHour: 21,       // only used in 'weekly' / 'monthly' modes
     drawMinute: 0,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd', hoursLabel: 'h', minutesLabel: 'm', secondsLabel: 's',
@@ -99,6 +136,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
         { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
       ],
+      // Example: this product could use its own schedule instead of the
+      // global one above — only include the fields you want to override:
+      // customDropSchedule: { mode: 'monthly', drawDayOfMonth: 15 },
     },
     {
       id: 'p2',

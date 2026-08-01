@@ -1,11 +1,5 @@
 {
   "framework": "nextjs",
   "installCommand": "npm install",
-  "buildCommand": "npm run build",
-  "crons": [
-    {
-      "path": "/api/analytics/social-tick",
-      "schedule": "0 * * * *"
-    }
-  ]
+  "buildCommand": "npm run build"
 }
