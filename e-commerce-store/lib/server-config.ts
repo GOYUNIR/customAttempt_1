@@ -240,10 +240,85 @@ export async function findPoolEntriesByEmail(redis: Redis, productNames: string[
   return matches;
 }
 
+// ============================================================
+// ADMIN ORDER MANAGEMENT — every open entry across every pool,
+// with the tools to cancel or edit any of them from /admin.
+// This is different from findPoolEntriesByEmail: that's scoped
+// to one customer verifying themselves; this is the admin's
+// full, unscoped view of every live order.
+// ============================================================
+export async function findAllOpenOrders(redis: Redis, productNames: string[]): Promise<FoundPoolEntry[]> {
+  const matches: FoundPoolEntry[] = [];
+  for (const productName of productNames) {
+    for (const size of ['50ml', '100ml']) {
+      const poolKey = `drop_pool:${productName}:${size}`;
+      const items = await redis.lrange(poolKey, 0, -1);
+      items.forEach((raw, index) => {
+        const parsed = safeParseRedisItem<any>(raw);
+        if (parsed) matches.push({ poolKey, variant: productName, size, index, parsed });
+      });
+    }
+  }
+  // Newest first
+  matches.sort((a, b) => {
+    const ta = new Date(a.parsed.registeredAt || 0).getTime();
+    const tb = new Date(b.parsed.registeredAt || 0).getTime();
+    return tb - ta;
+  });
+  return matches;
+}
+
 export async function removeListEntryAtIndex(redis: Redis, key: string, index: number) {
   const tombstone = `__DELETED_ENTRY_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
   await redis.lset(key, index, tombstone);
   await redis.lrem(key, 1, tombstone);
+}
+
+// Admin-driven cancel of ANY order (no email/last4 verification needed —
+// the admin password already gated this route). Frees the email/card slot
+// so the person can re-enter if the admin is resolving a support issue.
+export async function adminCancelOrder(redis: Redis, order: FoundPoolEntry, reason: string) {
+  await removeListEntryAtIndex(redis, order.poolKey, order.index);
+  await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', order.variant, order.size), -1);
+  const email = String(order.parsed.email || '').toLowerCase();
+  if (email) await redis.srem(emailBlockKey(order.variant, order.size), email);
+  if (order.parsed.cardFingerprint) await redis.srem(cardBlockKey(order.variant, order.size), order.parsed.cardFingerprint);
+  await archiveEntry(redis, {
+    email,
+    variant: order.variant,
+    size: order.size,
+    shippingAddress: order.parsed.shippingAddress || order.parsed.address || 'Unknown',
+    id: order.parsed.customerId || order.parsed.stripeCustomerId || 'n/a',
+    registeredAt: new Date().toISOString(),
+    type: 'CANCELLED_BY_ADMIN',
+    shippingStatus: undefined,
+  } as any);
+  // Log the human-readable reason separately so it shows in the ledger note.
+  if (reason) {
+    await archiveEntry(redis, {
+      email,
+      variant: order.variant,
+      size: order.size,
+      shippingAddress: `Admin note: ${reason}`,
+      id: order.parsed.customerId || 'n/a',
+      registeredAt: new Date().toISOString(),
+      type: 'ADMIN_NOTE',
+    });
+  }
+}
+
+export async function adminUpdateOrderAddress(redis: Redis, order: FoundPoolEntry, newAddress: string) {
+  const updated = { ...order.parsed, shippingAddress: newAddress, address: newAddress };
+  await redis.lset(order.poolKey, order.index, JSON.stringify(updated));
+  await archiveEntry(redis, {
+    email: String(order.parsed.email || '').toLowerCase(),
+    variant: order.variant,
+    size: order.size,
+    shippingAddress: newAddress,
+    id: order.parsed.customerId || 'n/a',
+    registeredAt: new Date().toISOString(),
+    type: 'ADDRESS_UPDATED',
+  });
 }
 
 export interface CatalogArchiveRecord {
@@ -311,8 +386,7 @@ export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
 
 // ============================================================
 // LIVE CONFIG OVERRIDES — lets /admin change schedule, social
-// proof, and pricing without a redeploy. Storefront and
-// trigger-drop read these on top of the goyunir.config.ts base.
+// proof, and pricing without a redeploy.
 // ============================================================
 export const CONFIG_DROP_SCHEDULE_KEY = 'config:drop_schedule';
 export const CONFIG_SOCIAL_PROOF_KEY = 'config:social_proof';
@@ -352,7 +426,6 @@ export async function getAllProductOverrides(redis: Redis, productIds: string[])
   return out;
 }
 
-// Promo click tracking (separate from `uses`, which only counts actual entries)
 export async function trackPromoClick(redis: Redis, code: string) {
   const raw = await redis.hget(PROMOS_KEY, code);
   const promo = safeParseRedisItem<any>(raw);

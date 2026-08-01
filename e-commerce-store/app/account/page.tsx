@@ -86,7 +86,7 @@ export default function AccountPage() {
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '80px 20px 60px', boxSizing: 'border-box' }}>
       <div style={{ maxWidth: '420px', margin: '0 auto' }}>
-        <Link href="/" style={{ fontSize: '11px', color: configPalette.textMuted, textDecoration: 'none', display: 'inline-block', marginBottom: '24px' }}>← Back to storefront</Link>
+        <Link href="/" style={{ fontSize: '13px', color: configPalette.textMuted, textDecoration: 'none', display: 'inline-block', marginBottom: '24px', padding: '10px 14px', borderRadius: '20px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}` }}>← Back to storefront</Link>
         <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0' }}>Manage My Entry</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>Verify with the email and the last 4 digits of the card you used to enter.</p>
 
