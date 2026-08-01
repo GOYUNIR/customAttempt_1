@@ -67,12 +67,12 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   // `timezone` applies to ALL four modes — change it once here.
   // ============================================================
   dropSchedule: {
-    mode: 'fixed',
+    mode: 'daily',
     timezone: 'America/Los_Angeles',
     targetEndDateTime: '2026-08-01T01:20:00',
     drawDayOfWeek: 6,   // only used in 'weekly' mode
     drawDayOfMonth: 1,  // only used in 'monthly' mode
-    drawHour: 21,       // only used in 'daily' / 'weekly' / 'monthly' modes
+    drawHour: 0,       // only used in 'daily' / 'weekly' / 'monthly' modes
     drawMinute: 0,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd', hoursLabel: 'h', minutesLabel: 'm', secondsLabel: 's',
