@@ -21,6 +21,8 @@ import { sendWinnerEmail } from '@/lib/email';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+const PROMOS_KEY = 'config:promos';
+
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        const priceCents = Math.round(getProductPrice(productDefinition, productSize) * 100);
+        const basePriceCents = Math.round(getProductPrice(productDefinition, productSize) * 100);
         const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);
         if (live.inventoryRemaining <= 0) continue;
@@ -91,6 +93,9 @@ export async function POST(request: Request) {
           const paymentMethod = winnerData.paymentMethodId || null;
           const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
+          const promoCode = String(winnerData.promoCode || '')
+            .trim()
+            .toUpperCase();
 
           if (successfulPoolCaptures >= inventoryLimit) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
@@ -108,6 +113,39 @@ export async function POST(request: Request) {
 
           try {
             if (paymentMethod && customerId) {
+              let priceCents = basePriceCents;
+              let promoForCharge: any = null;
+
+              if (promoCode) {
+                try {
+                  const raw = await redis.hget(PROMOS_KEY, promoCode);
+                  promoForCharge = safeParseRedisItem<any>(raw);
+                  if (promoForCharge && promoForCharge.active !== false) {
+                    const self =
+                      promoForCharge.promoterEmail &&
+                      String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
+                    if (!self) {
+                      const discount = Math.min(
+                        50,
+                        Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0),
+                      );
+                      if (discount > 0) {
+                        priceCents = Math.max(
+                          50,
+                          Math.round(basePriceCents * (1 - discount / 100)),
+                        );
+                      }
+                    } else {
+                      promoForCharge = null;
+                    }
+                  } else {
+                    promoForCharge = null;
+                  }
+                } catch {
+                  promoForCharge = null;
+                }
+              }
+
               await stripe.paymentIntents.create({
                 amount: priceCents,
                 currency: 'usd',
@@ -118,10 +156,21 @@ export async function POST(request: Request) {
                 receipt_email: winnerEmail,
                 description: `GOYUNIR: ${productName} (${productSize})`,
               });
+
               grandRevenueChargesCount++;
               successfulPoolCaptures++;
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
+
+              if (promoForCharge && promoCode) {
+                try {
+                  promoForCharge.revenueAttributed =
+                    (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
+                  await redis.hset(PROMOS_KEY, {
+                    [promoCode]: JSON.stringify(promoForCharge),
+                  });
+                } catch {}
+              }
 
               await archiveEntry(redis, {
                 email: winnerEmail,
@@ -148,6 +197,8 @@ export async function POST(request: Request) {
                 shippingAddress,
                 status: 'SUCCESS_CHARGED',
                 shippingStatus: 'PENDING_FULFILLMENT',
+                amountCents: priceCents,
+                promoCode: promoCode || undefined,
               });
             } else {
               remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
