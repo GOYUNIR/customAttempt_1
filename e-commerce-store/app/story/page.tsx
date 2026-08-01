@@ -20,7 +20,7 @@ export default function StoryPage() {
       <p style={{ marginTop: 48, fontSize: 11, color: '#555' }}>
         {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}
       </p>
-    </main
+    </main>
   );
 }// redeploy 20260801145801
 
