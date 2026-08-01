@@ -4,11 +4,20 @@ import {
   getCatalogArchiveRecords,
   archiveProductToCatalog,
   unarchiveProductFromCatalog,
+  getLiveProductState,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { resolveProductSchedule, scheduledDateToTimestamp } from '@/lib/storefront-config';
+import { resolveProductSchedule, scheduledDateToTimestamp, getAvailableSizes } from '@/lib/storefront-config';
+import { getWinnerCountForDraw } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+
+// The size used to track a product's live active/inventory state. Since
+// most drops only sell one size, we key live state off the first
+// configured size — if you run true dual-size inventory, extend this.
+function primarySize() {
+  return getAvailableSizes(GOYUNIR_STORE_SUITE)[0] || '50ml';
+}
 
 export async function GET() {
   const redis = createRedisClient();
@@ -18,14 +27,26 @@ export async function GET() {
       upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
       archiveScents: GOYUNIR_STORE_SUITE.catalogPreview.archiveScents,
       archivedProductIds: [],
+      liveState: {},
     });
   }
 
   const now = Date.now();
+  const size = primarySize();
   const archivedRecords = await getCatalogArchiveRecords(redis);
   const archivedIds = new Set(archivedRecords.map((r) => r.productId));
+  const archiveNotesById = new Map(archivedRecords.map((r) => [r.productId, r.notes || '']));
 
+  // Load/seed live state for every product and run scheduled archive checks.
+  const liveStateByProductId: Record<string, any> = {};
   for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
+    const live = await getLiveProductState(redis, product.id, size, {
+      isActive: product.isActive !== false,
+      totalInventory: product.totalInventory ?? product.maxRaffleAllocationLimit ?? 10,
+      winnersPerDraw: product.winnerTiers?.length ? product.winnerTiers : [product.maxRaffleAllocationLimit ?? 1],
+    });
+    liveStateByProductId[product.id] = live;
+
     const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
     if (product.scheduledArchiveAt && !archivedIds.has(product.id)) {
       const ts = scheduledDateToTimestamp(product.scheduledArchiveAt, schedule.timezone);
@@ -50,8 +71,11 @@ export async function GET() {
     }
   }
 
+  // "Active" now respects the LIVE isActive flag (admin-editable), not the
+  // static config file — this is what makes the admin active/hidden toggle
+  // actually work without a redeploy.
   const activeDrops = GOYUNIR_STORE_SUITE.productCatalog.filter(
-    (p) => p.isActive !== false && !archivedIds.has(p.id),
+    (p) => liveStateByProductId[p.id]?.isActive !== false && !archivedIds.has(p.id),
   );
 
   const dynamicArchive = (await getCatalogArchiveRecords(redis))
@@ -70,6 +94,7 @@ export async function GET() {
         availableFrom: r.availableFrom,
         availableUntil: r.archivedAt,
         slug: product?.slug,
+        notes: r.notes || '',
       };
     });
 
@@ -83,5 +108,20 @@ export async function GET() {
     upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
     archiveScents: [...staticArchive, ...dynamicArchive],
     archivedProductIds: Array.from(archivedIds),
+    // Per-product live inventory info, so the storefront can show
+    // "winners this round / inventory remaining" without a second call.
+    liveState: Object.fromEntries(
+      Object.entries(liveStateByProductId).map(([productId, live]: any) => [
+        productId,
+        {
+          inventoryRemaining: live.inventoryRemaining,
+          totalInventory: live.totalInventory,
+          winnersNextDraw: getWinnerCountForDraw(live),
+          isActive: live.isActive,
+          salesCompleted: live.salesCompleted,
+          archiveNotes: archiveNotesById.get(productId) || '',
+        },
+      ]),
+    ),
   });
 }

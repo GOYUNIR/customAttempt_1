@@ -78,6 +78,9 @@ export function poolStatField(kind: 'sub' | 'int', variant: string, size: string
 }
 
 export const SOCIAL_PROOF_BOOST_KEY = 'stats:social_proof_boost';
+// Cumulative count of REAL charged winners, subtracted from the displayed
+// "hype" number so the number goes down as real people lock in wins.
+export const SOCIAL_PROOF_WINNERS_DEDUCTED_KEY = 'stats:social_proof_winners_deducted';
 
 export function emailBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:emails`;
@@ -175,6 +178,7 @@ export interface CatalogArchiveRecord {
   description?: string;
   availableFrom: string;
   archivedAt: string;
+  notes?: string;
 }
 
 export async function archiveProductToCatalog(redis: Redis, record: CatalogArchiveRecord) {
@@ -204,6 +208,83 @@ export async function isProductArchived(redis: Redis, productId: string): Promis
   } catch {
     return false;
   }
+}
+
+// ============================================
+// LIVE PRODUCT STATE — the fix for "redeploys clobber live inventory".
+//
+// goyunir.config.ts is ONLY used to SEED a product's state the first time
+// it's ever seen. After that, Redis is the source of truth for isActive,
+// inventory, and winner-per-draw tiers. Admin portal writes here directly.
+// Redeploying with stale numbers in the config file never overwrites this.
+// ============================================
+export const LIVE_PRODUCT_STATE_KEY = 'catalog:live_state';
+
+export interface LiveProductState {
+  productId: string;
+  isActive: boolean;       // false = "Hidden" (not shown anywhere, not orderable)
+  totalInventory: number;  // the number this product started with
+  inventoryRemaining: number;
+  winnersPerDraw: number[]; // tiers, e.g. [2,2,2,2,1] — last value repeats if exhausted
+  drawsCompleted: number;
+  salesCompleted: number;  // SLS — successful charges, all-time
+  archiveNotes?: string;
+}
+
+// A live-state entry key is `${productId}:${size}` so 50ml/100ml can have
+// independent inventory if you use both sizes.
+export function liveStateKey(productId: string, size: string) {
+  return `${productId}:${size}`;
+}
+
+export async function getLiveProductState(
+  redis: Redis,
+  productId: string,
+  size: string,
+  seedDefaults: { isActive: boolean; totalInventory: number; winnersPerDraw: number[] },
+): Promise<LiveProductState> {
+  const key = liveStateKey(productId, size);
+  const raw = await redis.hget(LIVE_PRODUCT_STATE_KEY, key);
+  const parsed = safeParseRedisItem<LiveProductState>(raw);
+  if (parsed) return parsed;
+  const seeded: LiveProductState = {
+    productId: key,
+    isActive: seedDefaults.isActive,
+    totalInventory: seedDefaults.totalInventory,
+    inventoryRemaining: seedDefaults.totalInventory,
+    winnersPerDraw: seedDefaults.winnersPerDraw.length ? seedDefaults.winnersPerDraw : [1],
+    drawsCompleted: 0,
+    salesCompleted: 0,
+  };
+  await redis.hset(LIVE_PRODUCT_STATE_KEY, { [key]: JSON.stringify(seeded) });
+  return seeded;
+}
+
+export async function setLiveProductState(redis: Redis, state: LiveProductState) {
+  await redis.hset(LIVE_PRODUCT_STATE_KEY, { [state.productId]: JSON.stringify(state) });
+}
+
+export async function getAllLiveProductStates(redis: Redis): Promise<Record<string, LiveProductState>> {
+  try {
+    const hash = (await redis.hgetall(LIVE_PRODUCT_STATE_KEY)) as Record<string, string> | null;
+    if (!hash) return {};
+    const out: Record<string, LiveProductState> = {};
+    for (const [k, v] of Object.entries(hash)) {
+      const parsed = safeParseRedisItem<LiveProductState>(v);
+      if (parsed) out[k] = parsed;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// How many winners to pick THIS draw, capped by whatever inventory is left.
+export function getWinnerCountForDraw(state: LiveProductState): number {
+  const tiers = state.winnersPerDraw?.length ? state.winnersPerDraw : [1];
+  const idx = Math.min(state.drawsCompleted ?? 0, tiers.length - 1);
+  const desired = tiers[idx];
+  return Math.max(0, Math.min(desired, state.inventoryRemaining));
 }
 
 // ============================================

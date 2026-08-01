@@ -1,6 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, safeParseRedisItem, POOL_STATS_KEY, LAST_DRAW_KEY, ARCHIVE_LEDGER_KEY, getOnlineVisitors } from '@/lib/server-config';
+import {
+  createRedisClient,
+  createStripeClient,
+  safeParseRedisItem,
+  POOL_STATS_KEY,
+  LAST_DRAW_KEY,
+  ARCHIVE_LEDGER_KEY,
+  getOnlineVisitors,
+  getLiveProductState,
+  getWinnerCountForDraw,
+} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getAvailableSizes } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,13 +35,23 @@ export async function GET() {
 
     try {
       const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
+      const size = getAvailableSizes(GOYUNIR_STORE_SUITE)[0] || '50ml';
       for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-        for (const size of ['50ml', '100ml']) {
+        for (const sz of ['50ml', '100ml']) {
+          const live = await getLiveProductState(redis, product.id, sz, {
+            isActive: product.isActive !== false,
+            totalInventory: product.totalInventory ?? product.maxRaffleAllocationLimit ?? 10,
+            winnersPerDraw: product.winnerTiers?.length ? product.winnerTiers : [product.maxRaffleAllocationLimit ?? 1],
+          });
           status.pools.push({
-            product: product.name, size,
-            intCount: Number(statsHash?.[`int:${product.name}:${size}`] ?? 0),
-            subCount: Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0),
-            maxLimit: size === '50ml' ? 10 : 5,
+            product: product.name, size: sz,
+            intCount: Number(statsHash?.[`int:${product.name}:${sz}`] ?? 0),
+            subCount: Number(statsHash?.[`sub:${product.name}:${sz}`] ?? 0),
+            maxLimit: getWinnerCountForDraw(live),
+            inventoryRemaining: live.inventoryRemaining,
+            totalInventory: live.totalInventory,
+            salesCompleted: live.salesCompleted,
+            isActive: live.isActive,
           });
         }
       }

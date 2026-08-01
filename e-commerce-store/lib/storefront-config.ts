@@ -5,18 +5,22 @@ export interface StorefrontNote {
 }
 
 export interface DropScheduleConfig {
-  mode: 'fixed' | 'weekly' | 'monthly';
+  mode: 'fixed' | 'daily' | 'weekly' | 'monthly';
   timezone: string;
   targetEndDateTime: string; // used when mode is 'fixed'
   drawDayOfWeek: number;     // 0=Sun...6=Sat, used when mode is 'weekly'
   drawDayOfMonth: number;    // 1-31, used when mode is 'monthly' (clamped to the last real day of shorter months)
-  drawHour: number;
+  drawHour: number;          // used by 'daily' / 'weekly' / 'monthly'
   drawMinute: number;
   countdownExpiredText: string;
   daysLabel: string;
   hoursLabel: string;
   minutesLabel: string;
   secondsLabel: string;
+  // Fallback winner counts, used only the FIRST time a product/size is seen
+  // (to seed its live state in Redis). After that, edit winner tiers from
+  // the admin portal — changing these numbers here will NOT affect a
+  // product that's already live.
   winnersPer50ml: number;
   winnersPer100ml: number;
 }
@@ -40,6 +44,12 @@ export interface StorefrontProduct {
   scheduledArchiveAt?: string;
   scheduledUnarchiveAt?: string;
   catalogImage?: string;
+  // Seed-only: how many total units this product starts with, and how many
+  // winners to draw per round until it hits 0 (tiers — last value repeats).
+  // e.g. totalInventory: 9, winnerTiers: [2,2,2,2,1] draws 2/round for 4
+  // rounds then 1 for the 5th, hitting exactly 0. Admin-editable after seed.
+  totalInventory?: number;
+  winnerTiers?: number[];
 }
 
 export interface CatalogPreviewItem {
@@ -95,6 +105,9 @@ export interface StorefrontConfig {
     autoIncrementEnabled: boolean;
     autoIncrementChancePerHeartbeat: number;
     autoIncrementAmount: number;
+    // "x times a day, x hour threshold" controls for the /api/analytics/social-tick cron:
+    autoIncrementMaxPerDay: number;   // hard cap on how many times/day it can tick up
+    autoIncrementMinHourGap: number;  // minimum hours between ticks
   };
   brandFooterData: {
     instagramLink: string;
@@ -169,6 +182,8 @@ const defaultSocialProof = {
   autoIncrementEnabled: true,
   autoIncrementChancePerHeartbeat: 0.15,
   autoIncrementAmount: 1,
+  autoIncrementMaxPerDay: 4,
+  autoIncrementMinHourGap: 3,
 };
 
 const defaultFooter = {
@@ -226,6 +241,8 @@ function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string },
     scheduledArchiveAt: product.scheduledArchiveAt,
     scheduledUnarchiveAt: product.scheduledUnarchiveAt,
     catalogImage: product.catalogImage,
+    totalInventory: product.totalInventory,
+    winnerTiers: product.winnerTiers,
   };
 }
 
@@ -340,6 +357,20 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   const year = Number(map.year);
   const month = Number(map.month);
   const day = Number(map.day);
+
+  if (schedule.mode === 'daily') {
+    let candidate = zonedTimeToTimestamp({
+      timezone: schedule.timezone, year, month, day,
+      hour: schedule.drawHour, minute: schedule.drawMinute,
+    });
+    if (candidate <= now.getTime()) {
+      candidate = zonedTimeToTimestamp({
+        timezone: schedule.timezone, year, month, day: day + 1,
+        hour: schedule.drawHour, minute: schedule.drawMinute,
+      });
+    }
+    return candidate;
+  }
 
   if (schedule.mode === 'monthly') {
     const clampedDay = Math.min(Math.max(1, schedule.drawDayOfMonth || 1), daysInMonth(year, month));
