@@ -1,7 +1,7 @@
 'use client';
 import { useRef, useEffect, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   getProductPrice,
@@ -12,11 +12,16 @@ import {
 } from '@/lib/storefront-config';
 import { EntryFormState, isValidEmail, normalizeEntryForm } from '@/lib/validation';
 
-interface TimeLeftState { d: number; h: number; m: number; s: number; expired: boolean; }
+interface TimeLeftState {
+  d: number;
+  h: number;
+  m: number;
+  s: number;
+  expired: boolean;
+}
 
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -75,16 +80,22 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
   const effectiveSchedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct);
 
-  // Keep the URL in sync with whatever product is showing — uses Next's
-  // own router (not raw window.history) so it reliably updates the
-  // address bar instead of silently being ignored.
+  // Keep highlighted button in sync with the URL slug (e.g. /obsidian-void)
+  useEffect(() => {
+    if (!initialSlug) return;
+    const idx = allVisible.findIndex((p) => p.slug === initialSlug);
+    if (idx >= 0 && idx !== activeProductIndex) {
+      setActiveProductIndex(idx);
+    }
+  }, [initialSlug, archivedProductIds.join(',')]);
+
   useEffect(() => {
     if (typeof window === 'undefined' || !currentProduct?.slug) return;
     const path = `/${currentProduct.slug}`;
     if (window.location.pathname !== path) {
-      router.replace(path + window.location.search, { scroll: false });
+      window.history.replaceState({}, '', path + window.location.search);
     }
-  }, [currentProduct?.slug, router]);
+  }, [currentProduct?.slug]);
 
   const { scrollYProgress } = useScroll({ target: containerRef, offset: ['start start', 'end end'] });
   const cycles = Math.max(1, GOYUNIR_STORE_SUITE.animationMechanics.spinCyclesTopToCheckout);
@@ -304,8 +315,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     setActiveProductIndex(idx);
     setSelectedSize(sizes[0] || '50ml');
     const prod = allVisible[idx];
-    if (prod?.slug) {
-      router.replace(`/${prod.slug}`, { scroll: false });
+    if (prod?.slug && typeof window !== 'undefined') {
+      window.history.replaceState({}, '', `/${prod.slug}`);
     }
   };
 
@@ -488,33 +499,32 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               {heroContent.body}
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              {allVisible.map((prod, idx) => (
-                <button
-                  key={prod.id}
-                  onClick={() => switchProduct(idx)}
-                  style={{
-                    padding: '8px 18px',
-                    borderRadius: '20px',
-                    border:
-                      !isCurrentArchived && activeProductIndex === idx
+              {allVisible.map((prod, idx) => {
+                const isSelected =
+                  !isCurrentArchived && (prod.slug === currentProduct?.slug || activeProductIndex === idx);
+                return (
+                  <button
+                    key={prod.id}
+                    onClick={() => switchProduct(idx)}
+                    style={{
+                      padding: '8px 18px',
+                      borderRadius: '20px',
+                      border: isSelected
                         ? `1px solid ${configPalette.textMain}`
                         : `1px solid ${configPalette.cardBorder}`,
-                    background:
-                      !isCurrentArchived && activeProductIndex === idx ? configPalette.textMain : 'transparent',
-                    color:
-                      !isCurrentArchived && activeProductIndex === idx
-                        ? configPalette.primaryBackground
-                        : configPalette.textMuted,
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {prod.name}
-                </button>
-              ))}
+                      background: isSelected ? configPalette.textMain : 'transparent',
+                      color: isSelected ? configPalette.primaryBackground : configPalette.textMuted,
+                      fontSize: '11px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      letterSpacing: '0.5px',
+                    }}
+                  >
+                    {prod.name}
+                  </button>
+                );
+              })}
             </div>
           </motion.div>
         </section>
@@ -717,7 +727,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <p style={{ color: configPalette.textMuted, fontSize: '12px', margin: '0 0 20px 0', textAlign: 'center' }}>
                 {currentProduct.desc}
               </p>
-              <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left' }}>
+              <form
+                onSubmit={submitRaffleEntry}
+                style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left' }}
+              >
                 {sizes.length > 1 ? (
                   <div>
                     <label
@@ -829,6 +842,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     }}
                   />
                 </div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: '11px',
+                    color: configPalette.textMuted,
+                    textAlign: 'center',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Card is saved only — you are charged only if you win the allocation.
+                </p>
                 <button
                   type="submit"
                   disabled={isProcessing}
