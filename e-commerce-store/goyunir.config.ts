@@ -111,7 +111,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     // This is the combined "real + artificial" hype number. As real
     // winners get charged, that many are automatically SUBTRACTED from
     // this number when it's displayed (see lib/server-config.ts).
-    baseCount: 100,
+    baseCount: 0,
     caption: 'Hype is compounding fast—reserve now before inventory closes.',
     autoIncrementEnabled: true,
     autoIncrementChancePerHeartbeat: 0.15,
