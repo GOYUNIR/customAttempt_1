@@ -129,8 +129,7 @@ export default function CatalogPage() {
             marginBottom: '24px',
           }}
         >
-          ← Back to storefront
-        </Link>
+        <Link href="/" style={{ fontSize: '13px', color: configPalette.textMuted, textDecoration: 'none', display: 'inline-block', marginBottom: '24px', padding: '10px 14px', borderRadius: '20px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}` }}>← Back to storefront</Link>        </Link>
         <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
           Tap an archived scent to open its page and save a spot for the return.
