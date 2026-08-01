@@ -1,4 +1,7 @@
 'use client';
+
+import { useState, useEffect, useRef } from 'react';
+
 import { useRef, useEffect, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
@@ -75,6 +78,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   );
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
   const [socialProofDisplay, setSocialProofDisplay] = useState(GOYUNIR_STORE_SUITE.socialProof.baseCount);
+
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoDiscount, setPromoDiscount] = useState<number>(0);
+  const [manualPromoInput, setManualPromoInput] = useState('');
 
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
@@ -297,6 +304,49 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct.prefix, currentProduct.id]);
 
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  const urlRef = searchParams?.get('ref');
+  const stored = window.sessionStorage.getItem('goyunir_promo_ref');
+  const code = (urlRef || stored || '').toUpperCase();
+  if (!code) return;
+
+  if (urlRef) window.sessionStorage.setItem('goyunir_promo_ref', urlRef.toUpperCase());
+
+  fetch(`/api/promo/validate?code=${encodeURIComponent(code)}`)
+    .then((res) => res.json())
+    .then((data) => {
+      if (data.valid) {
+        setPromoCode(data.code);
+        setPromoDiscount(data.customerDiscountPercent || 0);
+      } else if (!stored) {
+        // invalid/expired code in URL — don't persist a dead code
+        window.sessionStorage.removeItem('goyunir_promo_ref');
+      }
+    })
+    .catch(() => {});
+}, [searchParams]);
+
+  const applyManualPromo = () => {
+    const code = manualPromoInput.trim().toUpperCase();
+    if (!code) return;
+    window.sessionStorage.setItem('goyunir_promo_ref', code);
+    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.valid) {
+          setPromoCode(data.code);
+          setPromoDiscount(data.customerDiscountPercent || 0);
+          setManualPromoInput('');
+        } else {
+          setFeedbackStatus('error');
+          setFeedbackMessage('That code isn\'t valid or is no longer active.');
+          window.sessionStorage.removeItem('goyunir_promo_ref');
+        }
+      })
+      .catch(() => {});
+  };
+
   const submitRaffleEntry = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isProcessing) return;
@@ -310,7 +360,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     setFeedbackStatus('loading');
     setFeedbackMessage('Securing your entry…');
     try {
-      const ref = searchParams?.get('ref') || '';
+      const ref = promoCode || searchParams?.get('ref') || '';
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -451,6 +501,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {promoCode && (
+        <div
+          style={{
+            position: 'fixed', top: '108px', left: '50%', transform: 'translateX(-50%)', zIndex: 98,
+            fontSize: '11px', fontWeight: 600, background: 'rgba(52,199,89,0.15)', color: '#34c759',
+            border: '1px solid #34c759', padding: '8px 16px', borderRadius: '16px', whiteSpace: 'nowrap',
+          }}
+        >
+          🏷 Promo <strong>{promoCode}</strong> applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}
+        </div>
+      )}
 
       <motion.div
         style={{
@@ -756,6 +818,20 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <p style={{ color: configPalette.textMuted, fontSize: 12, margin: '0 0 20px', textAlign: 'center' }}>
                 {currentProduct.desc}
               </p>
+              {!promoCode && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type="text"
+                    value={manualPromoInput}
+                    onChange={(e) => setManualPromoInput(e.target.value)}
+                    placeholder="Have a promo code? (optional)"
+                    style={{ flex: 1, padding: '10px', borderRadius: '10px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: '#fff', fontSize: '12px', boxSizing: 'border-box' }}
+                  />
+                  <button type="button" onClick={applyManualPromo} style={{ padding: '10px 14px', borderRadius: '10px', border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: '12px', cursor: 'pointer' }}>
+                    Apply
+                  </button>
+                </div>
+              )}
               <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {sizes.length > 1 ? (
                   <div style={{ display: 'flex', gap: 6 }}>

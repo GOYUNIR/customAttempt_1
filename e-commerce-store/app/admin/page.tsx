@@ -1,4 +1,5 @@
 'use client';
+
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
@@ -35,7 +36,7 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
 
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
-  const [opsSub, setOpsSub] = useState<'draw' | 'inventory' | 'catalog'>('draw');
+  const [opsSub, setOpsSub] = useState<'draw' | 'inventory' | 'catalog' | 'config'>('draw');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<any>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -43,11 +44,9 @@ export default function AdminPortal() {
   const [pulseTick, setPulseTick] = useState(0);
   const [revealAddresses, setRevealAddresses] = useState(false);
   const [revealBusy, setRevealBusy] = useState(false);
-
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
-
   const [invEdits, setInvEdits] = useState<Record<string, string>>({});
   const [invMessage, setInvMessage] = useState('');
   const [archivingId, setArchivingId] = useState<string | null>(null);
@@ -55,18 +54,17 @@ export default function AdminPortal() {
   const [archiveNotes, setArchiveNotes] = useState('');
   const [catalogMessage, setCatalogMessage] = useState('');
   const [archivedIds, setArchivedIds] = useState<string[]>([]);
-
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 40;
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [supportEmail, setSupportEmail] = useState('');
   const [supportRows, setSupportRows] = useState<any[]>([]);
   const [supportMsg, setSupportMsg] = useState('');
   const [shipMsg, setShipMsg] = useState('');
+  const [ledgerTypeFilter, setLedgerTypeFilter] = useState('ALL');
 
   const [recovery, setRecovery] = useState({
     enabled: true,
@@ -86,6 +84,13 @@ export default function AdminPortal() {
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
+
+  // Config State
+  const [configData, setConfigData] = useState<any>(null);
+  const [scheduleForm, setScheduleForm] = useState<any>({});
+  const [socialForm, setSocialForm] = useState<any>({});
+  const [priceForm, setPriceForm] = useState<Record<string, { price50ml: string; price100ml: string }>>({});
+  const [configMsg, setConfigMsg] = useState('');
 
   const card: React.CSSProperties = {
     padding: 20,
@@ -142,6 +147,61 @@ export default function AdminPortal() {
       const data = await res.json();
       setAudit(Array.isArray(data.entries) ? data.entries : []);
     } catch {}
+  };
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/admin/config');
+      const data = await res.json();
+      setConfigData(data);
+      setScheduleForm({ ...data.baseSchedule, ...(data.globalScheduleOverride || {}) });
+      setSocialForm({ ...data.baseSocialProof, ...(data.socialProofOverride || {}) });
+      const pf: Record<string, { price50ml: string; price100ml: string }> = {};
+      for (const p of data.products || []) {
+        const override = data.productOverrides?.[p.id];
+        pf[p.id] = {
+          price50ml: String(override?.price50ml ?? p.price50ml),
+          price100ml: String(override?.price100ml ?? p.price100ml),
+        };
+      }
+      setPriceForm(pf);
+    } catch {}
+  };
+
+  const saveSchedule = async () => {
+    if (!password) return alert('Enter password');
+    const res = await fetch('/api/admin/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, section: 'schedule', value: scheduleForm }),
+    });
+    setConfigMsg(res.ok ? 'Schedule saved.' : 'Failed to save schedule.');
+  };
+
+  const saveSocial = async () => {
+    if (!password) return alert('Enter password');
+    const res = await fetch('/api/admin/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
+    });
+    setConfigMsg(res.ok ? 'Social proof settings saved.' : 'Failed to save.');
+  };
+
+  const savePrice = async (productId: string) => {
+    if (!password) return alert('Enter password');
+    const v = priceForm[productId];
+    const res = await fetch('/api/admin/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password,
+        section: 'product',
+        productId,
+        value: { price50ml: Number(v.price50ml), price100ml: Number(v.price100ml) },
+      }),
+    });
+    setConfigMsg(res.ok ? `Price saved for ${productId}.` : 'Failed to save price.');
   };
 
   useEffect(() => {
@@ -428,11 +488,19 @@ export default function AdminPortal() {
   const maxBar = Math.max(totalInt, totalSub, totalSales, totalInv, 1);
   const maxSubPool = Math.max(...pools.map((x: any) => x.subCount || 0), 1);
   const conv = totalInt + totalSub > 0 ? Math.round((totalSub / (totalInt + totalSub)) * 100) : 0;
-
   const allEntries = searchResults !== null ? searchResults : status?.fallbackEntries || [];
-  const filteredEntries = Array.isArray(allEntries) ? allEntries : [];
+  const rawFilteredEntries = Array.isArray(allEntries) ? allEntries : [];
+
+  // Filtered ledger entries based on ledgerTypeFilter
+  const filteredEntries = rawFilteredEntries.filter(
+    (e) => ledgerTypeFilter === 'ALL' || e.type === ledgerTypeFilter
+  );
+
   const totalPages = Math.ceil(filteredEntries.length / itemsPerPage) || 1;
-  const currentEntries = filteredEntries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const currentEntries = filteredEntries.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
   const winnerRows = (status?.fallbackEntries || []).filter((e: any) => e?.type === 'WINNER_CHARGED');
 
   const tabs: { id: Tab; label: string }[] = [
@@ -576,10 +644,13 @@ export default function AdminPortal() {
         {tab === 'ops' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', gap: 6 }}>
-              {(['draw', 'inventory', 'catalog'] as const).map((s) => (
+              {(['draw', 'inventory', 'catalog', 'config'] as const).map((s) => (
                 <button
                   key={s}
-                  onClick={() => setOpsSub(s)}
+                  onClick={() => {
+                    setOpsSub(s);
+                    if (s === 'config') fetchConfig();
+                  }}
                   style={{
                     padding: '6px 12px',
                     borderRadius: 8,
@@ -758,8 +829,7 @@ export default function AdminPortal() {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>
-                          {product.name}{' '}
-                          <span style={{ color: '#555', fontSize: 10 }}>({product.slug})</span>
+                          {product.name} <span style={{ color: '#555', fontSize: 10 }}>({product.slug})</span>{' '}
                           {isArchived && <span style={{ color: '#f59e0b' }}> ARCHIVED</span>}
                         </div>
                         {isArchived ? (
@@ -790,49 +860,53 @@ export default function AdminPortal() {
                               cursor: 'pointer',
                             }}
                           >
-                            {archivingId === product.id ? 'Cancel' : 'Archive'}
+                            Archive
                           </button>
                         )}
                       </div>
+
                       {archivingId === product.id && (
                         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                           <input
-                            placeholder="Available from (shown on site)"
+                            placeholder="Available from (e.g. Next Spring)"
                             value={availableFromInput}
                             onChange={(e) => setAvailableFromInput(e.target.value)}
                             style={{
-                              padding: 10,
-                              borderRadius: 8,
+                              padding: 8,
+                              borderRadius: 6,
                               background: '#000',
                               border: '1px solid #27272a',
                               color: '#fff',
+                              fontSize: 12,
                             }}
                           />
                           <input
-                            placeholder="Notes (shown on site)"
+                            placeholder="Archive notes / story"
                             value={archiveNotes}
                             onChange={(e) => setArchiveNotes(e.target.value)}
                             style={{
-                              padding: 10,
-                              borderRadius: 8,
+                              padding: 8,
+                              borderRadius: 6,
                               background: '#000',
                               border: '1px solid #27272a',
                               color: '#fff',
+                              fontSize: 12,
                             }}
                           />
                           <button
                             onClick={() => archiveProduct(product)}
                             style={{
-                              padding: 10,
-                              borderRadius: 8,
+                              padding: '8px 12px',
+                              borderRadius: 6,
                               border: 'none',
                               background: '#f59e0b',
                               color: '#000',
+                              fontSize: 11,
                               fontWeight: 700,
                               cursor: 'pointer',
                             }}
                           >
-                            Confirm archive
+                            Confirm Archive
                           </button>
                         </div>
                       )}
@@ -842,50 +916,164 @@ export default function AdminPortal() {
                 {catalogMessage && <p style={{ fontSize: 12 }}>{catalogMessage}</p>}
               </div>
             )}
+
+            {opsSub === 'config' && (
+              <div style={card}>
+                <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Drop Schedule (live)</h3>
+                <p style={{ fontSize: 11, color: '#888', marginTop: 0 }}>Overrides goyunir.config.ts without a redeploy.</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <label style={{ fontSize: 11 }}>
+                    Mode
+                    <select
+                      value={scheduleForm.mode || 'weekly'}
+                      onChange={(e) => setScheduleForm((f: any) => ({ ...f, mode: e.target.value }))}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }}
+                    >
+                      <option value="fixed">Fixed date</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Timezone
+                    <input
+                      value={scheduleForm.timezone || ''}
+                      onChange={(e) => setScheduleForm((f: any) => ({ ...f, timezone: e.target.value }))}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }}
+                    />
+                  </label>
+                  {scheduleForm.mode === 'fixed' && (
+                    <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>
+                      Fixed date/time (YYYY-MM-DDTHH:MM:SS)
+                      <input
+                        value={scheduleForm.targetEndDateTime || ''}
+                        onChange={(e) => setScheduleForm((f: any) => ({ ...f, targetEndDateTime: e.target.value }))}
+                        style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }}
+                      />
+                    </label>
+                  )}
+                  {scheduleForm.mode === 'weekly' && (
+                    <label style={{ fontSize: 11 }}>
+                      Day of week (0=Sun..6=Sat)
+                      <input type="number" min={0} max={6} value={scheduleForm.drawDayOfWeek ?? 6}
+                        onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawDayOfWeek: Number(e.target.value) }))}
+                        style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                    </label>
+                  )}
+                  {scheduleForm.mode === 'monthly' && (
+                    <label style={{ fontSize: 11 }}>
+                      Day of month (1-31)
+                      <input type="number" min={1} max={31} value={scheduleForm.drawDayOfMonth ?? 1}
+                        onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawDayOfMonth: Number(e.target.value) }))}
+                        style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                    </label>
+                  )}
+                  {(scheduleForm.mode === 'daily' || scheduleForm.mode === 'weekly' || scheduleForm.mode === 'monthly') && (
+                    <>
+                      <label style={{ fontSize: 11 }}>
+                        Hour (0-23)
+                        <input type="number" min={0} max={23} value={scheduleForm.drawHour ?? 21}
+                          onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawHour: Number(e.target.value) }))}
+                          style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                      </label>
+                      <label style={{ fontSize: 11 }}>
+                        Minute (0-59)
+                        <input type="number" min={0} max={59} value={scheduleForm.drawMinute ?? 0}
+                          onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawMinute: Number(e.target.value) }))}
+                          style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                      </label>
+                    </>
+                  )}
+                </div>
+                <button onClick={saveSchedule} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: '#fff', color: '#000', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  Save schedule
+                </button>
+
+                <h3 style={{ margin: '24px 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Social Proof (live)</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <label style={{ fontSize: 11 }}>
+                    Base count
+                    <input type="number" value={socialForm.baseCount ?? 0}
+                      onChange={(e) => setSocialForm((f: any) => ({ ...f, baseCount: Number(e.target.value) }))}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                  </label>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginTop: 20 }}>
+                    <input type="checkbox" checked={socialForm.autoIncrementEnabled !== false}
+                      onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementEnabled: e.target.checked }))} />
+                    Auto-increment hype
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Max ticks/day
+                    <input type="number" value={socialForm.autoIncrementMaxPerDay ?? 4}
+                      onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxPerDay: Number(e.target.value) }))}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Min hours between ticks
+                    <input type="number" value={socialForm.autoIncrementMinHourGap ?? 3}
+                      onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
+                      style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff' }} />
+                  </label>
+                </div>
+                <button onClick={saveSocial} style={{ padding: '10px 16px', borderRadius: 10, border: 'none', background: '#fff', color: '#000', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  Save social proof
+                </button>
+
+                <h3 style={{ margin: '24px 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Pricing (live)</h3>
+                <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0 }}>
+                  Note: this overrides the price actually charged at draw time. If a charge ever falls back to a Stripe Checkout session (rare — only on declined direct charges), that session uses the price attached to the Stripe Price ID instead, which won't auto-match this override. Update the Stripe Price too if you rely on that fallback path.
+                </p>
+                {(configData?.products || []).map((p: any) => (
+                  <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, background: '#09090b', padding: 10, borderRadius: 8 }}>
+                    <div style={{ flex: 1, fontSize: 12 }}>{p.name}</div>
+                    <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
+                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
+                      style={{ width: 70, padding: 6, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff' }} />
+                    <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
+                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
+                      style={{ width: 70, padding: 6, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff' }} />
+                    <button onClick={() => savePrice(p.id)} style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#fff', color: '#000', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+                  </div>
+                ))}
+                {configMsg && <p style={{ fontSize: 12, color: '#cbd5e1' }}>{configMsg}</p>}
+              </div>
+            )}
           </div>
         )}
 
         {tab === 'fulfillment' && (
           <div style={card}>
-            <h2 style={{ margin: '0 0 8px', fontSize: 14, textTransform: 'uppercase' }}>Shipping queue</h2>
-            {shipMsg && <p style={{ fontSize: 12, color: '#cbd5e1' }}>{shipMsg}</p>}
-            {winnerRows.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No winners in ledger snapshot.</p>}
-            {winnerRows.map((row: any, i: number) => (
-              <div
-                key={i}
-                style={{
-                  background: '#09090b',
-                  padding: 12,
-                  borderRadius: 10,
-                  marginBottom: 8,
-                  fontSize: 12,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{row.email}</div>
-                <div style={{ color: '#888' }}>
-                  {row.variant} · {row.size}
+            <h2 style={{ margin: '0 0 12px', fontSize: 13, textTransform: 'uppercase' }}>Fulfillment Queue ({winnerRows.length})</h2>
+            {shipMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{shipMsg}</p>}
+            {winnerRows.map((r: any, i: number) => (
+              <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{r.email}</div>
+                <div style={{ fontSize: 11, color: '#888' }}>
+                  {r.variant} · {r.size}
                 </div>
-                <div style={{ color: '#666', marginTop: 4 }}>
-                  {revealAddresses ? row.shippingAddress || 'n/a' : '••••'}
+                <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                  Address: {revealAddresses ? r.shippingAddress || 'N/A' : '••••'}
                 </div>
-                <select
-                  defaultValue={row.shippingStatus || 'PENDING_FULFILLMENT'}
-                  onChange={(e) => updateShipping(row, e.target.value)}
-                  style={{
-                    marginTop: 8,
-                    padding: '6px 10px',
-                    borderRadius: 8,
-                    background: '#000',
-                    border: '1px solid #27272a',
-                    color: '#fff',
-                  }}
-                >
-                  {SHIP_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  {SHIP_STATUSES.map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => updateShipping(r, st)}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: 6,
+                        border: '1px solid #333',
+                        background: r.shippingStatus === st ? '#34d399' : 'transparent',
+                        color: r.shippingStatus === st ? '#000' : '#ccc',
+                        fontSize: 10,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {st}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
             ))}
           </div>
@@ -894,235 +1082,104 @@ export default function AdminPortal() {
         {tab === 'growth' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={card}>
-              <h2 style={{ margin: '0 0 8px', fontSize: 14, textTransform: 'uppercase' }}>Entry recovery</h2>
-              <p style={{ fontSize: 12, color: '#888', marginTop: 0 }}>
-                Tasteful INT reminders: ~{recovery.earlyDelayHours}h after start
-                {recovery.preDrawEnabled ? ` + within ${recovery.preDrawHours}h of draw` : ''}. Max 2. Hourly cron.
-              </p>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={recovery.enabled}
-                  onChange={(e) => setRecovery((r) => ({ ...r, enabled: e.target.checked }))}
-                />
-                Enabled
-              </label>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={recovery.preDrawEnabled}
-                  onChange={(e) => setRecovery((r) => ({ ...r, preDrawEnabled: e.target.checked }))}
-                />
-                Pre-draw nudge
-              </label>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-                <label style={{ fontSize: 12 }}>
-                  Early delay (h)
+              <h2 style={{ margin: '0 0 12px', fontSize: 13, textTransform: 'uppercase' }}>Abandoned Recovery</h2>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
-                    type="number"
-                    min={1}
-                    value={recovery.earlyDelayHours}
-                    onChange={(e) =>
-                      setRecovery((r) => ({ ...r, earlyDelayHours: Number(e.target.value) || 3 }))
-                    }
-                    style={{
-                      display: 'block',
-                      width: 80,
-                      marginTop: 4,
-                      padding: 8,
-                      borderRadius: 8,
-                      background: '#09090b',
-                      border: '1px solid #27272a',
-                      color: '#fff',
-                    }}
+                    type="checkbox"
+                    checked={recovery.enabled}
+                    onChange={(e) => setRecovery((r) => ({ ...r, enabled: e.target.checked }))}
                   />
+                  Enable Early Nudge
                 </label>
-                <label style={{ fontSize: 12 }}>
-                  Pre-draw window (h)
-                  <input
-                    type="number"
-                    min={1}
-                    value={recovery.preDrawHours}
-                    onChange={(e) =>
-                      setRecovery((r) => ({ ...r, preDrawHours: Number(e.target.value) || 24 }))
-                    }
-                    style={{
-                      display: 'block',
-                      width: 80,
-                      marginTop: 4,
-                      padding: 8,
-                      borderRadius: 8,
-                      background: '#09090b',
-                      border: '1px solid #27272a',
-                      color: '#fff',
-                    }}
-                  />
-                </label>
+                <input
+                  type="number"
+                  value={recovery.earlyDelayHours}
+                  onChange={(e) => setRecovery((r) => ({ ...r, earlyDelayHours: Number(e.target.value) }))}
+                  style={{ width: 60, padding: 6, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff' }}
+                />
+                <span style={{ fontSize: 12, color: '#888' }}>hours delay</span>
               </div>
               <button
                 onClick={saveRecovery}
-                style={{
-                  padding: '10px 16px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: '#fff',
-                  color: '#000',
-                  fontWeight: 700,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, border: 'none', background: '#fff', color: '#000', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
               >
-                Save recovery
+                Save Recovery Config
               </button>
-              {recoveryMsg && <p style={{ fontSize: 12 }}>{recoveryMsg}</p>}
+              {recoveryMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{recoveryMsg}</p>}
             </div>
 
             <div style={card}>
-              <h2 style={{ margin: '0 0 8px', fontSize: 14, textTransform: 'uppercase' }}>Promo / affiliates</h2>
-              <p style={{ fontSize: 12, color: '#888' }}>
-                Share link: <code style={{ color: '#aaa' }}>/elysian-white?ref=CODE</code>. Credit on entry; revenue
-                on charge. Self-use blocked by promoter email.
-              </p>
-              <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              <h2 style={{ margin: '0 0 12px', fontSize: 13, textTransform: 'uppercase' }}>Promoter Codes</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <input
-                  placeholder="CODE"
+                  placeholder="Code"
                   value={promoForm.code}
-                  onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value }))}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    background: '#09090b',
-                    border: '1px solid #27272a',
-                    color: '#fff',
-                  }}
+                  onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+                  style={{ padding: 8, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }}
                 />
                 <input
-                  placeholder="Promoter name"
+                  placeholder="Promoter Name"
                   value={promoForm.promoterName}
                   onChange={(e) => setPromoForm((f) => ({ ...f, promoterName: e.target.value }))}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    background: '#09090b',
-                    border: '1px solid #27272a',
-                    color: '#fff',
-                  }}
+                  style={{ padding: 8, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }}
                 />
                 <input
-                  placeholder="Promoter email (block self-use)"
+                  placeholder="Promoter Email"
                   value={promoForm.promoterEmail}
                   onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    background: '#09090b',
-                    border: '1px solid #27272a',
-                    color: '#fff',
-                  }}
+                  style={{ padding: 8, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }}
                 />
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    placeholder="Customer % off (on charge later)"
-                    value={promoForm.customerDiscountPercent}
-                    onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))}
-                    style={{
-                      flex: 1,
-                      padding: 10,
-                      borderRadius: 8,
-                      background: '#09090b',
-                      border: '1px solid #27272a',
-                      color: '#fff',
-                    }}
-                  />
-                  <input
-                    placeholder="Promoter payout %"
-                    value={promoForm.promoterPayoutPercent}
-                    onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))}
-                    style={{
-                      flex: 1,
-                      padding: 10,
-                      borderRadius: 8,
-                      background: '#09090b',
-                      border: '1px solid #27272a',
-                      color: '#fff',
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={savePromo}
-                  style={{
-                    padding: 12,
-                    borderRadius: 10,
-                    border: 'none',
-                    background: '#edb210',
-                    color: '#000',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Save promo
-                </button>
+                <input
+                  placeholder="Customer Discount %"
+                  value={promoForm.customerDiscountPercent}
+                  onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 6, background: '#000', border: '1px solid #27272a', color: '#fff', fontSize: 12 }}
+                />
               </div>
-              {promoMsg && <p style={{ fontSize: 12 }}>{promoMsg}</p>}
-              {promos.map((p) => (
-                <div
-                  key={p.code}
-                  style={{
-                    background: '#09090b',
-                    padding: 12,
-                    borderRadius: 10,
-                    marginBottom: 8,
-                    fontSize: 12,
-                  }}
-                >
-                  <div style={{ fontWeight: 700 }}>{p.code}</div>
-                  <div style={{ color: '#888' }}>
-                    {p.promoterName} · {p.promoterEmail || 'no email'}
-                  </div>
-                  <div style={{ color: '#aaa', marginTop: 4 }}>
-                    uses {p.uses || 0} · attributed ${Number(p.revenueAttributed || 0).toFixed(0)} · payout{' '}
-                    {p.promoterPayoutPercent}% · discount {p.customerDiscountPercent}%
-                  </div>
-                  <button
-                    onClick={() => deletePromo(p.code)}
-                    style={{
-                      marginTop: 8,
-                      fontSize: 11,
-                      color: '#f87171',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))}
-            </div>
+              <button
+                onClick={savePromo}
+                style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#fff', color: '#000', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+              >
+                Upsert Promo Code
+              </button>
+              {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
 
-            <div style={card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0, fontSize: 14, textTransform: 'uppercase' }}>Audit</h2>
-                <button
-                  onClick={fetchAudit}
-                  style={{
-                    fontSize: 11,
-                    padding: '6px 10px',
-                    borderRadius: 8,
-                    border: '1px solid #333',
-                    background: 'transparent',
-                    color: '#ccc',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Refresh
-                </button>
-              </div>
-              <div style={{ maxHeight: 200, overflowY: 'auto', marginTop: 10, fontSize: 11, color: '#888' }}>
-                {audit.length === 0 && <p>No audit rows (password required to load).</p>}
-                {audit.map((a, i) => (
-                  <div key={i} style={{ marginBottom: 6 }}>
-                    {a.at} — {a.action} {a.detail || ''}
+              <div style={{ marginTop: 16 }}>
+                {promos.map((p) => (
+                  <div key={p.code} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontWeight: 700 }}>{p.code} {!p.active && <span style={{ color: '#f87171' }}>(disabled)</span>}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => setPromoForm({
+                          code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
+                          customerDiscountPercent: String(p.customerDiscountPercent), promoterPayoutPercent: String(p.promoterPayoutPercent),
+                        })} style={{ fontSize: 10, padding: '4px 8px', borderRadius: 6, border: '1px solid #333', background: 'transparent', color: '#ccc', cursor: 'pointer' }}>Edit</button>
+                        <button onClick={async () => {
+                          if (!password) return alert('Enter password');
+                          await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'toggle', code: p.code }) });
+                          await fetchPromos();
+                        }} style={{ fontSize: 10, padding: '4px 8px', borderRadius: 6, border: `1px solid ${p.active ? '#f87171' : '#34d399'}`, background: 'transparent', color: p.active ? '#f87171' : '#34d399', cursor: 'pointer' }}>
+                          {p.active ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ color: '#888' }}>{p.promoterName} · {p.promoterEmail || 'no email'}</div>
+                    <div style={{ color: '#aaa', marginTop: 4 }}>
+                      {p.clicks || 0} clicks · {p.uses || 0} entries · attributed ${Number(p.revenueAttributed || 0).toFixed(0)} · owed ${((p.payoutOwedCents || 0) / 100).toFixed(2)} · payout {p.promoterPayoutPercent}% · discount {p.customerDiscountPercent}%
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      {p.payoutOwedCents > 0 && (
+                        <button onClick={async () => {
+                          if (!password) return alert('Enter password');
+                          await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
+                          await fetchPromos();
+                        }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer' }}>
+                          Mark ${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid
+                        </button>
+                      )}
+                      <button onClick={() => deletePromo(p.code)} style={{ fontSize: 11, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}>Delete</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1132,78 +1189,33 @@ export default function AdminPortal() {
 
         {tab === 'support' && (
           <div style={card}>
-            <h2 style={{ margin: '0 0 8px', fontSize: 14, textTransform: 'uppercase' }}>Lookup</h2>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <h2 style={{ margin: '0 0 12px', fontSize: 13, textTransform: 'uppercase' }}>Customer Support Lookup</h2>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
               <input
+                placeholder="Lookup by email..."
                 value={supportEmail}
                 onChange={(e) => setSupportEmail(e.target.value)}
-                placeholder="email or fragment"
-                style={{
-                  flex: 1,
-                  minWidth: 160,
-                  padding: 12,
-                  borderRadius: 10,
-                  background: '#09090b',
-                  border: '1px solid #27272a',
-                  color: '#fff',
-                }}
+                style={{ flex: 1, padding: 10, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 12 }}
               />
               <button
                 onClick={runSupportLookup}
-                style={{
-                  padding: '12px 16px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: '#fff',
-                  color: '#000',
-                  fontWeight: 700,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
+                style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#fff', color: '#000', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
               >
                 Search
               </button>
             </div>
             {supportMsg && <p style={{ fontSize: 12, color: '#888' }}>{supportMsg}</p>}
             {supportRows.map((e: any, i: number) => (
-              <div
-                key={i}
-                style={{
-                  background: '#09090b',
-                  padding: 12,
-                  borderRadius: 10,
-                  marginBottom: 8,
-                  fontSize: 12,
-                }}
-              >
+              <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
                 <div style={{ fontWeight: 600 }}>{e.email}</div>
                 <div style={{ color: '#888' }}>
                   {e.variant} · {e.size} ·{' '}
                   <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{e.type}</span>
+                  {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· {e.promoCode}</span>}
                 </div>
                 <div style={{ color: '#666', marginTop: 4 }}>
-                  {revealAddresses ? e.shippingAddress || 'n/a' : '••••'}
+                  {revealAddresses ? e.shippingAddress || 'N/A' : '••••'}
                 </div>
-                {e.type === 'WINNER_CHARGED' && (
-                  <select
-                    defaultValue={e.shippingStatus || 'PENDING_FULFILLMENT'}
-                    onChange={(ev) => updateShipping(e, ev.target.value)}
-                    style={{
-                      marginTop: 8,
-                      padding: 6,
-                      borderRadius: 8,
-                      background: '#000',
-                      border: '1px solid #27272a',
-                      color: '#fff',
-                    }}
-                  >
-                    {SHIP_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                )}
               </div>
             ))}
           </div>
@@ -1211,32 +1223,30 @@ export default function AdminPortal() {
 
         {tab === 'ledger' && (
           <div style={card}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-              <motion.div
-                key={pulseTick}
-                initial={{ scale: 1.6, opacity: 0.4 }}
-                animate={{ scale: 1, opacity: 1 }}
-                style={{ width: 8, height: 8, borderRadius: '50%', background: '#34d399', marginRight: 8 }}
-              />
-              <h2 style={{ margin: 0, fontSize: 14, textTransform: 'uppercase' }}>Ledger</h2>
-            </div>
+            <h2 style={{ margin: '0 0 12px', fontSize: 13, textTransform: 'uppercase' }}>Ledger</h2>
+            
+            <select
+              value={ledgerTypeFilter}
+              onChange={(e) => setLedgerTypeFilter(e.target.value)}
+              style={{ padding: 10, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', marginBottom: 10, width: '100%' }}
+            >
+              <option value="ALL">All types</option>
+              <option value="ENTERED">Entered</option>
+              <option value="WINNER_CHARGED">Won</option>
+              <option value="NOT_SELECTED">Not selected</option>
+              <option value="WINNER_DECLINED">Charge declined</option>
+              <option value="CANCELLED_BY_USER">Cancelled</option>
+              <option value="INTENT_STARTED">Started (unfinished)</option>
+            </select>
+
             <input
-              placeholder="Search…"
+              placeholder="Search entries..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: 12,
-                borderRadius: 10,
-                background: '#09090b',
-                border: '1px solid #27272a',
-                color: '#fff',
-                marginBottom: 12,
-                boxSizing: 'border-box',
-              }}
+              style={{ width: '100%', padding: 10, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', marginBottom: 12, fontSize: 12 }}
             />
-            {isSearching && <p style={{ fontSize: 11, color: '#666' }}>Searching…</p>}
-            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+
+            <div>
               {currentEntries.map((e: any, i: number) => (
                 <div
                   key={i}
@@ -1252,6 +1262,7 @@ export default function AdminPortal() {
                   <div style={{ color: '#888' }}>
                     {e.variant} · {e.size} ·{' '}
                     <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{e.type}</span>
+                    {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· {e.promoCode}</span>}
                   </div>
                   <div style={{ color: '#666', marginTop: 4 }}>
                     {revealAddresses ? e.shippingAddress || 'n/a' : '••••'}
@@ -1259,6 +1270,7 @@ export default function AdminPortal() {
                 </div>
               ))}
             </div>
+
             {totalPages > 1 && (
               <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
                 <button disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>

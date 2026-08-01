@@ -3,7 +3,34 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-interface EntryRecord { variant: string; size: string; shippingAddress: string; registeredAt: string | number; }
+interface EntryRecord {
+  variant: string;
+  size: string;
+  shippingAddress: string;
+  registeredAt: string | number;
+  status?: string;
+  shippingStatus?: string;
+  amountCents?: number;
+}
+
+function statusBanner(entry: EntryRecord) {
+  if (entry.status === 'WINNER_CHARGED') {
+    return {
+      color: '#34c759',
+      text: `🎉 You won! Charged $${((entry.amountCents || 0) / 100).toFixed(2)}. Shipping status: ${(entry.shippingStatus || 'PENDING_FULFILLMENT').replace(/_/g, ' ').toLowerCase()}.`,
+    };
+  }
+  if (entry.status === 'WINNER_DECLINED') {
+    return { color: '#f87171', text: 'You were selected, but the charge failed. Contact support to resolve.' };
+  }
+  if (entry.status === 'NOT_SELECTED') {
+    return { color: '#94a3b8', text: 'Not selected this round — you stay entered automatically for the next drop.' };
+  }
+  if (entry.status === 'CANCELLED_BY_USER') {
+    return { color: '#94a3b8', text: 'This entry was cancelled.' };
+  }
+  return null;
+}
 
 export default function AccountPage() {
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
@@ -75,26 +102,37 @@ export default function AccountPage() {
 
         {entries && entries.length > 0 && (
           <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {entries.map((entry) => (
-              <div key={`${entry.variant}-${entry.size}`} style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: '16px', padding: '16px' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{entry.variant} — {entry.size}</div>
-                <div style={{ fontSize: '11px', color: configPalette.textMuted, marginTop: '4px' }}>Shipping to: {entry.shippingAddress}</div>
-                {editingAddressFor === `${entry.variant}-${entry.size}` ? (
-                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <input type="text" value={addressDraft} onChange={(e) => setAddressDraft(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '10px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: '#fff', fontSize: '12px', boxSizing: 'border-box' }} />
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => saveAddress(entry)} disabled={isBusy} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: '#34c759', color: '#000', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>Save</button>
-                      <button onClick={() => setEditingAddressFor(null)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#aaa', fontSize: '11px', cursor: 'pointer' }}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
-                    <button onClick={() => { setEditingAddressFor(`${entry.variant}-${entry.size}`); setAddressDraft(entry.shippingAddress); }} style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: '11px', cursor: 'pointer' }}>Edit Address</button>
-                    <button onClick={() => cancelEntry(entry)} disabled={isBusy} style={{ padding: '8px 12px', borderRadius: '10px', border: '1px solid #ff3b30', background: 'transparent', color: '#ff3b30', fontSize: '11px', cursor: 'pointer' }}>Cancel Entry</button>
-                  </div>
-                )}
-              </div>
-            ))}
+            {entries.map((entry) => {
+              const isSettled = entry.status && entry.status !== 'ENTERED';
+              const banner = statusBanner(entry);
+              return (
+                <div key={`${entry.variant}-${entry.size}`} style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: '16px', padding: '16px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{entry.variant} — {entry.size}</div>
+                  {entry.shippingAddress && <div style={{ fontSize: '11px', color: configPalette.textMuted, marginTop: '4px' }}>Shipping to: {entry.shippingAddress}</div>}
+
+                  {banner && (
+                    <div style={{ marginTop: '10px', fontSize: '12px', color: banner.color, fontWeight: 600 }}>{banner.text}</div>
+                  )}
+
+                  {!isSettled && (
+                    editingAddressFor === `${entry.variant}-${entry.size}` ? (
+                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <input type="text" value={addressDraft} onChange={(e) => setAddressDraft(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '10px', background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: '#fff', fontSize: '12px', boxSizing: 'border-box' }} />
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button onClick={() => saveAddress(entry)} disabled={isBusy} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: '#34c759', color: '#000', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>Save</button>
+                          <button onClick={() => setEditingAddressFor(null)} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#aaa', fontSize: '11px', cursor: 'pointer' }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                        <button onClick={() => { setEditingAddressFor(`${entry.variant}-${entry.size}`); setAddressDraft(entry.shippingAddress); }} style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: '11px', cursor: 'pointer' }}>Edit Address</button>
+                        <button onClick={() => cancelEntry(entry)} disabled={isBusy} style={{ padding: '8px 12px', borderRadius: '10px', border: '1px solid #ff3b30', background: 'transparent', color: '#ff3b30', fontSize: '11px', cursor: 'pointer' }}>Cancel Entry</button>
+                      </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
             <button onClick={openPaymentPortal} disabled={isBusy} style={{ width: '100%', padding: '14px', borderRadius: '30px', background: 'transparent', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px' }}>🔒 Update Payment Method (via Stripe)</button>
           </div>
         )}

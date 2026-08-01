@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
 const PROMOS_KEY = 'config:promos';
 
 export type PromoRecord = {
@@ -13,7 +12,10 @@ export type PromoRecord = {
   promoterPayoutPercent: number;
   active: boolean;
   uses: number;
+  clicks: number;
   revenueAttributed: number;
+  payoutOwedCents: number;
+  payoutPaidCents: number;
   createdAt: string;
 };
 
@@ -46,38 +48,47 @@ export async function POST(request: Request) {
   }
 
   const action = String(body?.action || 'upsert');
+  const code = String(body?.code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 });
 
   if (action === 'delete') {
-    const code = String(body?.code || '')
-      .trim()
-      .toUpperCase();
-    if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 });
     await redis.hdel(PROMOS_KEY, code);
     return NextResponse.json({ success: true });
-  }
-
-  const code = String(body?.code || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9_-]/g, '');
-  if (!code || code.length < 3) {
-    return NextResponse.json({ error: 'Code must be 3+ letters/numbers' }, { status: 400 });
   }
 
   const existingMap = await loadPromos(redis);
   const existing = existingMap[code];
 
+  if (action === 'toggle') {
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    existing.active = !existing.active;
+    await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    return NextResponse.json({ success: true, promo: existing });
+  }
+
+  if (action === 'markPaid') {
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    existing.payoutPaidCents = (existing.payoutOwedCents || 0);
+    existing.payoutOwedCents = 0;
+    await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    return NextResponse.json({ success: true, promo: existing });
+  }
+
+  // 'upsert' — used for both creating new AND editing existing (same code = update in place)
+  if (code.length < 3) return NextResponse.json({ error: 'Code must be 3+ letters/numbers' }, { status: 400 });
+
   const record: PromoRecord = {
     code,
-    promoterName: String(body?.promoterName || existing?.promoterName || code),
-    promoterEmail: String(body?.promoterEmail || existing?.promoterEmail || '')
-      .trim()
-      .toLowerCase(),
+    promoterName: String(body?.promoterName ?? existing?.promoterName ?? code),
+    promoterEmail: String(body?.promoterEmail ?? existing?.promoterEmail ?? '').trim().toLowerCase(),
     customerDiscountPercent: Math.min(50, Math.max(0, Number(body?.customerDiscountPercent ?? existing?.customerDiscountPercent ?? 0))),
     promoterPayoutPercent: Math.min(50, Math.max(0, Number(body?.promoterPayoutPercent ?? existing?.promoterPayoutPercent ?? 10))),
-    active: body?.active !== false,
+    active: body?.active ?? existing?.active ?? true,
     uses: existing?.uses ?? 0,
+    clicks: existing?.clicks ?? 0,
     revenueAttributed: existing?.revenueAttributed ?? 0,
+    payoutOwedCents: existing?.payoutOwedCents ?? 0,
+    payoutPaidCents: existing?.payoutPaidCents ?? 0,
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
 

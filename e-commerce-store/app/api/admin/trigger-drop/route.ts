@@ -13,10 +13,11 @@ import {
   getOrSeedLiveState,
   saveLiveState,
   archiveProductToCatalog,
+  getProductOverride,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
-import { sendWinnerEmail } from '@/lib/email';
+import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -27,9 +28,7 @@ export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
     const stripe = createStripeClient();
-    if (!redis || !stripe) {
-      return NextResponse.json({ error: 'System offline.' }, { status: 500 });
-    }
+    if (!redis || !stripe) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
     let targetPoolSignature = 'ALL_POOLS';
     let inputPassword = '';
@@ -51,10 +50,7 @@ export async function POST(request: Request) {
       allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
     if (!allPoolKeys?.length) {
-      return NextResponse.json({
-        success: true,
-        drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] },
-      });
+      return NextResponse.json({ success: true, drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] } });
     }
 
     for (const poolKey of allPoolKeys) {
@@ -66,7 +62,13 @@ export async function POST(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        const basePriceCents = Math.round(getProductPrice(productDefinition, productSize) * 100);
+        // Live price override (from /admin) takes priority over the static
+        // config price. Keep the Stripe Price object's amount matching if
+        // you also rely on the fallback checkout-session path.
+        const override = await getProductOverride(redis, productDefinition.id);
+        const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
+        const basePriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
+
         const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);
         if (live.inventoryRemaining <= 0) continue;
@@ -85,28 +87,18 @@ export async function POST(request: Request) {
         for (const winnerStr of shuffled) {
           const rawWinnerData = safeParseRedisItem<any>(winnerStr);
           if (!rawWinnerData) continue;
-          const winnerData =
-            rawWinnerData.email && typeof rawWinnerData.email === 'object'
-              ? rawWinnerData.email
-              : rawWinnerData;
+          const winnerData = rawWinnerData.email && typeof rawWinnerData.email === 'object' ? rawWinnerData.email : rawWinnerData;
           const winnerEmail = String(winnerData.email || '').toLowerCase();
           const paymentMethod = winnerData.paymentMethodId || null;
           const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
-          const promoCode = String(winnerData.promoCode || '')
-            .trim()
-            .toUpperCase();
+          const promoCode = String(winnerData.promoCode || '').trim().toUpperCase();
 
           if (successfulPoolCaptures >= inventoryLimit) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
             await archiveEntry(redis, {
-              email: winnerEmail,
-              variant: productName,
-              size: productSize,
-              shippingAddress,
-              id: customerId || 'n/a',
-              registeredAt: new Date().toISOString(),
-              type: 'NOT_SELECTED',
+              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'NOT_SELECTED', promoCode: promoCode || undefined,
             });
             continue;
           }
@@ -121,20 +113,10 @@ export async function POST(request: Request) {
                   const raw = await redis.hget(PROMOS_KEY, promoCode);
                   promoForCharge = safeParseRedisItem<any>(raw);
                   if (promoForCharge && promoForCharge.active !== false) {
-                    const self =
-                      promoForCharge.promoterEmail &&
-                      String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
+                    const self = promoForCharge.promoterEmail && String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
                     if (!self) {
-                      const discount = Math.min(
-                        50,
-                        Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0),
-                      );
-                      if (discount > 0) {
-                        priceCents = Math.max(
-                          50,
-                          Math.round(basePriceCents * (1 - discount / 100)),
-                        );
-                      }
+                      const discount = Math.min(50, Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0));
+                      if (discount > 0) priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
                     } else {
                       promoForCharge = null;
                     }
@@ -147,13 +129,8 @@ export async function POST(request: Request) {
               }
 
               await stripe.paymentIntents.create({
-                amount: priceCents,
-                currency: 'usd',
-                customer: customerId,
-                payment_method: paymentMethod,
-                off_session: true,
-                confirm: true,
-                receipt_email: winnerEmail,
+                amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
+                off_session: true, confirm: true, receipt_email: winnerEmail,
                 description: `GOYUNIR: ${productName} (${productSize})`,
               });
 
@@ -162,80 +139,57 @@ export async function POST(request: Request) {
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
 
+              let payoutAmountCents = 0;
               if (promoForCharge && promoCode) {
                 try {
-                  promoForCharge.revenueAttributed =
-                    (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
-                  await redis.hset(PROMOS_KEY, {
-                    [promoCode]: JSON.stringify(promoForCharge),
-                  });
+                  const payoutPct = Math.min(50, Math.max(0, Number(promoForCharge.promoterPayoutPercent) || 0));
+                  payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
+                  promoForCharge.revenueAttributed = (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
+                  promoForCharge.payoutOwedCents = (Number(promoForCharge.payoutOwedCents) || 0) + payoutAmountCents;
+                  await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promoForCharge) });
+
+                  if (promoForCharge.promoterEmail) {
+                    await sendPromoterPayoutEmail({
+                      to: promoForCharge.promoterEmail,
+                      promoterName: promoForCharge.promoterName || promoCode,
+                      code: promoCode,
+                      orderAmountLabel: `$${(priceCents / 100).toFixed(2)}`,
+                      payoutAmountLabel: `$${(payoutAmountCents / 100).toFixed(2)}`,
+                      payoutPercent: promoForCharge.promoterPayoutPercent,
+                      product: productName,
+                      size: productSize,
+                    });
+                  }
                 } catch {}
               }
 
               await archiveEntry(redis, {
-                email: winnerEmail,
-                variant: productName,
-                size: productSize,
-                shippingAddress,
-                id: customerId,
-                registeredAt: new Date().toISOString(),
-                type: 'WINNER_CHARGED',
-                shippingStatus: 'PENDING_FULFILLMENT',
+                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+                id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
+                shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              await sendWinnerEmail({
-                to: winnerEmail,
-                product: productName,
-                size: productSize,
-                amountLabel: `$${(priceCents / 100).toFixed(0)}`,
-              });
+              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}` });
 
               processedWinners.push({
-                email: winnerEmail,
-                product: productName,
-                size: productSize,
-                shippingAddress,
-                status: 'SUCCESS_CHARGED',
-                shippingStatus: 'PENDING_FULFILLMENT',
-                amountCents: priceCents,
-                promoCode: promoCode || undefined,
+                email: winnerEmail, product: productName, size: productSize, shippingAddress,
+                status: 'SUCCESS_CHARGED', shippingStatus: 'PENDING_FULFILLMENT',
+                amountCents: priceCents, promoCode: promoCode || undefined,
               });
             } else {
               remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
               await archiveEntry(redis, {
-                email: winnerEmail,
-                variant: productName,
-                size: productSize,
-                shippingAddress,
-                id: customerId || 'n/a',
-                registeredAt: new Date().toISOString(),
-                type: 'WINNER_DECLINED',
+                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+                id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
               });
-              processedWinners.push({
-                email: winnerEmail,
-                product: productName,
-                size: productSize,
-                shippingAddress,
-                status: 'MISSING_PAYMENT_METHOD',
-              });
+              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: 'MISSING_PAYMENT_METHOD' });
             }
           } catch (err: any) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
-            processedWinners.push({
-              email: winnerEmail,
-              product: productName,
-              size: productSize,
-              shippingAddress,
-              status: `DECLINED: ${err.message}`,
-            });
+            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: `DECLINED: ${err.message}` });
             await archiveEntry(redis, {
-              email: winnerEmail,
-              variant: productName,
-              size: productSize,
-              shippingAddress,
-              id: customerId || 'n/a',
-              registeredAt: new Date().toISOString(),
-              type: 'WINNER_DECLINED',
+              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
+              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
             });
           }
         }
@@ -253,9 +207,7 @@ export async function POST(request: Request) {
           if (!parsed) continue;
           const em = String(parsed.email || '').toLowerCase();
           if (em) await redis.sadd(emailBlockKey(productName, productSize), em);
-          if (parsed.cardFingerprint) {
-            await redis.sadd(cardBlockKey(productName, productSize), String(parsed.cardFingerprint));
-          }
+          if (parsed.cardFingerprint) await redis.sadd(cardBlockKey(productName, productSize), String(parsed.cardFingerprint));
         }
 
         const intentKey = `intent_pool:${productName}:${productSize}`;
@@ -265,13 +217,9 @@ export async function POST(request: Request) {
             const parsed = safeParseRedisItem<any>(item);
             if (parsed) {
               await archiveEntry(redis, {
-                email: String(parsed.email || 'Unknown'),
-                variant: productName,
-                size: productSize,
+                email: String(parsed.email || 'Unknown'), variant: productName, size: productSize,
                 shippingAddress: String(parsed.shippingAddress || parsed.address || 'Unknown'),
-                id: 'n/a',
-                registeredAt: new Date().toISOString(),
-                type: 'INTENT_EXPIRED',
+                id: 'n/a', registeredAt: new Date().toISOString(), type: 'INTENT_EXPIRED',
               });
             }
           }
@@ -291,17 +239,14 @@ export async function POST(request: Request) {
             description: productDefinition.desc,
             availableFrom: 'Sold out',
             archivedAt: new Date().toISOString(),
-            notes: 'Auto-archived: inventory reached 0',
+            notes: 'Sold out — all inventory allocated.',
+            soldOut: true,
           });
         }
       } catch {}
     }
 
-    const drawSummary = {
-      executionTime: new Date().toLocaleString(),
-      processedWinners,
-      totalSuccessfulCharges: grandRevenueChargesCount,
-    };
+    const drawSummary = { executionTime: new Date().toLocaleString(), processedWinners, totalSuccessfulCharges: grandRevenueChargesCount };
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
     } catch {}

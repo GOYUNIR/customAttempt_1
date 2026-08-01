@@ -1,48 +1,51 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, getCatalogArchiveRecords } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getVisibleProducts } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
     const redis = createRedisClient();
-    if (!redis) {
-      return NextResponse.json({
-        archivedProductIds: [],
-        notesByProductId: {},
-        availableFromByProductId: {},
-        records: [],
-      });
-    }
+    const archived = redis ? await getCatalogArchiveRecords(redis) : [];
+    const archivedProductIds = archived.map((r) => r.productId);
 
-    const records = await getCatalogArchiveRecords(redis);
-    const archivedProductIds = records.map((r) => r.productId);
     const notesByProductId: Record<string, string> = {};
     const availableFromByProductId: Record<string, string> = {};
-
-    for (const r of records) {
+    for (const r of archived) {
       if (r.notes) notesByProductId[r.productId] = r.notes;
       if (r.availableFrom) availableFromByProductId[r.productId] = r.availableFrom;
     }
 
-    // Enrich images from config if missing
-    const enriched = records.map((r) => {
-      const p = GOYUNIR_STORE_SUITE.productCatalog.find((x) => x.id === r.productId);
+    const activeDrops = getVisibleProducts(GOYUNIR_STORE_SUITE)
+      .filter((p) => !archivedProductIds.includes(p.id))
+      .map((p) => ({ id: p.id, name: p.name, tagline: p.tagline, desc: p.desc, slug: p.slug }));
+
+    const dynamicArchiveScents = archived.map((r) => {
+      const product = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.id === r.productId);
+      const isSoldOut = r.soldOut || String(r.availableFrom || '').toLowerCase() === 'sold out';
       return {
-        ...r,
-        slug: p?.slug,
-        image: r.image || (p ? `/images/${p.prefix}_1.jpg` : undefined),
+        name: r.name,
+        status: isSoldOut ? 'Sold Out' : 'Archived',
+        image: r.image || (product ? `/images/${product.prefix}_1.jpg` : undefined),
+        description: r.notes || r.description || product?.desc,
+        availableFrom: r.availableFrom,
+        availableUntil: r.archivedAt,
+        slug: product?.slug,
       };
     });
 
     return NextResponse.json({
+      activeDrops,
+      upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
+      archiveScents: [...GOYUNIR_STORE_SUITE.catalogPreview.archiveScents, ...dynamicArchiveScents],
       archivedProductIds,
       notesByProductId,
       availableFromByProductId,
-      records: enriched,
+      records: archived,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message, archivedProductIds: [] }, { status: 500 });
+    return NextResponse.json({ error: err.message, activeDrops: [], upcomingDrops: [], archiveScents: [], archivedProductIds: [] }, { status: 500 });
   }
 }

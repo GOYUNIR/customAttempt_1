@@ -29,6 +29,8 @@ export interface ArchiveRecord {
   registeredAt: string;
   type: string;
   shippingStatus?: string;
+  promoCode?: string;
+  amountCents?: number;
 }
 
 export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
@@ -47,6 +49,7 @@ export const PROCESSED_SESSIONS_KEY = 'drop_processed_sessions';
 export const LAST_DRAW_KEY = 'drop_last_draw_summary';
 export const CATALOG_ARCHIVE_KEY = 'catalog:archive_state';
 export const LIVE_STATE_KEY = 'live_state';
+export const PROMOS_KEY = 'config:promos';
 
 export function emailBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:emails`;
@@ -55,11 +58,8 @@ export function cardBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:cards`;
 }
 
-/** Descriptive id: p2-obsidian-void:50ml */
 export function liveStateField(productId: string, slug: string, size: string) {
-  const safeSlug = String(slug || productId)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-');
+  const safeSlug = String(slug || productId).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return `${productId}-${safeSlug}:${size}`;
 }
 
@@ -133,37 +133,16 @@ export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
   try {
     const hash = (await redis.hgetall(LIVE_STATE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
-    return Object.values(hash)
-      .map((r) => safeParseRedisItem<LiveStateRecord>(r))
-      .filter(Boolean) as LiveStateRecord[];
+    return Object.values(hash).map((r) => safeParseRedisItem<LiveStateRecord>(r)).filter(Boolean) as LiveStateRecord[];
   } catch {
     return [];
   }
 }
 
-/**
- * Flexible signature used by multiple routes:
- *  A) getLiveProductState(redis, productObject, size, winnersPerDrawNumber)
- *  B) getLiveProductState(redis, productIdString, size, { isActive, totalInventory, winnersPerDraw })
- */
-export async function getLiveProductState(
-  redis: Redis,
-  productOrId: any,
-  size: string,
-  fourth?: any,
-): Promise<LiveStateRecord> {
-  let id = '';
-  let name = '';
-  let slug = '';
-  let seedInv = 10;
-  let winners = 1;
-  let isActive = true;
-
+export async function getLiveProductState(redis: Redis, productOrId: any, size: string, fourth?: any): Promise<LiveStateRecord> {
+  let id = '', name = '', slug = '', seedInv = 10, winners = 1, isActive = true;
   if (typeof productOrId === 'string') {
-    // Style B — catalog-archive, etc.
-    id = productOrId;
-    name = productOrId;
-    slug = productOrId;
+    id = productOrId; name = productOrId; slug = productOrId;
     const opts = fourth && typeof fourth === 'object' ? fourth : {};
     seedInv = Number(opts.totalInventory ?? opts.inventoryRemaining ?? 10) || 10;
     winners = normalizeWinners(opts.winnersPerDraw, 1);
@@ -171,16 +150,10 @@ export async function getLiveProductState(
     if (opts.productName) name = String(opts.productName);
     if (opts.slug) slug = String(opts.slug);
   } else if (productOrId && typeof productOrId === 'object') {
-    // Style A — trigger-drop / status
-    id = String(productOrId.id || '');
-    name = String(productOrId.name || productOrId.id || '');
-    slug = String(productOrId.slug || productOrId.id || '');
-    seedInv = Number(
-      productOrId.maxRaffleAllocationLimit ?? productOrId.totalInventory ?? 10,
-    ) || 10;
-    if (typeof fourth === 'number') {
-      winners = normalizeWinners(fourth, 1);
-    } else if (fourth && typeof fourth === 'object') {
+    id = String(productOrId.id || ''); name = String(productOrId.name || productOrId.id || ''); slug = String(productOrId.slug || productOrId.id || '');
+    seedInv = Number(productOrId.maxRaffleAllocationLimit ?? productOrId.totalInventory ?? 10) || 10;
+    if (typeof fourth === 'number') winners = normalizeWinners(fourth, 1);
+    else if (fourth && typeof fourth === 'object') {
       winners = normalizeWinners(fourth.winnersPerDraw, 1);
       seedInv = Number(fourth.totalInventory ?? seedInv) || seedInv;
       isActive = fourth.isActive !== false;
@@ -188,17 +161,8 @@ export async function getLiveProductState(
       if (fourth.slug) slug = String(fourth.slug);
     }
   }
-
-  const state = await getOrSeedLiveState(
-    redis,
-    { id, name, slug, maxRaffleAllocationLimit: seedInv },
-    size,
-    winners,
-  );
-  if (!isActive) {
-    state.isActive = false;
-    await saveLiveState(redis, state);
-  }
+  const state = await getOrSeedLiveState(redis, { id, name, slug, maxRaffleAllocationLimit: seedInv }, size, winners);
+  if (!isActive) { state.isActive = false; await saveLiveState(redis, state); }
   return state;
 }
 
@@ -218,19 +182,9 @@ export async function setLiveProductState(redis: Redis, state: any) {
   await saveLiveState(redis, normalized);
 }
 
-export function getWinnerCountForDraw(
-  sizeOrConfig?: any,
-  configWinners50 = 1,
-  configWinners100 = 1,
-): number {
-  // Called as getWinnerCountForDraw(size) or getWinnerCountForDraw(size, 50count, 100count)
-  if (typeof sizeOrConfig === 'string') {
-    return sizeOrConfig === '100ml' ? configWinners100 : configWinners50;
-  }
-  // Called with full config-ish object
-  if (sizeOrConfig && typeof sizeOrConfig === 'object') {
-    return normalizeWinners(sizeOrConfig.winnersPer50ml ?? sizeOrConfig.winnersPerDraw, 1);
-  }
+export function getWinnerCountForDraw(sizeOrConfig?: any, configWinners50 = 1, configWinners100 = 1): number {
+  if (typeof sizeOrConfig === 'string') return sizeOrConfig === '100ml' ? configWinners100 : configWinners50;
+  if (sizeOrConfig && typeof sizeOrConfig === 'object') return normalizeWinners(sizeOrConfig.winnersPer50ml ?? sizeOrConfig.winnersPerDraw, 1);
   return 1;
 }
 
@@ -238,10 +192,8 @@ export async function resetPoolAndBlocks(redis: Redis, productName: string, size
   const poolKey = `drop_pool:${productName}:${size}`;
   const intentKey = `intent_pool:${productName}:${size}`;
   await Promise.all([
-    redis.del(poolKey),
-    redis.del(intentKey),
-    redis.del(emailBlockKey(productName, size)),
-    redis.del(cardBlockKey(productName, size)),
+    redis.del(poolKey), redis.del(intentKey),
+    redis.del(emailBlockKey(productName, size)), redis.del(cardBlockKey(productName, size)),
     redis.hset(POOL_STATS_KEY, {
       [poolStatField('sub', productName, size)]: '0',
       [poolStatField('int', productName, size)]: '0',
@@ -261,26 +213,16 @@ export async function cleanupMatchingIntent(redis: Redis, variant: string, size:
         removedCount++;
       }
     }
-    if (removedCount > 0) {
-      await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), -removedCount);
-    }
+    if (removedCount > 0) await redis.hincrby(POOL_STATS_KEY, poolStatField('int', variant, size), -removedCount);
   } catch {}
   return removedCount;
 }
 
 export interface FoundPoolEntry {
-  poolKey: string;
-  variant: string;
-  size: string;
-  index: number;
-  parsed: any;
+  poolKey: string; variant: string; size: string; index: number; parsed: any;
 }
 
-export async function findPoolEntriesByEmail(
-  redis: Redis,
-  productNames: string[],
-  email: string,
-): Promise<FoundPoolEntry[]> {
+export async function findPoolEntriesByEmail(redis: Redis, productNames: string[], email: string): Promise<FoundPoolEntry[]> {
   const normalizedEmail = email.trim().toLowerCase();
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
@@ -305,30 +247,21 @@ export async function removeListEntryAtIndex(redis: Redis, key: string, index: n
 }
 
 export interface CatalogArchiveRecord {
-  productId: string;
-  name: string;
-  image?: string;
-  description?: string;
-  availableFrom: string;
-  archivedAt: string;
-  notes?: string;
+  productId: string; name: string; image?: string; description?: string;
+  availableFrom: string; archivedAt: string; notes?: string; soldOut?: boolean;
 }
 
 export async function archiveProductToCatalog(redis: Redis, record: CatalogArchiveRecord) {
   await redis.hset(CATALOG_ARCHIVE_KEY, { [record.productId]: JSON.stringify(record) });
 }
-
 export async function unarchiveProductFromCatalog(redis: Redis, productId: string) {
   await redis.hdel(CATALOG_ARCHIVE_KEY, productId);
 }
-
 export async function getCatalogArchiveRecords(redis: Redis): Promise<CatalogArchiveRecord[]> {
   try {
     const hash = (await redis.hgetall(CATALOG_ARCHIVE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
-    return Object.values(hash)
-      .map((raw) => safeParseRedisItem<CatalogArchiveRecord>(raw))
-      .filter(Boolean) as CatalogArchiveRecord[];
+    return Object.values(hash).map((raw) => safeParseRedisItem<CatalogArchiveRecord>(raw)).filter(Boolean) as CatalogArchiveRecord[];
   } catch {
     return [];
   }
@@ -340,10 +273,7 @@ export async function getOnlineVisitors(redis: Redis, trafficKey: string, limit 
     const now = Date.now();
     const visitors: { visitorId: string; lastSeenSecondsAgo: number }[] = [];
     for (let i = 0; i < raw.length; i += 2) {
-      visitors.push({
-        visitorId: String(raw[i]),
-        lastSeenSecondsAgo: Math.max(0, Math.round((now - Number(raw[i + 1])) / 1000)),
-      });
+      visitors.push({ visitorId: String(raw[i]), lastSeenSecondsAgo: Math.max(0, Math.round((now - Number(raw[i + 1])) / 1000)) });
     }
     visitors.sort((a, b) => a.lastSeenSecondsAgo - b.lastSeenSecondsAgo);
     return visitors;
@@ -367,9 +297,7 @@ export function createStripeClient(): Stripe | null {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) return null;
   try {
-    return new Stripe(secretKey, {
-      apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion,
-    });
+    return new Stripe(secretKey, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
   } catch {
     return null;
   }
@@ -377,7 +305,59 @@ export function createStripeClient(): Stripe | null {
 
 export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
   const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? 'localhost:3000';
-  const protocol =
-    request?.headers.get('x-forwarded-proto') ?? (process.env.VERCEL_ENV === 'production' ? 'https' : 'http');
+  const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.VERCEL_ENV === 'production' ? 'https' : 'http');
   return new URL(path, `${protocol}://${host}`).toString();
+}
+
+// ============================================================
+// LIVE CONFIG OVERRIDES — lets /admin change schedule, social
+// proof, and pricing without a redeploy. Storefront and
+// trigger-drop read these on top of the goyunir.config.ts base.
+// ============================================================
+export const CONFIG_DROP_SCHEDULE_KEY = 'config:drop_schedule';
+export const CONFIG_SOCIAL_PROOF_KEY = 'config:social_proof';
+export const CONFIG_PRODUCT_OVERRIDE_PREFIX = 'config:product:';
+
+export async function getGlobalScheduleOverride(redis: Redis): Promise<Record<string, any> | null> {
+  return safeParseRedisItem<any>(await redis.get(CONFIG_DROP_SCHEDULE_KEY));
+}
+export async function saveGlobalScheduleOverride(redis: Redis, value: Record<string, any>) {
+  await redis.set(CONFIG_DROP_SCHEDULE_KEY, JSON.stringify(value));
+}
+
+export async function getSocialProofOverride(redis: Redis): Promise<Record<string, any> | null> {
+  return safeParseRedisItem<any>(await redis.get(CONFIG_SOCIAL_PROOF_KEY));
+}
+export async function saveSocialProofOverride(redis: Redis, value: Record<string, any>) {
+  await redis.set(CONFIG_SOCIAL_PROOF_KEY, JSON.stringify(value));
+}
+
+export interface ProductOverride {
+  customDropSchedule?: Record<string, any>;
+  price50ml?: number;
+  price100ml?: number;
+}
+export async function getProductOverride(redis: Redis, productId: string): Promise<ProductOverride | null> {
+  return safeParseRedisItem<ProductOverride>(await redis.get(CONFIG_PRODUCT_OVERRIDE_PREFIX + productId));
+}
+export async function saveProductOverride(redis: Redis, productId: string, value: ProductOverride) {
+  await redis.set(CONFIG_PRODUCT_OVERRIDE_PREFIX + productId, JSON.stringify(value));
+}
+export async function getAllProductOverrides(redis: Redis, productIds: string[]): Promise<Record<string, ProductOverride>> {
+  const out: Record<string, ProductOverride> = {};
+  for (const id of productIds) {
+    const o = await getProductOverride(redis, id);
+    if (o) out[id] = o;
+  }
+  return out;
+}
+
+// Promo click tracking (separate from `uses`, which only counts actual entries)
+export async function trackPromoClick(redis: Redis, code: string) {
+  const raw = await redis.hget(PROMOS_KEY, code);
+  const promo = safeParseRedisItem<any>(raw);
+  if (!promo) return false;
+  promo.clicks = (promo.clicks || 0) + 1;
+  await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
+  return true;
 }
