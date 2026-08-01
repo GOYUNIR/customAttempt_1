@@ -56,7 +56,9 @@ export function cardBlockKey(variant: string, size: string) {
 
 /** Descriptive id: p2-obsidian-void:50ml */
 export function liveStateField(productId: string, slug: string, size: string) {
-  const safeSlug = (slug || productId).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const safeSlug = String(slug || productId)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-');
   return `${productId}-${safeSlug}:${size}`;
 }
 
@@ -73,6 +75,13 @@ export interface LiveStateRecord {
   salesCompleted: number;
 }
 
+function normalizeWinners(value: unknown, fallback = 1): number {
+  if (Array.isArray(value)) return Math.max(1, Number(value[0] ?? fallback) || fallback);
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, value);
+  if (typeof value === 'string' && value.trim()) return Math.max(1, Number(value) || fallback);
+  return fallback;
+}
+
 export async function getOrSeedLiveState(
   redis: Redis,
   product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number },
@@ -85,9 +94,10 @@ export async function getOrSeedLiveState(
   if (existing && typeof existing.inventoryRemaining === 'number') {
     return {
       ...existing,
-      productName: product.name,
-      slug: product.slug,
+      productName: existing.productName || product.name,
+      slug: existing.slug || product.slug,
       size,
+      winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
     };
   }
   const seed: LiveStateRecord = {
@@ -96,9 +106,9 @@ export async function getOrSeedLiveState(
     slug: product.slug,
     size,
     isActive: true,
-    totalInventory: product.maxRaffleAllocationLimit,
-    inventoryRemaining: product.maxRaffleAllocationLimit,
-    winnersPerDraw,
+    totalInventory: Math.max(0, product.maxRaffleAllocationLimit),
+    inventoryRemaining: Math.max(0, product.maxRaffleAllocationLimit),
+    winnersPerDraw: normalizeWinners(winnersPerDraw, 1),
     drawsCompleted: 0,
     salesCompleted: 0,
   };
@@ -107,7 +117,15 @@ export async function getOrSeedLiveState(
 }
 
 export async function saveLiveState(redis: Redis, state: LiveStateRecord) {
-  await redis.hset(LIVE_STATE_KEY, { [state.productId]: JSON.stringify(state) });
+  const normalized: LiveStateRecord = {
+    ...state,
+    winnersPerDraw: normalizeWinners(state.winnersPerDraw, 1),
+    inventoryRemaining: Math.max(0, Number(state.inventoryRemaining) || 0),
+    totalInventory: Math.max(0, Number(state.totalInventory) || 0),
+    salesCompleted: Math.max(0, Number(state.salesCompleted) || 0),
+    drawsCompleted: Math.max(0, Number(state.drawsCompleted) || 0),
+  };
+  await redis.hset(LIVE_STATE_KEY, { [normalized.productId]: JSON.stringify(normalized) });
 }
 
 export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
@@ -122,22 +140,97 @@ export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
   }
 }
 
-/** Aliases used by older routes in this repo */
+/**
+ * Flexible signature used by multiple routes:
+ *  A) getLiveProductState(redis, productObject, size, winnersPerDrawNumber)
+ *  B) getLiveProductState(redis, productIdString, size, { isActive, totalInventory, winnersPerDraw })
+ */
 export async function getLiveProductState(
   redis: Redis,
-  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number },
+  productOrId: any,
   size: string,
-  winnersPerDraw = 1,
+  fourth?: any,
 ): Promise<LiveStateRecord> {
-  return getOrSeedLiveState(redis, product, size, winnersPerDraw);
+  let id = '';
+  let name = '';
+  let slug = '';
+  let seedInv = 10;
+  let winners = 1;
+  let isActive = true;
+
+  if (typeof productOrId === 'string') {
+    // Style B — catalog-archive, etc.
+    id = productOrId;
+    name = productOrId;
+    slug = productOrId;
+    const opts = fourth && typeof fourth === 'object' ? fourth : {};
+    seedInv = Number(opts.totalInventory ?? opts.inventoryRemaining ?? 10) || 10;
+    winners = normalizeWinners(opts.winnersPerDraw, 1);
+    isActive = opts.isActive !== false;
+    if (opts.productName) name = String(opts.productName);
+    if (opts.slug) slug = String(opts.slug);
+  } else if (productOrId && typeof productOrId === 'object') {
+    // Style A — trigger-drop / status
+    id = String(productOrId.id || '');
+    name = String(productOrId.name || productOrId.id || '');
+    slug = String(productOrId.slug || productOrId.id || '');
+    seedInv = Number(
+      productOrId.maxRaffleAllocationLimit ?? productOrId.totalInventory ?? 10,
+    ) || 10;
+    if (typeof fourth === 'number') {
+      winners = normalizeWinners(fourth, 1);
+    } else if (fourth && typeof fourth === 'object') {
+      winners = normalizeWinners(fourth.winnersPerDraw, 1);
+      seedInv = Number(fourth.totalInventory ?? seedInv) || seedInv;
+      isActive = fourth.isActive !== false;
+      if (fourth.productName) name = String(fourth.productName);
+      if (fourth.slug) slug = String(fourth.slug);
+    }
+  }
+
+  const state = await getOrSeedLiveState(
+    redis,
+    { id, name, slug, maxRaffleAllocationLimit: seedInv },
+    size,
+    winners,
+  );
+  if (!isActive) {
+    state.isActive = false;
+    await saveLiveState(redis, state);
+  }
+  return state;
 }
 
-export async function setLiveProductState(redis: Redis, state: LiveStateRecord) {
-  return saveLiveState(redis, state);
+export async function setLiveProductState(redis: Redis, state: any) {
+  const normalized: LiveStateRecord = {
+    productId: String(state.productId || ''),
+    productName: String(state.productName || state.name || ''),
+    slug: String(state.slug || ''),
+    size: String(state.size || '50ml'),
+    isActive: state.isActive !== false,
+    totalInventory: Math.max(0, Number(state.totalInventory) || 0),
+    inventoryRemaining: Math.max(0, Number(state.inventoryRemaining) || 0),
+    winnersPerDraw: normalizeWinners(state.winnersPerDraw, 1),
+    drawsCompleted: Math.max(0, Number(state.drawsCompleted) || 0),
+    salesCompleted: Math.max(0, Number(state.salesCompleted) || 0),
+  };
+  await saveLiveState(redis, normalized);
 }
 
-export function getWinnerCountForDraw(size: string, configWinners50 = 1, configWinners100 = 1): number {
-  return size === '100ml' ? configWinners100 : configWinners50;
+export function getWinnerCountForDraw(
+  sizeOrConfig?: any,
+  configWinners50 = 1,
+  configWinners100 = 1,
+): number {
+  // Called as getWinnerCountForDraw(size) or getWinnerCountForDraw(size, 50count, 100count)
+  if (typeof sizeOrConfig === 'string') {
+    return sizeOrConfig === '100ml' ? configWinners100 : configWinners50;
+  }
+  // Called with full config-ish object
+  if (sizeOrConfig && typeof sizeOrConfig === 'object') {
+    return normalizeWinners(sizeOrConfig.winnersPer50ml ?? sizeOrConfig.winnersPerDraw, 1);
+  }
+  return 1;
 }
 
 export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
