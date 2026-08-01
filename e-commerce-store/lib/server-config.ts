@@ -122,6 +122,39 @@ export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
   }
 }
 
+/** Aliases used by older routes in this repo */
+export async function getLiveProductState(
+  redis: Redis,
+  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number },
+  size: string,
+  winnersPerDraw = 1,
+): Promise<LiveStateRecord> {
+  return getOrSeedLiveState(redis, product, size, winnersPerDraw);
+}
+
+export async function setLiveProductState(redis: Redis, state: LiveStateRecord) {
+  return saveLiveState(redis, state);
+}
+
+export function getWinnerCountForDraw(size: string, configWinners50 = 1, configWinners100 = 1): number {
+  return size === '100ml' ? configWinners100 : configWinners50;
+}
+
+export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
+  const poolKey = `drop_pool:${productName}:${size}`;
+  const intentKey = `intent_pool:${productName}:${size}`;
+  await Promise.all([
+    redis.del(poolKey),
+    redis.del(intentKey),
+    redis.del(emailBlockKey(productName, size)),
+    redis.del(cardBlockKey(productName, size)),
+    redis.hset(POOL_STATS_KEY, {
+      [poolStatField('sub', productName, size)]: '0',
+      [poolStatField('int', productName, size)]: '0',
+    }),
+  ]);
+}
+
 export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string) {
   const intentKey = `intent_pool:${variant}:${size}`;
   let removedCount = 0;
