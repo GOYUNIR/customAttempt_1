@@ -11,8 +11,6 @@ export default async function HomePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-
-  // Keep Stripe return params so confirm-setup + success alert still run
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(sp)) {
     if (typeof value === 'string') params.set(key, value);
@@ -31,14 +29,10 @@ export default async function HomePage({
   }
 
   const visible = getVisibleProducts(GOYUNIR_STORE_SUITE).filter((p) => !archivedIds.includes(p.id));
-
   const preferredSlug = GOYUNIR_STORE_SUITE.homeRedirectSlug;
   const preferred = preferredSlug ? visible.find((p) => p.slug === preferredSlug) : undefined;
   const target = preferred ?? visible[0];
 
-  if (target?.slug) {
-    redirect(`/${target.slug}${suffix}`);
-  }
-
+  if (target?.slug) redirect(`/${target.slug}${suffix}`);
   redirect(`/catalog${suffix}`);
 }

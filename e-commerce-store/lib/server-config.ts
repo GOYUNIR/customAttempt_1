@@ -1,39 +1,6 @@
 import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
 
-export interface CheckoutRegistrationPayload {
-  email: string;
-  variant: string;
-  size: string;
-  address: string;
-  quantity: number;
-  registeredAt: number;
-  customerId?: string;
-  paymentMethodId?: string;
-  sessionId?: string;
-  source: 'fallback' | 'redis';
-}
-
-declare global {
-  var __goyunirFallbackEntries: CheckoutRegistrationPayload[] | undefined;
-}
-
-function getFallbackStore(): CheckoutRegistrationPayload[] {
-  if (typeof globalThis === 'undefined') return [];
-  if (!globalThis.__goyunirFallbackEntries) globalThis.__goyunirFallbackEntries = [];
-  return globalThis.__goyunirFallbackEntries;
-}
-
-export function addFallbackEntry(entry: Omit<CheckoutRegistrationPayload, 'source'>): CheckoutRegistrationPayload[] {
-  const store = getFallbackStore();
-  store.push({ ...entry, source: 'fallback' });
-  return store;
-}
-
-export function getFallbackEntries(): CheckoutRegistrationPayload[] {
-  return getFallbackStore();
-}
-
 export function safeParseRedisItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
   if (typeof item === 'object') return item as T;
@@ -75,54 +42,10 @@ export function poolStatField(kind: 'sub' | 'int', variant: string, size: string
 }
 
 export const SOCIAL_PROOF_BOOST_KEY = 'stats:social_proof_boost';
-export const SALES_KEY = 'stats:sales';
-export function salesField(variant: string, size: string) {
-  return `sales:${variant}:${size}`;
-}
-
-export function inventoryKey(variant: string, size: string) {
-  return `inventory:remaining:${variant}:${size}`;
-}
-
-/** Remaining inv lives in Redis so deploys never reset stock. Seeds from config once. */
-export async function getInventoryRemaining(
-  redis: Redis,
-  variant: string,
-  size: string,
-  seedFromConfig: number,
-): Promise<number> {
-  const key = inventoryKey(variant, size);
-  const existing = await redis.get(key);
-  if (existing != null && existing !== '') {
-    return Math.max(0, Number(existing));
-  }
-  const seed = Math.max(0, seedFromConfig);
-  await redis.set(key, String(seed));
-  return seed;
-}
-
-export async function decrementInventory(redis: Redis, variant: string, size: string, by = 1): Promise<number> {
-  const key = inventoryKey(variant, size);
-  const next = await redis.decrby(key, by);
-  if (next < 0) {
-    await redis.set(key, '0');
-    return 0;
-  }
-  return next;
-}
-
-export async function setInventory(redis: Redis, variant: string, size: string, value: number) {
-  await redis.set(inventoryKey(variant, size), String(Math.max(0, value)));
-}
-
-export async function getSalesCount(redis: Redis, variant: string, size: string): Promise<number> {
-  const v = await redis.hget(SALES_KEY, salesField(variant, size));
-  return Number(v ?? 0);
-}
-
-export async function incrementSales(redis: Redis, variant: string, size: string, by = 1) {
-  await redis.hincrby(SALES_KEY, salesField(variant, size), by);
-}
+export const PROCESSED_SESSIONS_KEY = 'drop_processed_sessions';
+export const LAST_DRAW_KEY = 'drop_last_draw_summary';
+export const CATALOG_ARCHIVE_KEY = 'catalog:archive_state';
+export const LIVE_STATE_KEY = 'live_state';
 
 export function emailBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:emails`;
@@ -131,10 +54,75 @@ export function cardBlockKey(variant: string, size: string) {
   return `drop_fraud_block:${variant}:${size}:cards`;
 }
 
-export const PROCESSED_SESSIONS_KEY = 'drop_processed_sessions';
-export const LAST_DRAW_KEY = 'drop_last_draw_summary';
+/** Descriptive id: p2-obsidian-void:50ml */
+export function liveStateField(productId: string, slug: string, size: string) {
+  const safeSlug = (slug || productId).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `${productId}-${safeSlug}:${size}`;
+}
 
-export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string): Promise<number> {
+export interface LiveStateRecord {
+  productId: string;
+  productName: string;
+  slug: string;
+  size: string;
+  isActive: boolean;
+  totalInventory: number;
+  inventoryRemaining: number;
+  winnersPerDraw: number;
+  drawsCompleted: number;
+  salesCompleted: number;
+}
+
+export async function getOrSeedLiveState(
+  redis: Redis,
+  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number },
+  size: string,
+  winnersPerDraw: number,
+): Promise<LiveStateRecord> {
+  const field = liveStateField(product.id, product.slug, size);
+  const raw = await redis.hget(LIVE_STATE_KEY, field);
+  const existing = safeParseRedisItem<LiveStateRecord>(raw);
+  if (existing && typeof existing.inventoryRemaining === 'number') {
+    return {
+      ...existing,
+      productName: product.name,
+      slug: product.slug,
+      size,
+    };
+  }
+  const seed: LiveStateRecord = {
+    productId: field,
+    productName: product.name,
+    slug: product.slug,
+    size,
+    isActive: true,
+    totalInventory: product.maxRaffleAllocationLimit,
+    inventoryRemaining: product.maxRaffleAllocationLimit,
+    winnersPerDraw,
+    drawsCompleted: 0,
+    salesCompleted: 0,
+  };
+  await redis.hset(LIVE_STATE_KEY, { [field]: JSON.stringify(seed) });
+  return seed;
+}
+
+export async function saveLiveState(redis: Redis, state: LiveStateRecord) {
+  await redis.hset(LIVE_STATE_KEY, { [state.productId]: JSON.stringify(state) });
+}
+
+export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
+  try {
+    const hash = (await redis.hgetall(LIVE_STATE_KEY)) as Record<string, string> | null;
+    if (!hash) return [];
+    return Object.values(hash)
+      .map((r) => safeParseRedisItem<LiveStateRecord>(r))
+      .filter(Boolean) as LiveStateRecord[];
+  } catch {
+    return [];
+  }
+}
+
+export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string) {
   const intentKey = `intent_pool:${variant}:${size}`;
   let removedCount = 0;
   try {
@@ -151,21 +139,6 @@ export async function cleanupMatchingIntent(redis: Redis, variant: string, size:
     }
   } catch {}
   return removedCount;
-}
-
-export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
-  const poolKey = `drop_pool:${productName}:${size}`;
-  const intentKey = `intent_pool:${productName}:${size}`;
-  await Promise.all([
-    redis.del(poolKey),
-    redis.del(intentKey),
-    redis.del(emailBlockKey(productName, size)),
-    redis.del(cardBlockKey(productName, size)),
-    redis.hset(POOL_STATS_KEY, {
-      [poolStatField('sub', productName, size)]: '0',
-      [poolStatField('int', productName, size)]: '0',
-    }),
-  ]);
 }
 
 export interface FoundPoolEntry {
@@ -204,8 +177,6 @@ export async function removeListEntryAtIndex(redis: Redis, key: string, index: n
   await redis.lrem(key, 1, tombstone);
 }
 
-export const CATALOG_ARCHIVE_KEY = 'catalog:archive_state';
-
 export interface CatalogArchiveRecord {
   productId: string;
   name: string;
@@ -236,24 +207,16 @@ export async function getCatalogArchiveRecords(redis: Redis): Promise<CatalogArc
   }
 }
 
-export async function isProductArchived(redis: Redis, productId: string): Promise<boolean> {
-  try {
-    const val = await redis.hget(CATALOG_ARCHIVE_KEY, productId);
-    return val != null;
-  } catch {
-    return false;
-  }
-}
-
 export async function getOnlineVisitors(redis: Redis, trafficKey: string, limit = 50) {
   try {
     const raw = (await redis.zrange(trafficKey, -limit, -1, { withScores: true })) as (string | number)[];
     const now = Date.now();
     const visitors: { visitorId: string; lastSeenSecondsAgo: number }[] = [];
     for (let i = 0; i < raw.length; i += 2) {
-      const visitorId = String(raw[i]);
-      const score = Number(raw[i + 1]);
-      visitors.push({ visitorId, lastSeenSecondsAgo: Math.max(0, Math.round((now - score) / 1000)) });
+      visitors.push({
+        visitorId: String(raw[i]),
+        lastSeenSecondsAgo: Math.max(0, Math.round((now - Number(raw[i + 1])) / 1000)),
+      });
     }
     visitors.sort((a, b) => a.lastSeenSecondsAgo - b.lastSeenSecondsAgo);
     return visitors;

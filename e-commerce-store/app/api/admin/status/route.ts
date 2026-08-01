@@ -7,8 +7,7 @@ import {
   LAST_DRAW_KEY,
   ARCHIVE_LEDGER_KEY,
   getOnlineVisitors,
-  getInventoryRemaining,
-  getSalesCount,
+  getOrSeedLiveState,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getWinnerCount } from '@/lib/storefront-config';
@@ -41,18 +40,21 @@ export async function GET() {
       const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
       for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
         for (const size of ['50ml', '100ml']) {
+          const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, size);
+          const live = await getOrSeedLiveState(redis, product, size, winnersPerDraw);
           const intCount = Number(statsHash?.[`int:${product.name}:${size}`] ?? 0);
           const subCount = Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0);
-          const inv = await getInventoryRemaining(redis, product.name, size, product.maxRaffleAllocationLimit);
-          const sales = await getSalesCount(redis, product.name, size);
           status.pools.push({
             product: product.name,
+            productId: live.productId,
             size,
             intCount,
             subCount,
-            salesCount: sales,
-            maxLimit: inv,
-            winnersPerDraw: getWinnerCount(GOYUNIR_STORE_SUITE, size),
+            salesCount: live.salesCompleted,
+            maxLimit: live.inventoryRemaining,
+            totalInventory: live.totalInventory,
+            winnersPerDraw: live.winnersPerDraw,
+            drawsCompleted: live.drawsCompleted,
           });
         }
       }
@@ -65,8 +67,11 @@ export async function GET() {
     } catch {}
 
     try {
-      const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -80, -1);
-      status.fallbackEntries = recentRaw.map((item) => safeParseRedisItem<any>(item)).filter(Boolean).reverse();
+      const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -100, -1);
+      status.fallbackEntries = recentRaw
+        .map((item) => safeParseRedisItem<any>(item))
+        .filter(Boolean)
+        .reverse();
     } catch {}
 
     return NextResponse.json(status);

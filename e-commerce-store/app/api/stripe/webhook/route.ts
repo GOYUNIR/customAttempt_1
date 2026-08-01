@@ -1,103 +1,109 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient, createStripeClient, archiveEntry, emailBlockKey, cardBlockKey,
-  poolStatField, POOL_STATS_KEY, PROCESSED_SESSIONS_KEY, cleanupMatchingIntent,
+  createRedisClient,
+  createStripeClient,
+  archiveEntry,
+  cleanupMatchingIntent,
+  emailBlockKey,
+  cardBlockKey,
+  poolStatField,
+  POOL_STATS_KEY,
+  PROCESSED_SESSIONS_KEY,
 } from '@/lib/server-config';
-import Stripe from 'stripe';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const redis = createRedisClient();
   const stripe = createStripeClient();
-
-  const signature = request.headers.get('stripe-signature') ?? '';
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!stripe || !webhookSecret || !redis) {
-    return NextResponse.json({ error: 'System processing nodes offline.' }, { status: 500 });
+  if (!redis || !stripe) {
+    return NextResponse.json({ error: 'Offline' }, { status: 500 });
   }
 
-  const body = await request.text();
-  let event: Stripe.Event;
+  const sig = request.headers.get('stripe-signature');
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  let event: any;
+
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch (err) {
-    if (process.env.ALLOW_UNVERIFIED_WEBHOOKS === 'true' || process.env.NODE_ENV !== 'production') {
-      event = JSON.parse(body) as Stripe.Event;
+    const raw = await request.text();
+    if (secret && sig) {
+      event = stripe.webhooks.constructEvent(raw, sig, secret);
     } else {
-      return NextResponse.json({ error: 'Invalid webhook signature buffer.' }, { status: 400 });
+      event = JSON.parse(raw);
     }
+  } catch (err: any) {
+    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
   }
 
-  if (event.type !== 'checkout.session.completed') return NextResponse.json({ received: true });
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    if (session.mode === 'setup' && session.status === 'complete') {
+      const sessionId = session.id;
+      const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
+      if (already !== 1) {
+        const meta = session.metadata || {};
+        const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
+        const variant = String(meta.variant || '').trim();
+        const size = String(meta.size || '50ml').trim();
+        const shippingAddress = String(meta.address || '').trim();
+        const customerId = typeof session.customer === 'string' ? session.customer : '';
 
-  const session = event.data.object as any;
-  const sessionId = String(session.id || '');
-  const alreadyProcessed = sessionId ? await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId) : 0;
-  if (alreadyProcessed === 1) return NextResponse.json({ received: true, note: 'Already processed by confirm-setup.' });
+        if (email && variant) {
+          let paymentMethodId = '';
+          let cardLast4 = '';
+          let cardFingerprint = '';
+          try {
+            if (session.setup_intent) {
+              const si = await stripe.setupIntents.retrieve(String(session.setup_intent), {
+                expand: ['payment_method'],
+              });
+              const pm = si.payment_method as any;
+              if (pm) {
+                paymentMethodId = typeof pm === 'string' ? pm : pm.id;
+                if (typeof pm !== 'string') {
+                  cardLast4 = pm.card?.last4 || '';
+                  cardFingerprint = pm.card?.fingerprint || '';
+                }
+              }
+            }
+          } catch {}
 
-  const metadata = session.metadata ?? {};
-  const variant = String(metadata.variant || '').trim();
-  const size = String(metadata.size || '').trim();
-  const email = String(metadata.email || session.customer_details?.email || '').trim().toLowerCase();
-  const customerId = String(session.customer || '');
-  // Address comes ONLY from metadata now — Stripe no longer collects its
-  // own separate shipping address for this flow.
-  const address = String(metadata.address || '').trim();
-
-  let paymentMethodId = '';
-  const setupIntentId = typeof session.setup_intent === 'string' ? session.setup_intent : session.setup_intent?.id || '';
-  if (setupIntentId) {
-    try {
-      const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
-      paymentMethodId = typeof setupIntent.payment_method === 'string' ? setupIntent.payment_method : setupIntent.payment_method?.id || '';
-    } catch { paymentMethodId = ''; }
-  }
-
-  if (!variant || !size || !address || !email || !customerId) {
-    console.error('CRITICAL WEBHOOK ERROR: Incomplete payload mapping attributes:', { variant, size, address, email, customerId });
-    return NextResponse.json({ error: 'Incomplete checkout session metadata attributes.' }, { status: 400 });
-  }
-
-  let cardFingerprint = '';
-  let cardLast4 = '';
-  if (paymentMethodId) {
-    try {
-      const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
-      cardFingerprint = paymentMethod.card?.fingerprint ?? '';
-      cardLast4 = paymentMethod.card?.last4 ?? '';
-    } catch {}
-  }
-
-  const emailKey = emailBlockKey(variant, size);
-  const cardKey = cardBlockKey(variant, size);
-  const [isEmailDuplicate, isCardDuplicate] = await Promise.all([
-    redis.sismember(emailKey, email),
-    cardFingerprint ? redis.sismember(cardKey, cardFingerprint) : Promise.resolve(0),
-  ]);
-
-  if (sessionId) await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
-  await cleanupMatchingIntent(redis, variant, size, email);
-
-  if (isEmailDuplicate !== 1 && isCardDuplicate !== 1) {
-    const poolKey = `drop_pool:${variant}:${size}`;
-    const payload = JSON.stringify({
-      email, variant, size, shippingAddress: address, address, quantity: 1,
-      paymentMethodId: paymentMethodId || 'vaulted_token_hold',
-      customerId, stripeCustomerId: customerId, cardFingerprint, cardLast4,
-      id: session.id || `session_${Math.random().toString(36).substring(2, 7)}`,
-      registeredAt: new Date().toISOString(),
-      type: metadata.registrationType === 'WAITLIST_BACKORDER' ? 'WAITLIST' : 'SUBMISSION',
-    });
-    await Promise.all([
-      redis.rpush(poolKey, payload),
-      redis.sadd(emailKey, email),
-      cardFingerprint ? redis.sadd(cardKey, cardFingerprint) : Promise.resolve(),
-      redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1),
-      archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'ENTERED' }),
-    ]);
-  } else {
-    await archiveEntry(redis, { email, variant, size, shippingAddress: address, id: customerId, registeredAt: new Date().toISOString(), type: 'DUPLICATE_BLOCKED' });
+          const emailBlocked = await redis.sismember(emailBlockKey(variant, size), email);
+          if (emailBlocked !== 1) {
+            const entry = {
+              email,
+              variant,
+              size,
+              shippingAddress,
+              address: shippingAddress,
+              customerId,
+              stripeCustomerId: customerId,
+              paymentMethodId,
+              cardLast4,
+              cardFingerprint,
+              sessionId,
+              registeredAt: new Date().toISOString(),
+              type: 'ENTERED',
+            };
+            await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+            await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
+            await redis.sadd(emailBlockKey(variant, size), email);
+            if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
+            await cleanupMatchingIntent(redis, variant, size, email);
+            await archiveEntry(redis, {
+              email,
+              variant,
+              size,
+              shippingAddress,
+              id: customerId || 'n/a',
+              registeredAt: entry.registeredAt,
+              type: 'ENTERED',
+            });
+          }
+          await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+        }
+      }
+    }
   }
 
   return NextResponse.json({ received: true });
