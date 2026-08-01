@@ -11,14 +11,13 @@ import {
   emailBlockKey,
   cardBlockKey,
   SOCIAL_PROOF_BOOST_KEY,
-  SOCIAL_PROOF_WINNERS_DEDUCTED_KEY,
-  getLiveProductState,
-  setLiveProductState,
-  getWinnerCountForDraw,
+  getInventoryRemaining,
+  decrementInventory,
+  incrementSales,
   archiveProductToCatalog,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice } from '@/lib/storefront-config';
+import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -67,8 +66,10 @@ export async function POST(request: Request) {
         const priceCents = productDefinition
           ? Math.round(getProductPrice(productDefinition, productSize) * 100)
           : 8500;
+        const seedInv = productDefinition?.maxRaffleAllocationLimit ?? 10;
+        const invLeft = await getInventoryRemaining(redis, productName, productSize, seedInv);
+        if (invLeft <= 0 || listLength === 0) continue;
 
-        if (listLength === 0) continue;
         const entries = await redis.lrange(poolKey, 0, -1);
         const shuffled = [...entries];
         for (let i = shuffled.length - 1; i > 0; i--) {
@@ -76,38 +77,23 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // Inventory-aware winner count: how many to draw THIS round, capped
-        // by whatever's left. Falls back to old fixed-per-draw behavior if
-        // the product isn't in the config (shouldn't normally happen).
-        const liveState = productDefinition
-          ? await getLiveProductState(redis, productDefinition.id, productSize, {
-              isActive: productDefinition.isActive !== false,
-              totalInventory: productDefinition.totalInventory ?? productDefinition.maxRaffleAllocationLimit ?? 10,
-              winnersPerDraw: productDefinition.winnerTiers?.length
-                ? productDefinition.winnerTiers
-                : [productDefinition.maxRaffleAllocationLimit ?? 1],
-            })
-          : null;
-        const inventoryLimit = liveState ? getWinnerCountForDraw(liveState) : 1;
-
+        // Winners this draw = min(configured per-draw, remaining inventory)
+        const perDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
+        const inventoryLimit = Math.min(perDraw, invLeft);
         let successfulPoolCaptures = 0;
-        let chargedThisPool = 0;
         const remainingEntries: string[] = [];
 
         for (const winnerStr of shuffled) {
           const rawWinnerData = safeParseRedisItem<any>(winnerStr);
           if (!rawWinnerData) continue;
           const winnerData =
-            rawWinnerData.email && typeof rawWinnerData.email === 'object'
-              ? rawWinnerData.email
-              : rawWinnerData;
+            rawWinnerData.email && typeof rawWinnerData.email === 'object' ? rawWinnerData.email : rawWinnerData;
           const winnerEmail = String(winnerData.email || '').toLowerCase();
           const paymentMethod = winnerData.paymentMethodId || null;
           const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
 
           if (successfulPoolCaptures >= inventoryLimit) {
-            // LOSER — stay in pool forever for next draw
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
             await archiveEntry(redis, {
               email: winnerEmail,
@@ -131,11 +117,12 @@ export async function POST(request: Request) {
                 off_session: true,
                 confirm: true,
                 receipt_email: winnerEmail,
-                description: `GOYUNIR Lottery Win Allocation: ${productName} (${productSize})`,
+                description: `GOYUNIR Lottery Win: ${productName} (${productSize})`,
               });
               grandRevenueChargesCount++;
-              chargedThisPool++;
               successfulPoolCaptures++;
+              await decrementInventory(redis, productName, productSize, 1);
+              await incrementSales(redis, productName, productSize, 1);
               await archiveEntry(redis, {
                 email: winnerEmail,
                 variant: productName,
@@ -153,9 +140,8 @@ export async function POST(request: Request) {
                 status: 'SUCCESS_CHARGED',
               });
             } else {
-              // Missing card — treat as declined, still consumes an
-              // allocation slot for this round; they can fix card & re-enter.
-              successfulPoolCaptures++;
+              // Missing card — skip, try next person (do not count as win)
+              remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
               await archiveEntry(redis, {
                 email: winnerEmail,
                 variant: productName,
@@ -174,7 +160,8 @@ export async function POST(request: Request) {
               });
             }
           } catch (err: any) {
-            successfulPoolCaptures++;
+            // Charge failed — keep in pool, try next entrant for this draw slot
+            remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
             processedWinners.push({
               email: winnerEmail,
               product: productName,
@@ -194,13 +181,12 @@ export async function POST(request: Request) {
           }
         }
 
-        // Rebuild pool with losers only (they stay for next week / return)
+        // Rebuild pool with non-winners (they stay for next week)
         await redis.del(poolKey);
         for (const entry of remainingEntries) {
           await redis.rpush(poolKey, entry);
         }
 
-        // Rebuild email/card blocks from remaining only
         await redis.del(emailBlockKey(productName, productSize));
         await redis.del(cardBlockKey(productName, productSize));
         for (const entry of remainingEntries) {
@@ -213,7 +199,6 @@ export async function POST(request: Request) {
           }
         }
 
-        // Expire open intents
         const intentKey = `intent_pool:${productName}:${productSize}`;
         try {
           const remainingIntents = await redis.lrange(intentKey, 0, -1);
@@ -239,33 +224,23 @@ export async function POST(request: Request) {
           [poolStatField('int', productName, productSize)]: '0',
         });
 
-        // Update live inventory + SLS + draw count, auto-archive at 0.
-        if (productDefinition && liveState) {
-          liveState.inventoryRemaining = Math.max(0, liveState.inventoryRemaining - successfulPoolCaptures);
-          liveState.salesCompleted = (liveState.salesCompleted || 0) + chargedThisPool;
-          liveState.drawsCompleted = (liveState.drawsCompleted || 0) + 1;
-          if (liveState.inventoryRemaining <= 0) {
-            liveState.isActive = false;
-            await archiveProductToCatalog(redis, {
-              productId: productDefinition.id,
-              name: productDefinition.name,
-              image: productDefinition.catalogImage || `/images/${productDefinition.prefix}_1.jpg`,
-              description: productDefinition.desc,
-              availableFrom: 'Sold out — inventory exhausted',
-              archivedAt: new Date().toISOString(),
-            });
-          }
-          await setLiveProductState(redis, liveState);
-        }
-
-        // Subtract charged winners from the displayed social-proof number.
-        if (chargedThisPool > 0) {
-          await redis.incrby(SOCIAL_PROOF_WINNERS_DEDUCTED_KEY, chargedThisPool);
+        // Auto-archive product when inventory hits 0
+        const invAfter = await getInventoryRemaining(redis, productName, productSize, seedInv);
+        if (invAfter <= 0 && productDefinition) {
+          await archiveProductToCatalog(redis, {
+            productId: productDefinition.id,
+            name: productDefinition.name,
+            image: productDefinition.catalogImage || `/images/${productDefinition.prefix}_1.jpg`,
+            description: productDefinition.desc,
+            availableFrom: 'Sold out',
+            archivedAt: new Date().toISOString(),
+            notes: 'Auto-archived: inventory reached 0',
+          });
         }
       } catch {}
     }
 
-    // Reset hype boost after a draw; real entry counts for other live products stay
+    // Social proof: only clear the FAKE boost; real remaining SUBs stay in the count
     try {
       await redis.set(SOCIAL_PROOF_BOOST_KEY, '0');
     } catch {}

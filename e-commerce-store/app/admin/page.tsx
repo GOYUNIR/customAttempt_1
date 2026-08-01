@@ -322,17 +322,32 @@ export default function AdminPortal() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {status?.pools &&
               status.pools.map((p: any, i: number) => {
-                const intCount = p.intCount ?? 0,
-                  subCount = p.subCount ?? 0,
-                  maxLimit = p.maxLimit ?? 10;
+                const intCount = p.intCount ?? 0;
+                const subCount = p.subCount ?? 0;
+                const salesCount = p.salesCount ?? 0;
+                const maxLimit = p.maxLimit ?? 0;
                 return (
-                  <div key={i} style={{ background: '#09090b', padding: '14px 16px', borderRadius: '12px', border: '1px solid #1c1c1e', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div
+                    key={i}
+                    style={{
+                      background: '#09090b',
+                      padding: '14px 16px',
+                      borderRadius: '12px',
+                      border: '1px solid #1c1c1e',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                       <div style={{ fontWeight: '600', fontSize: '13px' }}>
                         {p.product} <span style={{ color: '#555' }}>— {p.size}</span>
                       </div>
-                      <div style={{ color: subCount >= maxLimit ? '#f87171' : '#34d399', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '13px' }}>
-                        {intCount} INT / {subCount} SUB / {maxLimit} INV
+                      <div style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '12px' }}>
+                        <span style={{ color: '#edb210' }}>{intCount} INT</span>
+                        {' / '}
+                        <span style={{ color: '#34d399' }}>{subCount} SUB</span>
+                        {' / '}
+                        <span style={{ color: '#60a5fa' }}>{salesCount} SLS</span>
+                        {' / '}
+                        <span style={{ color: maxLimit <= 0 ? '#f87171' : '#fff' }}>{maxLimit} INV</span>
                       </div>
                     </div>
                   </div>
@@ -344,18 +359,21 @@ export default function AdminPortal() {
         <section style={{ padding: '24px', borderRadius: '24px', background: '#07070a', border: '1px solid #27272a' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h2 style={{ margin: 0, fontSize: '1.25rem', textTransform: 'uppercase' }}>Real-Time Draw Processing Matrix</h2>
-            <button
-              onClick={() => setRevealAddresses((v) => !v)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: '8px',
-                border: '1px solid #27272a',
-                background: revealAddresses ? '#1c1c1e' : 'transparent',
-                color: revealAddresses ? '#34d399' : '#888',
-                fontSize: '11px',
-                cursor: 'pointer',
-              }}
-            >
+              <button
+                onClick={() => {
+                  if (!revealAddresses) {
+                    if (!triggerVerificationPassword) {
+                      alert('Enter admin password above to reveal addresses.');
+                      return;
+                    }
+                    if (triggerVerificationPassword !== '' && status) {
+                      // client cannot verify server password; require non-empty + confirm
+                      if (!confirm('Reveal shipping addresses? Only do this off-stream.')) return;
+                    }
+                  }
+                  setRevealAddresses((v) => !v);
+                }}
+              >
               {revealAddresses ? '🔒 Hide addresses' : '👁 Reveal addresses'}
             </button>
           </div>

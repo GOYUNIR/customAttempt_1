@@ -7,11 +7,11 @@ import {
   LAST_DRAW_KEY,
   ARCHIVE_LEDGER_KEY,
   getOnlineVisitors,
-  getLiveProductState,
-  getWinnerCountForDraw,
+  getInventoryRemaining,
+  getSalesCount,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getAvailableSizes } from '@/lib/storefront-config';
+import { getWinnerCount } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,9 +20,13 @@ export async function GET() {
     const redis = createRedisClient();
     const stripe = createStripeClient();
     const status = {
-      stripeConfigured: Boolean(stripe), redisConfigured: Boolean(redis),
-      fallbackEntries: [] as any[], pools: [] as any[],
-      liveActiveUsersOnline: 1, onlineVisitors: [] as any[], lastDraw: null as any,
+      stripeConfigured: Boolean(stripe),
+      redisConfigured: Boolean(redis),
+      fallbackEntries: [] as any[],
+      pools: [] as any[],
+      liveActiveUsersOnline: 1,
+      onlineVisitors: [] as any[],
+      lastDraw: null as any,
     };
     if (!redis) return NextResponse.json(status);
 
@@ -35,23 +39,20 @@ export async function GET() {
 
     try {
       const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
-      const size = getAvailableSizes(GOYUNIR_STORE_SUITE)[0] || '50ml';
       for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-        for (const sz of ['50ml', '100ml']) {
-          const live = await getLiveProductState(redis, product.id, sz, {
-            isActive: product.isActive !== false,
-            totalInventory: product.totalInventory ?? product.maxRaffleAllocationLimit ?? 10,
-            winnersPerDraw: product.winnerTiers?.length ? product.winnerTiers : [product.maxRaffleAllocationLimit ?? 1],
-          });
+        for (const size of ['50ml', '100ml']) {
+          const intCount = Number(statsHash?.[`int:${product.name}:${size}`] ?? 0);
+          const subCount = Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0);
+          const inv = await getInventoryRemaining(redis, product.name, size, product.maxRaffleAllocationLimit);
+          const sales = await getSalesCount(redis, product.name, size);
           status.pools.push({
-            product: product.name, size: sz,
-            intCount: Number(statsHash?.[`int:${product.name}:${sz}`] ?? 0),
-            subCount: Number(statsHash?.[`sub:${product.name}:${sz}`] ?? 0),
-            maxLimit: getWinnerCountForDraw(live),
-            inventoryRemaining: live.inventoryRemaining,
-            totalInventory: live.totalInventory,
-            salesCompleted: live.salesCompleted,
-            isActive: live.isActive,
+            product: product.name,
+            size,
+            intCount,
+            subCount,
+            salesCount: sales,
+            maxLimit: inv,
+            winnersPerDraw: getWinnerCount(GOYUNIR_STORE_SUITE, size),
           });
         }
       }

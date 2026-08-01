@@ -45,11 +45,7 @@ export async function POST(request: Request) {
     const protocol = hostHeader.includes('localhost') ? 'http' : 'https';
     const domainUrl = `${protocol}://${hostHeader}`;
 
-    // NOTE: shipping_address_collection intentionally removed. The address
-    // typed on our own form (above) is now the ONLY address that can exist
-    // for this entry — Stripe no longer gets its own separate address field,
-    // which is what previously let two different addresses be submitted for
-    // one entry.
+    // Return to / with setup params — page.tsx preserves them when redirecting to /slug
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'setup',
