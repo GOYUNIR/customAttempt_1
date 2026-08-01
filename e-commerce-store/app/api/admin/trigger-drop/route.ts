@@ -11,13 +11,52 @@ import {
   emailBlockKey,
   cardBlockKey,
   SOCIAL_PROOF_BOOST_KEY,
-  getInventoryRemaining,
-  decrementInventory,
-  incrementSales,
   archiveProductToCatalog,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
+
+async function getInventoryRemaining(redis: any, productName: string, productSize: string, seedInv: number) {
+  try {
+    const inventoryKey = `inventory:${productName}:${productSize}`;
+    const inventoryValue = await redis.get(inventoryKey);
+    if (inventoryValue !== null && inventoryValue !== undefined) {
+      const parsed = Number(inventoryValue);
+      if (!Number.isNaN(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+
+    const salesKey = `sales:${productName}:${productSize}`;
+    const salesValue = await redis.get(salesKey);
+    const sold = Number(salesValue || '0');
+    return Math.max(0, Number(seedInv || 0) - sold);
+  } catch {
+    return Math.max(0, Number(seedInv || 0));
+  }
+}
+
+async function decrementInventory(redis: any, productName: string, productSize: string, amount = 1) {
+  try {
+    const inventoryKey = `inventory:${productName}:${productSize}`;
+    const current = await redis.get(inventoryKey);
+    const parsed = Number(current ?? '0');
+    if (!Number.isNaN(parsed)) {
+      await redis.set(inventoryKey, String(Math.max(0, parsed - amount)));
+    }
+  } catch {}
+}
+
+async function incrementSales(redis: any, productName: string, productSize: string, amount = 1) {
+  try {
+    const salesKey = `sales:${productName}:${productSize}`;
+    const current = await redis.get(salesKey);
+    const parsed = Number(current ?? '0');
+    if (!Number.isNaN(parsed)) {
+      await redis.set(salesKey, String(parsed + amount));
+    }
+  } catch {}
+}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
