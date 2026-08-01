@@ -11,52 +11,12 @@ import {
   emailBlockKey,
   cardBlockKey,
   SOCIAL_PROOF_BOOST_KEY,
+  getOrSeedLiveState,
+  saveLiveState,
   archiveProductToCatalog,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
-
-async function getInventoryRemaining(redis: any, productName: string, productSize: string, seedInv: number) {
-  try {
-    const inventoryKey = `inventory:${productName}:${productSize}`;
-    const inventoryValue = await redis.get(inventoryKey);
-    if (inventoryValue !== null && inventoryValue !== undefined) {
-      const parsed = Number(inventoryValue);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
-        return parsed;
-      }
-    }
-
-    const salesKey = `sales:${productName}:${productSize}`;
-    const salesValue = await redis.get(salesKey);
-    const sold = Number(salesValue || '0');
-    return Math.max(0, Number(seedInv || 0) - sold);
-  } catch {
-    return Math.max(0, Number(seedInv || 0));
-  }
-}
-
-async function decrementInventory(redis: any, productName: string, productSize: string, amount = 1) {
-  try {
-    const inventoryKey = `inventory:${productName}:${productSize}`;
-    const current = await redis.get(inventoryKey);
-    const parsed = Number(current ?? '0');
-    if (!Number.isNaN(parsed)) {
-      await redis.set(inventoryKey, String(Math.max(0, parsed - amount)));
-    }
-  } catch {}
-}
-
-async function incrementSales(redis: any, productName: string, productSize: string, amount = 1) {
-  try {
-    const salesKey = `sales:${productName}:${productSize}`;
-    const current = await redis.get(salesKey);
-    const parsed = Number(current ?? '0');
-    if (!Number.isNaN(parsed)) {
-      await redis.set(salesKey, String(parsed + amount));
-    }
-  } catch {}
-}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -79,10 +39,16 @@ export async function POST(request: Request) {
 
     const masterPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD;
     if (!masterPassword) {
-      return NextResponse.json({ error: 'Server misconfigured: ADMIN_BASIC_AUTH_PASSWORD is not set.' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Server misconfigured: ADMIN_BASIC_AUTH_PASSWORD is not set.' },
+        { status: 500 },
+      );
     }
     if (inputPassword !== masterPassword) {
-      return NextResponse.json({ error: '⚠️ ACCESS REJECTED: Invalid master operation password.' }, { status: 403 });
+      return NextResponse.json(
+        { error: '⚠️ ACCESS REJECTED: Invalid master operation password.' },
+        { status: 403 },
+      );
     }
 
     const processedWinners: any[] = [];
@@ -92,7 +58,10 @@ export async function POST(request: Request) {
       allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
     if (!allPoolKeys || allPoolKeys.length === 0) {
-      return NextResponse.json({ success: true, drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] } });
+      return NextResponse.json({
+        success: true,
+        drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] },
+      });
     }
 
     for (const poolKey of allPoolKeys) {
@@ -102,12 +71,13 @@ export async function POST(request: Request) {
         const productName = String(keyParts[1] || 'Elysian White');
         const productSize = String(keyParts[2] || '50ml');
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
-        const priceCents = productDefinition
-          ? Math.round(getProductPrice(productDefinition, productSize) * 100)
-          : 8500;
-        const seedInv = productDefinition?.maxRaffleAllocationLimit ?? 10;
-        const invLeft = await getInventoryRemaining(redis, productName, productSize, seedInv);
-        if (invLeft <= 0 || listLength === 0) continue;
+        if (!productDefinition) continue;
+
+        const priceCents = Math.round(getProductPrice(productDefinition, productSize) * 100);
+        const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
+        const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);
+
+        if (live.inventoryRemaining <= 0 || listLength === 0) continue;
 
         const entries = await redis.lrange(poolKey, 0, -1);
         const shuffled = [...entries];
@@ -116,9 +86,8 @@ export async function POST(request: Request) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // Winners this draw = min(configured per-draw, remaining inventory)
-        const perDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
-        const inventoryLimit = Math.min(perDraw, invLeft);
+        // This draw: min(winnersPerDraw, remaining inventory)
+        const inventoryLimit = Math.min(live.winnersPerDraw || winnersPerDraw, live.inventoryRemaining);
         let successfulPoolCaptures = 0;
         const remainingEntries: string[] = [];
 
@@ -126,7 +95,9 @@ export async function POST(request: Request) {
           const rawWinnerData = safeParseRedisItem<any>(winnerStr);
           if (!rawWinnerData) continue;
           const winnerData =
-            rawWinnerData.email && typeof rawWinnerData.email === 'object' ? rawWinnerData.email : rawWinnerData;
+            rawWinnerData.email && typeof rawWinnerData.email === 'object'
+              ? rawWinnerData.email
+              : rawWinnerData;
           const winnerEmail = String(winnerData.email || '').toLowerCase();
           const paymentMethod = winnerData.paymentMethodId || null;
           const customerId = resolveCustomerId(winnerData) || null;
@@ -160,8 +131,10 @@ export async function POST(request: Request) {
               });
               grandRevenueChargesCount++;
               successfulPoolCaptures++;
-              await decrementInventory(redis, productName, productSize, 1);
-              await incrementSales(redis, productName, productSize, 1);
+
+              live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
+              live.salesCompleted = (live.salesCompleted || 0) + 1;
+
               await archiveEntry(redis, {
                 email: winnerEmail,
                 variant: productName,
@@ -179,7 +152,6 @@ export async function POST(request: Request) {
                 status: 'SUCCESS_CHARGED',
               });
             } else {
-              // Missing card — skip, try next person (do not count as win)
               remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
               await archiveEntry(redis, {
                 email: winnerEmail,
@@ -199,7 +171,6 @@ export async function POST(request: Request) {
               });
             }
           } catch (err: any) {
-            // Charge failed — keep in pool, try next entrant for this draw slot
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
             processedWinners.push({
               email: winnerEmail,
@@ -220,7 +191,10 @@ export async function POST(request: Request) {
           }
         }
 
-        // Rebuild pool with non-winners (they stay for next week)
+        live.drawsCompleted = (live.drawsCompleted || 0) + 1;
+        await saveLiveState(redis, live);
+
+        // Keep non-winners in pool for next draw
         await redis.del(poolKey);
         for (const entry of remainingEntries) {
           await redis.rpush(poolKey, entry);
@@ -263,9 +237,7 @@ export async function POST(request: Request) {
           [poolStatField('int', productName, productSize)]: '0',
         });
 
-        // Auto-archive product when inventory hits 0
-        const invAfter = await getInventoryRemaining(redis, productName, productSize, seedInv);
-        if (invAfter <= 0 && productDefinition) {
+        if (live.inventoryRemaining <= 0) {
           await archiveProductToCatalog(redis, {
             productId: productDefinition.id,
             name: productDefinition.name,
@@ -279,7 +251,6 @@ export async function POST(request: Request) {
       } catch {}
     }
 
-    // Social proof: only clear the FAKE boost; real remaining SUBs stay in the count
     try {
       await redis.set(SOCIAL_PROOF_BOOST_KEY, '0');
     } catch {}
@@ -292,6 +263,7 @@ export async function POST(request: Request) {
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
     } catch {}
+
     return NextResponse.json({ success: true, drawSummary });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
