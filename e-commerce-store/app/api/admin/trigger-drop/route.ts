@@ -235,7 +235,7 @@ export async function POST(request: Request) {
           await archiveProductToCatalog(redis, {
             productId: productDefinition.id,
             name: productDefinition.name,
-            image: productDefinition.catalogImage || `/images/${productDefinition.prefix}_1.jpg`,
+            image: productDefinition.catalogImage || `/images/${productDefinition.prefix}_1.jpeg`,
             description: productDefinition.desc,
             availableFrom: 'Sold out',
             archivedAt: new Date().toISOString(),

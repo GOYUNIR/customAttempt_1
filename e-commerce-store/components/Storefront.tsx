@@ -256,7 +256,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     };
     for (let i = 1; i <= TOTAL_IMAGES; i += 1) {
       const img = new Image();
-      img.src = `/images/${currentProduct.prefix}_${i}.jpg`;
+      img.src = `/images/${currentProduct.prefix}_${i}.jpeg`;
       img.onload = () => { if (i === 1) drawFrame(img); };
       preloadedImages.push(img);
     }

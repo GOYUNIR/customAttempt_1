@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       const image =
         String(body?.image || '') ||
         productDefinition.catalogImage ||
-        `/images/${productDefinition.prefix}_1.jpg`;
+        `/images/${productDefinition.prefix}_1.jpeg`;
       const availableFrom = String(body?.availableFrom || 'Unknown');
       const notes = String(body?.notes || '');
 

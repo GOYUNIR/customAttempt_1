@@ -135,15 +135,15 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         name: 'GOYUNIR Heavyweight Tee — Vol. 1',
         status: 'Upcoming',
         eta: 'Late 2026',
-        image: '/images/tee-vol1.jpg',
+        image: '/images/tee-vol1/1.jpeg',
         // This description shows in the catalog tap-through — use it to
         // set expectations on timing for stuff that's a while out:
         description: 'A heavyweight cotton tee with a raised GOYUNIR emblem across the chest. This is early — expect this category to take a while before anything ships.',
       },
-      { name: 'Raw Weave Cargo', status: 'Upcoming', eta: 'Late 2026', image: '/images/cargo.jpg', description: 'Utility-inspired cargo pants in raw, undyed cotton canvas. Still in development, no firm date yet.' },
+      { name: 'Raw Weave Cargo', status: 'Upcoming', eta: 'Late 2026', image: '/images/cargo/1.jpeg', description: 'Utility-inspired cargo pants in raw, undyed cotton canvas. Still in development, no firm date yet.' },
     ],
     archiveScents: [
-      { name: 'Crimson Static', status: 'Archived', image: '/images/crimson-static.jpg', description: 'A discontinued profile built around raw saffron and dark cassis.' },
+      { name: 'Crimson Static', status: 'Archived', image: '/images/crimson-static/1.jpeg', description: 'A discontinued profile built around raw saffron and dark cassis.' },
     ],
   },
 
