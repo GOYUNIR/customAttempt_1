@@ -85,8 +85,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   animationMechanics: {
     totalFramesToLoad: 29,//make it be total amount of pics in folder
     maxRotationDegrees: 360,
-    spinReverseOnAlternatingProgress: true,
-    spinCyclesTopToCheckout: 2,
+    spinReverseOnAlternatingProgress: false,
+    spinCyclesTopToCheckout: 1,
   },
 
   raffleRegistrationForm: {
