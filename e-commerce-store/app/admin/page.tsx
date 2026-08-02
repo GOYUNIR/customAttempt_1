@@ -395,7 +395,7 @@ export default function AdminPortal() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'archive', productId: product.id, name: product.name, description: product.desc,
-          image: `/images/${product.prefix}_1.jpeg`, availableFrom: availableFromInput || 'Unknown',
+          image: `/images/${product.prefix}1.jpeg`, availableFrom: availableFromInput || 'Unknown',
           notes: archiveNotes || '', verificationKey: password,
         }),
       });

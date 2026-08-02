@@ -28,7 +28,7 @@ export async function GET() {
       return {
         name: r.name,
         status: isSoldOut ? 'Sold Out' : 'Archived',
-        image: r.image || (product ? `/images/${product.prefix}_1.jpeg` : undefined),
+        image: r.image || (product ? `/images/${product.prefix}1.jpeg` : undefined),
         description: r.notes || r.description || product?.desc,
         availableFrom: r.availableFrom,
         availableUntil: r.archivedAt,
