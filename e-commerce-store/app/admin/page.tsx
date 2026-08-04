@@ -83,6 +83,12 @@ const buttonGhost: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+
+/** Always send Basic Auth credentials so /api/admin/* middleware does not 401. */
+function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  return fetch(input, { ...init, credentials: 'include' });
+}
+
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
   const [drawsSub, setDrawsSub] = useState<'run' | 'inventory' | 'catalog' | 'schedule'>('run');
@@ -143,7 +149,7 @@ export default function AdminPortal() {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`/api/admin/status?t=${Date.now()}`);
+      const res = await adminFetch(`/api/admin/status?t=${Date.now()}`);
       const data = await res.json();
       setStatus(data);
       setLastUpdatedAt(Date.now());
@@ -163,7 +169,7 @@ export default function AdminPortal() {
 
   const fetchRecovery = async () => {
     try {
-      const res = await fetch('/api/admin/recovery-config');
+      const res = await adminFetch('/api/admin/recovery-config');
       const data = await res.json();
       setRecovery({
         enabled: data.enabled !== false,
@@ -176,7 +182,7 @@ export default function AdminPortal() {
 
   const fetchPromos = async () => {
     try {
-      const res = await fetch('/api/admin/promos');
+      const res = await adminFetch('/api/admin/promos');
       const data = await res.json();
       setPromos(Array.isArray(data.promos) ? data.promos : []);
     } catch {}
@@ -185,7 +191,7 @@ export default function AdminPortal() {
   const fetchAudit = async () => {
     if (!password) return;
     try {
-      const res = await fetch(`/api/admin/audit?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch(`/api/admin/audit?password=${encodeURIComponent(password)}`);
       const data = await res.json();
       setAudit(Array.isArray(data.entries) ? data.entries : []);
     } catch {}
@@ -193,7 +199,7 @@ export default function AdminPortal() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/admin/config');
+      const res = await adminFetch('/api/admin/config');
       const data = await res.json();
       setConfigData(data);
       setScheduleForm({ ...data.baseSchedule, ...(data.globalScheduleOverride || {}) });
@@ -211,7 +217,7 @@ export default function AdminPortal() {
     if (!password) { setOrderMsg('Enter admin password first.'); return; }
     setOrdersLoading(true);
     try {
-      const res = await fetch(`/api/admin/orders?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch(`/api/admin/orders?password=${encodeURIComponent(password)}`);
       const data = await res.json();
       if (res.ok) { setOrders(Array.isArray(data.orders) ? data.orders : []); setOrderMsg(''); }
       else setOrderMsg(data.error || 'Failed to load orders.');
@@ -227,7 +233,7 @@ export default function AdminPortal() {
     const reason = prompt(`Cancel ${order.email}'s entry for ${order.variant} (${order.size})? Optional reason:`);
     if (reason === null) return;
     try {
-      const res = await fetch('/api/admin/orders', {
+      const res = await adminFetch('/api/admin/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, action: 'cancel', variant: order.variant, size: order.size, email: order.email, reason }),
       });
@@ -241,7 +247,7 @@ export default function AdminPortal() {
   const saveOrderAddress = async (order: any) => {
     if (!password) return alert('Enter password');
     try {
-      const res = await fetch('/api/admin/orders', {
+      const res = await adminFetch('/api/admin/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, action: 'updateAddress', variant: order.variant, size: order.size, email: order.email, newAddress: orderAddressDraft }),
       });
@@ -254,7 +260,7 @@ export default function AdminPortal() {
 
   const saveSchedule = async () => {
     if (!password) return alert('Enter password');
-    const res = await fetch('/api/admin/config', {
+    const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'schedule', value: scheduleForm }),
     });
@@ -263,7 +269,7 @@ export default function AdminPortal() {
 
   const saveSocial = async () => {
     if (!password) return alert('Enter password');
-    const res = await fetch('/api/admin/config', {
+    const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
     });
@@ -273,7 +279,7 @@ export default function AdminPortal() {
   const savePrice = async (productId: string) => {
     if (!password) return alert('Enter password');
     const v = priceForm[productId];
-    const res = await fetch('/api/admin/config', {
+    const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'product', productId, value: { price50ml: Number(v.price50ml), price100ml: Number(v.price100ml) } }),
     });
@@ -285,7 +291,7 @@ export default function AdminPortal() {
     setSelftestRunning(true);
     setSelftestResults(null);
     try {
-      const res = await fetch(`/api/admin/selftest?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch(`/api/admin/selftest?password=${encodeURIComponent(password)}`);
       const data = await res.json();
       setSelftestResults(data);
     } catch {
@@ -321,7 +327,7 @@ export default function AdminPortal() {
     setIsSearching(true);
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
+        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
         const data = await res.json();
         setSearchResults(Array.isArray(data.results) ? data.results : []);
       } catch {
@@ -339,7 +345,7 @@ export default function AdminPortal() {
     if (!password) return alert('Enter password');
     setRevealBusy(true);
     try {
-      const res = await fetch('/api/admin/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+      const res = await adminFetch('/api/admin/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
       const data = await res.json();
       if (!res.ok || !data.ok) return alert(data.error || 'Invalid password');
       setRevealAddresses(true);
@@ -356,7 +362,7 @@ export default function AdminPortal() {
     setIsRunning(true);
     setResultMessage('Running…');
     try {
-      const res = await fetch('/api/admin/trigger-drop', {
+      const res = await adminFetch('/api/admin/trigger-drop', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetPool: selectedDrawTarget, verificationKey: password }),
       });
@@ -376,7 +382,7 @@ export default function AdminPortal() {
     const value = Number(invEdits[key]);
     if (!Number.isFinite(value) || value < 0) return alert('Invalid number');
     try {
-      const res = await fetch('/api/admin/inventory', {
+      const res = await adminFetch('/api/admin/inventory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, productName, size, productId, inventoryRemaining: value }),
       });
@@ -391,7 +397,7 @@ export default function AdminPortal() {
     if (!password) return alert('Enter password');
     if (!confirm(`Archive ${product.name}? It moves to the public Catalog page's archive section immediately.`)) return;
     try {
-      const res = await fetch('/api/admin/catalog-archive', {
+      const res = await adminFetch('/api/admin/catalog-archive', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'archive', productId: product.id, name: product.name, description: product.desc,
@@ -409,7 +415,7 @@ export default function AdminPortal() {
   const unarchiveProduct = async (product: any) => {
     if (!password) return alert('Enter password');
     try {
-      const res = await fetch('/api/admin/catalog-archive', {
+      const res = await adminFetch('/api/admin/catalog-archive', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'unarchive', productId: product.id, verificationKey: password }),
       });
@@ -424,7 +430,7 @@ export default function AdminPortal() {
     if (!password) return alert('Enter password');
     setShipMsg('Updating…');
     try {
-      const res = await fetch('/api/admin/shipping-status', {
+      const res = await adminFetch('/api/admin/shipping-status', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, email: row.email, variant: row.variant, size: row.size, shippingStatus }),
       });
@@ -438,7 +444,7 @@ export default function AdminPortal() {
   const saveRecovery = async () => {
     if (!password) return alert('Enter password');
     try {
-      const res = await fetch('/api/admin/recovery-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...recovery }) });
+      const res = await adminFetch('/api/admin/recovery-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...recovery }) });
       const data = await res.json();
       setRecoveryMsg(res.ok ? 'Recovery settings saved.' : data.error || 'Failed');
     } catch {
@@ -449,7 +455,7 @@ export default function AdminPortal() {
   const savePromo = async () => {
     if (!password) return alert('Enter password');
     try {
-      const res = await fetch('/api/admin/promos', {
+      const res = await adminFetch('/api/admin/promos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           password, action: 'upsert', code: promoForm.code, promoterName: promoForm.promoterName, promoterEmail: promoForm.promoterEmail,
@@ -470,7 +476,7 @@ export default function AdminPortal() {
   const deletePromo = async (code: string) => {
     if (!password) return alert('Enter password');
     if (!confirm(`Delete promo code ${code}? This cannot be undone.`)) return;
-    await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
+    await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
     await fetchPromos();
   };
 
@@ -927,7 +933,7 @@ export default function AdminPortal() {
                         })} style={buttonGhost}>Edit</button>
                         <button onClick={async () => {
                           if (!password) return alert('Enter password');
-                          await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'toggle', code: p.code }) });
+                          await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'toggle', code: p.code }) });
                           await fetchPromos();
                         }} style={{ ...buttonGhost, border: `1px solid ${p.active ? '#f87171' : '#34d399'}`, color: p.active ? '#f87171' : '#34d399' }}>
                           {p.active ? 'Disable' : 'Enable'}
@@ -943,7 +949,7 @@ export default function AdminPortal() {
                         <button onClick={async () => {
                           if (!password) return alert('Enter password');
                           if (!confirm(`Mark $${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid to ${p.promoterName}? Only do this after you've actually sent the money.`)) return;
-                          await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
+                          await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
                           await fetchPromos();
                         }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
                           Mark ${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid

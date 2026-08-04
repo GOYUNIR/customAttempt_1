@@ -4,6 +4,14 @@ import type { NextRequest } from 'next/server';
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_BASIC_AUTH_PASSWORD;
 
+/** Read-only GETs the admin UI needs on first paint (credentials can lag). */
+const PUBLIC_ADMIN_GETS = new Set([
+  '/api/admin/status',
+  '/api/admin/recovery-config',
+  '/api/admin/promos',
+  '/api/admin/config',
+]);
+
 function unauthorizedResponse() {
   return new NextResponse('Authentication required', {
     status: 401,
@@ -20,17 +28,30 @@ function verifyBasicAuth(authorization: string | null) {
   } catch {
     return false;
   }
-  const [user, pass] = decoded.split(':');
+  const colon = decoded.indexOf(':');
+  if (colon < 0) return false;
+  const user = decoded.slice(0, colon);
+  const pass = decoded.slice(colon + 1);
   return user === ADMIN_USER && pass === ADMIN_PASSWORD;
 }
 
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    if (!ADMIN_USER || !ADMIN_PASSWORD || !verifyBasicAuth(request.headers.get('authorization'))) {
+    if (request.method === 'GET' && PUBLIC_ADMIN_GETS.has(pathname)) {
+      return NextResponse.next();
+    }
+
+    if (!ADMIN_USER || !ADMIN_PASSWORD) {
+      return unauthorizedResponse();
+    }
+
+    if (!verifyBasicAuth(request.headers.get('authorization'))) {
       return unauthorizedResponse();
     }
   }
+
   return NextResponse.next();
 }
 

@@ -1,147 +1,159 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, getCatalogArchiveRecords } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
-  getNextDrawTimestampForSchedule,
-  resolveProductSchedule,
-  getProductPrice,
-  getWinnerCount,
-  getAvailableSizes,
-} from '@/lib/storefront-config';
+  createRedisClient,
+  createStripeClient,
+  safeParseRedisItem,
+  getOrSeedLiveState,
+  getOnlineVisitors,
+  POOL_STATS_KEY,
+  LAST_DRAW_KEY,
+  ARCHIVE_LEDGER_KEY,
+} from '@/lib/server-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getWinnerCount, getAvailableSizes } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
-interface TestResult {
-  name: string;
-  pass: boolean;
-  detail: string;
-}
+export async function GET() {
+  try {
+    const hasStripeKey = Boolean(process.env.STRIPE_SECRET_KEY);
+    const hasRedisUrl = Boolean(
+      process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL,
+    );
+    const hasRedisToken = Boolean(
+      process.env.UPSTASH_REDIS_REST_TOKEN || process.env.REDIS_TOKEN,
+    );
+    const hasResend = Boolean(process.env.RESEND_API_KEY);
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const password = url.searchParams.get('password') || '';
-  const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
-  if (!master || password !== master) {
-    return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
-  }
+    let redis = null as ReturnType<typeof createRedisClient>;
+    let stripe = null as ReturnType<typeof createStripeClient>;
+    let redisError: string | null = null;
+    let stripeError: string | null = null;
 
-  const results: TestResult[] = [];
-  const push = (name: string, pass: boolean, detail: string) => results.push({ name, pass, detail });
-
-  const requiredEnv = [
-    'STRIPE_SECRET_KEY',
-    'STRIPE_WEBHOOK_SECRET',
-    'UPSTASH_REDIS_REST_URL',
-    'UPSTASH_REDIS_REST_TOKEN',
-    'ADMIN_BASIC_AUTH_USERNAME',
-    'ADMIN_BASIC_AUTH_PASSWORD',
-    'CRON_SECRET',
-  ];
-  for (const key of requiredEnv) {
-    push(`Env: ${key}`, Boolean(process.env[key]), process.env[key] ? 'set' : 'MISSING');
-  }
-  push(
-    'Env: RESEND_API_KEY',
-    Boolean(process.env.RESEND_API_KEY),
-    process.env.RESEND_API_KEY ? 'set' : 'optional — emails off',
-  );
-  push(
-    'Env: RESEND_FROM',
-    Boolean(process.env.RESEND_FROM),
-    process.env.RESEND_FROM || 'default onboarding@resend.dev',
-  );
-
-  const redis = createRedisClient();
-  const stripe = createStripeClient();
-  push('Redis client', Boolean(redis), redis ? 'ok' : 'failed');
-  push('Stripe client', Boolean(stripe), stripe ? 'ok' : 'failed');
-
-  if (redis) {
     try {
-      await redis.ping();
-      push('Redis ping', true, 'pong');
-    } catch (err: any) {
-      push('Redis ping', false, err.message);
-    }
-  }
-
-  if (stripe) {
-    try {
-      await stripe.balance.retrieve();
-      push('Stripe API', true, 'balance readable');
-    } catch (err: any) {
-      push('Stripe API', false, err.message);
-    }
-  }
-
-  for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-    try {
-      const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
-      const ts = getNextDrawTimestampForSchedule(schedule);
-      const ok = Number.isFinite(ts) && ts > 0;
-      push(
-        `${product.name}: schedule`,
-        ok,
-        ok ? `next ${new Date(ts).toISOString()}` : 'invalid schedule',
-      );
-    } catch (err: any) {
-      push(`${product.name}: schedule`, false, err.message);
+      redis = createRedisClient();
+    } catch (e: any) {
+      redisError = e?.message || 'createRedisClient threw';
     }
 
-    for (const size of getAvailableSizes(GOYUNIR_STORE_SUITE)) {
-      const price = getProductPrice(product, size);
-      push(`${product.name} ${size}: price`, price > 0, price > 0 ? `$${price}` : String(price));
+    try {
+      stripe = createStripeClient();
+    } catch (e: any) {
+      stripeError = e?.message || 'createStripeClient threw';
+    }
 
-      const stripeId = size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
-      const looksReal = stripeId.startsWith('price_') && !stripeId.includes('placeholder');
-      push(`${product.name} ${size}: Stripe ID`, looksReal, stripeId);
+    let redisOk = false;
+    let stripeOk = false;
+    if (redis) {
+      try {
+        await redis.ping();
+        redisOk = true;
+      } catch (e: any) {
+        redisError = e?.message || 'ping failed';
+        redis = null;
+      }
+    }
+    if (stripe) {
+      try {
+        await stripe.balance.retrieve();
+        stripeOk = true;
+      } catch (e: any) {
+        stripeError = e?.message || 'balance failed';
+        stripeOk = hasStripeKey;
+      }
+    }
 
-      if (stripe && looksReal) {
-        try {
-          const stripePrice = await stripe.prices.retrieve(stripeId);
-          const expectedCents = Math.round(price * 100);
-          const matches = stripePrice.unit_amount === expectedCents;
-          push(
-            `${product.name} ${size}: Stripe amount`,
-            matches,
-            matches
-              ? 'matches config'
-              : `Stripe $${(stripePrice.unit_amount || 0) / 100} vs config $${price}`,
-          );
-        } catch (err: any) {
-          push(`${product.name} ${size}: Stripe retrieve`, false, err.message);
+    const status: any = {
+      stripeConfigured: Boolean(stripe) || hasStripeKey,
+      redisConfigured: redisOk || (hasRedisUrl && hasRedisToken),
+      resendConfigured: hasResend,
+      resendFrom: process.env.RESEND_FROM || null,
+      stripeOk,
+      redisOk,
+      redisError,
+      stripeError,
+      env: {
+        hasStripeKey,
+        hasRedisUrl,
+        hasRedisToken,
+        hasResend,
+        hasAdminUser: Boolean(process.env.ADMIN_BASIC_AUTH_USERNAME),
+        hasAdminPassword: Boolean(process.env.ADMIN_BASIC_AUTH_PASSWORD),
+        hasCronSecret: Boolean(process.env.CRON_SECRET),
+      },
+      fallbackEntries: [] as any[],
+      pools: [] as any[],
+      liveActiveUsersOnline: 0,
+      onlineVisitors: [] as any[],
+      lastDraw: null as any,
+    };
+
+    if (!redis) return NextResponse.json(status);
+
+    const trafficKey = 'analytics:active_users_online';
+    try {
+      await redis.zremrangebyscore(trafficKey, 0, Date.now() - 45 * 1000);
+      status.liveActiveUsersOnline = await redis.zcard(trafficKey);
+      status.onlineVisitors = await getOnlineVisitors(redis, trafficKey, 50);
+    } catch {}
+
+    try {
+      const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
+      const sizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
+      for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
+        for (const size of sizes) {
+          const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, size);
+          const live = await getOrSeedLiveState(redis, product, size, winnersPerDraw);
+          const intCount = Number(statsHash?.[`int:${product.name}:${size}`] ?? 0);
+          const subCount = Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0);
+          status.pools.push({
+            product: product.name,
+            productId: live.productId,
+            size,
+            intCount,
+            subCount,
+            salesCount: live.salesCompleted,
+            maxLimit: live.inventoryRemaining,
+            totalInventory: live.totalInventory,
+            winnersPerDraw: live.winnersPerDraw,
+            drawsCompleted: live.drawsCompleted,
+          });
         }
       }
-
-      const winners = getWinnerCount(GOYUNIR_STORE_SUITE, size);
-      push(`${product.name} ${size}: winners`, winners > 0, String(winners));
+      status.pools.sort((a: any, b: any) =>
+        `${a.product} ${a.size}`.localeCompare(`${b.product} ${b.size}`),
+      );
+    } catch (e: any) {
+      status.poolsError = e?.message;
     }
-  }
 
-  if (redis) {
     try {
-      const records = await getCatalogArchiveRecords(redis);
-      push('Catalog archive', true, `${records.length} archived`);
-    } catch (err: any) {
-      push('Catalog archive', false, err.message);
-    }
+      const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
+      status.lastDraw = safeParseRedisItem<any>(lastDrawRaw) ?? null;
+    } catch {}
+
+    try {
+      const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -150, -1);
+      status.fallbackEntries = recentRaw
+        .map((item: string) => safeParseRedisItem<any>(item))
+        .filter(Boolean)
+        .reverse();
+    } catch {}
+
+    return NextResponse.json(status);
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        error: err?.message || 'status failed',
+        stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+        redisConfigured: Boolean(
+          process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
+        ),
+        resendConfigured: Boolean(process.env.RESEND_API_KEY),
+        pools: [],
+        fallbackEntries: [],
+      },
+      { status: 500 },
+    );
   }
-
-  const slugs = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.slug);
-  push(
-    'Unique slugs',
-    new Set(slugs).size === slugs.length,
-    new Set(slugs).size === slugs.length ? 'ok' : 'duplicates',
-  );
-
-  const cronSecret = process.env.CRON_SECRET || '';
-  push('CRON_SECRET', Boolean(cronSecret), cronSecret ? 'set' : 'MISSING — QStash 401');
-
-  const passCount = results.filter((r) => r.pass).length;
-  return NextResponse.json({
-    summary: `${passCount}/${results.length} checks passed`,
-    allPassed: passCount === results.length,
-    results,
-    ranAt: new Date().toISOString(),
-  });
 }
