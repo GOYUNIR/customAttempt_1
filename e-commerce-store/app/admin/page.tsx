@@ -89,10 +89,12 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, credentials: 'include' });
 }
 
+
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
   const [drawsSub, setDrawsSub] = useState<'run' | 'inventory' | 'catalog' | 'schedule'>('run');
   const [password, setPassword] = useState('');
+  const [toast, setToast] = useState('');
   const [status, setStatus] = useState<any>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [secondsAgo, setSecondsAgo] = useState(0);
@@ -105,6 +107,7 @@ export default function AdminPortal() {
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
 
   const [invEdits, setInvEdits] = useState<Record<string, string>>({});
+  const [winnersEdits, setWinnersEdits] = useState<Record<string, string>>({});
   const [invMessage, setInvMessage] = useState('');
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [availableFromInput, setAvailableFromInput] = useState('');
@@ -146,6 +149,11 @@ export default function AdminPortal() {
 
   const [selftestResults, setSelftestResults] = useState<any>(null);
   const [selftestRunning, setSelftestRunning] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(''), 2800);
+  };
 
   const fetchStatus = async () => {
     try {
@@ -264,7 +272,7 @@ export default function AdminPortal() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'schedule', value: scheduleForm }),
     });
-    setConfigMsg(res.ok ? 'Schedule saved — live immediately, no redeploy needed.' : 'Failed to save schedule.');
+    if (res.ok) { setConfigMsg('Schedule saved — live immediately, no redeploy needed.'); showToast('UPDATED · Schedule'); } else setConfigMsg('Failed to save schedule.');
   };
 
   const saveSocial = async () => {
@@ -273,7 +281,7 @@ export default function AdminPortal() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
     });
-    setConfigMsg(res.ok ? 'Social proof settings saved.' : 'Failed to save.');
+    if (res.ok) { setConfigMsg('Social proof settings saved.'); showToast('UPDATED · Social proof'); } else setConfigMsg('Failed to save.');
   };
 
   const savePrice = async (productId: string) => {
@@ -283,7 +291,7 @@ export default function AdminPortal() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'product', productId, value: { price50ml: Number(v.price50ml), price100ml: Number(v.price100ml) } }),
     });
-    setConfigMsg(res.ok ? `Price saved for ${productId}.` : 'Failed to save price.');
+    if (res.ok) { setConfigMsg(`Price saved for ${productId}.`); showToast('UPDATED · Price'); } else setConfigMsg('Failed to save price.');
   };
 
   const runSelftest = async () => {
@@ -367,7 +375,7 @@ export default function AdminPortal() {
         body: JSON.stringify({ targetPool: selectedDrawTarget, verificationKey: password }),
       });
       const data = await res.json();
-      if (res.ok) { setResultMessage(`Done. Charged ${data.drawSummary?.totalSuccessfulCharges ?? 0} winner(s).`); await fetchStatus(); }
+      if (res.ok) { setResultMessage(`Done. Charged ${data.drawSummary?.totalSuccessfulCharges ?? 0} winner(s).`); showToast('UPDATED · Draw complete'); await fetchStatus(); }
       else setResultMessage(data.error || 'Failed');
     } catch {
       setResultMessage('Connection failed');
@@ -379,15 +387,34 @@ export default function AdminPortal() {
   const saveInventory = async (productName: string, size: string, productId: string) => {
     if (!password) return alert('Enter password');
     const key = `${productName}:${size}`;
-    const value = Number(invEdits[key]);
-    if (!Number.isFinite(value) || value < 0) return alert('Invalid number');
+    const payload: any = { password, productName, size, productId };
+    if (invEdits[key] !== undefined && invEdits[key] !== '') {
+      const value = Number(invEdits[key]);
+      if (!Number.isFinite(value) || value < 0) return alert('Invalid inventory number');
+      payload.inventoryRemaining = value;
+    }
+    if (winnersEdits[key] !== undefined && winnersEdits[key] !== '') {
+      const w = Number(winnersEdits[key]);
+      if (!Number.isFinite(w) || w < 1) return alert('Winners per draw must be at least 1');
+      payload.winnersPerDraw = Math.floor(w);
+    }
+    if (payload.inventoryRemaining === undefined && payload.winnersPerDraw === undefined) {
+      return alert('Enter inventory and/or winners per draw');
+    }
     try {
       const res = await adminFetch('/api/admin/inventory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, productName, size, productId, inventoryRemaining: value }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (res.ok) { setInvMessage(`Saved ${productName} ${size} → ${value} remaining.`); await fetchStatus(); } else setInvMessage(data.error || 'Failed');
+      if (res.ok) {
+        const parts = [];
+        if (payload.inventoryRemaining !== undefined) parts.push(`${payload.inventoryRemaining} left`);
+        if (payload.winnersPerDraw !== undefined) parts.push(`${payload.winnersPerDraw} winners/draw`);
+        setInvMessage(`Saved ${productName} ${size} → ${parts.join(' · ')}`);
+        showToast('UPDATED · Inventory / draw size');
+        await fetchStatus();
+      } else setInvMessage(data.error || 'Failed');
     } catch {
       setInvMessage('Connection failed');
     }
@@ -435,7 +462,7 @@ export default function AdminPortal() {
         body: JSON.stringify({ password, email: row.email, variant: row.variant, size: row.size, shippingStatus }),
       });
       const data = await res.json();
-      if (res.ok) { setShipMsg(`Updated ${data.updated || 0} record(s) → ${shippingStatus}.`); await fetchStatus(); } else setShipMsg(data.error || 'Failed');
+      if (res.ok) { setShipMsg(`Updated ${data.updated || 0} record(s) → ${shippingStatus}.`); showToast('UPDATED · Shipping'); await fetchStatus(); } else setShipMsg(data.error || 'Failed');
     } catch {
       setShipMsg('Failed');
     }
@@ -446,7 +473,7 @@ export default function AdminPortal() {
     try {
       const res = await adminFetch('/api/admin/recovery-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...recovery }) });
       const data = await res.json();
-      setRecoveryMsg(res.ok ? 'Recovery settings saved.' : data.error || 'Failed');
+      if (res.ok) { setRecoveryMsg('Recovery settings saved.'); showToast('UPDATED · Recovery'); } else setRecoveryMsg(data.error || 'Failed');
     } catch {
       setRecoveryMsg('Failed');
     }
@@ -464,7 +491,7 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setPromoMsg(`Saved ${data.promo?.code}.`);
+        setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
         setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10', maxUsesPerEmail: '1' });
         await fetchPromos();
       } else setPromoMsg(data.error || 'Failed');
@@ -519,6 +546,11 @@ export default function AdminPortal() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
           <div>
             <h1 style={{ fontSize: 22, margin: 0, fontWeight: 700, letterSpacing: '-0.02em' }}>GOYUNIR Admin</h1>
+            {toast ? (
+              <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 200, background: '#14532d', color: '#bbf7d0', border: '1px solid #22c55e', padding: '10px 16px', borderRadius: 12, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>
+                {toast}
+              </div>
+            ) : null}
             <p style={{ color: '#888', margin: '6px 0 0', fontSize: 12 }}>
               {lastUpdatedAt ? `Updated ${secondsAgo}s ago` : 'Loading…'} ·{' '}
               <span style={{ color: status?.stripeConfigured ? '#34d399' : '#f87171' }}>Stripe</span> ·{' '}
@@ -667,21 +699,35 @@ export default function AdminPortal() {
               <div style={cardStyle}>
                 <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Live Inventory</h3>
                 <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                  Adjust remaining units per product/size at any time — takes effect immediately, no redeploy.
+                  Adjust remaining inventory and how many winners are selected each draw. Takes effect immediately — no redeploy.
                 </p>
                 {pools.map((p: any, i: number) => {
                   const key = `${p.product}:${p.size}`;
+                  const currentWinners = Array.isArray(p.winnersPerDraw)
+                    ? p.winnersPerDraw[0]
+                    : (p.winnersPerDraw ?? 1);
                   return (
                     <div key={i} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, background: '#09090b', padding: 12, borderRadius: 10 }}>
                       <div style={{ flex: 1, minWidth: 140, fontSize: 12 }}>
                         <strong>{p.product} · {p.size}</strong>
                         <div style={{ fontSize: 11, marginTop: 4 }}>
                           <span style={{ color: '#edb210' }}>{p.intCount ?? 0} started</span> · <span style={{ color: '#34d399' }}>{p.subCount ?? 0} entered</span> · <span style={{ color: '#60a5fa' }}>{p.salesCount ?? 0} sold</span> · <span style={{ color: '#fff' }}>{p.maxLimit ?? 0} left</span>
+                          {' · '}
+                          <span style={{ color: '#c4b5fd' }}>{currentWinners} winners/draw</span>
                         </div>
                       </div>
-                      <input type="number" min={0} value={invEdits[key] ?? ''} placeholder={String(p.maxLimit ?? 0)}
-                        onChange={(e) => setInvEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                        style={{ ...inputStyle, width: 72 }} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Inv left</span>
+                        <input type="number" min={0} value={invEdits[key] ?? ''} placeholder={String(p.maxLimit ?? 0)}
+                          onChange={(e) => setInvEdits((prev) => ({ ...prev, [key]: e.target.value }))}
+                          style={{ ...inputStyle, width: 72 }} />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Winners / draw</span>
+                        <input type="number" min={1} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
+                          onChange={(e) => setWinnersEdits((prev) => ({ ...prev, [key]: e.target.value }))}
+                          style={{ ...inputStyle, width: 72 }} />
+                      </div>
                       <button onClick={() => saveInventory(p.product, p.size, p.productId)} style={buttonPrimary}>Save</button>
                     </div>
                   );

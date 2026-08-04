@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  getLiveProductState,
-  setLiveProductState,
+  getOrSeedLiveState,
+  saveLiveState,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getWinnerCount } from '@/lib/storefront-config';
@@ -23,23 +23,70 @@ export async function POST(request: Request) {
 
     const productName = String(body?.productName || '');
     const size = String(body?.size || '50ml');
-    const inventoryRemaining = Number(body?.inventoryRemaining);
-    if (!productName || !Number.isFinite(inventoryRemaining) || inventoryRemaining < 0) {
-      return NextResponse.json({ error: 'Invalid payload.' }, { status: 400 });
+    const inventoryRemaining =
+      body?.inventoryRemaining !== undefined && body?.inventoryRemaining !== null
+        ? Number(body.inventoryRemaining)
+        : undefined;
+    const totalInventory =
+      body?.totalInventory !== undefined && body?.totalInventory !== null
+        ? Number(body.totalInventory)
+        : undefined;
+    const winnersPerDraw =
+      body?.winnersPerDraw !== undefined && body?.winnersPerDraw !== null
+        ? Number(body.winnersPerDraw)
+        : undefined;
+
+    if (!productName) {
+      return NextResponse.json({ error: 'productName required.' }, { status: 400 });
     }
 
     const product = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
     if (!product) return NextResponse.json({ error: 'Unknown product.' }, { status: 404 });
 
-    const winners = getWinnerCount(GOYUNIR_STORE_SUITE, size);
-    const live = await getLiveProductState(redis, product, size, winners);
-    live.inventoryRemaining = Math.floor(inventoryRemaining);
-    if (live.inventoryRemaining > live.totalInventory) {
-      live.totalInventory = live.inventoryRemaining;
-    }
-    await setLiveProductState(redis, live);
+    const defaultWinners = getWinnerCount(GOYUNIR_STORE_SUITE, size);
+    const live = await getOrSeedLiveState(redis, product, size, defaultWinners);
 
-    return NextResponse.json({ success: true, live });
+    if (inventoryRemaining !== undefined) {
+      if (!Number.isFinite(inventoryRemaining) || inventoryRemaining < 0) {
+        return NextResponse.json({ error: 'Invalid inventoryRemaining.' }, { status: 400 });
+      }
+      live.inventoryRemaining = Math.floor(inventoryRemaining);
+      if (live.inventoryRemaining > live.totalInventory) {
+        live.totalInventory = live.inventoryRemaining;
+      }
+    }
+
+    if (totalInventory !== undefined) {
+      if (!Number.isFinite(totalInventory) || totalInventory < 0) {
+        return NextResponse.json({ error: 'Invalid totalInventory.' }, { status: 400 });
+      }
+      live.totalInventory = Math.floor(totalInventory);
+      if (live.inventoryRemaining > live.totalInventory) {
+        live.inventoryRemaining = live.totalInventory;
+      }
+    }
+
+    if (winnersPerDraw !== undefined) {
+      if (!Number.isFinite(winnersPerDraw) || winnersPerDraw < 1) {
+        return NextResponse.json({ error: 'winnersPerDraw must be >= 1.' }, { status: 400 });
+      }
+      // live.winnersPerDraw is number | number[] in some versions — store as single number for draw limit
+      live.winnersPerDraw = Math.floor(winnersPerDraw) as any;
+    }
+
+    await saveLiveState(redis, live);
+
+    return NextResponse.json({
+      success: true,
+      live: {
+        productId: live.productId,
+        inventoryRemaining: live.inventoryRemaining,
+        totalInventory: live.totalInventory,
+        winnersPerDraw: live.winnersPerDraw,
+        salesCompleted: live.salesCompleted,
+        drawsCompleted: live.drawsCompleted,
+      },
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

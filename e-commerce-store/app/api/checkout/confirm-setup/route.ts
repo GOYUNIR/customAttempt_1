@@ -11,13 +11,28 @@ import {
   PROCESSED_SESSIONS_KEY,
   cleanupMatchingIntent,
 } from '@/lib/server-config';
+import { sendEntryConfirmedEmail } from '@/lib/email';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getProductPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
 const PROMOS_KEY = 'config:promos';
+const ENTRY_EMAIL_SENT_KEY = 'email:entry_confirmed';
 
 function usedEmailsKey(code: string) {
   return `promo:used_emails:${code}`;
+}
+
+function siteUrlFromRequest(request: Request) {
+  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (env) return env.replace(/\/$/, '');
+  try {
+    const u = new URL(request.url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return 'https://custom-attempt-1.vercel.app';
+  }
 }
 
 export async function POST(request: Request) {
@@ -99,8 +114,8 @@ export async function POST(request: Request) {
       });
     }
 
-    // Promo: block if this email already used this code (when maxUsesPerEmail > 0)
     let appliedPromo: string | undefined = promoCode || undefined;
+    let discountPercent = 0;
     if (promoCode) {
       try {
         const raw = await redis.hget(PROMOS_KEY, promoCode);
@@ -108,8 +123,7 @@ export async function POST(request: Request) {
         if (!promo || promo.active === false) {
           appliedPromo = undefined;
         } else {
-          const maxPer =
-            typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
+          const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
           const self =
             promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
           if (self) {
@@ -117,6 +131,9 @@ export async function POST(request: Request) {
           } else if (maxPer > 0) {
             const used = await redis.sismember(usedEmailsKey(promoCode), email);
             if (used === 1) appliedPromo = undefined;
+          }
+          if (appliedPromo) {
+            discountPercent = Math.min(50, Math.max(0, Number(promo.customerDiscountPercent) || 0));
           }
         }
       } catch {
@@ -169,6 +186,31 @@ export async function POST(request: Request) {
     }
 
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+
+    // One entry-confirmation email per email+variant+size (never spam duplicates)
+    const emailDedupe = `${variant}:${size}:${email}`;
+    try {
+      const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+      if (sent !== 1) {
+        const product = GOYUNIR_STORE_SUITE.productCatalog.find(
+          (p) => p.name === variant || p.id === variant,
+        );
+        const listPrice = product ? getProductPrice(product, size) : undefined;
+        await sendEntryConfirmedEmail({
+          to: email,
+          product: variant,
+          size,
+          address: shippingAddress,
+          promoCode: appliedPromo,
+          discountPercent: discountPercent || undefined,
+          listPrice,
+          siteUrl: siteUrlFromRequest(request),
+        });
+        await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+      }
+    } catch (e) {
+      console.error('entry email', e);
+    }
 
     return NextResponse.json({
       success: true,
