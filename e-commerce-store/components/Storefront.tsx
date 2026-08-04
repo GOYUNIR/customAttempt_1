@@ -24,8 +24,6 @@ interface TimeLeftState {
 
 const PREFILL_KEY = 'goyunir_entry_prefill';
 
-// Lightweight "crumpled black paper" texture — layered radial gradients,
-// no image asset needed, keeps the checkout card from reading as flat black.
 const paperTexture: React.CSSProperties = {
   backgroundColor: '#0d0d0f',
   backgroundImage: `
@@ -110,7 +108,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     } catch {}
   }, []);
 
-  // Google Places autocomplete when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is set
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!key || typeof window === 'undefined') return;
@@ -143,7 +140,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     s.onload = () => boot();
     document.head.appendChild(s);
   }, []);
-
 
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
@@ -302,7 +298,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               sessionStorage.setItem(k, '1');
               setFeedbackStatus('notice');
               setFeedbackMessage('Allocation window closed. If you entered, watch your email — selected entries are charged when the draw processes.');
-              // Ping auto-draw (no secret in client — uses public trigger that only works server-side via cron)
               fetch('/api/cron/auto-draw?ping=1').catch(() => {});
             }
           } catch {}
@@ -410,8 +405,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const response = await fetch('/api/checkout', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          variant: currentProduct.name, size: selectedSize, email: normalizedForm.email,
-          shippingAddress: normalizedForm.shippingAddress, quantityChosen: normalizedForm.quantity, ref,
+          variant: currentProduct.name,
+          size: selectedSize,
+          email: normalizedForm.email,
+          shippingAddress: normalizedForm.shippingAddress,
+          quantityChosen: normalizedForm.quantity,
+          promoCode: ref || undefined,
+          ref: ref || undefined,
         }),
       });
       const data = await response.json();
@@ -499,7 +499,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       </AnimatePresence>
 
       <motion.div
-        style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', opacity: bottleOpacity }}
+        style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', opacity: bottleOpacity, scale: bottleScale }}
       >
         <canvas ref={canvasRef} style={{ width: '90vw', maxWidth: '300px', height: 'auto', aspectRatio: '1/1' }} />
       </motion.div>
@@ -602,9 +602,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
             <h2 style={{ fontSize: 24, textAlign: 'center', fontFamily: 'serif', margin: 0 }}>{GOYUNIR_STORE_SUITE.raffleRegistrationForm.titleHeader}</h2>
 
-            {/* CHECKOUT CARD — frosted glass over a subtle crumpled-paper
-                texture instead of flat black, so it visually separates
-                from the page background behind it. */}
             <motion.div
               initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
               style={{
@@ -616,9 +613,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
               }}
             >
-              {/* Texture layer */}
               <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.9 }} />
-              {/* Frost layer */}
               <div style={{ position: 'absolute', inset: 0, background: 'rgba(17,17,17,0.55)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
@@ -697,11 +692,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     Card saved — charged only if selected. One entry per email.
                   </p>
                   <datalist id="goyunir-address-suggestions">
-                  {savedAddresses.map((a) => (
-                    <option key={a} value={a} />
-                  ))}
-                </datalist>
-                <button type="submit" disabled={isProcessing}
+                    {savedAddresses.map((a) => (
+                      <option key={a} value={a} />
+                    ))}
+                  </datalist>
+                  <button type="submit" disabled={isProcessing}
                     style={{
                       width: '100%', padding: 16, borderRadius: 30,
                       background: isProcessing ? '#1f1f23' : timeLeft.expired || isCurrentArchived ? '#edb210' : configPalette.checkoutCtaButton,
@@ -746,5 +741,3 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     </div>
   );
 }
-
-

@@ -5,12 +5,14 @@ import {
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
   safeParseRedisItem,
+  getProductOverride,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getProductPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
-const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER'];
+const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER', 'CANCELLED_BY_ADMIN'];
 
 export async function POST(request: Request) {
   try {
@@ -28,9 +30,18 @@ export async function POST(request: Request) {
     const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
     const poolMatches = await findPoolEntriesByEmail(redis, productNames, email);
 
-    // Find each variant/size's MOST RECENT ledger status, so we know if
-    // it's still an open entry or already settled (won/lost/cancelled).
-    const statusByKey: Record<string, { type: string; shippingStatus?: string; amountCents?: number; registeredAt: string }> = {};
+    const statusByKey: Record<
+      string,
+      {
+        type: string;
+        shippingStatus?: string;
+        amountCents?: number;
+        registeredAt: string;
+        promoCode?: string;
+        discountPercent?: number;
+        shippingAddress?: string;
+      }
+    > = {};
     try {
       const ledger = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
       for (const raw of ledger) {
@@ -40,7 +51,15 @@ export async function POST(request: Request) {
         const key = `${e.variant}|${e.size}`;
         const existing = statusByKey[key];
         if (!existing || new Date(e.registeredAt).getTime() >= new Date(existing.registeredAt).getTime()) {
-          statusByKey[key] = { type: e.type, shippingStatus: e.shippingStatus, amountCents: e.amountCents, registeredAt: e.registeredAt };
+          statusByKey[key] = {
+            type: e.type,
+            shippingStatus: e.shippingStatus,
+            amountCents: e.amountCents,
+            registeredAt: e.registeredAt,
+            promoCode: e.promoCode,
+            discountPercent: e.discountPercent,
+            shippingAddress: e.shippingAddress || e.address,
+          };
         }
       }
     } catch {}
@@ -52,6 +71,36 @@ export async function POST(request: Request) {
       if (cardLast4 && cardLast4 !== last4) continue;
       const key = `${m.variant}|${m.size}`;
       const settled = statusByKey[key];
+      const product = GOYUNIR_STORE_SUITE.productCatalog.find(
+        (p) => p.name === m.variant || p.id === m.variant,
+      );
+      let listPrice: number | undefined;
+      if (product) {
+        try {
+          const override = await getProductOverride(redis, product.id);
+          const ov =
+            m.size === '100ml' ? override?.price100ml : override?.price50ml;
+          listPrice = typeof ov === 'number' ? ov : getProductPrice(product, m.size);
+        } catch {
+          listPrice = getProductPrice(product, m.size);
+        }
+      }
+
+      const promoCode = m.parsed.promoCode || settled?.promoCode || undefined;
+      const discountPercent =
+        Number(m.parsed.discountPercent) ||
+        Number(settled?.discountPercent) ||
+        0;
+      const expectedCents =
+        typeof listPrice === 'number'
+          ? Math.max(
+              50,
+              Math.round(
+                listPrice * 100 * (1 - Math.min(50, Math.max(0, discountPercent)) / 100),
+              ),
+            )
+          : undefined;
+
       entries.push({
         variant: m.variant,
         size: m.size,
@@ -62,19 +111,38 @@ export async function POST(request: Request) {
         status: settled && TERMINAL_TYPES.includes(settled.type) ? settled.type : 'ENTERED',
         shippingStatus: settled?.shippingStatus,
         amountCents: settled?.amountCents,
+        promoCode,
+        discountPercent: discountPercent || undefined,
+        listPrice,
+        expectedAmountCents: expectedCents,
       });
     }
 
-    // Also surface settled entries that are no longer in the live pool
-    // (winners get removed from the pool by trigger-drop).
     for (const [key, s] of Object.entries(statusByKey)) {
       if (!TERMINAL_TYPES.includes(s.type)) continue;
       const [variant, size] = key.split('|');
       const alreadyListed = entries.some((e) => e.variant === variant && e.size === size);
       if (alreadyListed) continue;
+
+      const product = GOYUNIR_STORE_SUITE.productCatalog.find(
+        (p) => p.name === variant || p.id === variant,
+      );
+      const listPrice = product ? getProductPrice(product, size) : undefined;
+
       entries.push({
-        variant, size, shippingAddress: '', registeredAt: s.registeredAt,
-        source: 'ledger', cardLast4: last4, status: s.type, shippingStatus: s.shippingStatus, amountCents: s.amountCents,
+        variant,
+        size,
+        shippingAddress: s.shippingAddress || '',
+        registeredAt: s.registeredAt,
+        source: 'ledger',
+        cardLast4: last4,
+        status: s.type,
+        shippingStatus: s.shippingStatus,
+        amountCents: s.amountCents,
+        promoCode: s.promoCode,
+        discountPercent: s.discountPercent,
+        listPrice,
+        expectedAmountCents: s.amountCents,
       });
     }
 
@@ -85,15 +153,21 @@ export async function POST(request: Request) {
         const matchPm = pms.data.find((pm) => pm.card?.last4 === last4);
         if (matchPm) {
           entries.push({
-            variant: '(saved in Stripe — complete entry on site if missing)', size: '—',
+            variant: '(saved in Stripe — complete entry on site if missing)',
+            size: '—',
             shippingAddress: c.metadata?.initialShippingAddress || c.address?.line1 || '',
-            registeredAt: new Date(c.created * 1000).toISOString(), source: 'stripe_only', cardLast4: last4, status: 'ENTERED',
+            registeredAt: new Date(c.created * 1000).toISOString(),
+            source: 'stripe_only',
+            cardLast4: last4,
+            status: 'ENTERED',
           });
         }
       }
     }
 
-    if (entries.length === 0) return NextResponse.json({ error: 'No matching entry found.' }, { status: 404 });
+    if (entries.length === 0) {
+      return NextResponse.json({ error: 'No matching entry found.' }, { status: 404 });
+    }
     return NextResponse.json({ entries });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

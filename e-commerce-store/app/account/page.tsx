@@ -12,6 +12,9 @@ interface EntryRecord {
   shippingStatus?: string;
   amountCents?: number;
   promoCode?: string;
+  discountPercent?: number;
+  listPrice?: number;
+  expectedAmountCents?: number;
 }
 
 function statusBanner(entry: EntryRecord) {
@@ -264,8 +267,54 @@ export default function AccountPage() {
                   <div style={{ fontWeight: 'bold', fontSize: 14 }}>
                     {entry.variant} — {entry.size}
                   </div>
-                  {entry.promoCode && (
-                    <div style={{ fontSize: 11, color: '#edb210', marginTop: 4 }}>Promo: {entry.promoCode}</div>
+                  {(typeof entry.listPrice === 'number' ||
+                    typeof entry.amountCents === 'number' ||
+                    typeof entry.expectedAmountCents === 'number' ||
+                    entry.promoCode) && (
+                    <div style={{ fontSize: 12, marginTop: 8, lineHeight: 1.45 }}>
+                      {entry.status === 'WINNER_CHARGED' && typeof entry.amountCents === 'number' ? (
+                        <div style={{ color: '#34c759', fontWeight: 600 }}>
+                          Charged ${(entry.amountCents / 100).toFixed(2)}
+                          {entry.promoCode ? ` · promo ${entry.promoCode}` : ''}
+                        </div>
+                      ) : (
+                        <>
+                          {typeof entry.listPrice === 'number' && (
+                            <div style={{ color: configPalette.textMuted }}>
+                              List ${entry.listPrice.toFixed(2)}
+                              {entry.discountPercent && entry.discountPercent > 0 ? (
+                                <>
+                                  {' '}
+                                  →{' '}
+                                  <span style={{ color: '#edb210', fontWeight: 600 }}>
+                                    $
+                                    {(
+                                      (entry.expectedAmountCents ??
+                                        Math.round(
+                                          entry.listPrice *
+                                            100 *
+                                            (1 - entry.discountPercent / 100),
+                                        )) / 100
+                                    ).toFixed(2)}
+                                  </span>
+                                  {` if selected (${entry.discountPercent}% off)`}
+                                </>
+                              ) : (
+                                <span> if selected</span>
+                              )}
+                            </div>
+                          )}
+                          {entry.promoCode && (
+                            <div style={{ color: '#edb210', marginTop: 2 }}>
+                              Promo {entry.promoCode}
+                              {entry.discountPercent && entry.discountPercent > 0
+                                ? ` · ${entry.discountPercent}% off`
+                                : ''}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   )}
                   {entry.shippingAddress && (
                     <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 4 }}>

@@ -82,6 +82,7 @@ export async function sendWinnerEmail(opts: {
   product: string;
   size: string;
   amountLabel?: string;
+  promoCode?: string;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -99,6 +100,7 @@ export async function sendWinnerEmail(opts: {
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">You've been selected</h1>
           <p style="margin:0 0 12px">Your card was charged for <strong>${opts.product}</strong> · ${opts.size}${opts.amountLabel ? ` (${opts.amountLabel})` : ''}.</p>
+          ${opts.promoCode ? `<p style="margin:0 0 12px;color:#666;font-size:13px">Promo <strong>${opts.promoCode}</strong> applied.</p>` : ''}
           <p style="margin:0 0 12px">We'll ship to the address on your entry. Tracking follows when the label is created.</p>
           <p style="color:#666;font-size:13px;margin:0">Questions: reply to this email or use Manage My Entry on the site.</p>
         </div>
@@ -195,7 +197,6 @@ export async function sendPromoterInvoiceEmail(opts: {
     return { ok: false, error: err };
   }
 }
-
 
 /** Alias used by trigger-drop */
 export async function sendPromoterPayoutEmail(opts: {

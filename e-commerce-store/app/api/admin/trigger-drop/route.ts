@@ -62,9 +62,6 @@ export async function POST(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        // Live price override (from /admin) takes priority over the static
-        // config price. Keep the Stripe Price object's amount matching if
-        // you also rely on the fallback checkout-session path.
         const override = await getProductOverride(redis, productDefinition.id);
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
         const basePriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
@@ -107,18 +104,47 @@ export async function POST(request: Request) {
             if (paymentMethod && customerId) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
+              const entryDiscount = Math.min(
+                50,
+                Math.max(0, Number(winnerData.discountPercent) || 0),
+              );
+              if (entryDiscount > 0) {
+                priceCents = Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)));
+              }
 
               if (promoCode) {
                 try {
                   const raw = await redis.hget(PROMOS_KEY, promoCode);
                   promoForCharge = safeParseRedisItem<any>(raw);
                   if (promoForCharge && promoForCharge.active !== false) {
-                    const self = promoForCharge.promoterEmail && String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
+                    const self =
+                      promoForCharge.promoterEmail &&
+                      String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
                     if (!self) {
-                      const discount = Math.min(50, Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0));
-                      if (discount > 0) priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
+                      if (entryDiscount <= 0) {
+                        const discount = Math.min(
+                          50,
+                          Math.max(
+                            0,
+                            Number(
+                              promoForCharge.customerDiscountPercent ??
+                                promoForCharge.discountPercent ??
+                                0,
+                            ) || 0,
+                          ),
+                        );
+                        if (discount > 0) {
+                          priceCents = Math.max(
+                            50,
+                            Math.round(basePriceCents * (1 - discount / 100)),
+                          );
+                        }
+                      }
                     } else {
                       promoForCharge = null;
+                      if (entryDiscount > 0) {
+                        priceCents = basePriceCents;
+                      }
                     }
                   } else {
                     promoForCharge = null;
@@ -127,6 +153,14 @@ export async function POST(request: Request) {
                   promoForCharge = null;
                 }
               }
+
+              console.log('[trigger-drop] charge', {
+                email: winnerEmail,
+                promoCode: promoCode || null,
+                entryDiscount,
+                basePriceCents,
+                priceCents,
+              });
 
               await stripe.paymentIntents.create({
                 amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
@@ -169,7 +203,7 @@ export async function POST(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}` });
+              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined });
               if (!(emailResult as any)?.ok) {
                 console.error('[trigger-drop] winner email failed', winnerEmail, emailResult);
               }
@@ -279,5 +313,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-
-

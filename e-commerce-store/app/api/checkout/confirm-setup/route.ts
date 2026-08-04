@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     const variant = String(meta.variant || '');
     const size = String(meta.size || '50ml');
     const shippingAddress = String(meta.address || '');
-    const promoCode = String(meta.promoCode || '')
+    const promoCode = String(meta.promoCode || meta.ref || '')
       .trim()
       .toUpperCase();
 
@@ -121,22 +121,34 @@ export async function POST(request: Request) {
         const raw = await redis.hget(PROMOS_KEY, promoCode);
         const promo = safeParseRedisItem<any>(raw);
         if (!promo || promo.active === false) {
+          console.warn('[confirm-setup] promo not found or inactive', promoCode);
           appliedPromo = undefined;
         } else {
           const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
           const self =
             promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
           if (self) {
+            console.warn('[confirm-setup] self-promo blocked', promoCode, email);
             appliedPromo = undefined;
           } else if (maxPer > 0) {
             const used = await redis.sismember(usedEmailsKey(promoCode), email);
-            if (used === 1) appliedPromo = undefined;
+            if (used === 1) {
+              console.warn('[confirm-setup] promo already used by email', promoCode, email);
+              appliedPromo = undefined;
+            }
           }
           if (appliedPromo) {
-            discountPercent = Math.min(50, Math.max(0, Number(promo.customerDiscountPercent) || 0));
+            discountPercent = Math.min(
+              50,
+              Math.max(
+                0,
+                Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0,
+              ),
+            );
           }
         }
-      } catch {
+      } catch (e) {
+        console.error('[confirm-setup] promo lookup failed', e);
         appliedPromo = undefined;
       }
     }
@@ -152,7 +164,8 @@ export async function POST(request: Request) {
       paymentMethodId,
       cardLast4,
       cardFingerprint,
-      promoCode: appliedPromo,
+      promoCode: appliedPromo || undefined,
+      discountPercent: appliedPromo && discountPercent > 0 ? discountPercent : undefined,
       registeredAt: new Date().toISOString(),
     };
 
@@ -170,7 +183,9 @@ export async function POST(request: Request) {
       id: customerId || 'n/a',
       registeredAt: entry.registeredAt,
       type: 'ENTERED',
-      ...(appliedPromo ? { promoCode: appliedPromo } : {}),
+      ...(appliedPromo
+        ? { promoCode: appliedPromo, discountPercent: discountPercent || undefined }
+        : {}),
     } as any);
 
     if (appliedPromo) {
@@ -187,7 +202,6 @@ export async function POST(request: Request) {
 
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
 
-    // One entry-confirmation email per email+variant+size (never spam duplicates)
     const emailDedupe = `${variant}:${size}:${email}`;
     try {
       const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
@@ -196,7 +210,7 @@ export async function POST(request: Request) {
           (p) => p.name === variant || p.id === variant,
         );
         const listPrice = product ? getProductPrice(product, size) : undefined;
-        await sendEntryConfirmedEmail({
+        const emailResult = await sendEntryConfirmedEmail({
           to: email,
           product: variant,
           size,
@@ -206,10 +220,13 @@ export async function POST(request: Request) {
           listPrice,
           siteUrl: siteUrlFromRequest(request),
         });
+        if (!(emailResult as any)?.ok && !(emailResult as any)?.skipped) {
+          console.error('[confirm-setup] entry email failed', email, emailResult);
+        }
         await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
       }
     } catch (e) {
-      console.error('entry email', e);
+      console.error('[confirm-setup] entry email', e);
     }
 
     return NextResponse.json({
@@ -217,6 +234,8 @@ export async function POST(request: Request) {
       message: 'Entry locked in. Good luck.',
       email,
       address: shippingAddress,
+      promoCode: appliedPromo || null,
+      discountPercent: discountPercent || 0,
     });
   } catch (err: any) {
     console.error('confirm-setup', err);

@@ -80,16 +80,12 @@ async function runAutoDraw(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        // Auto-draw throttle: at most once per 20h per pool unless force=1
         const force = new URL(request.url).searchParams.get('force') === '1';
         if (!force) {
           const lastAuto = Number((await redis.get(`draw:last_auto:${productName}:${productSize}`)) || 0);
           if (lastAuto && Date.now() - lastAuto < 20 * 60 * 60 * 1000) continue;
         }
 
-        // Live price override (from /admin) takes priority over the static
-        // config price. Keep the Stripe Price object's amount matching if
-        // you also rely on the fallback checkout-session path.
         const override = await getProductOverride(redis, productDefinition.id);
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
         const basePriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
@@ -136,18 +132,47 @@ async function runAutoDraw(request: Request) {
             if (paymentMethod && customerId) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
+              const entryDiscount = Math.min(
+                50,
+                Math.max(0, Number(winnerData.discountPercent) || 0),
+              );
+              if (entryDiscount > 0) {
+                priceCents = Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)));
+              }
 
               if (promoCode) {
                 try {
                   const raw = await redis.hget(PROMOS_KEY, promoCode);
                   promoForCharge = safeParseRedisItem<any>(raw);
                   if (promoForCharge && promoForCharge.active !== false) {
-                    const self = promoForCharge.promoterEmail && String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
+                    const self =
+                      promoForCharge.promoterEmail &&
+                      String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
                     if (!self) {
-                      const discount = Math.min(50, Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0));
-                      if (discount > 0) priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
+                      if (entryDiscount <= 0) {
+                        const discount = Math.min(
+                          50,
+                          Math.max(
+                            0,
+                            Number(
+                              promoForCharge.customerDiscountPercent ??
+                                promoForCharge.discountPercent ??
+                                0,
+                            ) || 0,
+                          ),
+                        );
+                        if (discount > 0) {
+                          priceCents = Math.max(
+                            50,
+                            Math.round(basePriceCents * (1 - discount / 100)),
+                          );
+                        }
+                      }
                     } else {
                       promoForCharge = null;
+                      if (entryDiscount > 0) {
+                        priceCents = basePriceCents;
+                      }
                     }
                   } else {
                     promoForCharge = null;
@@ -156,6 +181,14 @@ async function runAutoDraw(request: Request) {
                   promoForCharge = null;
                 }
               }
+
+              console.log('[auto-draw] charge', {
+                email: winnerEmail,
+                promoCode: promoCode || null,
+                entryDiscount,
+                basePriceCents,
+                priceCents,
+              });
 
               await stripe.paymentIntents.create({
                 amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
@@ -198,7 +231,7 @@ async function runAutoDraw(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}` });
+              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined });
               if (!(emailResult as any)?.ok) {
                 console.error('[auto-draw] winner email failed', winnerEmail, emailResult);
               }
