@@ -45,6 +45,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [archivedProductIds, setArchivedProductIds] = useState<string[]>([]);
   const [archiveNotesMap, setArchiveNotesMap] = useState<Record<string, string>>({});
   const [archiveFromMap, setArchiveFromMap] = useState<Record<string, string>>({});
+  const [productOverrides, setProductOverrides] = useState<Record<string, any>>({});
+  const [globalScheduleOverride, setGlobalScheduleOverride] = useState<any>(null);
+
+  useEffect(() => {
+    fetch('/api/config/public')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.productOverrides) setProductOverrides(data.productOverrides);
+        if (data.globalScheduleOverride) setGlobalScheduleOverride(data.globalScheduleOverride);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/catalog/status')
@@ -98,6 +110,41 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     } catch {}
   }, []);
 
+  // Google Places autocomplete when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is set
+  useEffect(() => {
+    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!key || typeof window === 'undefined') return;
+    const existing = document.querySelector('script[data-goyunir-places]');
+    const boot = () => {
+      try {
+        const input = document.getElementById('goyunir-shipping-address') as HTMLInputElement | null;
+        if (!input || !(window as any).google?.maps?.places) return;
+        const ac = new (window as any).google.maps.places.Autocomplete(input, {
+          fields: ['formatted_address', 'address_components'],
+          types: ['address'],
+        });
+        ac.addListener('place_changed', () => {
+          const place = ac.getPlace();
+          const formatted = place?.formatted_address;
+          if (formatted) {
+            setForm((prev) => ({ ...prev, shippingAddress: formatted }));
+          }
+        });
+      } catch {}
+    };
+    if (existing) {
+      boot();
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
+    s.async = true;
+    s.dataset.goyunirPlaces = '1';
+    s.onload = () => boot();
+    document.head.appendChild(s);
+  }, []);
+
+
   const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   const heroContent = GOYUNIR_STORE_SUITE.heroContent;
@@ -108,7 +155,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       : allVisible[activeProductIndex] ?? allVisible[0] ?? GOYUNIR_STORE_SUITE.productCatalog[0];
 
   const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
-  const effectiveSchedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct);
+  const priceFor = (product: typeof currentProduct, size: string) => {
+    const ov = productOverrides[product?.id];
+    if (size === '100ml' && typeof ov?.price100ml === 'number') return ov.price100ml;
+    if (size !== '100ml' && typeof ov?.price50ml === 'number') return ov.price50ml;
+    return getProductPrice(product, size);
+  };
+
+  const effectiveSchedule = {
+    ...resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct),
+    ...(globalScheduleOverride || {}),
+    ...(productOverrides[currentProduct?.id]?.customDropSchedule || {}),
+  };
   const archiveNote = archiveNotesMap[currentProduct?.id] || '';
   const archiveFrom = archiveFromMap[currentProduct?.id] || '';
 
@@ -567,37 +625,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>
                 <p style={{ color: configPalette.textMuted, fontSize: 12, margin: '0 0 20px', textAlign: 'center' }}>{currentProduct.desc}</p>
 
-                {/* Promo — quiet strip when active, small unobtrusive
-                    toggle link when not, instead of a separate floating
-                    banner or an always-visible input field competing for
-                    attention with email/address. */}
-                {promoCode ? (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 11 }}>
-                    <span style={{ color: '#34c759', fontWeight: 600 }}>
-                      🏷 {promoCode} applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ marginBottom: 14 }}>
-                    {!showManualPromo ? (
-                      <button type="button" onClick={() => setShowManualPromo(true)}
-                        style={{ background: 'none', border: 'none', color: '#666', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
-                        Have a promo code?
-                      </button>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input type="text" value={manualPromoInput} onChange={(e) => setManualPromoInput(e.target.value)} placeholder="Enter code"
-                          autoFocus
-                          style={{ flex: 1, padding: 10, borderRadius: 10, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: '#fff', fontSize: 12, boxSizing: 'border-box' }} />
-                        <button type="button" onClick={applyManualPromo}
-                          style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: 12, cursor: 'pointer' }}>
-                          Apply
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {sizes.length > 1 ? (
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -611,20 +638,61 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                               background: isSelected ? '#fff' : 'rgba(22,22,26,0.5)',
                               color: isSelected ? '#000' : configPalette.textMain, fontSize: 13, fontWeight: 'bold', cursor: 'pointer',
                             }}>
-                            {sz} — ${getProductPrice(currentProduct, sz)}
+                            {sz} — ${priceFor(currentProduct, sz)}
                           </button>
                         );
                       })}
                     </div>
                   ) : (
-                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>{sizes[0]} — ${getProductPrice(currentProduct, sizes[0])}</div>
+                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>
+                      {sizes[0]} —{' '}
+                      {promoDiscount > 0 ? (
+                        <>
+                          <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 6 }}>${priceFor(currentProduct, sizes[0])}</span>
+                          <span style={{ color: '#edb210' }}>${Math.max(1, Math.round(priceFor(currentProduct, sizes[0]) * (1 - promoDiscount / 100)))}</span>
+                        </>
+                      ) : (
+                        <>${priceFor(currentProduct, sizes[0])}</>
+                      )}
+                    </div>
                   )}
                   <input required type="email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
                     placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.emailPlaceholder} autoComplete="email"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
                   <input required type="text" value={form.shippingAddress} onChange={(e) => setForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
-                    list="goyunir-address-suggestions" placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} autoComplete="shipping street-address" name="shipping-address"
+                    id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} autoComplete="shipping street-address" name="shipping-address"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
+                  {promoCode ? (
+                    <div style={{ background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
+                      <span style={{ color: '#34c759', fontWeight: 600 }}>
+                        🏷 {promoCode} applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      {!showManualPromo ? (
+                        <button type="button" onClick={() => setShowManualPromo(true)}
+                          style={{ background: 'none', border: 'none', color: '#666', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
+                          Have a promo code?
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            type="text"
+                            value={manualPromoInput}
+                            onChange={(e) => setManualPromoInput(e.target.value.toUpperCase())}
+                            placeholder="Promo code"
+                            style={{ flex: 1, padding: 12, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 12, boxSizing: 'border-box' }}
+                          />
+                          <button type="button" onClick={applyManualPromo}
+                            style={{ padding: '0 14px', borderRadius: 12, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                            Apply
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <p style={{ margin: 0, fontSize: 11, color: configPalette.textMuted, textAlign: 'center' }}>
                     Card saved — charged only if selected. One entry per email.
                   </p>

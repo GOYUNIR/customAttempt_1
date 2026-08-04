@@ -375,8 +375,28 @@ export default function AdminPortal() {
         body: JSON.stringify({ targetPool: selectedDrawTarget, verificationKey: password }),
       });
       const data = await res.json();
-      if (res.ok) { setResultMessage(`Done. Charged ${data.drawSummary?.totalSuccessfulCharges ?? 0} winner(s).`); showToast('UPDATED · Draw complete'); await fetchStatus(); }
-      else setResultMessage(data.error || 'Failed');
+      if (res.ok) {
+        const ds = data.drawSummary || {};
+        const winners = ds.processedWinners || [];
+        const charged = winners.filter((w: any) => w.status === 'SUCCESS_CHARGED' || w.status === 'charged');
+        const revenue = (ds.totalRevenueCents != null
+          ? ds.totalRevenueCents
+          : charged.reduce((sum: number, w: any) => sum + (Number(w.amountCents) || 0), 0)) / 100;
+        const lines = [
+          `Done · ${ds.totalSuccessfulCharges ?? charged.length} charged`,
+          ds.executionTime ? `Time: ${ds.executionTime}` : '',
+          revenue > 0 ? `Revenue: $${revenue.toFixed(2)}` : '',
+          ...charged.slice(0, 8).map((w: any) =>
+            `${w.email} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
+          ),
+          ...winners.filter((w: any) => w.status && w.status !== 'SUCCESS_CHARGED' && w.status !== 'charged').slice(0, 5).map((w: any) =>
+            `${w.email}: ${w.status}`
+          ),
+        ].filter(Boolean);
+        setResultMessage(lines.join('\n'));
+        showToast('UPDATED · Draw complete');
+        await fetchStatus();
+      } else setResultMessage(data.error || 'Failed');
     } catch {
       setResultMessage('Connection failed');
     } finally {
@@ -684,16 +704,18 @@ export default function AdminPortal() {
                     ↓ Download all-time winners CSV
                   </a>
                 )}
-                {resultMessage && <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10 }}>{resultMessage}</p>}
+                {resultMessage && <pre style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10, whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: '#09090b', padding: 12, borderRadius: 10 }}>{resultMessage}</pre>}
                 <div style={{ marginTop: 16, fontSize: 12 }}>
                   <div style={{ color: '#888', marginBottom: 8 }}>Most recent draw</div>
                   {status?.lastDraw ? (
                     <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-                      <div style={{ color: '#666', marginBottom: 6 }}>{status.lastDraw.executionTime} · {status.lastDraw.totalSuccessfulCharges ?? 0} charged</div>
+                      <div style={{ color: '#666', marginBottom: 6 }}>{status.lastDraw.executionTime} · {status.lastDraw.totalSuccessfulCharges ?? 0} charged
+                        {status.lastDraw.totalRevenueCents != null ? ` · $${(status.lastDraw.totalRevenueCents / 100).toFixed(2)}` : ''}
+                      </div>
                       {(status.lastDraw.processedWinners || []).map((w: any, i: number) => (
                         <div key={i} style={{ background: '#09090b', padding: 10, borderRadius: 8, marginBottom: 6 }}>
                           <div>{w.email}</div>
-                          <div style={{ color: '#34d399', fontSize: 11 }}>{w.product} — {w.size} · {w.status}{w.promoCode ? ` · promo ${w.promoCode}` : ''}</div>
+                          <div style={{ color: '#34d399', fontSize: 11 }}>{w.product} — {w.size} · {w.status}{w.amountCents ? ` · $${(w.amountCents / 100).toFixed(2)}` : ''}{w.promoCode ? ` · promo ${w.promoCode}` : ''}</div>
                           <div style={{ color: '#666', fontSize: 11 }}>{revealAddresses ? w.shippingAddress : '••••'}</div>
                         </div>
                       ))}

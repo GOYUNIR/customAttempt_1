@@ -169,7 +169,10 @@ export async function POST(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}` });
+              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}` });
+              if (!(emailResult as any)?.ok) {
+                console.error('[trigger-drop] winner email failed', winnerEmail, emailResult);
+              }
 
               processedWinners.push({
                 email: winnerEmail, product: productName, size: productSize, shippingAddress,
@@ -246,7 +249,27 @@ export async function POST(request: Request) {
       } catch {}
     }
 
-    const drawSummary = { executionTime: new Date().toLocaleString(), processedWinners, totalSuccessfulCharges: grandRevenueChargesCount };
+    const tz = GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles';
+    const executionTime = new Date().toLocaleString('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZoneName: 'short',
+    });
+    const drawSummary = {
+      executionTime,
+      timezone: tz,
+      processedWinners,
+      totalSuccessfulCharges: grandRevenueChargesCount,
+      totalRevenueCents: processedWinners
+        .filter((w: any) => w.status === 'SUCCESS_CHARGED' || w.status === 'charged')
+        .reduce((s: number, w: any) => s + (Number(w.amountCents) || 0), 0),
+    };
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
     } catch {}
@@ -256,3 +279,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+
