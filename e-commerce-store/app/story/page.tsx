@@ -1,8 +1,9 @@
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import Link from 'next/dist/client/link';
-const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+import Link from 'next/link';
 
 export default function StoryPage() {
+  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+
   return (
     <main style={{ maxWidth: 560, margin: '0 auto', padding: '48px 20px 80px', color: '#e5e5e5', background: '#0a0a0a', minHeight: '100vh', fontFamily: 'system-ui,sans-serif', lineHeight: 1.7, fontSize: 15 }}>
       <div style={{ display: 'flex', gap: 16, marginBottom: 32, fontSize: 12, letterSpacing: 2 }}>
@@ -14,14 +15,31 @@ export default function StoryPage() {
         GOYUNIR engineering blends raw extraction mechanics with hyper-modern chemical balancing. Limited allocations keep every release intentional—not infinite shelf stock.
       </p>
       <p style={{ color: '#aaa' }}>
-        Enter once per scent. Card is saved; you are charged only if selected. When a drop returns, existing entries stay in the pool so you don’t start over.
+        Enter once per scent. Card is saved; you are charged only if selected. When a drop returns, existing entries stay in the pool so you don't start over.
       </p>
-      <a href="/" style={{ display: 'inline-block', marginTop: 32, color: '#fff', fontSize: 13 }}>
-        <Link href="/" style={{ fontSize: '13px', color: configPalette.textMuted, textDecoration: 'none', display: 'inline-block', marginBottom: '24px', padding: '10px 14px', borderRadius: '20px', background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}` }}>← Back to storefront</Link>      </a>
+      <Link
+        href="/"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 44,
+          padding: '0 18px',
+          borderRadius: 999,
+          fontSize: 13,
+          fontWeight: 600,
+          color: configPalette.textMain,
+          textDecoration: 'none',
+          background: 'rgba(255,255,255,0.06)',
+          border: `1px solid ${configPalette.cardBorder}`,
+          marginTop: 32,
+        }}
+      >
+        ← Back to store
+      </Link>
       <p style={{ marginTop: 48, fontSize: 11, color: '#555' }}>
         {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}
       </p>
     </main>
   );
-}// redeploy 20260801145801
-
+}
