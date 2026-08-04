@@ -394,9 +394,17 @@ export default function AdminPortal() {
       payload.inventoryRemaining = value;
     }
     if (winnersEdits[key] !== undefined && winnersEdits[key] !== '') {
-      const w = Number(winnersEdits[key]);
+      let w = Number(winnersEdits[key]);
       if (!Number.isFinite(w) || w < 1) return alert('Winners per draw must be at least 1');
-      payload.winnersPerDraw = Math.floor(w);
+      w = Math.floor(w);
+      const invCap = payload.inventoryRemaining !== undefined
+        ? payload.inventoryRemaining
+        : Number(pools.find((p: any) => p.product === productName && p.size === size)?.maxLimit ?? 999);
+      if (w > invCap) {
+        alert(`Winners per draw cannot exceed inventory left (${invCap}). Capping to ${Math.max(1, invCap)}.`);
+        w = Math.max(1, invCap);
+      }
+      payload.winnersPerDraw = w;
     }
     if (payload.inventoryRemaining === undefined && payload.winnersPerDraw === undefined) {
       return alert('Enter inventory and/or winners per draw');
@@ -817,6 +825,11 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 11 }}>Minute (0-59)
                         <input type="number" min={0} max={59} value={scheduleForm.drawMinute ?? 0}
                           onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawMinute: Number(e.target.value) }))}
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                      </label>
+                      <label style={{ fontSize: 11 }}>Second (0-59)
+                        <input type="number" min={0} max={59} value={scheduleForm.drawSecond ?? 0}
+                          onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawSecond: Number(e.target.value) }))}
                           style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                       </label>
                     </>

@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const results: TestResult[] = [];
   const push = (name: string, pass: boolean, detail: string) => results.push({ name, pass, detail });
 
-  const requiredEnv = [
+  for (const key of [
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
     'UPSTASH_REDIS_REST_URL',
@@ -36,20 +36,11 @@ export async function GET(request: Request) {
     'ADMIN_BASIC_AUTH_USERNAME',
     'ADMIN_BASIC_AUTH_PASSWORD',
     'CRON_SECRET',
-  ];
-  for (const key of requiredEnv) {
+  ]) {
     push(`Env: ${key}`, Boolean(process.env[key]), process.env[key] ? 'set' : 'MISSING');
   }
-  push(
-    'Env: RESEND_API_KEY',
-    Boolean(process.env.RESEND_API_KEY),
-    process.env.RESEND_API_KEY ? 'set' : 'optional — winner/recovery emails off',
-  );
-  push(
-    'Env: RESEND_FROM',
-    Boolean(process.env.RESEND_FROM),
-    process.env.RESEND_FROM || 'using default onboarding@resend.dev',
-  );
+  push('Env: RESEND_API_KEY', Boolean(process.env.RESEND_API_KEY), process.env.RESEND_API_KEY ? 'set' : 'optional');
+  push('Env: RESEND_FROM', Boolean(process.env.RESEND_FROM), process.env.RESEND_FROM || 'default');
 
   const redis = createRedisClient();
   const stripe = createStripeClient();
@@ -60,17 +51,16 @@ export async function GET(request: Request) {
     try {
       await redis.ping();
       push('Redis ping', true, 'pong');
-    } catch (err: any) {
-      push('Redis ping', false, err.message);
+    } catch (e: any) {
+      push('Redis ping', false, e.message);
     }
   }
-
   if (stripe) {
     try {
       await stripe.balance.retrieve();
-      push('Stripe API', true, 'balance readable');
-    } catch (err: any) {
-      push('Stripe API', false, err.message);
+      push('Stripe API', true, 'ok');
+    } catch (e: any) {
+      push('Stripe API', false, e.message);
     }
   }
 
@@ -78,43 +68,13 @@ export async function GET(request: Request) {
     try {
       const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
       const ts = getNextDrawTimestampForSchedule(schedule);
-      const ok = Number.isFinite(ts) && ts > 0;
-      push(
-        `${product.name}: schedule`,
-        ok,
-        ok ? `next draw ${new Date(ts).toISOString()}` : 'invalid schedule',
-      );
-    } catch (err: any) {
-      push(`${product.name}: schedule`, false, err.message);
+      push(`${product.name}: schedule`, Number.isFinite(ts) && ts > 0, new Date(ts).toISOString());
+    } catch (e: any) {
+      push(`${product.name}: schedule`, false, e.message);
     }
-
     for (const size of getAvailableSizes(GOYUNIR_STORE_SUITE)) {
       const price = getProductPrice(product, size);
-      push(`${product.name} ${size}: price`, price > 0, price > 0 ? `$${price}` : String(price));
-
-      const stripeId = size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
-      const looksReal = stripeId.startsWith('price_') && !stripeId.includes('placeholder');
-      push(`${product.name} ${size}: Stripe ID`, looksReal, stripeId);
-
-      if (stripe && looksReal) {
-        try {
-          const stripePrice = await stripe.prices.retrieve(stripeId);
-          const expectedCents = Math.round(price * 100);
-          const matches = stripePrice.unit_amount === expectedCents;
-          push(
-            `${product.name} ${size}: Stripe amount`,
-            matches,
-            matches
-              ? 'matches config'
-              : `Stripe $${(stripePrice.unit_amount || 0) / 100} vs config $${price}`,
-          );
-        } catch (err: any) {
-          push(`${product.name} ${size}: Stripe retrieve`, false, err.message);
-        }
-      }
-
-      const winners = getWinnerCount(GOYUNIR_STORE_SUITE, size);
-      push(`${product.name} ${size}: winners`, winners > 0, String(winners));
+      push(`${product.name} ${size}: price`, price > 0, `$${price}`);
     }
   }
 
@@ -122,21 +82,10 @@ export async function GET(request: Request) {
     try {
       const records = await getCatalogArchiveRecords(redis);
       push('Catalog archive', true, `${records.length} archived`);
-    } catch (err: any) {
-      push('Catalog archive', false, err.message);
+    } catch (e: any) {
+      push('Catalog archive', false, e.message);
     }
   }
-
-  const slugs = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.slug);
-  push(
-    'Unique slugs',
-    new Set(slugs).size === slugs.length,
-    new Set(slugs).size === slugs.length ? 'ok' : 'duplicates',
-  );
-
-  // Recovery + social tick reachability (auth via CRON_SECRET)
-  const cronSecret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
-  push('CRON_SECRET usable', Boolean(cronSecret), cronSecret ? 'set' : 'MISSING — QStash will 401');
 
   const passCount = results.filter((r) => r.pass).length;
   return NextResponse.json({

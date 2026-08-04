@@ -12,6 +12,8 @@ export interface DropScheduleConfig {
   drawDayOfMonth: number;    // 1-31, used when mode is 'monthly' (clamped to the last real day of shorter months)
   drawHour: number;          // used by 'daily' / 'weekly' / 'monthly'
   drawMinute: number;
+  /** 0-59, used by daily/weekly/monthly (optional, default 0) */
+  drawSecond?: number;
   countdownExpiredText: string;
   daysLabel: string;
   hoursLabel: string;
@@ -142,6 +144,7 @@ const defaultDropSchedule: DropScheduleConfig = {
   drawDayOfMonth: 1,
   drawHour: 21,
   drawMinute: 0,
+  drawSecond: 0,
   countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
   daysLabel: 'd',
   hoursLabel: 'h',
@@ -296,18 +299,34 @@ export function resolveProductSchedule(config: StorefrontConfig, product: Storef
   return { ...config.dropSchedule, ...(product.customDropSchedule ?? {}) };
 }
 
-function zonedTimeToTimestamp(opts: { timezone: string; year: number; month: number; day: number; hour: number; minute: number }): number {
+function zonedTimeToTimestamp(opts: {
+  timezone: string;
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second?: number;
+}): number {
   const { timezone, year, month, day, hour, minute } = opts;
-  const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+  const second = Math.max(0, Math.min(59, Number(opts.second) || 0));
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second);
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     hourCycle: 'h23',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
   const parts = dtf.formatToParts(new Date(utcGuess));
   const map: Record<string, string> = {};
   parts.forEach((p) => { if (p.type !== 'literal') map[p.type] = p.value; });
-  const asIfUTC = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), Number(map.hour), Number(map.minute));
+  const asIfUTC = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second || 0),
+  );
   const offset = asIfUTC - utcGuess;
   return utcGuess - offset;
 }
@@ -315,8 +334,11 @@ function zonedTimeToTimestamp(opts: { timezone: string; year: number; month: num
 function parseISOLocal(iso: string) {
   const [datePart, timePart] = iso.split('T');
   const [year, month, day] = (datePart || '').split('-').map(Number);
-  const [hour, minute] = (timePart || '00:00').split(':').map(Number);
-  return { year, month, day, hour, minute };
+  const timeBits = (timePart || '00:00:00').split(':').map(Number);
+  const hour = timeBits[0] || 0;
+  const minute = timeBits[1] || 0;
+  const second = timeBits[2] || 0;
+  return { year, month, day, hour, minute, second };
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -361,12 +383,12 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   if (schedule.mode === 'daily') {
     let candidate = zonedTimeToTimestamp({
       timezone: schedule.timezone, year, month, day,
-      hour: schedule.drawHour, minute: schedule.drawMinute,
+      hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
     });
     if (candidate <= now.getTime()) {
       candidate = zonedTimeToTimestamp({
         timezone: schedule.timezone, year, month, day: day + 1,
-        hour: schedule.drawHour, minute: schedule.drawMinute,
+        hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
       });
     }
     return candidate;
@@ -376,7 +398,7 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
     const clampedDay = Math.min(Math.max(1, schedule.drawDayOfMonth || 1), daysInMonth(year, month));
     let candidate = zonedTimeToTimestamp({
       timezone: schedule.timezone, year, month, day: clampedDay,
-      hour: schedule.drawHour, minute: schedule.drawMinute,
+      hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
     });
     if (candidate <= now.getTime()) {
       let nextMonth = month + 1;
@@ -385,7 +407,7 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
       const nextClampedDay = Math.min(Math.max(1, schedule.drawDayOfMonth || 1), daysInMonth(nextYear, nextMonth));
       candidate = zonedTimeToTimestamp({
         timezone: schedule.timezone, year: nextYear, month: nextMonth, day: nextClampedDay,
-        hour: schedule.drawHour, minute: schedule.drawMinute,
+        hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
       });
     }
     return candidate;
@@ -397,12 +419,12 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   let daysUntil = (schedule.drawDayOfWeek - currentDay + 7) % 7;
   let candidate = zonedTimeToTimestamp({
     timezone: schedule.timezone, year, month, day: day + daysUntil,
-    hour: schedule.drawHour, minute: schedule.drawMinute,
+    hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
   });
   if (candidate <= now.getTime()) {
     candidate = zonedTimeToTimestamp({
       timezone: schedule.timezone, year, month, day: day + daysUntil + 7,
-      hour: schedule.drawHour, minute: schedule.drawMinute,
+      hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,
     });
   }
   return candidate;
@@ -411,3 +433,5 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
 export function getNextDrawTimestamp(config: StorefrontConfig): number {
   return getNextDrawTimestampForSchedule(config.dropSchedule);
 }
+
+

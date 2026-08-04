@@ -70,8 +70,27 @@ export async function POST(request: Request) {
       if (!Number.isFinite(winnersPerDraw) || winnersPerDraw < 1) {
         return NextResponse.json({ error: 'winnersPerDraw must be >= 1.' }, { status: 400 });
       }
-      // live.winnersPerDraw is number | number[] in some versions — store as single number for draw limit
-      live.winnersPerDraw = Math.floor(winnersPerDraw) as any;
+      let w = Math.floor(winnersPerDraw);
+      // Cannot select more winners than units left
+      if (w > live.inventoryRemaining) {
+        w = Math.max(1, live.inventoryRemaining);
+      }
+      if (live.inventoryRemaining === 0) {
+        return NextResponse.json(
+          { error: 'Inventory is 0 — restock before setting winners per draw.' },
+          { status: 400 },
+        );
+      }
+      live.winnersPerDraw = w as any;
+    }
+
+    // Re-clamp if inventory was lowered below winners
+    {
+      const raw = live.winnersPerDraw as any;
+      const w = Array.isArray(raw) ? Number(raw[0]) || 1 : Number(raw) || 1;
+      if (w > live.inventoryRemaining && live.inventoryRemaining > 0) {
+        live.winnersPerDraw = live.inventoryRemaining as any;
+      }
     }
 
     await saveLiveState(redis, live);
