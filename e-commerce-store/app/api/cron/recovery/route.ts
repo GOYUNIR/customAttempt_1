@@ -21,18 +21,22 @@ async function getConfig(redis: any) {
   };
 }
 
+function authorized(request: Request) {
+  const url = new URL(request.url);
+  const secret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD;
+  if (!secret) return true;
+  const auth = request.headers.get('authorization');
+  const key = url.searchParams.get('key') || '';
+  if (request.headers.get('x-vercel-cron') === '1') return true;
+  if (auth === `Bearer ${secret}`) return true;
+  if (key === secret) return true;
+  return false;
+}
+
 export async function GET(request: Request) {
   try {
-    const url = new URL(request.url);
-    const isVercelCron = request.headers.get('x-vercel-cron') === '1';
-
-    if (!isVercelCron) {
-      const auth = request.headers.get('authorization');
-      const secret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD;
-      const key = url.searchParams.get('key') || '';
-      if (secret && auth !== `Bearer ${secret}` && key !== secret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
+    if (!authorized(request)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const redis = createRedisClient();

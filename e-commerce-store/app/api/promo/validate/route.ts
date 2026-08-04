@@ -2,27 +2,53 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, trackPromoClick } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+
 const PROMOS_KEY = 'config:promos';
+
+function usedEmailsKey(code: string) {
+  return `promo:used_emails:${code}`;
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const code = String(url.searchParams.get('code') || '').trim().toUpperCase();
-  if (!code) return NextResponse.json({ valid: false });
+  const code = String(url.searchParams.get('code') || '')
+    .trim()
+    .toUpperCase();
+  const email = String(url.searchParams.get('email') || '')
+    .trim()
+    .toLowerCase();
+
+  if (!code) return NextResponse.json({ valid: false, error: 'No code' });
 
   const redis = createRedisClient();
-  if (!redis) return NextResponse.json({ valid: false });
+  if (!redis) return NextResponse.json({ valid: false, error: 'Offline' });
 
   const raw = await redis.hget(PROMOS_KEY, code);
   const promo = safeParseRedisItem<any>(raw);
-  if (!promo || promo.active === false) return NextResponse.json({ valid: false });
+  if (!promo || promo.active === false) {
+    return NextResponse.json({ valid: false, error: 'Invalid or inactive code' });
+  }
 
-  // First validation per link click also counts as a "click" — logs that
-  // the link was actually opened, separate from an eventual entry ("use").
+  const maxPerEmail =
+    typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
+
+  if (email && maxPerEmail > 0) {
+    const used = await redis.sismember(usedEmailsKey(code), email);
+    if (used === 1) {
+      return NextResponse.json({
+        valid: false,
+        error: 'This code was already used with this email',
+        alreadyUsed: true,
+      });
+    }
+  }
+
   await trackPromoClick(redis, code);
 
   return NextResponse.json({
     valid: true,
     code,
     customerDiscountPercent: Math.min(50, Math.max(0, Number(promo.customerDiscountPercent) || 0)),
+    maxUsesPerEmail: maxPerEmail,
   });
-}
+} 

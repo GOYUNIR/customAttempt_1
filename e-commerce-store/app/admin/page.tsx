@@ -127,7 +127,7 @@ export default function AdminPortal() {
 
   const [promos, setPromos] = useState<any[]>([]);
   const [promoForm, setPromoForm] = useState({
-    code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10',
+    code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10', maxUsesPerEmail: '1',
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
@@ -453,13 +453,13 @@ export default function AdminPortal() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           password, action: 'upsert', code: promoForm.code, promoterName: promoForm.promoterName, promoterEmail: promoForm.promoterEmail,
-          customerDiscountPercent: Number(promoForm.customerDiscountPercent), promoterPayoutPercent: Number(promoForm.promoterPayoutPercent), active: true,
+          customerDiscountPercent: Number(promoForm.customerDiscountPercent), promoterPayoutPercent: Number(promoForm.promoterPayoutPercent), maxUsesPerEmail: Number(promoForm.maxUsesPerEmail ?? 1), active: true,
         }),
       });
       const data = await res.json();
       if (res.ok) {
         setPromoMsg(`Saved ${data.promo?.code}.`);
-        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10' });
+        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10', maxUsesPerEmail: '1' });
         await fetchPromos();
       } else setPromoMsg(data.error || 'Failed');
     } catch {
@@ -516,7 +516,7 @@ export default function AdminPortal() {
             <p style={{ color: '#888', margin: '6px 0 0', fontSize: 12 }}>
               {lastUpdatedAt ? `Updated ${secondsAgo}s ago` : 'Loading…'} ·{' '}
               <span style={{ color: status?.stripeConfigured ? '#34d399' : '#f87171' }}>Stripe</span> ·{' '}
-              <span style={{ color: status?.redisConfigured ? '#34d399' : '#f87171' }}>Redis</span> ·{' '}
+              <span style={{ color: status?.redisConfigured ? '#34d399' : '#f87171' }}>Redis</span>{' · '}<span style={{ color: status?.resendConfigured ? '#34d399' : '#f87171' }}>Resend</span> ·{' '}
               <span style={{ color: '#34d399' }}>{status?.liveActiveUsersOnline ?? 0} online</span>
             </p>
           </div>
@@ -587,7 +587,7 @@ export default function AdminPortal() {
                 <div key={i} style={{ marginBottom: 10 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
                     <span>{p.product} — {p.size}</span>
-                    <span style={{ fontFamily: 'monospace', color: '#34d399' }}>{p.subCount || 0} entered · {p.maxLimit ?? 0} left</span>
+                    <span style={{ fontFamily: 'monospace', color: '#34d399' }}>{(p.intCount ?? 0)} started · {(p.subCount || 0)} entered · {(p.salesCount ?? 0)} sold · {p.maxLimit ?? 0} left</span>
                   </div>
                   <Bar value={p.subCount || 0} max={maxSubPool} color="#34d399" />
                 </div>
@@ -909,6 +909,7 @@ export default function AdminPortal() {
                 <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
                 <input placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
                 <input placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
+                <input placeholder="Max uses per email (1=once, 0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               </div>
               <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
               {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
@@ -922,7 +923,7 @@ export default function AdminPortal() {
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button onClick={() => setPromoForm({
                           code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
-                          customerDiscountPercent: String(p.customerDiscountPercent), promoterPayoutPercent: String(p.promoterPayoutPercent),
+                          customerDiscountPercent: String(p.customerDiscountPercent), promoterPayoutPercent: String(p.promoterPayoutPercent), maxUsesPerEmail: String(p.maxUsesPerEmail ?? 1),
                         })} style={buttonGhost}>Edit</button>
                         <button onClick={async () => {
                           if (!password) return alert('Enter password');

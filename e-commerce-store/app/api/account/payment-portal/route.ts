@@ -1,24 +1,34 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, findPoolEntriesByEmail } from '@/lib/server-config';
+import {
+  createRedisClient,
+  createStripeClient,
+  findPoolEntriesByEmail,
+} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
-const PORTAL_CONFIG_CACHE_KEY = 'stripe:billing_portal_config_id';
+const PORTAL_CONFIG_CACHE_KEY = 'stripe:portal_config_id';
 
-async function getOrCreatePortalConfigId(stripe: any, redis: any): Promise<string> {
+async function getOrCreatePortalConfigId(stripe: any, redis: any) {
   try {
     const cached = await redis.get(PORTAL_CONFIG_CACHE_KEY);
     if (cached) return String(cached);
   } catch {}
 
   const configuration = await stripe.billingPortal.configurations.create({
-    business_profile: { headline: 'Update your card for GOYUNIR' },
+    business_profile: {
+      headline: 'Update your GOYUNIR payment method',
+    },
     features: {
       payment_method_update: { enabled: true },
-      customer_update: { enabled: false },
+      customer_update: {
+        enabled: false,
+        allowed_updates: [],
+      },
       invoice_history: { enabled: false },
       subscription_cancel: { enabled: false },
+      subscription_pause: { enabled: false },
       subscription_update: { enabled: false },
     },
   });
@@ -39,7 +49,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const email = String(body?.email || '').trim().toLowerCase();
+    const email = String(body?.email || '')
+      .trim()
+      .toLowerCase();
     const last4 = String(body?.last4 || '').trim();
     if (!email || last4.length !== 4) {
       return NextResponse.json({ error: 'Enter your email and card digits first.' }, { status: 400 });
@@ -48,11 +60,22 @@ export async function POST(request: Request) {
     const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
     const matches = await findPoolEntriesByEmail(redis, productNames, email);
     const target = matches.find((m) => String(m.parsed.cardLast4 || '') === last4);
-    if (!target) return NextResponse.json({ error: 'No matching entry found.' }, { status: 404 });
 
-    const customerId = target.parsed.customerId || target.parsed.stripeCustomerId;
+    let customerId = target?.parsed?.customerId || target?.parsed?.stripeCustomerId || '';
+
     if (!customerId) {
-      return NextResponse.json({ error: 'No linked payment profile found.' }, { status: 404 });
+      const list = await stripe.customers.list({ email, limit: 5 });
+      for (const c of list.data) {
+        const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
+        if (pms.data.some((pm: any) => pm.card?.last4 === last4)) {
+          customerId = c.id;
+          break;
+        }
+      }
+    }
+
+    if (!customerId) {
+      return NextResponse.json({ error: 'No matching payment profile found.' }, { status: 404 });
     }
 
     const hostHeader = request.headers.get('host') || 'localhost:3000';

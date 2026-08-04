@@ -4,7 +4,6 @@ import {
   createStripeClient,
   safeParseRedisItem,
   archiveEntry,
-  resolveCustomerId,
   emailBlockKey,
   cardBlockKey,
   poolStatField,
@@ -16,6 +15,10 @@ import {
 export const dynamic = 'force-dynamic';
 
 const PROMOS_KEY = 'config:promos';
+
+function usedEmailsKey(code: string) {
+  return `promo:used_emails:${code}`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -60,22 +63,32 @@ export async function POST(request: Request) {
     }
 
     const setupIntent = session.setup_intent as any;
-    const paymentMethodId =
-      typeof setupIntent === 'object'
-        ? setupIntent?.payment_method?.id || setupIntent?.payment_method
-        : null;
-    const customerId =
-      typeof session.customer === 'string' ? session.customer : session.customer?.id || '';
-
+    let paymentMethodId: string | null = null;
+    let cardLast4 = '';
     let cardFingerprint = '';
-    try {
-      if (paymentMethodId && typeof paymentMethodId === 'string') {
-        const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+
+    if (typeof setupIntent === 'object' && setupIntent) {
+      const pm = setupIntent.payment_method;
+      if (typeof pm === 'string') {
+        paymentMethodId = pm;
+      } else if (pm && typeof pm === 'object') {
+        paymentMethodId = pm.id || null;
+        cardLast4 = String(pm.card?.last4 || '');
         cardFingerprint = String(pm.card?.fingerprint || '');
       }
-    } catch {}
+    }
 
-    // Dupe guard
+    const customerId =
+      typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id || '';
+
+    if (paymentMethodId && !cardLast4) {
+      try {
+        const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+        cardLast4 = String(pm.card?.last4 || '');
+        cardFingerprint = String(pm.card?.fingerprint || cardFingerprint);
+      } catch {}
+    }
+
     const blocked = await redis.sismember(emailBlockKey(variant, size), email);
     if (blocked === 1) {
       await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
@@ -86,15 +99,43 @@ export async function POST(request: Request) {
       });
     }
 
+    // Promo: block if this email already used this code (when maxUsesPerEmail > 0)
+    let appliedPromo: string | undefined = promoCode || undefined;
+    if (promoCode) {
+      try {
+        const raw = await redis.hget(PROMOS_KEY, promoCode);
+        const promo = safeParseRedisItem<any>(raw);
+        if (!promo || promo.active === false) {
+          appliedPromo = undefined;
+        } else {
+          const maxPer =
+            typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
+          const self =
+            promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
+          if (self) {
+            appliedPromo = undefined;
+          } else if (maxPer > 0) {
+            const used = await redis.sismember(usedEmailsKey(promoCode), email);
+            if (used === 1) appliedPromo = undefined;
+          }
+        }
+      } catch {
+        appliedPromo = undefined;
+      }
+    }
+
     const entry = {
       email,
       variant,
       size,
       shippingAddress,
+      address: shippingAddress,
       customerId,
+      stripeCustomerId: customerId,
       paymentMethodId,
+      cardLast4,
       cardFingerprint,
-      promoCode: promoCode || undefined,
+      promoCode: appliedPromo,
       registeredAt: new Date().toISOString(),
     };
 
@@ -112,24 +153,17 @@ export async function POST(request: Request) {
       id: customerId || 'n/a',
       registeredAt: entry.registeredAt,
       type: 'ENTERED',
-    });
+      ...(appliedPromo ? { promoCode: appliedPromo } : {}),
+    } as any);
 
-    // Attribute promo on successful entry (revenue counted on charge in trigger-drop)
-    if (promoCode) {
+    if (appliedPromo) {
       try {
-        const raw = await redis.hget(PROMOS_KEY, promoCode);
+        await redis.sadd(usedEmailsKey(appliedPromo), email);
+        const raw = await redis.hget(PROMOS_KEY, appliedPromo);
         const promo = safeParseRedisItem<any>(raw);
-        if (promo && promo.active !== false) {
-          // block self-use
-          if (
-            promo.promoterEmail &&
-            String(promo.promoterEmail).toLowerCase() === email
-          ) {
-            // still entered; no promo credit
-          } else {
-            promo.uses = (promo.uses || 0) + 1;
-            await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promo) });
-          }
+        if (promo) {
+          promo.uses = (promo.uses || 0) + 1;
+          await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
         }
       } catch {}
     }
