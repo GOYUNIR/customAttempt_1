@@ -30,9 +30,10 @@ export async function sendEntryConfirmedEmail(opts: {
     opts.promoCode &&
     typeof opts.discountPercent === 'number' &&
     opts.discountPercent > 0 &&
-    typeof opts.listPrice === 'number';
+    typeof opts.listPrice === 'number' &&
+    opts.listPrice > 0;
 
-  const priceLine = hasDiscount
+  const priceLine = hasDiscount && opts.listPrice
     ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> · ${opts.discountPercent}% off if selected (list $${opts.listPrice.toFixed(2)}). Charged only if selected.</p>`
     : opts.promoCode
       ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> is on your entry. Charged only if selected.</p>`

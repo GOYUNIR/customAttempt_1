@@ -23,6 +23,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const PROMOS_KEY = 'config:promos';
+const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 export async function POST(request: Request) {
   try {
@@ -279,6 +280,13 @@ export async function POST(request: Request) {
     };
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
+      // Also save to history
+      await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({
+        ...drawSummary,
+        timestamp: new Date().toISOString(),
+      }));
+      const len = await redis.llen(DRAW_HISTORY_KEY);
+      if (len > 100) await redis.ltrim(DRAW_HISTORY_KEY, len - 100, -1);
     } catch {}
 
     return NextResponse.json({ success: true, drawSummary });

@@ -9,18 +9,29 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
   const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
-  if (!master || password !== master) {
-    // Check if browser is using middleware auth
-    const auth = request.headers.get('authorization');
-    if (!auth || !auth.startsWith('Basic ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const encoded = auth.slice(6);
-    const decoded = atob(encoded);
-    const [user, pass] = decoded.split(':');
-    if (user !== process.env.ADMIN_BASIC_AUTH_USERNAME || pass !== master) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  
+  // Check if browser is using middleware auth
+  const authHeader = request.headers.get('authorization');
+  if (!master) {
+    return NextResponse.json({ error: 'Admin password not configured' }, { status: 500 });
+  }
+  
+  let isAuthorized = false;
+  if (password === master) {
+    isAuthorized = true;
+  } else if (authHeader && authHeader.startsWith('Basic ')) {
+    try {
+      const encoded = authHeader.slice(6);
+      const decoded = atob(encoded);
+      const [user, pass] = decoded.split(':');
+      if (user === process.env.ADMIN_BASIC_AUTH_USERNAME && pass === master) {
+        isAuthorized = true;
+      }
+    } catch {}
+  }
+  
+  if (!isAuthorized) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const redis = createRedisClient();
