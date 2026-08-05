@@ -16,22 +16,22 @@ const DEFAULT_PRODUCTS = [
     prefix: 'elysian-white',
     tagline: 'WHITE ALLOCATION / 01',
     desc: 'Clean, electric profile variant constructed with premium bergamot.',
-    price50ml: 85,
-    price100ml: 140,
-    stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
-    stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
-    maxRaffleAllocationLimit: 10,
+    price50ml: 0,  // FIXED: WAS 85
+    price100ml: 0, // FIXED: WAS 140
+    stripeId50ml: '',
+    stripeId100ml: '',
+    maxRaffleAllocationLimit: 0, // FIXED: WAS 10
     isActive: true,
     isArchived: false,
-    isUpcoming: false,  // <-- ADD THIS LINE
+    isUpcoming: false,
     notes: [
       { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
       { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
       { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
     ],
     images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-    totalInventory: 9,
-    winnerTiers: [2, 2, 2, 2, 1],
+    totalInventory: 0, // FIXED: WAS 9
+    winnerTiers: [0], // FIXED: WAS [2,2,2,2,1]
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -42,22 +42,22 @@ const DEFAULT_PRODUCTS = [
     prefix: 'obsidian-void',
     tagline: 'BLACK ALLOCATION / 02',
     desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-    price50ml: 85,
-    price100ml: 140,
-    stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
-    stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
-    maxRaffleAllocationLimit: 5,
+    price50ml: 0,  // FIXED: WAS 85
+    price100ml: 0, // FIXED: WAS 140
+    stripeId50ml: '',
+    stripeId100ml: '',
+    maxRaffleAllocationLimit: 0, // FIXED: WAS 5
     isActive: true,
     isArchived: false,
-    isUpcoming: false,  // <-- ADD THIS LINE
+    isUpcoming: false,
     notes: [
       { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
       { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
       { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
     ],
     images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
-    totalInventory: 5,
-    winnerTiers: [1],
+    totalInventory: 0, // FIXED: WAS 5
+    winnerTiers: [0], // FIXED: WAS [1]
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

@@ -7,28 +7,20 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const redis = createRedisClient();
   let hasProducts = false;
+  let redirectSlug = null;
   
   if (redis) {
     try {
       const activeRaw = await redis.hgetall('store:active_products');
       if (activeRaw && Object.keys(activeRaw).length > 0) {
-        hasProducts = true;
-      }
-    } catch (error) {
-      console.error('[HomePage] Redis error:', error);
-    }
-  }
-  
-  // If products exist in Redis, redirect to the first one
-  if (hasProducts && redis) {
-    try {
-      const activeRaw = await redis.hgetall('store:active_products');
-      if (activeRaw) {
+        // Find first active, non-archived, non-upcoming product
         for (const [key, value] of Object.entries(activeRaw)) {
           try {
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isActive && !product.isArchived && product.slug) {
-              redirect(`/${product.slug}`);
+            if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
+              hasProducts = true;
+              redirectSlug = product.slug;
+              break;
             }
           } catch (e) {
             console.error('[HomePage] Error parsing product:', e);
@@ -36,8 +28,13 @@ export default async function HomePage() {
         }
       }
     } catch (error) {
-      console.error('[HomePage] Redirect error:', error);
+      console.error('[HomePage] Redis error:', error);
     }
+  }
+  
+  // If we found a product, redirect to it
+  if (hasProducts && redirectSlug) {
+    redirect(`/${redirectSlug}`);
   }
   
   // No products in Redis - show coming soon page

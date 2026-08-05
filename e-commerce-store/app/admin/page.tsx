@@ -246,11 +246,19 @@ export default function AdminPortal() {
   };
 
   const fetchAudit = async () => {
+    // Don't try to fetch audit without a password
+    if (!password) {
+      setAudit([]);
+      return;
+    }
     try {
       const res = await adminFetch(`/api/admin/audit?password=${encodeURIComponent(password)}`);
       const data = await res.json();
       setAudit(Array.isArray(data.entries) ? data.entries : []);
-    } catch {}
+    } catch (err) {
+      console.error('[Audit] Error:', err);
+      setAudit([]);
+    }
   };
 
   const fetchConfig = async () => {
@@ -953,7 +961,7 @@ export default function AdminPortal() {
               onClick={() => {
                 setTab(t.id);
                 if (t.id === 'growth') { fetchPromos(); fetchAudit(); }
-                if (t.id === 'system') { fetchAudit(); fetchDrawHistory(); }
+                if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                 if (t.id === 'settings') fetchSettings();

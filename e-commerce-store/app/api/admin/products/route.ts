@@ -86,28 +86,31 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const includeArchived = url.searchParams.get('includeArchived') === 'true';
-    const includeInactive = url.searchParams.get('includeInactive') === 'true';
     
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ products: [] });
     
     let products: StoreProduct[] = [];
-    const all = await loadProducts(redis);
     
     if (includeArchived) {
+      const all = await loadProducts(redis);
       products = Object.values(all);
-    } else if (includeInactive) {
-      products = Object.values(all).filter(p => !p.isArchived);
     } else {
       const raw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-      if (raw) {
+      if (raw && Object.keys(raw).length > 0) {
         const parsed = Object.values(raw).map((v) => safeParseRedisItem<StoreProduct>(v));
         products = parsed.filter((p): p is StoreProduct => p !== null);
+      }
+      // If no active products, return all products (including upcoming)
+      if (products.length === 0) {
+        const all = await loadProducts(redis);
+        products = Object.values(all).filter(p => !p.isArchived);
       }
     }
     
     return NextResponse.json({ products });
   } catch (err: any) {
+    console.error('[Products API] Error:', err);
     return NextResponse.json({ error: err.message, products: [] }, { status: 500 });
   }
 }
