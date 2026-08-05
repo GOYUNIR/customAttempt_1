@@ -781,14 +781,25 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
       <header
         style={{
-          position: 'fixed', top: 0, left: 0, width: '100%', height: '56px', borderBottom: `1px solid ${configPalette.cardBorder}`,
-          background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(15px)', display: 'flex', alignItems: 'center', padding: '0 16px', zIndex: 100, boxSizing: 'border-box',
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          width: '100%', 
+          height: '56px', 
+          borderBottom: `1px solid ${configPalette.cardBorder}`,
+          background: 'rgba(10,10,10,0.88)', 
+          backdropFilter: 'blur(15px)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          padding: '0 16px', 
+          zIndex: 100, 
+          boxSizing: 'border-box',
         }}
       >
         <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
           <Link href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</Link>
           <Link href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</Link>
-          <Link href="/account" style={{ color: '#666', textDecoration: 'none' }}>ACCOUNT</Link>
         </div>
 
         <Link
@@ -807,6 +818,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         >
           GOYUNIR
         </Link>
+        
+        <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
+          <Link href="/account" style={{ color: '#666', textDecoration: 'none' }}>ACCOUNT</Link>
+        </div>
       </header>
 
       <AnimatePresence>

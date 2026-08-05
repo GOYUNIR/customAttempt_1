@@ -1,9 +1,46 @@
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { createRedisClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  // Simple landing page - NO ADMIN BUTTON
+  const redis = createRedisClient();
+  let hasProducts = false;
+  
+  if (redis) {
+    try {
+      const activeRaw = await redis.hgetall('store:active_products');
+      if (activeRaw && Object.keys(activeRaw).length > 0) {
+        hasProducts = true;
+      }
+    } catch (error) {
+      console.error('[HomePage] Redis error:', error);
+    }
+  }
+  
+  // If products exist in Redis, redirect to the first one
+  if (hasProducts && redis) {
+    try {
+      const activeRaw = await redis.hgetall('store:active_products');
+      if (activeRaw) {
+        for (const [key, value] of Object.entries(activeRaw)) {
+          try {
+            const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            if (product.isActive && !product.isArchived && product.slug) {
+              redirect(`/${product.slug}`);
+            }
+          } catch (e) {
+            console.error('[HomePage] Error parsing product:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[HomePage] Redirect error:', error);
+    }
+  }
+  
+  // No products in Redis - show coming soon page
   return (
     <main style={{ 
       minHeight: '100vh', 

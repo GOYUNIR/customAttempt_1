@@ -1,3 +1,8 @@
+// ============================================================
+// GOYUNIR ADMIN PORTAL - COMPLETE FILE
+// SEARCH FOR "ADMIN_UPDATE_MARKER" TO FIND THE LATEST CHANGES
+// ============================================================
+
 'use client';
 
 import Link from 'next/link';
@@ -157,7 +162,7 @@ export default function AdminPortal() {
     name: '', slug: '', prefix: '', tagline: '', desc: '',
     price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
     maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-    isActive: true, isArchived: false, notes: [], images: []
+    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
   });
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);
@@ -402,6 +407,27 @@ export default function AdminPortal() {
     }
   };
 
+  // ============================================================
+  // ADMIN_UPDATE_MARKER - "Move to Upcoming" feature added here
+  // ============================================================
+  const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
+    if (!password) return alert('Enter password');
+    const action = currentUpcoming ? 'moveToActive' : 'moveToUpcoming';
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action, id }),
+      });
+      if (res.ok) {
+        showToast(`UPDATED · ${currentUpcoming ? 'Moved to Active' : 'Moved to Upcoming'}`);
+        await fetchProducts();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
   const addImage = async () => {
     if (!imageInput.trim()) return;
     if (!editingProduct) return;
@@ -457,7 +483,7 @@ export default function AdminPortal() {
       name: '', slug: '', prefix: '', tagline: '', desc: '',
       price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
       maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-      isActive: true, isArchived: false, notes: [], images: []
+      isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
     });
     setEditingProduct(null);
     setEditingNoteIdx(null);
@@ -476,6 +502,7 @@ export default function AdminPortal() {
       winnerTiers: product.winnerTiers ? product.winnerTiers.join(',') : '',
       notes: product.notes || [],
       images: product.images || [],
+      isUpcoming: product.isUpcoming || false,
     });
     setShowProductForm(true);
   };
@@ -1373,7 +1400,7 @@ export default function AdminPortal() {
                   <input type="text" placeholder="Winner Tiers (comma separated, e.g. 2,2,2,1)" value={productForm.winnerTiers} onChange={(e) => setProductForm((p: any) => ({ ...p, winnerTiers: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
                 </div>
                 
-                <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
+                <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
                     Active (visible on storefront)
@@ -1381,6 +1408,10 @@ export default function AdminPortal() {
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked }))} />
                     Archived (moved to catalog archive)
+                  </label>
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked }))} />
+                    Upcoming (shown in upcoming section)
                   </label>
                 </div>
 
@@ -1432,10 +1463,11 @@ export default function AdminPortal() {
                 </div>
               )}
               {allProducts.map((product) => {
-                const isActive = product.isActive && !product.isArchived;
+                const isActive = product.isActive && !product.isArchived && !product.isUpcoming;
                 const isArchived = product.isArchived;
+                const isUpcoming = product.isUpcoming;
                 return (
-                  <div key={product.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: `1px solid ${isActive ? '#1c1c1e' : isArchived ? '#5a3d1a' : '#2a1a1a'}` }}>
+                  <div key={product.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: `1px solid ${isActive ? '#1c1c1e' : isArchived ? '#5a3d1a' : isUpcoming ? '#1a3a5a' : '#2a1a1a'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
@@ -1443,7 +1475,8 @@ export default function AdminPortal() {
                           slug: {product.slug} · {product.images?.length || 0} images · ${product.price50ml || 0} / ${product.price100ml || 0}
                           {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
-                          {!isActive && !isArchived && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
+                          {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
+                          {!isActive && !isArchived && !isUpcoming && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -1453,6 +1486,9 @@ export default function AdminPortal() {
                         </button>
                         <button onClick={() => toggleArchive(product.id, isArchived)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
                           {isArchived ? 'Unarchive' : 'Archive'}
+                        </button>
+                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
+                          {isUpcoming ? 'Remove from Upcoming' : 'Move to Upcoming'}
                         </button>
                         <button onClick={() => deleteProduct(product.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>

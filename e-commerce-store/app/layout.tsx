@@ -16,7 +16,6 @@ export default function RootLayout({
     <html lang="en">
       <body style={{ margin: 0, padding: 0, background: '#0a0a0a', color: '#ffffff' }}>
         {children}
-        {/* Global footer that appears on all pages */}
         <footer style={{ 
           background: 'rgba(10,10,10,0.95)', 
           backdropFilter: 'blur(15px)',
