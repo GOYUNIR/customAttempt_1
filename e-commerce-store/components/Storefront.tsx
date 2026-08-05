@@ -355,11 +355,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     return activeProductIndex;
   })();
 
-  // Get the current product with fallback
+  // Get the current product with proper fallback
   const getCurrentProduct = (): StoreProduct | null => {
     // First try the active product at the index
-    const active = allVisible[currentProductIndex] || allVisible[0] || activeProducts[0];
-    if (active) return active;
+    if (allVisible.length > 0) {
+      const active = allVisible[activeProductIndex] || allVisible[0];
+      if (active) return active;
+    }
     
     // If we have a requested slug, find it in all products
     if (initialSlug) {
@@ -369,8 +371,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (archived) return archived;
     }
     
-    // Fallback to any product
-    return allProducts[0] || activeProducts[0] || null;
+    // Return null if no products found
+    return null;
   };
 
   const currentProduct = getCurrentProduct();
@@ -842,7 +844,8 @@ const validSchedule = getValidSchedule();
         justifyContent: 'center',
         flexDirection: 'column',
         color: '#fff',
-        gap: 16
+        gap: 16,
+        padding: '20px'
       }}>
         <div style={{ fontSize: 20, color: '#666' }}>No products available</div>
         <Link href="/catalog" style={{ color: '#a855f7', textDecoration: 'none' }}>View Catalog →</Link>

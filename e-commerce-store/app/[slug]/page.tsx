@@ -37,7 +37,7 @@ export default async function ProductPage({
     }
   }
   
-  // If product doesn't exist in Redis, return 404
+  // If product doesn't exist in Redis, show 404 with catalog link
   if (!exists) {
     notFound();
   }

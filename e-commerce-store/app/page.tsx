@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createRedisClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const redis = createRedisClient();
   let redirectSlug = null;
+  let hasProducts = false;
   
   if (redis) {
     try {
@@ -15,6 +16,7 @@ export default async function HomePage() {
           try {
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
             if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
+              hasProducts = true;
               redirectSlug = product.slug;
               break;
             }
@@ -29,11 +31,11 @@ export default async function HomePage() {
   }
   
   // If we found an active product, redirect to it
-  if (redirectSlug) {
+  if (hasProducts && redirectSlug) {
     redirect(`/${redirectSlug}`);
   }
   
-  // No active products - show coming soon page (layout handles top bar)
+  // No active products - show coming soon page with catalog link
   return (
     <main style={{ 
       minHeight: 'calc(100vh - 56px)', 
@@ -68,6 +70,21 @@ export default async function HomePage() {
         <p style={{ color: '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
           Our allocation drops are being prepared. Check back soon.
         </p>
+        <Link 
+          href="/catalog" 
+          style={{
+            padding: '12px 28px',
+            borderRadius: '30px',
+            background: '#ffffff',
+            color: '#000000',
+            textDecoration: 'none',
+            fontWeight: '600',
+            fontSize: '14px',
+            display: 'inline-block',
+          }}
+        >
+          View Catalog
+        </Link>
       </div>
     </main>
   );
