@@ -32,8 +32,8 @@ interface StoreProduct {
   images: string[];
   totalInventory: number;
   winnerTiers: number[];
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface StoreConfig {
@@ -1120,8 +1120,6 @@ function getDefaultProducts(): StoreProduct[] {
       images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
       totalInventory: 9,
       winnerTiers: [2, 2, 2, 2, 1],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     },
     {
       id: 'prod_obsidian_void',
@@ -1145,8 +1143,6 @@ function getDefaultProducts(): StoreProduct[] {
       images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
       totalInventory: 5,
       winnerTiers: [1],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     }
   ];
 }
