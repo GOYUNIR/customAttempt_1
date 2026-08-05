@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -98,6 +98,7 @@ export default function AdminPortal() {
   const [pulseTick, setPulseTick] = useState(0);
   const [revealAddresses, setRevealAddresses] = useState(false);
   const [revealBusy, setRevealBusy] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -147,6 +148,14 @@ export default function AdminPortal() {
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
   const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
+  // Settings state
+  const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
+  const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
+  const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
+  const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
+  const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
+  const [settingsMsg, setSettingsMsg] = useState('');
+
   const showToast = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(''), 2800);
@@ -162,6 +171,20 @@ export default function AdminPortal() {
     } catch {
       setStatus({ error: 'Unable to fetch status' });
     }
+  };
+
+  const refreshAll = async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      fetchStatus(),
+      fetchCatalogStatus(),
+      fetchRecovery(),
+      fetchPromos(),
+      fetchConfig(),
+      fetchDrawHistory(),
+    ]);
+    setIsRefreshing(false);
+    showToast('🔄 All data refreshed');
   };
 
   const fetchCatalogStatus = async () => {
@@ -215,6 +238,13 @@ export default function AdminPortal() {
         pf[p.id] = { price50ml: String(override?.price50ml ?? p.price50ml), price100ml: String(override?.price100ml ?? p.price100ml) };
       }
       setPriceForm(pf);
+      
+      // Initialize product notes
+      const notes: Record<string, any[]> = {};
+      for (const p of GOYUNIR_STORE_SUITE.productCatalog) {
+        notes[p.id] = p.notes || [];
+      }
+      setProductNotes(notes);
     } catch {}
   };
 
@@ -526,6 +556,30 @@ export default function AdminPortal() {
     }
   };
 
+  const saveSettings = async () => {
+    if (!password) return alert('Enter password');
+    try {
+      const res = await adminFetch('/api/admin/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          theme: themeSettings,
+          hero: heroSettings,
+          form: formSettings,
+          footer: footerSettings,
+          productNotes,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSettingsMsg('Settings saved — will apply on next deploy.');
+        showToast('UPDATED · Settings');
+      } else setSettingsMsg(data.error || 'Failed to save settings.');
+    } catch {
+      setSettingsMsg('Connection failed.');
+    }
+  };
+
   const pools = status?.pools || [];
   const totalInt = pools.reduce((s: number, p: any) => s + (p.intCount || 0), 0);
   const totalSub = pools.reduce((s: number, p: any) => s + (p.subCount || 0), 0);
@@ -550,6 +604,7 @@ export default function AdminPortal() {
     { id: 'ledger', label: 'Ledger' },
     { id: 'growth', label: 'Growth', badge: totalOwed > 0 ? Math.round(totalOwed / 100) : undefined },
     { id: 'system', label: 'System' },
+    { id: 'settings', label: 'Settings' },
   ];
 
   return (
@@ -570,7 +625,12 @@ export default function AdminPortal() {
               <span style={{ color: '#34d399' }}>{status?.liveActiveUsersOnline ?? 0} online</span>
             </p>
           </div>
-          <Link href="/" style={{ color: '#888', fontSize: 12, textDecoration: 'none', alignSelf: 'flex-start', padding: '6px 0' }}>← Store</Link>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={refreshAll} disabled={isRefreshing} style={{ ...buttonGhost, padding: '6px 12px' }}>
+              {isRefreshing ? '⟳' : '🔄 Refresh'}
+            </button>
+            <Link href="/" style={{ color: '#888', fontSize: 12, textDecoration: 'none', padding: '6px 0' }}>← Store</Link>
+          </div>
         </div>
 
         <div style={{ ...cardStyle, marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -591,6 +651,7 @@ export default function AdminPortal() {
                 if (t.id === 'system') { fetchAudit(); fetchDrawHistory(); }
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
+                if (t.id === 'settings') fetchConfig();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -999,7 +1060,7 @@ export default function AdminPortal() {
                 <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
                 <input placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
                 <input placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
-                <input placeholder="Max uses per email (1=once, 0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
+                <input placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               </div>
               <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
               {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
@@ -1094,6 +1155,134 @@ export default function AdminPortal() {
                 {audit.length === 0 && <p>No audit entries loaded (requires password).</p>}
                 {audit.map((a, i) => <div key={i} style={{ marginBottom: 6 }}>{a.at} — {a.action} {a.detail || ''}</div>)}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============ SETTINGS ============ */}
+        {tab === 'settings' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+                Edit site appearance and content. Changes require a redeploy to take effect.
+              </p>
+              
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {Object.entries(themeSettings).map(([key, value]) => (
+                  <label key={key} style={{ fontSize: 11 }}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    <input 
+                      type="color" 
+                      value={value} 
+                      onChange={(e) => setThemeSettings({ ...themeSettings, [key]: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
+                  </label>
+                ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {Object.entries(heroSettings).map(([key, value]) => (
+                  <label key={key} style={{ fontSize: 11 }}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    <input 
+                      type="text" 
+                      value={value} 
+                      onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {Object.entries(formSettings).map(([key, value]) => (
+                  <label key={key} style={{ fontSize: 11 }}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    <input 
+                      type="text" 
+                      value={value} 
+                      onChange={(e) => setFormSettings({ ...formSettings, [key]: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Footer</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {Object.entries(footerSettings).map(([key, value]) => (
+                  <label key={key} style={{ fontSize: 11 }}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    <input 
+                      type="text" 
+                      value={value} 
+                      onChange={(e) => setFooterSettings({ ...footerSettings, [key]: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Product Notes</h4>
+              {GOYUNIR_STORE_SUITE.productCatalog.map((product) => (
+                <div key={product.id} style={{ marginBottom: 8, padding: 8, background: '#09090b', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{product.name}</div>
+                  {(productNotes[product.id] || []).map((note: any, idx: number) => (
+                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <input 
+                        type="text" 
+                        value={note.label || ''} 
+                        placeholder="Label"
+                        onChange={(e) => {
+                          const newNotes = [...(productNotes[product.id] || [])];
+                          newNotes[idx] = { ...newNotes[idx], label: e.target.value };
+                          setProductNotes({ ...productNotes, [product.id]: newNotes });
+                        }}
+                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11 }} />
+                      <input 
+                        type="text" 
+                        value={note.name || ''} 
+                        placeholder="Name"
+                        onChange={(e) => {
+                          const newNotes = [...(productNotes[product.id] || [])];
+                          newNotes[idx] = { ...newNotes[idx], name: e.target.value };
+                          setProductNotes({ ...productNotes, [product.id]: newNotes });
+                        }}
+                        style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
+                      <input 
+                        type="text" 
+                        value={note.text || ''} 
+                        placeholder="Text"
+                        onChange={(e) => {
+                          const newNotes = [...(productNotes[product.id] || [])];
+                          newNotes[idx] = { ...newNotes[idx], text: e.target.value };
+                          setProductNotes({ ...productNotes, [product.id]: newNotes });
+                        }}
+                        style={{ ...inputStyle, flex: 2, padding: 6, fontSize: 11 }} />
+                      <button 
+                        onClick={() => {
+                          const newNotes = (productNotes[product.id] || []).filter((_: any, i: number) => i !== idx);
+                          setProductNotes({ ...productNotes, [product.id]: newNotes });
+                        }}
+                        style={{ ...buttonGhost, padding: '4px 8px', fontSize: 11, color: '#f87171', borderColor: '#f87171' }}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button 
+                    onClick={() => {
+                      const current = productNotes[product.id] || [];
+                      setProductNotes({ ...productNotes, [product.id]: [...current, { label: 'PROFILE', name: 'New Note', text: '' }] });
+                    }}
+                    style={{ ...buttonGhost, padding: '4px 10px', fontSize: 11, marginTop: 4 }}>
+                    + Add Note
+                  </button>
+                </div>
+              ))}
+
+              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }}>Save All Settings</button>
+              {settingsMsg && <p style={{ fontSize: 12, color: '#34d399', marginTop: 10 }}>{settingsMsg}</p>}
             </div>
           </div>
         )}

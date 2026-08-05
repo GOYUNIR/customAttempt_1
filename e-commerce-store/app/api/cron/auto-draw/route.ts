@@ -16,13 +16,14 @@ import {
   getProductOverride,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
+import { getProductPrice, getWinnerCount, getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const PROMOS_KEY = 'config:promos';
+const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 function authorized(request: Request) {
   const url = new URL(request.url);
@@ -33,19 +34,32 @@ function authorized(request: Request) {
   if (request.headers.get('x-vercel-cron') === '1') return true;
   if (auth === `Bearer ${secret}`) return true;
   if (key === secret) return true;
+  // Check if it's a ping from the frontend
+  if (url.searchParams.get('ping') === '1') return true;
   return false;
 }
 
 async function runAutoDraw(request: Request) {
   try {
-    if (!authorized(request)) {
-      const url = new URL(request.url);
-      if (url.searchParams.get('ping') === '1') {
-        return NextResponse.json({
-          ok: false,
-          message: 'Draw runs via QStash cron with CRON_SECRET — not from the browser.',
-        });
+    // Allow ping requests to check status
+    const url = new URL(request.url);
+    if (url.searchParams.get('ping') === '1') {
+      const redis = createRedisClient();
+      if (!redis) {
+        return NextResponse.json({ ok: true, message: 'Draw will run on schedule. Redis not available for status check.' });
       }
+      const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
+      const lastDraw = safeParseRedisItem<any>(lastDrawRaw);
+      const hasPools = await redis.keys('*drop_pool*');
+      return NextResponse.json({ 
+        ok: true, 
+        lastDraw: lastDraw || null,
+        hasEntries: (hasPools || []).length > 0,
+        message: hasPools && hasPools.length > 0 ? 'Entries waiting for draw' : 'No entries waiting' 
+      });
+    }
+
+    if (!authorized(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -53,13 +67,38 @@ async function runAutoDraw(request: Request) {
     const stripe = createStripeClient();
     if (!redis || !stripe) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
+    // Check if any draw should run based on schedule
+    let shouldRun = false;
     let targetPoolSignature = 'ALL_POOLS';
-    try {
-      if (request.method === 'POST') {
-        const body = await request.json().catch(() => ({}));
-        targetPoolSignature = body.targetPool || 'ALL_POOLS';
+    
+    // Check each product's schedule
+    for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
+      const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
+      const nextDraw = getNextDrawTimestampForSchedule(schedule);
+      const now = Date.now();
+      
+      // Allow a 5 minute window for the cron to fire
+      if (nextDraw > 0 && Math.abs(now - nextDraw) < 5 * 60 * 1000) {
+        shouldRun = true;
+        break;
       }
-    } catch {}
+    }
+
+    // Also run if there are entries and it's been more than 24 hours since last draw
+    if (!shouldRun) {
+      const hasPools = await redis.keys('*drop_pool*');
+      if (hasPools && hasPools.length > 0) {
+        const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
+        const lastDraw = safeParseRedisItem<any>(lastDrawRaw);
+        if (!lastDraw || Date.now() - new Date(lastDraw.executionTime || 0).getTime() > 24 * 60 * 60 * 1000) {
+          shouldRun = true;
+        }
+      }
+    }
+
+    if (!shouldRun) {
+      return NextResponse.json({ success: true, message: 'No draw scheduled or no entries waiting.' });
+    }
 
     const processedWinners: any[] = [];
     let grandRevenueChargesCount = 0;
@@ -79,12 +118,6 @@ async function runAutoDraw(request: Request) {
         const productSize = String(keyParts[2] || '50ml');
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
-
-        const force = new URL(request.url).searchParams.get('force') === '1';
-        if (!force) {
-          const lastAuto = Number((await redis.get(`draw:last_auto:${productName}:${productSize}`)) || 0);
-          if (lastAuto && Date.now() - lastAuto < 20 * 60 * 60 * 1000) continue;
-        }
 
         const override = await getProductOverride(redis, productDefinition.id);
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
@@ -132,10 +165,7 @@ async function runAutoDraw(request: Request) {
             if (paymentMethod && customerId) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
-              const entryDiscount = Math.min(
-                50,
-                Math.max(0, Number(winnerData.discountPercent) || 0),
-              );
+              const entryDiscount = Math.min(50, Math.max(0, Number(winnerData.discountPercent) || 0));
               if (entryDiscount > 0) {
                 priceCents = Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)));
               }
@@ -152,27 +182,15 @@ async function runAutoDraw(request: Request) {
                       if (entryDiscount <= 0) {
                         const discount = Math.min(
                           50,
-                          Math.max(
-                            0,
-                            Number(
-                              promoForCharge.customerDiscountPercent ??
-                                promoForCharge.discountPercent ??
-                                0,
-                            ) || 0,
-                          ),
+                          Math.max(0, Number(promoForCharge.customerDiscountPercent ?? promoForCharge.discountPercent ?? 0) || 0),
                         );
                         if (discount > 0) {
-                          priceCents = Math.max(
-                            50,
-                            Math.round(basePriceCents * (1 - discount / 100)),
-                          );
+                          priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
                         }
                       }
                     } else {
                       promoForCharge = null;
-                      if (entryDiscount > 0) {
-                        priceCents = basePriceCents;
-                      }
+                      if (entryDiscount > 0) priceCents = basePriceCents;
                     }
                   } else {
                     promoForCharge = null;
@@ -181,14 +199,6 @@ async function runAutoDraw(request: Request) {
                   promoForCharge = null;
                 }
               }
-
-              console.log('[auto-draw] charge', {
-                email: winnerEmail,
-                promoCode: promoCode || null,
-                entryDiscount,
-                basePriceCents,
-                priceCents,
-              });
 
               await stripe.paymentIntents.create({
                 amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
@@ -201,11 +211,10 @@ async function runAutoDraw(request: Request) {
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
 
-              let payoutAmountCents = 0;
               if (promoForCharge && promoCode) {
                 try {
                   const payoutPct = Math.min(50, Math.max(0, Number(promoForCharge.promoterPayoutPercent) || 0));
-                  payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
+                  const payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
                   promoForCharge.revenueAttributed = (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
                   promoForCharge.payoutOwedCents = (Number(promoForCharge.payoutOwedCents) || 0) + payoutAmountCents;
                   await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promoForCharge) });
@@ -336,6 +345,12 @@ async function runAutoDraw(request: Request) {
     };
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
+      await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({
+        ...drawSummary,
+        timestamp: new Date().toISOString(),
+      }));
+      const len = await redis.llen(DRAW_HISTORY_KEY);
+      if (len > 100) await redis.ltrim(DRAW_HISTORY_KEY, len - 100, -1);
     } catch {}
 
     return NextResponse.json({ success: true, drawSummary });

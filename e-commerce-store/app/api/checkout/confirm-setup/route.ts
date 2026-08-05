@@ -51,12 +51,27 @@ export async function POST(request: Request) {
 
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      // Still return success so the user doesn't see an error
+      // Check if we already have a promo recorded for this session
+      let existingPromo = null;
+      let existingDiscount = 0;
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const meta = session.metadata || {};
+        if (meta.promoCode) {
+          existingPromo = meta.promoCode;
+          existingDiscount = Number(meta.discountPercent) || 0;
+        }
+      } catch {}
+      
       return NextResponse.json({
         success: true,
         entryCreated: false,
-        message: '✅ You\'re already locked in! Good luck with the allocation.',
+        message: existingPromo 
+          ? `🎉 You're already locked in! Promo ${existingPromo} applied${existingDiscount > 0 ? ` (${existingDiscount}% off if selected)` : ''}. Good luck!`
+          : "🎉 You're already locked in! Good luck with the allocation.",
         alreadyEntered: true,
+        promoCode: existingPromo || null,
+        discountPercent: existingDiscount || 0,
       });
     }
 
@@ -110,6 +125,7 @@ export async function POST(request: Request) {
       } catch {}
     }
 
+    // Check if email is already entered
     const blocked = await redis.sismember(emailBlockKey(variant, size), email);
     if (blocked === 1) {
       await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
@@ -126,10 +142,11 @@ export async function POST(request: Request) {
         success: true,
         entryCreated: false,
         alreadyEntered: true,
-        message: "✅ You're already locked in for this drop — sit tight, we'll email you if you're selected.",
+        message: "🎉 You're already locked in for this drop — sit tight, we'll email you if you're selected.",
       });
     }
 
+    // Validate promo code before applying
     let appliedPromo: string | undefined = promoCode || undefined;
     let discountPercent = 0;
     if (promoCode) {
@@ -141,8 +158,7 @@ export async function POST(request: Request) {
           appliedPromo = undefined;
         } else {
           const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
-          const self =
-            promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
+          const self = promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
           if (self) {
             console.warn('[confirm-setup] self-promo blocked', promoCode, email);
             appliedPromo = undefined;
