@@ -28,37 +28,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
       { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
     ],
-    images: [
-      '/images/elysian-white/1.jpeg',
-      '/images/elysian-white/2.jpeg',
-      '/images/elysian-white/3.jpeg',
-      '/images/elysian-white/4.jpeg',
-      '/images/elysian-white/5.jpeg',
-      '/images/elysian-white/6.jpeg',
-      '/images/elysian-white/7.jpeg',
-      '/images/elysian-white/8.jpeg',
-      '/images/elysian-white/9.jpeg',
-      '/images/elysian-white/10.jpeg',
-      '/images/elysian-white/11.jpeg',
-      '/images/elysian-white/12.jpeg',
-      '/images/elysian-white/13.jpeg',
-      '/images/elysian-white/14.jpeg',
-      '/images/elysian-white/15.jpeg',
-      '/images/elysian-white/16.jpeg',
-      '/images/elysian-white/17.jpeg',
-      '/images/elysian-white/18.jpeg',
-      '/images/elysian-white/19.jpeg',
-      '/images/elysian-white/20.jpeg',
-      '/images/elysian-white/21.jpeg',
-      '/images/elysian-white/22.jpeg',
-      '/images/elysian-white/23.jpeg',
-      '/images/elysian-white/24.jpeg',
-      '/images/elysian-white/25.jpeg',
-      '/images/elysian-white/26.jpeg',
-      '/images/elysian-white/27.jpeg',
-      '/images/elysian-white/28.jpeg',
-      '/images/elysian-white/29.jpeg'
-    ],
+    images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
     totalInventory: 9,
     winnerTiers: [2, 2, 2, 2, 1],
     createdAt: new Date().toISOString(),
@@ -83,37 +53,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
       { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
     ],
-    images: [
-      '/images/obsidian-void/1.jpeg',
-      '/images/obsidian-void/2.jpeg',
-      '/images/obsidian-void/3.jpeg',
-      '/images/obsidian-void/4.jpeg',
-      '/images/obsidian-void/5.jpeg',
-      '/images/obsidian-void/6.jpeg',
-      '/images/obsidian-void/7.jpeg',
-      '/images/obsidian-void/8.jpeg',
-      '/images/obsidian-void/9.jpeg',
-      '/images/obsidian-void/10.jpeg',
-      '/images/obsidian-void/11.jpeg',
-      '/images/obsidian-void/12.jpeg',
-      '/images/obsidian-void/13.jpeg',
-      '/images/obsidian-void/14.jpeg',
-      '/images/obsidian-void/15.jpeg',
-      '/images/obsidian-void/16.jpeg',
-      '/images/obsidian-void/17.jpeg',
-      '/images/obsidian-void/18.jpeg',
-      '/images/obsidian-void/19.jpeg',
-      '/images/obsidian-void/20.jpeg',
-      '/images/obsidian-void/21.jpeg',
-      '/images/obsidian-void/22.jpeg',
-      '/images/obsidian-void/23.jpeg',
-      '/images/obsidian-void/24.jpeg',
-      '/images/obsidian-void/25.jpeg',
-      '/images/obsidian-void/26.jpeg',
-      '/images/obsidian-void/27.jpeg',
-      '/images/obsidian-void/28.jpeg',
-      '/images/obsidian-void/29.jpeg'
-    ],
+    images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
     totalInventory: 5,
     winnerTiers: [1],
     createdAt: new Date().toISOString(),
@@ -221,6 +161,7 @@ export async function GET(request: Request) {
     }
 
     // Seed products
+    let seeded = 0;
     for (const product of DEFAULT_PRODUCTS) {
       await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
       if (product.isActive && !product.isArchived) {
@@ -228,17 +169,24 @@ export async function GET(request: Request) {
       } else if (product.isArchived) {
         await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
       }
+      seeded++;
     }
 
     // Seed config
     await redis.set(CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
 
+    // Verify seeding worked
+    const verify = await redis.hgetall(PRODUCTS_KEY);
+    const verifyCount = verify ? Object.keys(verify).length : 0;
+
     return NextResponse.json({
       success: true,
-      message: `Seeded ${DEFAULT_PRODUCTS.length} products and config to Redis.`,
-      products: DEFAULT_PRODUCTS.map(p => ({ id: p.id, name: p.name, slug: p.slug }))
+      message: `Seeded ${seeded} products to Redis. Verified: ${verifyCount} products exist.`,
+      products: DEFAULT_PRODUCTS.map(p => ({ id: p.id, name: p.name, slug: p.slug })),
+      verified: verifyCount
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[seed] Error:', err);
+    return NextResponse.json({ error: err.message, stack: err.stack }, { status: 500 });
   }
 }
