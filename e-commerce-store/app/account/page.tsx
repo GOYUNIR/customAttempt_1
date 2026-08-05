@@ -291,9 +291,7 @@ export default function AccountPage() {
                                     {(
                                       (entry.expectedAmountCents ??
                                         Math.round(
-                                          entry.listPrice *
-                                            100 *
-                                            (1 - entry.discountPercent / 100),
+                                          entry.listPrice * 100 * (1 - entry.discountPercent / 100),
                                         )) / 100
                                     ).toFixed(2)}
                                   </span>

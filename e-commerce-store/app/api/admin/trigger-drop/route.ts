@@ -104,10 +104,7 @@ export async function POST(request: Request) {
             if (paymentMethod && customerId) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
-              const entryDiscount = Math.min(
-                50,
-                Math.max(0, Number(winnerData.discountPercent) || 0),
-              );
+              const entryDiscount = Math.min(50, Math.max(0, Number(winnerData.discountPercent) || 0));
               if (entryDiscount > 0) {
                 priceCents = Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)));
               }
@@ -124,27 +121,15 @@ export async function POST(request: Request) {
                       if (entryDiscount <= 0) {
                         const discount = Math.min(
                           50,
-                          Math.max(
-                            0,
-                            Number(
-                              promoForCharge.customerDiscountPercent ??
-                                promoForCharge.discountPercent ??
-                                0,
-                            ) || 0,
-                          ),
+                          Math.max(0, Number(promoForCharge.customerDiscountPercent ?? promoForCharge.discountPercent ?? 0) || 0),
                         );
                         if (discount > 0) {
-                          priceCents = Math.max(
-                            50,
-                            Math.round(basePriceCents * (1 - discount / 100)),
-                          );
+                          priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
                         }
                       }
                     } else {
                       promoForCharge = null;
-                      if (entryDiscount > 0) {
-                        priceCents = basePriceCents;
-                      }
+                      if (entryDiscount > 0) priceCents = basePriceCents;
                     }
                   } else {
                     promoForCharge = null;
@@ -155,11 +140,7 @@ export async function POST(request: Request) {
               }
 
               console.log('[trigger-drop] charge', {
-                email: winnerEmail,
-                promoCode: promoCode || null,
-                entryDiscount,
-                basePriceCents,
-                priceCents,
+                email: winnerEmail, promoCode: promoCode || null, entryDiscount, basePriceCents, priceCents,
               });
 
               await stripe.paymentIntents.create({
@@ -173,11 +154,10 @@ export async function POST(request: Request) {
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
 
-              let payoutAmountCents = 0;
               if (promoForCharge && promoCode) {
                 try {
                   const payoutPct = Math.min(50, Math.max(0, Number(promoForCharge.promoterPayoutPercent) || 0));
-                  payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
+                  const payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
                   promoForCharge.revenueAttributed = (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
                   promoForCharge.payoutOwedCents = (Number(promoForCharge.payoutOwedCents) || 0) + payoutAmountCents;
                   await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promoForCharge) });
@@ -203,10 +183,10 @@ export async function POST(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined });
-              if (!(emailResult as any)?.ok) {
-                console.error('[trigger-drop] winner email failed', winnerEmail, emailResult);
-              }
+              await sendWinnerEmail({
+                to: winnerEmail, product: productName, size: productSize,
+                amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined,
+              });
 
               processedWinners.push({
                 email: winnerEmail, product: productName, size: productSize, shippingAddress,
@@ -285,15 +265,8 @@ export async function POST(request: Request) {
 
     const tz = GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles';
     const executionTime = new Date().toLocaleString('en-US', {
-      timeZone: tz,
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-      timeZoneName: 'short',
+      timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZoneName: 'short',
     });
     const drawSummary = {
       executionTime,

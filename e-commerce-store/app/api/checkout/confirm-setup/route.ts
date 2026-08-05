@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      return NextResponse.json({ success: true, message: 'Entry already confirmed.' });
+      return NextResponse.json({ success: true, entryCreated: false, message: 'This confirmation was already processed.' });
     }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -107,10 +107,20 @@ export async function POST(request: Request) {
     const blocked = await redis.sismember(emailBlockKey(variant, size), email);
     if (blocked === 1) {
       await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      await archiveEntry(redis, {
+        email,
+        variant,
+        size,
+        shippingAddress,
+        id: customerId || 'n/a',
+        registeredAt: new Date().toISOString(),
+        type: 'DUPLICATE_BLOCKED',
+      });
       return NextResponse.json({
         success: true,
+        entryCreated: false,
         alreadyEntered: true,
-        message: 'Already registered for this allocation.',
+        message: "You're already locked in for this drop — sit tight, we'll email you if you're selected.",
       });
     }
 
@@ -231,6 +241,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      entryCreated: true,
       message: 'Entry locked in. Good luck.',
       email,
       address: shippingAddress,

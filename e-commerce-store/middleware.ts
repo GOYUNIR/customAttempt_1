@@ -4,6 +4,12 @@ import type { NextRequest } from 'next/server';
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_BASIC_AUTH_PASSWORD;
 
+/** Public-with-password routes under /api/admin (password checked in the route). */
+const PASSWORD_GATE_ONLY = [
+  '/api/admin/self-test',
+  '/api/admin/selftest',
+];
+
 function unauthorizedResponse() {
   return new NextResponse('Authentication required', {
     status: 401,
@@ -29,6 +35,10 @@ function verifyBasicAuth(authorization: string | null) {
 
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  if (PASSWORD_GATE_ONLY.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     if (!ADMIN_USER || !ADMIN_PASSWORD) {

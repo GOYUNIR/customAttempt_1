@@ -164,6 +164,27 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     ...(productOverrides[currentProduct?.id]?.customDropSchedule || {}),
   };
   const archiveNote = archiveNotesMap[currentProduct?.id] || '';
+
+  useEffect(() => {
+    setPromoCode(null);
+    setPromoDiscount(0);
+    setShowManualPromo(false);
+    try {
+      const stored = sessionStorage.getItem('goyunir_promo_ref');
+      if (stored) {
+        fetch(`/api/promo/validate?code=${encodeURIComponent(stored)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.valid) {
+              setPromoCode(data.code);
+              setPromoDiscount(data.customerDiscountPercent || 0);
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
+  }, [currentProduct?.id]);
+
   const archiveFrom = archiveFromMap[currentProduct?.id] || '';
 
   useEffect(() => {
@@ -264,6 +285,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             if (res.ok && data.success) {
               setFeedbackStatus('success');
               setFeedbackMessage(data.message || 'Entry locked in. Good luck.');
+              if (data.promoCode) {
+                setPromoCode(data.promoCode);
+                setPromoDiscount(data.discountPercent || 0);
+              } else {
+                setPromoCode(null);
+                setPromoDiscount(0);
+                try { window.sessionStorage.removeItem('goyunir_promo_ref'); } catch {}
+              }
               try {
                 localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: form.email || data.email, shippingAddress: form.shippingAddress || data.address }));
               } catch {}
@@ -417,7 +446,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await response.json();
       if (data.alreadyEntered) {
         setFeedbackStatus('notice');
-        setFeedbackMessage(data.error || 'Already entered for this scent.');
+        setFeedbackMessage(data.error || "You're already locked in for this scent — one entry per email. Try another scent or Manage My Entry.");
         try {
           localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: normalizedForm.email, shippingAddress: normalizedForm.shippingAddress }));
         } catch {}
@@ -459,28 +488,30 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       <header
         style={{
           position: 'fixed', top: 0, left: 0, width: '100%', height: '56px', borderBottom: `1px solid ${configPalette.cardBorder}`,
-          background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(15px)', display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 16px', zIndex: 100, boxSizing: 'border-box',
+          background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(15px)', display: 'flex', alignItems: 'center', padding: '0 16px', zIndex: 100, boxSizing: 'border-box',
         }}
       >
         <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
           <a href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</a>
           <a href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</a>
         </div>
+
         <a
           href="/"
           style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
             fontWeight: 'bold',
             letterSpacing: '4px',
             fontSize: '12px',
             textTransform: 'uppercase',
             color: configPalette.textMain,
             textDecoration: 'none',
-            textAlign: 'center',
           }}
         >
           GOYUNIR
         </a>
-        <div style={{ width: 72 }} />
       </header>
 
       <AnimatePresence>
@@ -614,7 +645,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               }}
             >
               <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.9 }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(17,17,17,0.55)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)' }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>

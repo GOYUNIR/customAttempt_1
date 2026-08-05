@@ -299,7 +299,7 @@ export default function AdminPortal() {
     setSelftestRunning(true);
     setSelftestResults(null);
     try {
-      const res = await adminFetch(`/api/admin/selftest?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch(`/api/admin/self-test?password=${encodeURIComponent(password)}`);
       const data = await res.json();
       setSelftestResults(data);
     } catch {
@@ -726,6 +726,25 @@ export default function AdminPortal() {
             )}
 
             {drawsSub === 'inventory' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={cardStyle}>
+                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Pricing</h3>
+                <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0, marginBottom: 12 }}>
+                  This is what actually gets charged at draw time and shown on-site. If a charge ever falls back to a Stripe Checkout session (only on a declined direct charge), that session uses the price attached to the Stripe Price ID instead — keep that in sync in Stripe if you rely on that path.
+                </p>
+                {(configData?.products || []).map((p: any) => (
+                  <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, background: '#09090b', padding: 10, borderRadius: 8 }}>
+                    <div style={{ flex: 1, fontSize: 12 }}>{p.name}</div>
+                    <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
+                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
+                      style={{ ...inputStyle, width: 70 }} />
+                    <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
+                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
+                      style={{ ...inputStyle, width: 70 }} />
+                    <button onClick={() => savePrice(p.id)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
+                  </div>
+                ))}
+              </div>
               <div style={cardStyle}>
                 <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Live Inventory</h3>
                 <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
@@ -763,6 +782,7 @@ export default function AdminPortal() {
                   );
                 })}
                 {invMessage && <p style={{ fontSize: 12, color: '#cbd5e1' }}>{invMessage}</p>}
+              </div>
               </div>
             )}
 
@@ -858,25 +878,6 @@ export default function AdminPortal() {
                   )}
                 </div>
                 <button onClick={saveSchedule} style={buttonPrimary}>Save Schedule</button>
-
-                <h3 style={{ margin: '24px 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Pricing</h3>
-                <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0 }}>
-                  This is what actually gets charged at draw time. If a charge falls back to a Stripe Checkout session (only happens on a declined direct charge), that fallback session uses the price attached to the Stripe Price ID instead — keep that in sync in Stripe too if you rely on that path.
-                </p>
-                {(configData?.products || []).map((p: any) => (
-                  <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, background: '#09090b', padding: 10, borderRadius: 8 }}>
-                    <div style={{ flex: 1, fontSize: 12 }}>{p.name}</div>
-                    <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
-                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
-                      style={{ ...inputStyle, width: 70 }} />
-                    <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
-                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
-                      style={{ ...inputStyle, width: 70 }} />
-                    <button onClick={() => savePrice(p.id)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
-                  </div>
-                ))}
-
-                <h3 style={{ margin: '24px 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Social Proof Number</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                   <label style={{ fontSize: 11 }}>Base count
                     <input type="number" value={socialForm.baseCount ?? 0} onChange={(e) => setSocialForm((f: any) => ({ ...f, baseCount: Number(e.target.value) }))}
@@ -956,6 +957,34 @@ export default function AdminPortal() {
         {/* ============ GROWTH ============ */}
         {tab === 'growth' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Social Proof Number</h2>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+                The "X people entered" counter on the storefront. Real entries always count accurately; this optionally adds a small artificial boost on top for hype.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>Base count
+                  <input type="number" value={socialForm.baseCount ?? 0} onChange={(e) => setSocialForm((f: any) => ({ ...f, baseCount: Number(e.target.value) }))}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginTop: 20 }}>
+                  <input type="checkbox" checked={socialForm.autoIncrementEnabled !== false} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementEnabled: e.target.checked }))} />
+                  Auto-increment hype ticks
+                </label>
+                <label style={{ fontSize: 11 }}>Max ticks/day
+                  <input type="number" value={socialForm.autoIncrementMaxPerDay ?? 4} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxPerDay: Number(e.target.value) }))}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11 }}>Min hours between ticks
+                  <input type="number" value={socialForm.autoIncrementMinHourGap ?? 3} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+              </div>
+              <button onClick={saveSocial} style={buttonPrimary}>Save Social Proof</button>
+              <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 10 }}>
+                The hype ticks require an hourly hit to <code>/api/analytics/social-tick</code> — see the note below the recovery box about setting that up in Upstash QStash. Without that scheduled call, this only ever shows real entries, which is likely what you're seeing right now.
+              </p>
+            </div>
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Abandoned Entry Recovery</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
