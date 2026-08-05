@@ -14,6 +14,7 @@ import {
   saveLiveState,
   archiveProductToCatalog,
   getProductOverride,
+  ArchiveRecord,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
@@ -24,6 +25,17 @@ export const maxDuration = 60;
 
 const PROMOS_KEY = 'config:promos';
 const DRAW_HISTORY_KEY = 'admin:draw_history';
+
+function siteUrlFromRequest(request: Request) {
+  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (env) return env.replace(/\/$/, '');
+  try {
+    const u = new URL(request.url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return 'https://custom-attempt-1.vercel.app';
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -53,6 +65,8 @@ export async function POST(request: Request) {
     if (!allPoolKeys?.length) {
       return NextResponse.json({ success: true, drawSummary: { totalSuccessfulCharges: 0, processedWinners: [] } });
     }
+
+    const siteUrl = siteUrlFromRequest(request);
 
     for (const poolKey of allPoolKeys) {
       try {
@@ -91,13 +105,21 @@ export async function POST(request: Request) {
           const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
           const promoCode = String(winnerData.promoCode || '').trim().toUpperCase();
+          const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
           if (successfulPoolCaptures >= inventoryLimit) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
-            await archiveEntry(redis, {
-              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
-              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'NOT_SELECTED', promoCode: promoCode || undefined,
-            });
+            const archiveRecord: ArchiveRecord = {
+              email: winnerEmail,
+              variant: productName,
+              size: productSize,
+              shippingAddress: shippingAddress,
+              id: customerId || 'n/a',
+              registeredAt: new Date().toISOString(),
+              type: 'NOT_SELECTED',
+              promoCode: promoCode || undefined,
+            };
+            await archiveEntry(redis, archiveRecord);
             continue;
           }
 
@@ -178,37 +200,75 @@ export async function POST(request: Request) {
                 } catch {}
               }
 
-              await archiveEntry(redis, {
-                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
-                id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
-                shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
-              });
+              const archiveRecord: ArchiveRecord = {
+                email: winnerEmail,
+                variant: productName,
+                size: productSize,
+                shippingAddress: shippingAddress,
+                id: customerId || 'n/a',
+                registeredAt: new Date().toISOString(),
+                type: 'WINNER_CHARGED',
+                shippingStatus: 'PENDING_FULFILLMENT',
+                promoCode: promoCode || undefined,
+                amountCents: priceCents,
+                orderRef: orderRef,
+              };
+              await archiveEntry(redis, archiveRecord);
 
+              // Send winner email with full details
               await sendWinnerEmail({
-                to: winnerEmail, product: productName, size: productSize,
-                amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined,
+                to: winnerEmail,
+                product: productName,
+                size: productSize,
+                amountLabel: `$${(priceCents / 100).toFixed(2)}`,
+                promoCode: promoCode || undefined,
+                shippingAddress: shippingAddress,
+                orderRef: orderRef,
+                siteUrl: siteUrl,
+                originalPrice: (basePriceCents / 100).toFixed(2),
+                discountPercent: entryDiscount > 0 ? entryDiscount : (promoForCharge ? promoForCharge.customerDiscountPercent : 0),
               });
 
               processedWinners.push({
-                email: winnerEmail, product: productName, size: productSize, shippingAddress,
-                status: 'SUCCESS_CHARGED', shippingStatus: 'PENDING_FULFILLMENT',
-                amountCents: priceCents, promoCode: promoCode || undefined,
+                email: winnerEmail,
+                product: productName,
+                size: productSize,
+                shippingAddress,
+                status: 'SUCCESS_CHARGED',
+                shippingStatus: 'PENDING_FULFILLMENT',
+                amountCents: priceCents,
+                promoCode: promoCode || undefined,
+                orderRef: orderRef,
               });
             } else {
               remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
-              await archiveEntry(redis, {
-                email: winnerEmail, variant: productName, size: productSize, shippingAddress,
-                id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
-              });
+              const archiveRecord: ArchiveRecord = {
+                email: winnerEmail,
+                variant: productName,
+                size: productSize,
+                shippingAddress: shippingAddress,
+                id: customerId || 'n/a',
+                registeredAt: new Date().toISOString(),
+                type: 'WINNER_DECLINED',
+                promoCode: promoCode || undefined,
+              };
+              await archiveEntry(redis, archiveRecord);
               processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: 'MISSING_PAYMENT_METHOD' });
             }
           } catch (err: any) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
             processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: `DECLINED: ${err.message}` });
-            await archiveEntry(redis, {
-              email: winnerEmail, variant: productName, size: productSize, shippingAddress,
-              id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
-            });
+            const archiveRecord: ArchiveRecord = {
+              email: winnerEmail,
+              variant: productName,
+              size: productSize,
+              shippingAddress: shippingAddress,
+              id: customerId || 'n/a',
+              registeredAt: new Date().toISOString(),
+              type: 'WINNER_DECLINED',
+              promoCode: promoCode || undefined,
+            };
+            await archiveEntry(redis, archiveRecord);
           }
         }
 
@@ -234,11 +294,16 @@ export async function POST(request: Request) {
           for (const item of remainingIntents) {
             const parsed = safeParseRedisItem<any>(item);
             if (parsed) {
-              await archiveEntry(redis, {
-                email: String(parsed.email || 'Unknown'), variant: productName, size: productSize,
+              const archiveRecord: ArchiveRecord = {
+                email: String(parsed.email || 'Unknown'),
+                variant: productName,
+                size: productSize,
                 shippingAddress: String(parsed.shippingAddress || parsed.address || 'Unknown'),
-                id: 'n/a', registeredAt: new Date().toISOString(), type: 'INTENT_EXPIRED',
-              });
+                id: 'n/a',
+                registeredAt: new Date().toISOString(),
+                type: 'INTENT_EXPIRED',
+              };
+              await archiveEntry(redis, archiveRecord);
             }
           }
         } catch {}
@@ -280,7 +345,6 @@ export async function POST(request: Request) {
     };
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
-      // Also save to history
       await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({
         ...drawSummary,
         timestamp: new Date().toISOString(),

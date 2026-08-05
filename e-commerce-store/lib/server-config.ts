@@ -31,6 +31,8 @@ export interface ArchiveRecord {
   shippingStatus?: string;
   promoCode?: string;
   amountCents?: number;
+  orderRef?: string;
+  discountPercent?: number;
 }
 
 export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
@@ -101,7 +103,6 @@ export async function getOrSeedLiveState(
       winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
     };
   }
-  // Default to 0 inventory if not seeded (prevents showing fake inventory)
   const seed: LiveStateRecord = {
     productId: field,
     productName: product.name,
@@ -293,6 +294,7 @@ export async function adminCancelOrder(redis: Redis, order: FoundPoolEntry, reas
     registeredAt: new Date().toISOString(),
     type: 'CANCELLED_BY_ADMIN',
     shippingStatus: undefined,
+    promoCode: order.parsed.promoCode || undefined,
   } as any);
   // Log the human-readable reason separately so it shows in the ledger note.
   if (reason) {
@@ -435,4 +437,3 @@ export async function trackPromoClick(redis: Redis, code: string) {
   await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
   return true;
 }
-

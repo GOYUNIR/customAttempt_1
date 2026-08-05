@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey } from '@/lib/server-config';
+import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 
@@ -38,9 +38,7 @@ export async function POST(request: Request) {
     // Release the promo code if it was used
     if (promoCode) {
       try {
-        // Remove email from used list so they can use it again
         await redis.srem(usedEmailsKey(promoCode), email);
-        // Decrement the uses count
         const raw = await redis.hget(PROMOS_KEY, promoCode);
         const promo = JSON.parse(typeof raw === 'string' ? raw : 'null');
         if (promo && promo.uses > 0) {
@@ -50,11 +48,17 @@ export async function POST(request: Request) {
       } catch {}
     }
 
-    await archiveEntry(redis, { 
-      email, variant, size, shippingAddress: target.parsed.shippingAddress || target.parsed.address || 'Unknown', 
-      id: target.parsed.customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'CANCELLED_BY_USER',
+    const archiveRecord: ArchiveRecord = {
+      email,
+      variant,
+      size,
+      shippingAddress: target.parsed.shippingAddress || target.parsed.address || 'Unknown',
+      id: target.parsed.customerId || 'n/a',
+      registeredAt: new Date().toISOString(),
+      type: 'CANCELLED_BY_USER',
       promoCode: promoCode || undefined,
-    });
+    };
+    await archiveEntry(redis, archiveRecord);
     
     // Send cancellation email
     try {

@@ -8,13 +8,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_BASIC_AUTH_PASSWORD;
 const PASSWORD_GATE_ONLY = [
   '/api/admin/self-test',
   '/api/admin/selftest',
+  '/api/admin/audit',
+  '/api/admin/export-winners',
 ];
 
-function unauthorizedResponse() {
-  return new NextResponse('Authentication required', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
-  });
+function unauthorizedResponse(request: NextRequest) {
+  // Redirect to home page instead of showing auth prompt
+  const url = new URL('/', request.url);
+  return NextResponse.redirect(url);
 }
 
 function verifyBasicAuth(authorization: string | null) {
@@ -36,16 +37,22 @@ function verifyBasicAuth(authorization: string | null) {
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
+  // Allow password-gated API routes to handle auth themselves
   if (PASSWORD_GATE_ONLY.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next();
   }
 
+  // Protect admin routes
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    // Check if credentials are configured
     if (!ADMIN_USER || !ADMIN_PASSWORD) {
-      return unauthorizedResponse();
+      return unauthorizedResponse(request);
     }
-    if (!verifyBasicAuth(request.headers.get('authorization'))) {
-      return unauthorizedResponse();
+    
+    // Check for valid Basic Auth
+    const authHeader = request.headers.get('authorization');
+    if (!verifyBasicAuth(authHeader)) {
+      return unauthorizedResponse(request);
     }
   }
 

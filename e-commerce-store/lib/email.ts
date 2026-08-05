@@ -124,12 +124,19 @@ export async function sendEntryConfirmedEmail(opts: {
   }
 }
 
+// ... keep existing imports and helper functions ...
+
 export async function sendWinnerEmail(opts: {
   to: string;
   product: string;
   size: string;
   amountLabel?: string;
   promoCode?: string;
+  shippingAddress?: string;
+  orderRef?: string;
+  siteUrl?: string;
+  originalPrice?: string;
+  discountPercent?: number;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -137,7 +144,14 @@ export async function sendWinnerEmail(opts: {
     return { ok: false, skipped: true };
   }
   
-  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderRef = opts.orderRef || `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const hasDiscount = opts.discountPercent && opts.discountPercent > 0 && opts.originalPrice;
+  
+  const manageLink = opts.siteUrl ? `
+    <div style="margin:16px 0;text-align:center;">
+      <a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="display:inline-block;padding:12px 28px;background:#10b981;color:#fff;border-radius:999px;font-weight:600;font-size:14px;text-decoration:none;">Manage My Entry →</a>
+    </div>
+  ` : '';
   
   try {
     const { data, error } = await resend.emails.send({
@@ -146,14 +160,49 @@ export async function sendWinnerEmail(opts: {
       replyTo: replyTo(),
       subject: `🎉 Selected — ${opts.product} (${opts.size})`,
       html: `
-        <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
-          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You've been selected!</h1>
-          <p style="margin:0 0 12px">Your card was charged for <strong>${opts.product}</strong> · ${opts.size}${opts.amountLabel ? ` (${opts.amountLabel})` : ''}.</p>
-          <p style="margin:0 0 12px;color:#666;font-size:12px">Order Reference: ${orderRef}</p>
-          ${opts.promoCode ? `<p style="margin:0 0 12px;color:#666;font-size:13px">Promo <strong>${opts.promoCode}</strong> applied.</p>` : ''}
-          <p style="margin:0 0 12px">We'll ship to the address on your entry. Tracking follows when the label is created.</p>
-          <p style="color:#666;font-size:13px;margin:0">Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <div style="text-align:center;margin-bottom:24px;">
+            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">GOYUNIR</div>
+            <div style="width:60px;height:3px;background:linear-gradient(90deg,#a855f7,#3b82f6);margin:8px auto 0;border-radius:4px;"></div>
+          </div>
+          
+          <h1 style="font-size:26px;font-weight:700;margin:0 0 8px;color:#111;">🎉 You've been selected!</h1>
+          <p style="color:#6b7280;font-size:14px;margin:0 0 4px;">Order Reference: <span style="font-family:monospace;color:#111;font-weight:600;">${orderRef}</span></p>
+          
+          <div style="background:#f9fafb;border-radius:10px;padding:16px 20px;margin:16px 0;">
+            <p style="margin:0;font-size:16px;font-weight:600;">${opts.product} <span style="font-weight:400;color:#6b7280;">· ${opts.size}</span></p>
+          </div>
+          
+          <div style="background:#f0fdf4;border-radius:8px;padding:12px 16px;margin:12px 0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#666;">Amount Charged:</span>
+              ${hasDiscount ? `
+                <div style="text-align:right;">
+                  <span style="color:#666;text-decoration:line-through;font-size:13px;">$${opts.originalPrice}</span>
+                  <span style="color:#10b981;font-weight:700;font-size:20px;margin-left:8px;">${opts.amountLabel}</span>
+                  <span style="background:#10b981;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:600;margin-left:8px;">${opts.discountPercent}% OFF</span>
+                </div>
+              ` : `
+                <span style="font-weight:700;font-size:20px;color:#111;">${opts.amountLabel}</span>
+              `}
+            </div>
+            ${opts.promoCode ? `<div style="font-size:12px;color:#10b981;margin-top:4px;">🏷 Promo code: ${opts.promoCode} applied</div>` : ''}
+          </div>
+          
+          ${opts.shippingAddress ? `
+            <div style="background:#f9fafb;border-radius:8px;padding:12px 16px;margin:12px 0;">
+              <p style="margin:0;font-size:13px;color:#6b7280;">📦 Shipping to:</p>
+              <p style="margin:4px 0 0;font-size:14px;font-weight:500;">${opts.shippingAddress}</p>
+            </div>
+          ` : ''}
+          
+          <p style="margin:16px 0 8px;font-size:14px;color:#374151;">We'll ship to the address on your entry. Tracking information will follow when the label is created.</p>
+          
+          ${manageLink}
+          
+          <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
+            <p style="margin:0;font-size:13px;color:#6b7280;">📧 Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#3b82f6;text-decoration:none;">goyunir.support@gmail.com</a></p>
+          </div>
         </div>
       `,
     });

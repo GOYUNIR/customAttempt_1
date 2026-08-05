@@ -84,6 +84,7 @@ const buttonGhost: React.CSSProperties = {
 };
 
 function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  // Always include credentials
   return fetch(input, { ...init, credentials: 'include' });
 }
 
@@ -99,6 +100,7 @@ export default function AdminPortal() {
   const [revealAddresses, setRevealAddresses] = useState(false);
   const [revealBusy, setRevealBusy] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [authFailed, setAuthFailed] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -121,9 +123,6 @@ export default function AdminPortal() {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('ALL');
   const [shipMsg, setShipMsg] = useState('');
-  const [editingShipEntry, setEditingShipEntry] = useState<string | null>(null);
-  const [shipStatusDraft, setShipStatusDraft] = useState('');
-  const [shipTrackingDraft, setShipTrackingDraft] = useState('');
   const [editingAddressEntry, setEditingAddressEntry] = useState<string | null>(null);
   const [addressDraft, setAddressDraft] = useState('');
 
@@ -150,7 +149,6 @@ export default function AdminPortal() {
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
   const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
-  // Settings state
   const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
   const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
@@ -167,6 +165,11 @@ export default function AdminPortal() {
   const fetchStatus = async () => {
     try {
       const res = await adminFetch(`/api/admin/status?t=${Date.now()}`);
+      if (res.status === 401 || res.status === 403) {
+        setAuthFailed(true);
+        window.location.href = '/';
+        return;
+      }
       const data = await res.json();
       setStatus(data);
       setLastUpdatedAt(Date.now());
@@ -221,7 +224,6 @@ export default function AdminPortal() {
   };
 
   const fetchAudit = async () => {
-    if (!password) return;
     try {
       const res = await adminFetch(`/api/admin/audit?password=${encodeURIComponent(password)}`);
       const data = await res.json();
@@ -496,33 +498,6 @@ export default function AdminPortal() {
     }
   };
 
-  const updateShipping = async (entry: any, shippingStatus: string, trackingNumber?: string) => {
-    if (!password) return alert('Enter password');
-    setShipMsg('Updating…');
-    try {
-      const res = await adminFetch('/api/admin/shipping-status', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          password, 
-          email: entry.email, 
-          variant: entry.variant, 
-          size: entry.size, 
-          shippingStatus,
-          trackingNumber: trackingNumber || undefined
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setShipMsg(`Updated ${data.updated || 0} record(s) → ${shippingStatus}.`);
-        showToast('UPDATED · Shipping');
-        await fetchStatus();
-        setEditingShipEntry(null);
-      } else setShipMsg(data.error || 'Failed');
-    } catch {
-      setShipMsg('Failed');
-    }
-  };
-
   const updateAddress = async (entry: any, newAddress: string) => {
     if (!password) return alert('Enter password');
     setShipMsg('Updating address…');
@@ -543,9 +518,9 @@ export default function AdminPortal() {
         showToast('UPDATED · Address');
         await fetchStatus();
         setEditingAddressEntry(null);
-      } else setShipMsg(data.error || 'Failed');
-    } catch {
-      setShipMsg('Failed');
+      } else setShipMsg(data.error || 'Failed: ' + (data.error || 'Unknown error'));
+    } catch (err: any) {
+      setShipMsg('Failed: ' + err.message);
     }
   };
 
@@ -635,7 +610,7 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setSettingsMsg('Settings saved successfully!');
+        setSettingsMsg('Settings saved successfully! (Will apply on next deploy)');
         showToast('UPDATED · Settings');
       } else setSettingsMsg(data.error || 'Failed to save settings.');
     } catch (err: any) {
@@ -1062,9 +1037,9 @@ export default function AdminPortal() {
             <div>
               {currentEntries.map((e: any, i: number) => {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
-                const isEditingShip = editingShipEntry === entryKey;
                 const isEditingAddress = editingAddressEntry === entryKey;
                 const orderRef = e.orderRef || `GOY-${new Date(e.registeredAt || 0).getTime().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                const displayPrice = e.amountCents ? (e.amountCents / 100).toFixed(2) : (e.listPrice || 0).toFixed(2);
                 
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
@@ -1073,7 +1048,9 @@ export default function AdminPortal() {
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
                       {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {e.promoCode}</span>}
-                      {e.amountCents && <span style={{ color: '#34d399', marginLeft: 6 }}>· ${(e.amountCents / 100).toFixed(2)}</span>}
+                      {(e.amountCents || e.listPrice) && (
+                        <span style={{ color: '#34d399', marginLeft: 6 }}>· ${displayPrice}</span>
+                      )}
                     </div>
                     <div style={{ color: '#666', marginTop: 4 }}>
                       📍 {revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}
@@ -1081,18 +1058,7 @@ export default function AdminPortal() {
                     </div>
                     {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {isEditingShip ? (
-                          <>
-                            <select value={shipStatusDraft} onChange={(ev) => setShipStatusDraft(ev.target.value)}
-                              style={{ ...inputStyle, padding: 6, flex: 1 }}>
-                              {SHIP_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-                            </select>
-                            <input type="text" value={shipTrackingDraft} onChange={(ev) => setShipTrackingDraft(ev.target.value)}
-                              placeholder="Tracking #" style={{ ...inputStyle, padding: 6, flex: 1 }} />
-                            <button onClick={() => updateShipping(e, shipStatusDraft, shipTrackingDraft)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
-                            <button onClick={() => setEditingShipEntry(null)} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Cancel</button>
-                          </>
-                        ) : isEditingAddress ? (
+                        {isEditingAddress ? (
                           <>
                             <input type="text" value={addressDraft} onChange={(ev) => setAddressDraft(ev.target.value)}
                               placeholder="New address" style={{ ...inputStyle, padding: 6, flex: 2 }} />
@@ -1101,9 +1067,6 @@ export default function AdminPortal() {
                           </>
                         ) : (
                           <>
-                            <button onClick={() => { setEditingShipEntry(entryKey); setShipStatusDraft(e.shippingStatus || 'PENDING_FULFILLMENT'); setShipTrackingDraft(e.trackingNumber || ''); }} style={buttonGhost}>
-                              Update Shipping
-                            </button>
                             <button onClick={() => { setEditingAddressEntry(entryKey); setAddressDraft(e.shippingAddress || ''); }} style={buttonGhost}>
                               Edit Address
                             </button>
@@ -1253,7 +1216,7 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Edit site appearance and content. Changes require a redeploy to take effect (settings are stored in Redis and applied at build time).
+                Edit site appearance and content. Changes are stored in Redis and applied at build time — you'll need to redeploy for changes to take effect.
               </p>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
               
@@ -1314,6 +1277,7 @@ export default function AdminPortal() {
               </div>
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Product Notes</h4>
+              <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>These notes appear as scrollable cards on the product page (e.g., "TOP PROFILE", "HEART PROFILE", "BASE PROFILE").</p>
               {GOYUNIR_STORE_SUITE.productCatalog.map((product) => (
                 <div key={product.id} style={{ marginBottom: 8, padding: 8, background: '#09090b', borderRadius: 8 }}>
                   <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{product.name}</div>
@@ -1322,7 +1286,7 @@ export default function AdminPortal() {
                       <input 
                         type="text" 
                         value={note.label || ''} 
-                        placeholder="Label"
+                        placeholder="Label (e.g. TOP PROFILE)"
                         onChange={(e) => {
                           const newNotes = [...(productNotes[product.id] || [])];
                           newNotes[idx] = { ...newNotes[idx], label: e.target.value };
@@ -1332,7 +1296,7 @@ export default function AdminPortal() {
                       <input 
                         type="text" 
                         value={note.name || ''} 
-                        placeholder="Name"
+                        placeholder="Name (e.g. White Bergamot)"
                         onChange={(e) => {
                           const newNotes = [...(productNotes[product.id] || [])];
                           newNotes[idx] = { ...newNotes[idx], name: e.target.value };
@@ -1342,7 +1306,7 @@ export default function AdminPortal() {
                       <input 
                         type="text" 
                         value={note.text || ''} 
-                        placeholder="Text"
+                        placeholder="Description"
                         onChange={(e) => {
                           const newNotes = [...(productNotes[product.id] || [])];
                           newNotes[idx] = { ...newNotes[idx], text: e.target.value };
