@@ -32,6 +32,8 @@ interface StoreProduct {
   images: string[];
   totalInventory: number;
   winnerTiers: number[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface StoreConfig {
