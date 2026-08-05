@@ -26,23 +26,38 @@ export default function CatalogPage() {
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [activeDrops, setActiveDrops] = useState<ActiveDrop[]>([]);
-  const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>(
-    GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
-  );
-  const [archiveScents, setArchiveScents] = useState<CatalogItem[]>(
-    GOYUNIR_STORE_SUITE.catalogPreview.archiveScents,
-  );
+  const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
+  const [archiveScents, setArchiveScents] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Clear the static catalog data and load from API
     fetch('/api/catalog/status')
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data.activeDrops)) setActiveDrops(data.activeDrops);
-        if (Array.isArray(data.upcomingDrops)) setUpcomingDrops(data.upcomingDrops);
-        if (Array.isArray(data.archiveScents)) setArchiveScents(data.archiveScents);
+        // Only show active products that aren't archived
+        if (Array.isArray(data.activeDrops)) {
+          setActiveDrops(data.activeDrops);
+        } else {
+          setActiveDrops([]);
+        }
+        if (Array.isArray(data.upcomingDrops)) {
+          setUpcomingDrops(data.upcomingDrops);
+        } else {
+          setUpcomingDrops([]);
+        }
+        if (Array.isArray(data.archiveScents)) {
+          setArchiveScents(data.archiveScents);
+        } else {
+          setArchiveScents([]);
+        }
       })
-      .catch(() => {})
+      .catch(() => {
+        // On error, use empty arrays
+        setActiveDrops([]);
+        setUpcomingDrops([]);
+        setArchiveScents([]);
+      })
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -94,7 +109,7 @@ export default function CatalogPage() {
               fontSize: '10px',
             }}
           >
-            {!item.image && 'IMAGE PENDING'}
+            {!item.image && 'NO IMAGE'}
           </div>
           <div style={{ padding: '10px 12px' }}>
             <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.textMain }}>{item.name}</div>
@@ -141,7 +156,7 @@ export default function CatalogPage() {
         </Link>
         <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
-          Tap an archived scent to open its page and save a spot for the return.
+          Browse available and past allocations.
         </p>
 
         {activeDrops.length > 0 && (
@@ -155,7 +170,7 @@ export default function CatalogPage() {
                 margin: '0 0 12px 0',
               }}
             >
-              🧴 Currently Allocating
+              🧴 Currently Available
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
               {activeDrops.map((drop) => (
@@ -190,7 +205,7 @@ export default function CatalogPage() {
             margin: '0 0 12px 0',
           }}
         >
-          👔 Clothing Line
+          👔 Upcoming Releases
         </h2>
         {renderGrid(upcomingDrops, 'Nothing announced yet — check back soon.')}
 
@@ -203,9 +218,9 @@ export default function CatalogPage() {
             margin: '32px 0 12px 0',
           }}
         >
-          🧪 Past Scents Archive
+          🧪 Past Archives
         </h2>
-        {renderGrid(archiveScents, isLoading ? 'Loading…' : 'No archived scents yet.')}
+        {renderGrid(archiveScents, isLoading ? 'Loading…' : 'No archived items yet.')}
       </div>
 
       <AnimatePresence>

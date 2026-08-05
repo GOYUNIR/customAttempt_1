@@ -36,11 +36,23 @@ export default async function HomePage({
           .map((v) => JSON.parse(typeof v === 'string' ? v : '{}'))
           .filter((p) => p.isActive && !p.isArchived);
       }
-    } catch {}
+    } catch (error) {
+      console.error('[HomePage] Redis error:', error);
+    }
   }
 
   // Fallback to first active product
-  const targetSlug = homeRedirectSlug || activeProducts[0]?.slug;
+  let targetSlug = homeRedirectSlug;
+  if (!targetSlug && activeProducts.length > 0) {
+    targetSlug = activeProducts[0]?.slug;
+  }
+  
+  // If no products found, use default fallback
+  if (!targetSlug) {
+    targetSlug = 'elysian-white';
+  }
+  
+  console.log('[HomePage] Redirecting to:', `/${targetSlug}${suffix}`);
   
   if (targetSlug) redirect(`/${targetSlug}${suffix}`);
   redirect(`/catalog${suffix}`);

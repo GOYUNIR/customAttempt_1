@@ -10,15 +10,16 @@ export async function GET() {
     const redis = createRedisClient();
 
     if (!redis) {
+      // Return empty arrays if Redis is unavailable
       return NextResponse.json({
         activeDrops: [],
-        upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
-        archiveScents: GOYUNIR_STORE_SUITE.catalogPreview.archiveScents,
-        archivedProductIds: [] as string[],
-        soldOutProductIds: [] as string[],
-        notesByProductId: {} as Record<string, string>,
-        availableFromByProductId: {} as Record<string, string>,
-        records: [] as any[],
+        upcomingDrops: [],
+        archiveScents: [],
+        archivedProductIds: [],
+        soldOutProductIds: [],
+        notesByProductId: {},
+        availableFromByProductId: {},
+        records: [],
       });
     }
 
@@ -39,66 +40,80 @@ export async function GET() {
       if (isSoldOut) soldOutProductIds.push(r.productId);
     }
 
-    const activeDrops = getVisibleProducts(GOYUNIR_STORE_SUITE)
-      .filter((p) => !archivedProductIds.includes(p.id))
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        tagline: p.tagline,
-        desc: p.desc,
-        slug: p.slug,
-        image: `/images/${p.prefix}/1.jpeg`,
-      }));
+    // Get active products from Redis directly
+    let activeDrops: any[] = [];
+    try {
+      const activeRaw = await redis.hgetall('store:active_products');
+      if (activeRaw) {
+        for (const [key, value] of Object.entries(activeRaw)) {
+          try {
+            const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            if (product.isActive && !product.isArchived && !archivedProductIds.includes(product.id)) {
+              activeDrops.push({
+                id: product.id,
+                name: product.name,
+                tagline: product.tagline || 'LIMITED DROP',
+                desc: product.desc || '',
+                slug: product.slug,
+                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
+              });
+            }
+          } catch (e) {
+            console.error('[catalog/status] Error parsing product:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[catalog/status] Error fetching active products:', e);
+    }
 
-    const dynamicArchiveScents = archived.map((r) => {
-      const product = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.id === r.productId);
-      const isSoldOut =
-        r.soldOut === true ||
-        String(r.availableFrom || '').toLowerCase() === 'sold out' ||
-        /sold\s*out/i.test(String(r.notes || ''));
-      return {
-        name: r.name || product?.name || r.productId,
-        status: isSoldOut ? 'Sold Out' : 'Archived',
-        image: r.image || (product ? `/images/${product.prefix}/1.jpeg` : undefined),
-        description: r.notes || r.description || product?.desc,
-        availableFrom: r.availableFrom,
-        availableUntil: r.archivedAt,
-        slug: product?.slug,
-        productId: r.productId,
-        soldOut: isSoldOut,
-      };
-    });
+    // Get archived products from Redis
+    let archiveScents: any[] = [];
+    try {
+      const archivedRaw = await redis.hgetall('store:archived_products');
+      if (archivedRaw) {
+        for (const [key, value] of Object.entries(archivedRaw)) {
+          try {
+            const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            if (product.isArchived) {
+              const isSoldOut =
+                product.totalInventory === 0 ||
+                String(product.availableFrom || '').toLowerCase() === 'sold out';
+              archiveScents.push({
+                name: product.name,
+                status: isSoldOut ? 'Sold Out' : 'Archived',
+                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
+                description: product.desc || product.notes?.[0]?.text || '',
+                availableFrom: product.availableFrom || 'Previously available',
+                slug: product.slug,
+                productId: product.id,
+                soldOut: isSoldOut,
+              });
+            }
+          } catch (e) {
+            console.error('[catalog/status] Error parsing archived product:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[catalog/status] Error fetching archived products:', e);
+    }
 
-    const staticArchive = GOYUNIR_STORE_SUITE.catalogPreview.archiveScents.filter(
-      (s) => !dynamicArchiveScents.some((d) => d.name === s.name),
-    );
-
-    const records = archived.map((r) => {
-      const product = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.id === r.productId);
-      const isSoldOut =
-        r.soldOut === true ||
-        String(r.availableFrom || '').toLowerCase() === 'sold out' ||
-        /sold\s*out/i.test(String(r.notes || ''));
-      return {
-        ...r,
-        slug: product?.slug,
-        name: r.name || product?.name,
-        image: r.image || (product ? `/images/${product.prefix}/1.jpeg` : undefined),
-        soldOut: isSoldOut,
-      };
-    });
+    // Upcoming drops - empty by default, can be managed via admin
+    const upcomingDrops: any[] = [];
 
     return NextResponse.json({
       activeDrops,
-      upcomingDrops: GOYUNIR_STORE_SUITE.catalogPreview.upcomingDrops,
-      archiveScents: [...dynamicArchiveScents, ...staticArchive],
+      upcomingDrops,
+      archiveScents,
       archivedProductIds,
       soldOutProductIds,
       notesByProductId,
       availableFromByProductId,
-      records,
+      records: archived,
     });
   } catch (err: any) {
+    console.error('[catalog/status] Error:', err);
     return NextResponse.json(
       {
         error: err?.message || 'Unknown error',

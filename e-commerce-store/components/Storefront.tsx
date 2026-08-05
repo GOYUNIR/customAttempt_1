@@ -121,8 +121,9 @@ const DEFAULT_CONFIG: StoreConfig = {
     checkoutCtaButton: '#635bff',
   },
   availableSizes: ['50ml'],
+  homeRedirectSlug: 'elysian-white',
   dropSchedule: {
-    mode: 'weekly',
+    mode: 'daily',
     timezone: 'America/Los_Angeles',
     targetEndDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', 'T') + ':00',
     drawDayOfWeek: 6,
@@ -135,8 +136,8 @@ const DEFAULT_CONFIG: StoreConfig = {
     hoursLabel: 'h',
     minutesLabel: 'm',
     secondsLabel: 's',
-    winnersPer50ml: 0,
-    winnersPer100ml: 0,
+    winnersPer50ml: 10,
+    winnersPer100ml: 5,
   },
   animationMechanics: {
     totalFramesToLoad: 29,
@@ -227,16 +228,27 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             socialProof: { ...DEFAULT_CONFIG.socialProof, ...data.config.socialProof, ...data.socialOverride },
           });
         }
-        if (data.activeProducts) {
+        if (data.activeProducts && data.activeProducts.length > 0) {
           setActiveProducts(data.activeProducts);
-          setAllProducts(data.allProducts || []);
+          setAllProducts(data.allProducts || data.activeProducts);
           setArchivedProducts(data.archivedProducts || []);
           const ids = (data.archivedProducts || []).map((p: any) => p.id);
           setArchivedIds(ids);
+        } else {
+          // Fallback to default products if nothing in Redis
+          const fallbackProducts = getDefaultProducts();
+          setActiveProducts(fallbackProducts);
+          setAllProducts(fallbackProducts);
+          setArchivedProducts([]);
+          setArchivedIds([]);
         }
         if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
       } catch (err) {
         console.error('Failed to load store config:', err);
+        // Use fallback products on error
+        const fallbackProducts = getDefaultProducts();
+        setActiveProducts(fallbackProducts);
+        setAllProducts(fallbackProducts);
       } finally {
         setLoading(false);
       }
@@ -523,6 +535,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const preloadedImages: HTMLImageElement[] = [];
     canvasRef.current.width = 600;
     canvasRef.current.height = 600;
+    
     const drawFrame = (img: HTMLImageElement) => {
       if (img.complete && img.naturalWidth > 0) {
         context.clearRect(0, 0, 600, 600);
@@ -530,21 +543,63 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       }
     };
     
+    const drawPlaceholder = () => {
+      context.fillStyle = '#1a1a1a';
+      context.fillRect(0, 0, 600, 600);
+      context.fillStyle = '#444';
+      context.font = '24px system-ui';
+      context.textAlign = 'center';
+      context.fillText('Loading Image', 300, 300);
+    };
+    
     const productPrefix = currentProduct?.prefix || 'default';
     const imageUrls = currentProduct?.images?.length > 0 
       ? currentProduct.images 
       : Array.from({ length: TOTAL_IMAGES }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
     
-    for (let i = 0; i < Math.min(imageUrls.length, TOTAL_IMAGES); i++) {
+    let loadedCount = 0;
+    const totalImages = Math.min(imageUrls.length, TOTAL_IMAGES);
+    
+    for (let i = 0; i < totalImages; i++) {
       const img = new Image();
-      img.src = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
-      img.onload = () => { if (i === 0) drawFrame(img); };
+      const imgUrl = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
+      img.src = imgUrl;
+      img.onload = () => {
+        loadedCount++;
+        if (loadedCount === 1) {
+          drawFrame(img);
+        }
+      };
+      img.onerror = () => {
+        // Try fallback path
+        if (i === 0) {
+          const fallbackImg = new Image();
+          fallbackImg.src = `/images/${productPrefix}/1.jpeg`;
+          fallbackImg.onload = () => {
+            loadedCount++;
+            drawFrame(fallbackImg);
+          };
+          fallbackImg.onerror = () => {
+            loadedCount++;
+            drawPlaceholder();
+          };
+          preloadedImages.push(fallbackImg);
+        } else {
+          loadedCount++;
+          if (loadedCount === totalImages && preloadedImages.length > 0) {
+            drawFrame(preloadedImages[0]);
+          }
+        }
+      };
       preloadedImages.push(img);
     }
+    
     const unsubscribe = frameIndex.on('change', (value) => {
       const index = Math.min(Math.max(Math.round(value), 1), preloadedImages.length);
       const activeFrameImage = preloadedImages[index - 1];
-      if (activeFrameImage) drawFrame(activeFrameImage);
+      if (activeFrameImage && activeFrameImage.complete && activeFrameImage.naturalWidth > 0) {
+        drawFrame(activeFrameImage);
+      }
     });
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images]);
@@ -702,6 +757,24 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     );
   }
 
+  if (!currentProduct) {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        background: configPalette?.primaryBackground || '#0a0a0a',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'column',
+        color: '#fff',
+        gap: 16
+      }}>
+        <div style={{ fontSize: 20, color: '#666' }}>No products available</div>
+        <Link href="/catalog" style={{ color: '#a855f7', textDecoration: 'none' }}>View Catalog →</Link>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
       <header
@@ -713,6 +786,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
           <Link href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</Link>
           <Link href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</Link>
+          <Link href="/account" style={{ color: '#666', textDecoration: 'none' }}>ACCOUNT</Link>
         </div>
 
         <Link
@@ -1018,6 +1092,61 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       </div>
     </div>
   );
+}
+
+function getDefaultProducts(): StoreProduct[] {
+  return [
+    {
+      id: 'prod_elysian_white',
+      name: 'Elysian White',
+      slug: 'elysian-white',
+      prefix: 'elysian-white',
+      tagline: 'WHITE ALLOCATION / 01',
+      desc: 'Clean, electric profile variant constructed with premium bergamot.',
+      price50ml: 85,
+      price100ml: 140,
+      stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
+      stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
+      maxRaffleAllocationLimit: 10,
+      isActive: true,
+      isArchived: false,
+      notes: [
+        { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
+        { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
+        { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
+      ],
+      images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
+      totalInventory: 9,
+      winnerTiers: [2, 2, 2, 2, 1],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      id: 'prod_obsidian_void',
+      name: 'Obsidian Void',
+      slug: 'obsidian-void',
+      prefix: 'obsidian-void',
+      tagline: 'BLACK ALLOCATION / 02',
+      desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
+      price50ml: 85,
+      price100ml: 140,
+      stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
+      stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
+      maxRaffleAllocationLimit: 5,
+      isActive: true,
+      isArchived: false,
+      notes: [
+        { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
+        { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
+        { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
+      ],
+      images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
+      totalInventory: 5,
+      winnerTiers: [1],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  ];
 }
 
 function getNextDrawTimestampForSchedule(schedule: any): number {
