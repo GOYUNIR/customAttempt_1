@@ -209,6 +209,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, product });
     }
 
+    if (action === 'addToUpcoming') {
+      const id = String(body?.id || '');
+      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
+      const all = await loadProducts(redis);
+      const product = all[id];
+      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+      product.isUpcoming = true;
+      product.isActive = true;
+      product.isArchived = false;
+      product.updatedAt = new Date().toISOString();
+      await saveProduct(redis, product);
+      return NextResponse.json({ success: true, product });
+    }
+
+    if (action === 'removeFromUpcoming') {
+      const id = String(body?.id || '');
+      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
+      const all = await loadProducts(redis);
+      const product = all[id];
+      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+      product.isUpcoming = false;
+      product.isActive = true;
+      product.updatedAt = new Date().toISOString();
+      await saveProduct(redis, product);
+      return NextResponse.json({ success: true, product });
+    }
+
     // upsert - create or update
     const name = String(body?.name || '').trim();
     if (!name) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });

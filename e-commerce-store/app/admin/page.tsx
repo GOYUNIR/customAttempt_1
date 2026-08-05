@@ -462,7 +462,7 @@ export default function AdminPortal() {
 
   const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
     if (!password) { alert('Enter admin password first'); return; }
-    const action = currentUpcoming ? 'moveToActive' : 'moveToUpcoming';
+    const action = currentUpcoming ? 'removeFromUpcoming' : 'addToUpcoming';
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -471,7 +471,7 @@ export default function AdminPortal() {
         body: JSON.stringify({ password, action, id }),
       });
       if (res.ok) {
-        showToast(`UPDATED · ${currentUpcoming ? 'Moved to Active' : 'Moved to Upcoming'}`);
+        showToast(`UPDATED · ${currentUpcoming ? 'Removed from Upcoming' : 'Added to Upcoming'}`);
         await fetchProducts();
       }
     } catch (err: any) {

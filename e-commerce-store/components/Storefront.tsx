@@ -28,6 +28,7 @@ interface StoreProduct {
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
+  isUpcoming: boolean;  // <-- ADDED THIS LINE
   notes: { label: string; name: string; text: string }[];
   images: string[];
   totalInventory: number;
@@ -272,7 +273,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const sizes = config.availableSizes || ['50ml'];
   const defaultSize = sizes.includes('100ml') && searchParams?.get('size') === '100ml' ? '100ml' : sizes[0] || '50ml';
 
-  const allVisible = activeProducts.filter((p) => p.isActive !== false && !archivedIds.includes(p.id));
+  // FIXED: Show active products AND upcoming products on the storefront
+  const allVisible = activeProducts.filter((p) => {
+    // If product is marked as Upcoming, show it
+    if (p.isUpcoming) return true;
+    // Otherwise, show if active and not archived
+    return p.isActive !== false && !p.isArchived;
+  });
 
   const requestedProduct = initialSlug 
     ? allProducts.find((p) => p.slug === initialSlug) || activeProducts.find((p) => p.slug === initialSlug)
@@ -346,15 +353,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     document.head.appendChild(s);
   }, []);
 
-  // Determine which product to display
-  const currentProductIndex = (() => {
-    if (requestedProduct && !requestedIsArchived) {
-      const idx = allVisible.findIndex((p) => p.id === requestedProduct.id);
-      if (idx >= 0) return idx;
-    }
-    return activeProductIndex;
-  })();
-
   // Get the current product with proper fallback
   const getCurrentProduct = (): StoreProduct | null => {
     // First try the active product at the index
@@ -386,40 +384,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     return size === '100ml' ? product.price100ml : product.price50ml;
   };
 
-  // Find this section (around line 250-280) and replace:
-const effectiveSchedule = {
-  ...config.dropSchedule,
-  ...(globalScheduleOverride || {}),
-  ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
-};
-
-// Make sure the schedule has valid values
-const getValidSchedule = () => {
-  const schedule = effectiveSchedule;
-  // If no schedule or invalid, create a default 24-hour from now
-  if (!schedule || !schedule.mode) {
-    return {
-      mode: 'daily',
-      timezone: 'America/Los_Angeles',
-      targetEndDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      drawDayOfWeek: 6,
-      drawDayOfMonth: 1,
-      drawHour: 21,
-      drawMinute: 0,
-      drawSecond: 0,
-      countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
-      daysLabel: 'd',
-      hoursLabel: 'h',
-      minutesLabel: 'm',
-      secondsLabel: 's',
-      winnersPer50ml: 10,
-      winnersPer100ml: 5,
-    };
-  }
-  return schedule;
-};
-
-const validSchedule = getValidSchedule();
+  const effectiveSchedule = {
+    ...config.dropSchedule,
+    ...(globalScheduleOverride || {}),
+    ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
+  };
 
   const archiveNote = currentProduct ? archiveNotesMap[currentProduct.id] || '' : '';
   const archiveFrom = currentProduct ? archiveFromMap[currentProduct.id] || '' : '';
@@ -595,7 +564,6 @@ const validSchedule = getValidSchedule();
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
     
-    // If no currentProduct, draw placeholder and return
     if (!currentProduct) {
       context.fillStyle = '#1a1a1a';
       context.fillRect(0, 0, 600, 600);
@@ -636,7 +604,6 @@ const validSchedule = getValidSchedule();
     let loadedCount = 0;
     const totalImages = Math.min(imageUrls.length, totalFrames);
     
-    // Preload all images
     for (let i = 0; i < totalImages; i++) {
       const img = new Image();
       const imgUrl = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
@@ -649,7 +616,6 @@ const validSchedule = getValidSchedule();
       };
       img.onerror = () => {
         loadedCount++;
-        // If first image fails, try fallback
         if (i === 0) {
           const fallbackImg = new Image();
           fallbackImg.src = `/images/${productPrefix}/1.jpeg`;
@@ -669,7 +635,6 @@ const validSchedule = getValidSchedule();
       preloadedImages.push(img);
     }
     
-    // Subscribe to frame changes
     const unsubscribe = frameIndex.on('change', (value) => {
       const index = Math.min(Math.max(Math.round(value), 1), preloadedImages.length);
       const activeFrameImage = preloadedImages[index - 1];
@@ -677,7 +642,6 @@ const validSchedule = getValidSchedule();
         drawFrame(activeFrameImage);
       }
     });
-    
     return () => unsubscribe();
   }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images, currentProduct]);
 
@@ -1185,57 +1149,6 @@ const validSchedule = getValidSchedule();
       </div>
     </div>
   );
-}
-
-function getDefaultProducts(): StoreProduct[] {
-  return [
-    {
-      id: 'prod_elysian_white',
-      name: 'Elysian White',
-      slug: 'elysian-white',
-      prefix: 'elysian-white',
-      tagline: 'WHITE ALLOCATION / 01',
-      desc: 'Clean, electric profile variant constructed with premium bergamot.',
-      price50ml: 0,
-      price100ml: 0,
-      stripeId50ml: 'price_placeholder_50ml',
-      stripeId100ml: 'price_placeholder_100ml',
-      maxRaffleAllocationLimit: 0,
-      isActive: true,
-      isArchived: false,
-      notes: [
-        { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
-        { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
-        { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
-      ],
-      images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-      totalInventory: 0,
-      winnerTiers: [0],
-    },
-    {
-      id: 'prod_obsidian_void',
-      name: 'Obsidian Void',
-      slug: 'obsidian-void',
-      prefix: 'obsidian-void',
-      tagline: 'BLACK ALLOCATION / 02',
-      desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-      price50ml: 0,
-      price100ml: 0,
-      stripeId50ml: 'price_placeholder_50ml',
-      stripeId100ml: 'price_placeholder_100ml',
-      maxRaffleAllocationLimit: 0,
-      isActive: true,
-      isArchived: false,
-      notes: [
-        { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
-        { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
-        { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
-      ],
-      images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
-      totalInventory: 0,
-      winnerTiers: [0],
-    }
-  ];
 }
 
 function getNextDrawTimestampForSchedule(schedule: any): number {
