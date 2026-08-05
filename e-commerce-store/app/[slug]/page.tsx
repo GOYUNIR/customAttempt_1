@@ -14,13 +14,24 @@ export default async function ProductPage({
   
   console.log('[ProductPage] Checking slug:', slug);
   
+  // Always allow the default product slugs to work
+  const defaultSlugs = ['elysian-white', 'obsidian-void'];
+  if (defaultSlugs.includes(slug)) {
+    console.log('[ProductPage] Using fallback for default slug:', slug);
+    return (
+      <Suspense fallback={null}>
+        <Storefront initialSlug={slug} />
+      </Suspense>
+    );
+  }
+  
   const redis = createRedisClient();
   let exists = false;
   let productName = '';
   
   if (redis) {
     try {
-      // Check ALL products (not just active ones)
+      // Check ALL products
       const allRaw = await redis.hgetall('store:products');
       if (allRaw) {
         for (const [key, value] of Object.entries(allRaw)) {
@@ -37,58 +48,14 @@ export default async function ProductPage({
           }
         }
       }
-      
-      // If not found, check active products separately
-      if (!exists) {
-        const activeRaw = await redis.hgetall('store:active_products');
-        if (activeRaw) {
-          for (const [key, value] of Object.entries(activeRaw)) {
-            try {
-              const product = JSON.parse(typeof value === 'string' ? value : '{}');
-              if (product.slug === slug) {
-                exists = true;
-                productName = product.name || slug;
-                console.log('[ProductPage] Found active product:', productName);
-                break;
-              }
-            } catch (e) {
-              console.error('[ProductPage] Error parsing active product:', e);
-            }
-          }
-        }
-      }
-      
-      // If still not found, check archived products
-      if (!exists) {
-        const archivedRaw = await redis.hgetall('store:archived_products');
-        if (archivedRaw) {
-          for (const [key, value] of Object.entries(archivedRaw)) {
-            try {
-              const product = JSON.parse(typeof value === 'string' ? value : '{}');
-              if (product.slug === slug) {
-                exists = true;
-                productName = product.name || slug;
-                console.log('[ProductPage] Found archived product:', productName);
-                break;
-              }
-            } catch (e) {
-              console.error('[ProductPage] Error parsing archived product:', e);
-            }
-          }
-        }
-      }
     } catch (error) {
       console.error('[ProductPage] Redis error:', error);
     }
   }
   
-  // If Redis is not available, check if it's one of the default products
-  if (!exists && !redis) {
-    const defaultSlugs = ['elysian-white', 'obsidian-void'];
-    if (defaultSlugs.includes(slug)) {
-      exists = true;
-      console.log('[ProductPage] Using fallback for:', slug);
-    }
+  // If the slug is a default slug but we couldn't verify it in Redis, still show it
+  if (defaultSlugs.includes(slug)) {
+    exists = true;
   }
   
   console.log('[ProductPage] Slug:', slug, 'Exists:', exists);
