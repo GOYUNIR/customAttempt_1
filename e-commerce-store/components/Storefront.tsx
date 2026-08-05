@@ -164,27 +164,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     ...(productOverrides[currentProduct?.id]?.customDropSchedule || {}),
   };
   const archiveNote = archiveNotesMap[currentProduct?.id] || '';
-
-  useEffect(() => {
-    setPromoCode(null);
-    setPromoDiscount(0);
-    setShowManualPromo(false);
-    try {
-      const stored = sessionStorage.getItem('goyunir_promo_ref');
-      if (stored) {
-        fetch(`/api/promo/validate?code=${encodeURIComponent(stored)}`)
-          .then((r) => r.json())
-          .then((data) => {
-            if (data.valid) {
-              setPromoCode(data.code);
-              setPromoDiscount(data.customerDiscountPercent || 0);
-            }
-          })
-          .catch(() => {});
-      }
-    } catch {}
-  }, [currentProduct?.id]);
-
   const archiveFrom = archiveFromMap[currentProduct?.id] || '';
 
   useEffect(() => {
@@ -446,7 +425,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await response.json();
       if (data.alreadyEntered) {
         setFeedbackStatus('notice');
-        setFeedbackMessage(data.error || "You're already locked in for this scent — one entry per email. Try another scent or Manage My Entry.");
+        setFeedbackMessage(data.error || 'Already entered for this scent.');
         try {
           localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: normalizedForm.email, shippingAddress: normalizedForm.shippingAddress }));
         } catch {}
@@ -492,11 +471,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }}
       >
         <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
-          <a href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</a>
-          <a href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</a>
+          <Link href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</Link>
+          <Link href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</Link>
         </div>
 
-        <a
+        <Link
           href="/"
           style={{
             position: 'absolute',
@@ -511,7 +490,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           }}
         >
           GOYUNIR
-        </a>
+        </Link>
       </header>
 
       <AnimatePresence>
@@ -645,7 +624,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               }}
             >
               <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.9 }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)' }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(17,17,17,0.55)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>

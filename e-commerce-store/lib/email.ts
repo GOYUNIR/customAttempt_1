@@ -198,6 +198,58 @@ export async function sendPromoterInvoiceEmail(opts: {
   }
 }
 
+/** Sent when a customer updates their shipping address or payment method
+ * from /account, or when an admin updates an order from /admin. */
+export async function sendAccountUpdateEmail(opts: {
+  to: string;
+  product: string;
+  size?: string;
+  changeType: 'address' | 'payment' | 'cancelled';
+  newAddress?: string;
+}) {
+  const resend = getResend();
+  if (!resend) {
+    console.warn('[email] RESEND_API_KEY missing — skip account update email');
+    return { ok: false, skipped: true };
+  }
+  const heading =
+    opts.changeType === 'address'
+      ? 'Shipping address updated'
+      : opts.changeType === 'payment'
+        ? 'Payment method updated'
+        : 'Entry cancelled';
+  const body =
+    opts.changeType === 'address'
+      ? `Your shipping address for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was changed to:</p><p style="margin:0 0 12px;color:#444;font-size:13px">${opts.newAddress || ''}`
+      : opts.changeType === 'payment'
+        ? `Your payment method on file for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was updated.`
+        : `Your entry for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was cancelled.`;
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: `${heading} — ${opts.product}`,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">${heading}</h1>
+          <p style="margin:0 0 12px">${body}</p>
+          <p style="color:#666;font-size:13px;margin:0">Didn't make this change? Reply to this email right away.</p>
+        </div>
+      `,
+    });
+    if (error) {
+      console.error('[email] account update error', error);
+      return { ok: false, error };
+    }
+    return { ok: true, id: data?.id };
+  } catch (err) {
+    console.error('[email] account update failed', err);
+    return { ok: false, error: err };
+  }
+}
+
 /** Alias used by trigger-drop */
 export async function sendPromoterPayoutEmail(opts: {
   to: string;
