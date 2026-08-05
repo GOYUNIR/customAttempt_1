@@ -221,6 +221,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       try {
         const res = await fetch('/api/store/config');
         const data = await res.json();
+        console.log('[Storefront] Loaded config:', data);
+        
         if (data.config) {
           setConfig({
             ...DEFAULT_CONFIG,
@@ -230,24 +232,26 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             socialProof: { ...DEFAULT_CONFIG.socialProof, ...data.config.socialProof, ...data.socialOverride },
           });
         }
+        
         if (data.activeProducts && data.activeProducts.length > 0) {
+          console.log('[Storefront] Setting active products:', data.activeProducts);
           setActiveProducts(data.activeProducts);
           setAllProducts(data.allProducts || data.activeProducts);
           setArchivedProducts(data.archivedProducts || []);
           const ids = (data.archivedProducts || []).map((p: any) => p.id);
           setArchivedIds(ids);
         } else {
-          // Fallback to default products if nothing in Redis
+          console.log('[Storefront] No active products found, using fallback');
           const fallbackProducts = getDefaultProducts();
           setActiveProducts(fallbackProducts);
           setAllProducts(fallbackProducts);
           setArchivedProducts([]);
           setArchivedIds([]);
         }
+        
         if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
       } catch (err) {
-        console.error('Failed to load store config:', err);
-        // Use fallback products on error
+        console.error('[Storefront] Failed to load store config:', err);
         const fallbackProducts = getDefaultProducts();
         setActiveProducts(fallbackProducts);
         setAllProducts(fallbackProducts);
@@ -341,13 +345,37 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     document.head.appendChild(s);
   }, []);
 
-  const currentProduct = requestedProduct && requestedIsArchived
-    ? requestedProduct
-    : allVisible[activeProductIndex] ?? allVisible[0] ?? activeProducts[0];
+  // Determine which product to display
+  const currentProductIndex = (() => {
+    if (requestedProduct && !requestedIsArchived) {
+      const idx = allVisible.findIndex((p) => p.id === requestedProduct.id);
+      if (idx >= 0) return idx;
+    }
+    return activeProductIndex;
+  })();
 
+  // Get the current product with fallback
+  const getCurrentProduct = (): StoreProduct | null => {
+    // First try the active product at the index
+    const active = allVisible[currentProductIndex] || allVisible[0] || activeProducts[0];
+    if (active) return active;
+    
+    // If we have a requested slug, find it in all products
+    if (initialSlug) {
+      const found = allProducts.find(p => p.slug === initialSlug);
+      if (found) return found;
+      const archived = archivedProducts.find(p => p.slug === initialSlug);
+      if (archived) return archived;
+    }
+    
+    // Fallback to any product
+    return allProducts[0] || activeProducts[0] || null;
+  };
+
+  const currentProduct = getCurrentProduct();
   const isCurrentArchived = currentProduct ? archivedIds.includes(currentProduct.id) : false;
 
-  const priceFor = (product: StoreProduct | undefined, size: string) => {
+  const priceFor = (product: StoreProduct | null, size: string) => {
     if (!product) return 0;
     const ov = productOverrides[product.id];
     if (size === '100ml' && typeof ov?.price100ml === 'number') return ov.price100ml;
@@ -534,6 +562,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   useEffect(() => {
     const context = canvasRef.current?.getContext('2d');
     if (!context || !canvasRef.current) return;
+    
+    // If no currentProduct, draw placeholder and return
+    if (!currentProduct) {
+      context.fillStyle = '#1a1a1a';
+      context.fillRect(0, 0, 600, 600);
+      context.fillStyle = '#444';
+      context.font = '24px system-ui';
+      context.textAlign = 'center';
+      context.fillText('No Product', 300, 300);
+      return;
+    }
+    
     const preloadedImages: HTMLImageElement[] = [];
     canvasRef.current.width = 600;
     canvasRef.current.height = 600;
@@ -554,9 +594,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       context.fillText('Loading Image', 300, 300);
     };
     
-    const productPrefix = currentProduct?.prefix || 'default';
-    const imageUrls = currentProduct?.images?.length > 0 
-      ? currentProduct.images 
+    const productPrefix = currentProduct.prefix || 'default';
+    const images = currentProduct.images || [];
+    const imageUrls = images.length > 0 
+      ? images 
       : Array.from({ length: TOTAL_IMAGES }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
     
     let loadedCount = 0;
@@ -573,7 +614,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }
       };
       img.onerror = () => {
-        // Try fallback path
         if (i === 0) {
           const fallbackImg = new Image();
           fallbackImg.src = `/images/${productPrefix}/1.jpeg`;
@@ -692,7 +732,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const response = await fetch('/api/checkout', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          variant: currentProduct.name,
+          variant: currentProduct?.name || 'Product',
           size: selectedSize,
           email: normalizedForm.email,
           shippingAddress: normalizedForm.shippingAddress,
@@ -893,7 +933,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
-          {(currentProduct?.notes || []).map((note, idx) => {
+          {currentProduct && currentProduct.notes && currentProduct.notes.length > 0 && currentProduct.notes.map((note, idx) => {
             const isLeft = idx % 2 === 0;
             const topOffset = 100 + idx * 90;
             const activeColor = idx % 2 === 0 ? configPalette.accentPurple : configPalette.accentBlue;
@@ -1092,13 +1132,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>SUPPORT</p>
-                <a 
-                  href={`mailto:${config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}`} 
-                  style={{ color: '#888', display: 'block', marginBottom: 6, textDecoration: 'none' }}
-                >
-                  {config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}
-                </a>
-                <Link href="/account" style={{ color: '#888', display: 'block', marginBottom: 6, textDecoration: 'none' }}>Manage My Entry</Link>
+                <span style={{ color: '#888', display: 'block', marginBottom: 6 }}>{config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}</span>
+                <a href="/account" style={{ color: '#888', display: 'block', marginBottom: 6 }}>Manage My Entry</a>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', fontSize: 10 }}>
@@ -1125,11 +1160,11 @@ function getDefaultProducts(): StoreProduct[] {
       prefix: 'elysian-white',
       tagline: 'WHITE ALLOCATION / 01',
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
-      price50ml: 85,
-      price100ml: 140,
-      stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
-      stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
-      maxRaffleAllocationLimit: 10,
+      price50ml: 0,
+      price100ml: 0,
+      stripeId50ml: 'price_placeholder_50ml',
+      stripeId100ml: 'price_placeholder_100ml',
+      maxRaffleAllocationLimit: 0,
       isActive: true,
       isArchived: false,
       notes: [
@@ -1138,8 +1173,8 @@ function getDefaultProducts(): StoreProduct[] {
         { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
       ],
       images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-      totalInventory: 9,
-      winnerTiers: [2, 2, 2, 2, 1],
+      totalInventory: 0,
+      winnerTiers: [0],
     },
     {
       id: 'prod_obsidian_void',
@@ -1148,11 +1183,11 @@ function getDefaultProducts(): StoreProduct[] {
       prefix: 'obsidian-void',
       tagline: 'BLACK ALLOCATION / 02',
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-      price50ml: 85,
-      price100ml: 140,
-      stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
-      stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
-      maxRaffleAllocationLimit: 5,
+      price50ml: 0,
+      price100ml: 0,
+      stripeId50ml: 'price_placeholder_50ml',
+      stripeId100ml: 'price_placeholder_100ml',
+      maxRaffleAllocationLimit: 0,
       isActive: true,
       isArchived: false,
       notes: [
@@ -1161,8 +1196,8 @@ function getDefaultProducts(): StoreProduct[] {
         { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
       ],
       images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
-      totalInventory: 5,
-      winnerTiers: [1],
+      totalInventory: 0,
+      winnerTiers: [0],
     }
   ];
 }
@@ -1177,6 +1212,5 @@ function getNextDrawTimestampForSchedule(schedule: any): number {
     } catch {}
   }
   
-  // Default: 24 hours from now
   return Date.now() + 24 * 60 * 60 * 1000;
 }
