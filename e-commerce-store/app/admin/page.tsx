@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-type Tab = 'overview' | 'drops' | 'orders' | 'growth' | 'ledger' | 'system';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -83,16 +83,13 @@ const buttonGhost: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-
-/** Always send Basic Auth credentials so /api/admin/* middleware does not 401. */
 function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, credentials: 'include' });
 }
 
-
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
-  const [drawsSub, setDrawsSub] = useState<'run' | 'inventory' | 'catalog' | 'schedule'>('run');
+  const [drawsSub, setDrawsSub] = useState<'run' | 'inventory' | 'automation'>('run');
   const [password, setPassword] = useState('');
   const [toast, setToast] = useState('');
   const [status, setStatus] = useState<any>(null);
@@ -115,13 +112,6 @@ export default function AdminPortal() {
   const [catalogMessage, setCatalogMessage] = useState('');
   const [archivedIds, setArchivedIds] = useState<string[]>([]);
 
-  const [orders, setOrders] = useState<any[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  const [orderSearch, setOrderSearch] = useState('');
-  const [editingOrderKey, setEditingOrderKey] = useState<string | null>(null);
-  const [orderAddressDraft, setOrderAddressDraft] = useState('');
-  const [orderMsg, setOrderMsg] = useState('');
-
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -130,6 +120,9 @@ export default function AdminPortal() {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('ALL');
   const [shipMsg, setShipMsg] = useState('');
+  const [editingShipEntry, setEditingShipEntry] = useState<string | null>(null);
+  const [shipStatusDraft, setShipStatusDraft] = useState('');
+  const [shipTrackingDraft, setShipTrackingDraft] = useState('');
 
   const [recovery, setRecovery] = useState({ enabled: true, earlyDelayHours: 3, preDrawHours: 24, preDrawEnabled: true });
   const [recoveryMsg, setRecoveryMsg] = useState('');
@@ -149,6 +142,9 @@ export default function AdminPortal() {
 
   const [selftestResults, setSelftestResults] = useState<any>(null);
   const [selftestRunning, setSelftestRunning] = useState(false);
+  
+  const [drawHistory, setDrawHistory] = useState<any[]>([]);
+  const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -221,49 +217,14 @@ export default function AdminPortal() {
     } catch {}
   };
 
-  const fetchOrders = async () => {
-    if (!password) { setOrderMsg('Enter admin password first.'); return; }
-    setOrdersLoading(true);
+  const fetchDrawHistory = async () => {
+    setDrawHistoryLoading(true);
     try {
-      const res = await adminFetch(`/api/admin/orders?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/draw-history');
       const data = await res.json();
-      if (res.ok) { setOrders(Array.isArray(data.orders) ? data.orders : []); setOrderMsg(''); }
-      else setOrderMsg(data.error || 'Failed to load orders.');
-    } catch {
-      setOrderMsg('Connection failed.');
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-
-  const cancelOrder = async (order: any) => {
-    if (!password) return alert('Enter password');
-    const reason = prompt(`Cancel ${order.email}'s entry for ${order.variant} (${order.size})? Optional reason:`);
-    if (reason === null) return;
-    try {
-      const res = await adminFetch('/api/admin/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'cancel', variant: order.variant, size: order.size, email: order.email, reason }),
-      });
-      const data = await res.json();
-      if (res.ok) { setOrderMsg('Order cancelled.'); await fetchOrders(); } else setOrderMsg(data.error || 'Failed.');
-    } catch {
-      setOrderMsg('Connection failed.');
-    }
-  };
-
-  const saveOrderAddress = async (order: any) => {
-    if (!password) return alert('Enter password');
-    try {
-      const res = await adminFetch('/api/admin/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'updateAddress', variant: order.variant, size: order.size, email: order.email, newAddress: orderAddressDraft }),
-      });
-      const data = await res.json();
-      if (res.ok) { setOrderMsg('Address updated.'); setEditingOrderKey(null); await fetchOrders(); } else setOrderMsg(data.error || 'Failed.');
-    } catch {
-      setOrderMsg('Connection failed.');
-    }
+      if (Array.isArray(data.draws)) setDrawHistory(data.draws);
+    } catch {}
+    setDrawHistoryLoading(false);
   };
 
   const saveSchedule = async () => {
@@ -396,6 +357,7 @@ export default function AdminPortal() {
         setResultMessage(lines.join('\n'));
         showToast('UPDATED · Draw complete');
         await fetchStatus();
+        await fetchDrawHistory();
       } else setResultMessage(data.error || 'Failed');
     } catch {
       setResultMessage('Connection failed');
@@ -481,16 +443,28 @@ export default function AdminPortal() {
     }
   };
 
-  const updateShipping = async (row: any, shippingStatus: string) => {
+  const updateShipping = async (entry: any, shippingStatus: string, trackingNumber?: string) => {
     if (!password) return alert('Enter password');
     setShipMsg('Updating…');
     try {
       const res = await adminFetch('/api/admin/shipping-status', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, email: row.email, variant: row.variant, size: row.size, shippingStatus }),
+        body: JSON.stringify({ 
+          password, 
+          email: entry.email, 
+          variant: entry.variant, 
+          size: entry.size, 
+          shippingStatus,
+          trackingNumber: trackingNumber || undefined
+        }),
       });
       const data = await res.json();
-      if (res.ok) { setShipMsg(`Updated ${data.updated || 0} record(s) → ${shippingStatus}.`); showToast('UPDATED · Shipping'); await fetchStatus(); } else setShipMsg(data.error || 'Failed');
+      if (res.ok) {
+        setShipMsg(`Updated ${data.updated || 0} record(s) → ${shippingStatus}.`);
+        showToast('UPDATED · Shipping');
+        await fetchStatus();
+        setEditingShipEntry(null);
+      } else setShipMsg(data.error || 'Failed');
     } catch {
       setShipMsg('Failed');
     }
@@ -535,6 +509,22 @@ export default function AdminPortal() {
     await fetchPromos();
   };
 
+  const cancelOrder = async (entry: any) => {
+    if (!password) return alert('Enter password');
+    const reason = prompt(`Cancel ${entry.email}'s entry for ${entry.variant} (${entry.size})? Optional reason:`);
+    if (reason === null) return;
+    try {
+      const res = await adminFetch('/api/admin/cancel-entry', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, variant: entry.variant, size: entry.size, email: entry.email, reason }),
+      });
+      const data = await res.json();
+      if (res.ok) { setShipMsg('Entry cancelled.'); await fetchStatus(); } else setShipMsg(data.error || 'Failed.');
+    } catch {
+      setShipMsg('Connection failed.');
+    }
+  };
+
   const pools = status?.pools || [];
   const totalInt = pools.reduce((s: number, p: any) => s + (p.intCount || 0), 0);
   const totalSub = pools.reduce((s: number, p: any) => s + (p.subCount || 0), 0);
@@ -551,20 +541,13 @@ export default function AdminPortal() {
   const currentEntries = filteredEntries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const winnerRows = (status?.fallbackEntries || []).filter((e: any) => e?.type === 'WINNER_CHARGED');
 
-  const filteredOrders = orders.filter((o) => {
-    if (!orderSearch.trim()) return true;
-    const q = orderSearch.toLowerCase();
-    return o.email.toLowerCase().includes(q) || o.variant.toLowerCase().includes(q) || (o.promoCode || '').toLowerCase().includes(q);
-  });
-
   const totalOwed = promos.reduce((s, p) => s + (p.payoutOwedCents || 0), 0);
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'drops', label: 'Drops' },
-    { id: 'orders', label: 'Orders', badge: orders.length || undefined },
-    { id: 'growth', label: 'Growth', badge: totalOwed > 0 ? Math.round(totalOwed / 100) : undefined },
     { id: 'ledger', label: 'Ledger' },
+    { id: 'growth', label: 'Growth', badge: totalOwed > 0 ? Math.round(totalOwed / 100) : undefined },
     { id: 'system', label: 'System' },
   ];
 
@@ -604,8 +587,8 @@ export default function AdminPortal() {
               onClick={() => {
                 setTab(t.id);
                 if (t.id === 'growth') { fetchPromos(); fetchAudit(); }
-                if (t.id === 'orders' && orders.length === 0) fetchOrders();
-                if (t.id === 'system') fetchAudit();
+                if (t.id === 'system') { fetchAudit(); fetchDrawHistory(); }
+                if (t.id === 'drops') fetchConfig();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -667,14 +650,14 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ DROPS (draw + inventory + catalog + schedule) ============ */}
+        {/* ============ DROPS ============ */}
         {tab === 'drops' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(['run', 'inventory', 'catalog', 'schedule'] as const).map((s) => (
-                <button key={s} onClick={() => { setDrawsSub(s); if (s === 'schedule') fetchConfig(); }}
+              {(['run', 'inventory', 'automation'] as const).map((s) => (
+                <button key={s} onClick={() => { setDrawsSub(s); if (s === 'automation') fetchConfig(); if (s === 'run') fetchDrawHistory(); }}
                   style={{ ...buttonGhost, border: drawsSub === s ? '1px solid #fff' : '1px solid #333', background: drawsSub === s ? '#1c1c1e' : 'transparent', textTransform: 'capitalize' }}>
-                  {s === 'run' ? 'Run Draw' : s}
+                  {s === 'run' ? 'Run Draw' : s === 'automation' ? 'Automation' : s}
                 </button>
               ))}
             </div>
@@ -705,124 +688,107 @@ export default function AdminPortal() {
                   </a>
                 )}
                 {resultMessage && <pre style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10, whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: '#09090b', padding: 12, borderRadius: 10 }}>{resultMessage}</pre>}
+                
                 <div style={{ marginTop: 16, fontSize: 12 }}>
-                  <div style={{ color: '#888', marginBottom: 8 }}>Most recent draw</div>
-                  {status?.lastDraw ? (
-                    <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-                      <div style={{ color: '#666', marginBottom: 6 }}>{status.lastDraw.executionTime} · {status.lastDraw.totalSuccessfulCharges ?? 0} charged
-                        {status.lastDraw.totalRevenueCents != null ? ` · $${(status.lastDraw.totalRevenueCents / 100).toFixed(2)}` : ''}
-                      </div>
-                      {(status.lastDraw.processedWinners || []).map((w: any, i: number) => (
-                        <div key={i} style={{ background: '#09090b', padding: 10, borderRadius: 8, marginBottom: 6 }}>
-                          <div>{w.email}</div>
-                          <div style={{ color: '#34d399', fontSize: 11 }}>{w.product} — {w.size} · {w.status}{w.amountCents ? ` · $${(w.amountCents / 100).toFixed(2)}` : ''}{w.promoCode ? ` · promo ${w.promoCode}` : ''}</div>
-                          <div style={{ color: '#666', fontSize: 11 }}>{revealAddresses ? w.shippingAddress : '••••'}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ color: '#888' }}>Draw History</div>
+                    <button onClick={fetchDrawHistory} disabled={drawHistoryLoading} style={buttonGhost}>
+                      {drawHistoryLoading ? 'Loading…' : 'Refresh'}
+                    </button>
+                  </div>
+                  {drawHistory.length === 0 && !drawHistoryLoading && (
+                    <p style={{ color: '#555' }}>No draws have been run yet.</p>
+                  )}
+                  {drawHistoryLoading && <p style={{ color: '#555' }}>Loading history…</p>}
+                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                    {drawHistory.map((draw: any, idx: number) => (
+                      <div key={idx} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ color: '#34d399', fontWeight: 600 }}>Draw #{draw.drawNumber || idx + 1}</span>
+                          <span style={{ color: '#666', fontSize: 11 }}>{draw.executionTime || draw.timestamp || 'Unknown time'}</span>
                         </div>
-                      ))}
-                    </div>
-                  ) : <p style={{ color: '#555' }}>No draw has run yet.</p>}
+                        <div style={{ color: '#888', fontSize: 11 }}>
+                          {draw.totalSuccessfulCharges ?? draw.chargedCount ?? 0} charged · 
+                          {draw.totalRevenueCents != null ? ` $${(draw.totalRevenueCents / 100).toFixed(2)}` : ''}
+                          {draw.winnerCount != null ? ` · ${draw.winnerCount} winners` : ''}
+                        </div>
+                        {(draw.processedWinners || []).slice(0, 5).map((w: any, i: number) => (
+                          <div key={i} style={{ fontSize: 11, color: '#666', marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #222' }}>
+                            {w.email} · {w.product || w.variant || ''} {w.size || ''}
+                            {w.status === 'SUCCESS_CHARGED' || w.status === 'charged' ? (
+                              <span style={{ color: '#34d399' }}> ✓ ${((w.amountCents || 0) / 100).toFixed(2)}</span>
+                            ) : (
+                              <span style={{ color: '#f87171' }}> ✗ {w.status}</span>
+                            )}
+                          </div>
+                        ))}
+                        {(draw.processedWinners || []).length > 5 && (
+                          <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>+ {(draw.processedWinners || []).length - 5} more</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
             {drawsSub === 'inventory' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={cardStyle}>
-                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Pricing</h3>
+                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Update Inventory</h3>
                 <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0, marginBottom: 12 }}>
-                  This is what actually gets charged at draw time and shown on-site. If a charge ever falls back to a Stripe Checkout session (only on a declined direct charge), that session uses the price attached to the Stripe Price ID instead — keep that in sync in Stripe if you rely on that path.
+                  Manage pricing, inventory levels, and winners per draw all in one place. Takes effect immediately — no redeploy.
                 </p>
                 {(configData?.products || []).map((p: any) => (
-                  <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, background: '#09090b', padding: 10, borderRadius: 8 }}>
-                    <div style={{ flex: 1, fontSize: 12 }}>{p.name}</div>
-                    <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
-                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
-                      style={{ ...inputStyle, width: 70 }} />
-                    <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
-                      onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
-                      style={{ ...inputStyle, width: 70 }} />
-                    <button onClick={() => savePrice(p.id)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
+                  <div key={p.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{p.name}</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
+                        onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
+                        style={{ ...inputStyle, width: 80 }} />
+                      <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
+                        onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
+                        style={{ ...inputStyle, width: 80 }} />
+                      <button onClick={() => savePrice(p.id)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save Price</button>
+                    </div>
+                    {pools.filter((pool: any) => pool.product === p.name).map((pool: any) => {
+                      const key = `${pool.product}:${pool.size}`;
+                      const currentWinners = Array.isArray(pool.winnersPerDraw)
+                        ? pool.winnersPerDraw[0]
+                        : (pool.winnersPerDraw ?? 1);
+                      return (
+                        <div key={key} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
+                          <div style={{ fontSize: 11, color: '#888', minWidth: 50 }}>{pool.size}</div>
+                          <div style={{ fontSize: 11, minWidth: 80 }}>
+                            <span style={{ color: '#34d399' }}>{pool.subCount ?? 0} entered</span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Inv left</span>
+                            <input type="number" min={0} value={invEdits[key] ?? ''} placeholder={String(pool.maxLimit ?? 0)}
+                              onChange={(e) => setInvEdits((prev) => ({ ...prev, [key]: e.target.value }))}
+                              style={{ ...inputStyle, width: 72 }} />
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Winners / draw</span>
+                            <input type="number" min={1} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
+                              onChange={(e) => setWinnersEdits((prev) => ({ ...prev, [key]: e.target.value }))}
+                              style={{ ...inputStyle, width: 72 }} />
+                          </div>
+                          <button onClick={() => saveInventory(pool.product, pool.size, pool.productId)} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Save</button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
-              </div>
-              <div style={cardStyle}>
-                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Live Inventory</h3>
-                <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                  Adjust remaining inventory and how many winners are selected each draw. Takes effect immediately — no redeploy.
-                </p>
-                {pools.map((p: any, i: number) => {
-                  const key = `${p.product}:${p.size}`;
-                  const currentWinners = Array.isArray(p.winnersPerDraw)
-                    ? p.winnersPerDraw[0]
-                    : (p.winnersPerDraw ?? 1);
-                  return (
-                    <div key={i} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, background: '#09090b', padding: 12, borderRadius: 10 }}>
-                      <div style={{ flex: 1, minWidth: 140, fontSize: 12 }}>
-                        <strong>{p.product} · {p.size}</strong>
-                        <div style={{ fontSize: 11, marginTop: 4 }}>
-                          <span style={{ color: '#edb210' }}>{p.intCount ?? 0} started</span> · <span style={{ color: '#34d399' }}>{p.subCount ?? 0} entered</span> · <span style={{ color: '#60a5fa' }}>{p.salesCount ?? 0} sold</span> · <span style={{ color: '#fff' }}>{p.maxLimit ?? 0} left</span>
-                          {' · '}
-                          <span style={{ color: '#c4b5fd' }}>{currentWinners} winners/draw</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Inv left</span>
-                        <input type="number" min={0} value={invEdits[key] ?? ''} placeholder={String(p.maxLimit ?? 0)}
-                          onChange={(e) => setInvEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                          style={{ ...inputStyle, width: 72 }} />
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Winners / draw</span>
-                        <input type="number" min={1} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
-                          onChange={(e) => setWinnersEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                          style={{ ...inputStyle, width: 72 }} />
-                      </div>
-                      <button onClick={() => saveInventory(p.product, p.size, p.productId)} style={buttonPrimary}>Save</button>
-                    </div>
-                  );
-                })}
                 {invMessage && <p style={{ fontSize: 12, color: '#cbd5e1' }}>{invMessage}</p>}
               </div>
-              </div>
             )}
 
-            {drawsSub === 'catalog' && (
+            {drawsSub === 'automation' && (
               <div style={cardStyle}>
-                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Catalog Archive</h3>
-                <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                  Archive a product early, or restore it. Products also auto-archive as &quot;Sold Out&quot; when inventory hits zero.
-                </p>
-                {GOYUNIR_STORE_SUITE.productCatalog.map((product) => {
-                  const isArchived = archivedIds.includes(product.id);
-                  return (
-                    <div key={product.id} style={{ background: '#09090b', padding: 14, borderRadius: 10, marginBottom: 10, border: '1px solid #1c1c1e' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>
-                          {product.name} <span style={{ color: '#555', fontSize: 10 }}>({product.slug})</span>{' '}
-                          {isArchived && <span style={{ color: '#f59e0b' }}>ARCHIVED</span>}
-                        </div>
-                        {isArchived
-                          ? <button onClick={() => unarchiveProduct(product)} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>Restore</button>
-                          : <button onClick={() => setArchivingId(archivingId === product.id ? null : product.id)} style={{ ...buttonGhost, border: '1px solid #f59e0b', color: '#f59e0b' }}>Archive</button>}
-                      </div>
-                      {archivingId === product.id && (
-                        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <input placeholder="Available from (e.g. Next Spring)" value={availableFromInput} onChange={(e) => setAvailableFromInput(e.target.value)} style={inputStyle} />
-                          <input placeholder="Archive notes / story" value={archiveNotes} onChange={(e) => setArchiveNotes(e.target.value)} style={inputStyle} />
-                          <button onClick={() => archiveProduct(product)} style={{ ...buttonPrimary, background: '#f59e0b' }}>Confirm Archive</button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {catalogMessage && <p style={{ fontSize: 12 }}>{catalogMessage}</p>}
-              </div>
-            )}
-
-            {drawsSub === 'schedule' && (
-              <div style={cardStyle}>
-                <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Drop Schedule</h3>
-                <p style={{ fontSize: 11, color: '#888', marginTop: 0 }}>Overrides goyunir.config.ts live — no redeploy needed.</p>
+                <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Automation</h3>
+                <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>Schedule and social proof settings — overrides goyunir.config.ts live, no redeploy needed.</p>
+                
+                <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Drop Schedule</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                   <label style={{ fontSize: 11 }}>Mode
                     <select value={scheduleForm.mode || 'weekly'} onChange={(e) => setScheduleForm((f: any) => ({ ...f, mode: e.target.value }))}
@@ -869,15 +835,13 @@ export default function AdminPortal() {
                           onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawMinute: Number(e.target.value) }))}
                           style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                       </label>
-                      <label style={{ fontSize: 11 }}>Second (0-59)
-                        <input type="number" min={0} max={59} value={scheduleForm.drawSecond ?? 0}
-                          onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawSecond: Number(e.target.value) }))}
-                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                      </label>
                     </>
                   )}
                 </div>
                 <button onClick={saveSchedule} style={buttonPrimary}>Save Schedule</button>
+                {configMsg && <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10 }}>{configMsg}</p>}
+
+                <h4 style={{ fontSize: 11, color: '#aaa', margin: '20px 0 8px', textTransform: 'uppercase' }}>Social Proof Counter</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                   <label style={{ fontSize: 11 }}>Base count
                     <input type="number" value={socialForm.baseCount ?? 0} onChange={(e) => setSocialForm((f: any) => ({ ...f, baseCount: Number(e.target.value) }))}
@@ -897,123 +861,115 @@ export default function AdminPortal() {
                   </label>
                 </div>
                 <button onClick={saveSocial} style={buttonPrimary}>Save Social Proof</button>
-                {configMsg && <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10 }}>{configMsg}</p>}
+
+                <h4 style={{ fontSize: 11, color: '#aaa', margin: '20px 0 8px', textTransform: 'uppercase' }}>Abandoned Entry Recovery</h4>
+                <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+                  Emails people who started but never finished checkout — an early nudge, and an optional pre-draw reminder. Sends at most twice per person per product.
+                </p>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={recovery.enabled} onChange={(e) => setRecovery((r) => ({ ...r, enabled: e.target.checked }))} />
+                    Enable early nudge
+                  </label>
+                  <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={recovery.preDrawEnabled} onChange={(e) => setRecovery((r) => ({ ...r, preDrawEnabled: e.target.checked }))} />
+                    Enable pre-draw reminder
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
+                  <label style={{ fontSize: 11 }}>Early nudge delay (hours)
+                    <input type="number" value={recovery.earlyDelayHours} onChange={(e) => setRecovery((r) => ({ ...r, earlyDelayHours: Number(e.target.value) }))}
+                      style={{ ...inputStyle, display: 'block', width: 80, marginTop: 4 }} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>Pre-draw window (hours)
+                    <input type="number" value={recovery.preDrawHours} onChange={(e) => setRecovery((r) => ({ ...r, preDrawHours: Number(e.target.value) }))}
+                      style={{ ...inputStyle, display: 'block', width: 80, marginTop: 4 }} />
+                  </label>
+                </div>
+                <button onClick={saveRecovery} style={{ ...buttonPrimary, marginTop: 12 }}>Save Recovery Settings</button>
+                {recoveryMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{recoveryMsg}</p>}
               </div>
             )}
           </div>
         )}
 
-        {/* ============ ORDERS ============ */}
-        {tab === 'orders' && (
+        {/* ============ LEDGER ============ */}
+        {tab === 'ledger' && (
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Open Orders ({orders.length})</h2>
-              <button onClick={fetchOrders} disabled={ordersLoading} style={buttonGhost}>{ordersLoading ? 'Loading…' : 'Refresh'}</button>
+            <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Full Ledger</h2>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>Every event, ever, for every entry — nothing is deleted. Filter, search, and manage entries directly.</p>
+            
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <select value={ledgerTypeFilter} onChange={(e) => setLedgerTypeFilter(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 120 }}>
+                <option value="ALL">All event types</option>
+                <option value="ENTERED">Entered</option>
+                <option value="WINNER_CHARGED">Won & Charged</option>
+                <option value="NOT_SELECTED">Not Selected</option>
+                <option value="WINNER_DECLINED">Charge Declined</option>
+                <option value="CANCELLED_BY_USER">Cancelled (Customer)</option>
+                <option value="CANCELLED_BY_ADMIN">Cancelled (Admin)</option>
+                <option value="INTENT_STARTED">Started (Unfinished)</option>
+                <option value="ADDRESS_UPDATED">Address Changed</option>
+              </select>
             </div>
-            <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
-              Every currently-active entry across every product. Cancel or edit any order directly — useful for resolving support requests without needing the customer's card details.
-            </p>
-            <input placeholder="Search by email, product, or promo code…" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)}
+            <input placeholder="Search email, product, or address…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               style={{ ...inputStyle, width: '100%', marginBottom: 12 }} />
-            {orderMsg && <p style={{ fontSize: 12, color: '#cbd5e1', marginBottom: 10 }}>{orderMsg}</p>}
-            {filteredOrders.length === 0 && !ordersLoading && (
-              <p style={{ color: '#555', fontSize: 13, textAlign: 'center', border: '1px dashed #222', padding: 24, borderRadius: 12 }}>
-                {orders.length === 0 ? 'No open orders, or click Refresh to load.' : 'No orders match your search.'}
-              </p>
-            )}
-            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-              {filteredOrders.map((o) => {
-                const key = `${o.variant}-${o.size}-${o.email}`;
+            {isSearching && <p style={{ fontSize: 11, color: '#666' }}>Searching…</p>}
+            {shipMsg && <p style={{ fontSize: 12, color: '#34d399', marginBottom: 10 }}>{shipMsg}</p>}
+            
+            <div>
+              {currentEntries.map((e: any, i: number) => {
+                const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
+                const isEditing = editingShipEntry === entryKey;
                 return (
-                  <div key={key} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <div style={{ fontWeight: 600 }}>{o.email}</div>
-                      <div style={{ color: '#34d399' }}>{o.variant} — {o.size}</div>
+                  <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
+                    <div style={{ fontWeight: 600 }}>{e.email}</div>
+                    <div style={{ color: '#888' }}>
+                      {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
+                      {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {e.promoCode}</span>}
+                      {e.amountCents && <span style={{ color: '#34d399', marginLeft: 6 }}>· ${(e.amountCents / 100).toFixed(2)}</span>}
                     </div>
-                    <div style={{ color: '#666', marginTop: 4 }}>
-                      📍 {revealAddresses ? o.shippingAddress || 'n/a' : '•••• hidden'}
-                      {o.cardLast4 && <span> · card ••{o.cardLast4}</span>}
-                      {o.promoCode && <span style={{ color: '#edb210' }}> · promo {o.promoCode}</span>}
-                    </div>
-                    {editingOrderKey === key ? (
-                      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                        <input value={orderAddressDraft} onChange={(e) => setOrderAddressDraft(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                        <button onClick={() => saveOrderAddress(o)} style={{ ...buttonPrimary, background: '#34d399', padding: '8px 12px', fontSize: 11 }}>Save</button>
-                        <button onClick={() => setEditingOrderKey(null)} style={{ ...buttonGhost, padding: '8px 12px' }}>Cancel</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                        <button onClick={() => { setEditingOrderKey(key); setOrderAddressDraft(o.shippingAddress); }} style={buttonGhost}>Edit Address</button>
-                        <button onClick={() => cancelOrder(o)} style={{ ...buttonGhost, border: '1px solid #f87171', color: '#f87171' }}>Cancel Order</button>
+                    <div style={{ color: '#666', marginTop: 4 }}>{revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}</div>
+                    {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
+                      <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {isEditing ? (
+                          <>
+                            <select value={shipStatusDraft} onChange={(ev) => setShipStatusDraft(ev.target.value)}
+                              style={{ ...inputStyle, padding: 6, flex: 1 }}>
+                              {SHIP_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                            </select>
+                            <input type="text" value={shipTrackingDraft} onChange={(ev) => setShipTrackingDraft(ev.target.value)}
+                              placeholder="Tracking # (optional)" style={{ ...inputStyle, padding: 6, flex: 1 }} />
+                            <button onClick={() => updateShipping(e, shipStatusDraft, shipTrackingDraft)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
+                            <button onClick={() => setEditingShipEntry(null)} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditingShipEntry(entryKey); setShipStatusDraft(e.shippingStatus || 'PENDING_FULFILLMENT'); setShipTrackingDraft(e.trackingNumber || ''); }} style={buttonGhost}>
+                              Update Shipping
+                            </button>
+                            <button onClick={() => cancelOrder(e)} style={{ ...buttonGhost, border: '1px solid #f87171', color: '#f87171' }}>Cancel Entry</button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
                 );
               })}
             </div>
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                <button disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} style={buttonGhost}>Prev</button>
+                <span style={{ fontSize: 12, color: '#888' }}>{currentPage}/{totalPages}</span>
+                <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} style={buttonGhost}>Next</button>
+              </div>
+            )}
           </div>
         )}
 
         {/* ============ GROWTH ============ */}
         {tab === 'growth' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Social Proof Number</h2>
-              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                The "X people entered" counter on the storefront. Real entries always count accurately; this optionally adds a small artificial boost on top for hype.
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                <label style={{ fontSize: 11 }}>Base count
-                  <input type="number" value={socialForm.baseCount ?? 0} onChange={(e) => setSocialForm((f: any) => ({ ...f, baseCount: Number(e.target.value) }))}
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                </label>
-                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginTop: 20 }}>
-                  <input type="checkbox" checked={socialForm.autoIncrementEnabled !== false} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementEnabled: e.target.checked }))} />
-                  Auto-increment hype ticks
-                </label>
-                <label style={{ fontSize: 11 }}>Max ticks/day
-                  <input type="number" value={socialForm.autoIncrementMaxPerDay ?? 4} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxPerDay: Number(e.target.value) }))}
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                </label>
-                <label style={{ fontSize: 11 }}>Min hours between ticks
-                  <input type="number" value={socialForm.autoIncrementMinHourGap ?? 3} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                </label>
-              </div>
-              <button onClick={saveSocial} style={buttonPrimary}>Save Social Proof</button>
-              <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 10 }}>
-                The hype ticks require an hourly hit to <code>/api/analytics/social-tick</code> — see the note below the recovery box about setting that up in Upstash QStash. Without that scheduled call, this only ever shows real entries, which is likely what you're seeing right now.
-              </p>
-            </div>
-            <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Abandoned Entry Recovery</h2>
-              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Emails people who started but never finished checkout — an early nudge, and an optional pre-draw reminder. Sends at most twice per person per product. Runs hourly via your Upstash QStash schedule.
-              </p>
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-                <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input type="checkbox" checked={recovery.enabled} onChange={(e) => setRecovery((r) => ({ ...r, enabled: e.target.checked }))} />
-                  Enable early nudge
-                </label>
-                <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input type="checkbox" checked={recovery.preDrawEnabled} onChange={(e) => setRecovery((r) => ({ ...r, preDrawEnabled: e.target.checked }))} />
-                  Enable pre-draw reminder
-                </label>
-              </div>
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
-                <label style={{ fontSize: 11 }}>Early nudge delay (hours)
-                  <input type="number" value={recovery.earlyDelayHours} onChange={(e) => setRecovery((r) => ({ ...r, earlyDelayHours: Number(e.target.value) }))}
-                    style={{ ...inputStyle, display: 'block', width: 80, marginTop: 4 }} />
-                </label>
-                <label style={{ fontSize: 11 }}>Pre-draw window (hours)
-                  <input type="number" value={recovery.preDrawHours} onChange={(e) => setRecovery((r) => ({ ...r, preDrawHours: Number(e.target.value) }))}
-                    style={{ ...inputStyle, display: 'block', width: 80, marginTop: 4 }} />
-                </label>
-              </div>
-              <button onClick={saveRecovery} style={{ ...buttonPrimary, marginTop: 12 }}>Save Recovery Settings</button>
-              {recoveryMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{recoveryMsg}</p>}
-            </div>
-
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promoter / Affiliate Codes</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
@@ -1071,54 +1027,6 @@ export default function AdminPortal() {
                 ))}
               </div>
             </div>
-          </div>
-        )}
-
-        {/* ============ LEDGER ============ */}
-        {tab === 'ledger' && (
-          <div style={cardStyle}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Full Ledger</h2>
-            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>Every event, ever, for every entry — nothing is deleted. Filter by type or search freely.</p>
-            <select value={ledgerTypeFilter} onChange={(e) => setLedgerTypeFilter(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: 10 }}>
-              <option value="ALL">All event types</option>
-              <option value="ENTERED">Entered</option>
-              <option value="WINNER_CHARGED">Won & Charged</option>
-              <option value="NOT_SELECTED">Not Selected</option>
-              <option value="WINNER_DECLINED">Charge Declined</option>
-              <option value="CANCELLED_BY_USER">Cancelled (Customer)</option>
-              <option value="CANCELLED_BY_ADMIN">Cancelled (Admin)</option>
-              <option value="INTENT_STARTED">Started (Unfinished)</option>
-              <option value="ADDRESS_UPDATED">Address Changed</option>
-            </select>
-            <input placeholder="Search email, product, or address…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ ...inputStyle, width: '100%', marginBottom: 12 }} />
-            {isSearching && <p style={{ fontSize: 11, color: '#666' }}>Searching…</p>}
-            <div>
-              {currentEntries.map((e: any, i: number) => (
-                <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>{e.email}</div>
-                  <div style={{ color: '#888' }}>
-                    {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
-                    {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {e.promoCode}</span>}
-                  </div>
-                  <div style={{ color: '#666', marginTop: 4 }}>{revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}</div>
-                  {e.type === 'WINNER_CHARGED' && (
-                    <select defaultValue={e.shippingStatus || 'PENDING_FULFILLMENT'} onChange={(ev) => updateShipping(e, ev.target.value)}
-                      style={{ ...inputStyle, marginTop: 8, padding: 6 }}>
-                      {SHIP_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-                    </select>
-                  )}
-                </div>
-              ))}
-            </div>
-            {shipMsg && <p style={{ fontSize: 11, color: '#34d399' }}>{shipMsg}</p>}
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
-                <button disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} style={buttonGhost}>Prev</button>
-                <span style={{ fontSize: 12, color: '#888' }}>{currentPage}/{totalPages}</span>
-                <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} style={buttonGhost}>Next</button>
-              </div>
-            )}
           </div>
         )}
 

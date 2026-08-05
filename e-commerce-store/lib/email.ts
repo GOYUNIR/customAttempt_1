@@ -56,7 +56,7 @@ export async function sendEntryConfirmedEmail(opts: {
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
-          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">You're entered</h1>
+          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You're entered!</h1>
           <p style="margin:0 0 12px">You're in the allocation for <strong>${opts.product}</strong> · ${opts.size}.</p>
           ${priceLine}
           ${addressLine}
@@ -98,7 +98,7 @@ export async function sendWinnerEmail(opts: {
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
-          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">You've been selected</h1>
+          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You've been selected!</h1>
           <p style="margin:0 0 12px">Your card was charged for <strong>${opts.product}</strong> · ${opts.size}${opts.amountLabel ? ` (${opts.amountLabel})` : ''}.</p>
           ${opts.promoCode ? `<p style="margin:0 0 12px;color:#666;font-size:13px">Promo <strong>${opts.promoCode}</strong> applied.</p>` : ''}
           <p style="margin:0 0 12px">We'll ship to the address on your entry. Tracking follows when the label is created.</p>
@@ -204,7 +204,7 @@ export async function sendAccountUpdateEmail(opts: {
   to: string;
   product: string;
   size?: string;
-  changeType: 'address' | 'payment' | 'cancelled';
+  changeType: 'address' | 'payment' | 'cancelled' | 'shipping';
   newAddress?: string;
 }) {
   const resend = getResend();
@@ -217,13 +217,17 @@ export async function sendAccountUpdateEmail(opts: {
       ? 'Shipping address updated'
       : opts.changeType === 'payment'
         ? 'Payment method updated'
-        : 'Entry cancelled';
+        : opts.changeType === 'shipping'
+          ? 'Shipping status updated'
+          : 'Entry cancelled';
   const body =
     opts.changeType === 'address'
       ? `Your shipping address for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was changed to:</p><p style="margin:0 0 12px;color:#444;font-size:13px">${opts.newAddress || ''}`
       : opts.changeType === 'payment'
         ? `Your payment method on file for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was updated.`
-        : `Your entry for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was cancelled.`;
+        : opts.changeType === 'shipping'
+          ? `Your order for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} has been updated: ${opts.newAddress || ''}`
+          : `Your entry for <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''} was cancelled.`;
   try {
     const { data, error } = await resend.emails.send({
       from: from(),

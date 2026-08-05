@@ -119,7 +119,7 @@ export default function CatalogPage() {
       }}
     >
       <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-      <Link
+        <Link
           href="/"
           style={{
             display: 'inline-flex',
@@ -138,7 +138,8 @@ export default function CatalogPage() {
           }}
         >
           ← Back to store
-        </Link>        <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
+        </Link>
+        <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
           Tap an archived scent to open its page and save a spot for the return.
         </p>

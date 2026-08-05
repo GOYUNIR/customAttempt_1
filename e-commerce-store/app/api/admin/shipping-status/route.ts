@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem } from '@/lib/server-config';
+import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,12 +21,16 @@ export async function POST(request: Request) {
     const variant = String(body?.variant || '');
     const size = String(body?.size || '');
     const shippingStatus = String(body?.shippingStatus || '');
+    const trackingNumber = String(body?.trackingNumber || '').trim();
+    
     if (!email || !variant || !ALLOWED.includes(shippingStatus)) {
       return NextResponse.json({ error: 'Bad payload' }, { status: 400 });
     }
 
     const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     let updated = 0;
+    let updatedEntry: any = null;
+    
     for (let i = 0; i < all.length; i++) {
       const e = safeParseRedisItem<any>(all[i]);
       if (!e) continue;
@@ -35,8 +40,29 @@ export async function POST(request: Request) {
         e.variant === variant &&
         (!size || e.size === size)
       ) {
-        await redis.lset(ARCHIVE_LEDGER_KEY, i, JSON.stringify({ ...e, shippingStatus }));
+        const updatedEntryData = { 
+          ...e, 
+          shippingStatus,
+          ...(trackingNumber ? { trackingNumber } : {}),
+        };
+        await redis.lset(ARCHIVE_LEDGER_KEY, i, JSON.stringify(updatedEntryData));
         updated++;
+        updatedEntry = updatedEntryData;
+      }
+    }
+
+    // Send email notification if we updated an entry
+    if (updated > 0 && updatedEntry) {
+      try {
+        await sendAccountUpdateEmail({
+          to: email,
+          product: variant,
+          size: size || undefined,
+          changeType: 'shipping',
+          newAddress: `Status: ${shippingStatus}${trackingNumber ? `, Tracking: ${trackingNumber}` : ''}`,
+        });
+      } catch (e) {
+        console.error('[shipping-status] email failed', e);
       }
     }
 

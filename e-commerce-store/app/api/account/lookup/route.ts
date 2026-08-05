@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
     const poolMatches = await findPoolEntriesByEmail(redis, productNames, email);
 
+    // Build a map of ALL statuses from the ledger (not just terminal)
     const statusByKey: Record<
       string,
       {
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
         if (String(e.email || '').toLowerCase() !== email) continue;
         const key = `${e.variant}|${e.size}`;
         const existing = statusByKey[key];
+        // Keep the most recent status for each variant/size
         if (!existing || new Date(e.registeredAt).getTime() >= new Date(existing.registeredAt).getTime()) {
           statusByKey[key] = {
             type: e.type,
@@ -66,6 +68,7 @@ export async function POST(request: Request) {
 
     const entries: any[] = [];
 
+    // Add active pool entries
     for (const m of poolMatches) {
       const cardLast4 = String(m.parsed.cardLast4 || '');
       if (cardLast4 && cardLast4 !== last4) continue;
@@ -101,14 +104,17 @@ export async function POST(request: Request) {
             )
           : undefined;
 
+      // Use the status from the ledger if it exists, otherwise ENTERED
+      const status = settled && TERMINAL_TYPES.includes(settled.type) ? settled.type : 'ENTERED';
+
       entries.push({
         variant: m.variant,
         size: m.size,
         shippingAddress: m.parsed.shippingAddress || m.parsed.address || '',
-        registeredAt: m.parsed.registeredAt,
+        registeredAt: m.parsed.registeredAt || settled?.registeredAt || new Date().toISOString(),
         source: 'active_pool',
         cardLast4: cardLast4 || last4,
-        status: settled && TERMINAL_TYPES.includes(settled.type) ? settled.type : 'ENTERED',
+        status,
         shippingStatus: settled?.shippingStatus,
         amountCents: settled?.amountCents,
         promoCode,
@@ -118,8 +124,8 @@ export async function POST(request: Request) {
       });
     }
 
+    // Add ALL ledger entries (not just terminal) that aren't already in the pool list
     for (const [key, s] of Object.entries(statusByKey)) {
-      if (!TERMINAL_TYPES.includes(s.type)) continue;
       const [variant, size] = key.split('|');
       const alreadyListed = entries.some((e) => e.variant === variant && e.size === size);
       if (alreadyListed) continue;
@@ -127,7 +133,16 @@ export async function POST(request: Request) {
       const product = GOYUNIR_STORE_SUITE.productCatalog.find(
         (p) => p.name === variant || p.id === variant,
       );
-      const listPrice = product ? getProductPrice(product, size) : undefined;
+      let listPrice: number | undefined;
+      if (product) {
+        try {
+          const override = await getProductOverride(redis, product.id);
+          const ov = size === '100ml' ? override?.price100ml : override?.price50ml;
+          listPrice = typeof ov === 'number' ? ov : getProductPrice(product, size);
+        } catch {
+          listPrice = getProductPrice(product, size);
+        }
+      }
 
       entries.push({
         variant,
@@ -146,24 +161,37 @@ export async function POST(request: Request) {
       });
     }
 
-    if (entries.length === 0 && stripe) {
-      const customers = await stripe.customers.list({ email, limit: 3 });
-      for (const c of customers.data) {
-        const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
-        const matchPm = pms.data.find((pm) => pm.card?.last4 === last4);
-        if (matchPm) {
-          entries.push({
-            variant: '(saved in Stripe — complete entry on site if missing)',
-            size: '—',
-            shippingAddress: c.metadata?.initialShippingAddress || c.address?.line1 || '',
-            registeredAt: new Date(c.created * 1000).toISOString(),
-            source: 'stripe_only',
-            cardLast4: last4,
-            status: 'ENTERED',
-          });
+    // Also check Stripe for any customers with this card that might not have entries
+    if (stripe) {
+      try {
+        const customers = await stripe.customers.list({ email, limit: 5 });
+        for (const c of customers.data) {
+          const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
+          const matchPm = pms.data.find((pm) => pm.card?.last4 === last4);
+          if (matchPm) {
+            const alreadyInEntries = entries.some((e) => e.source === 'stripe_only');
+            if (!alreadyInEntries) {
+              entries.push({
+                variant: '(saved card)',
+                size: '—',
+                shippingAddress: c.metadata?.initialShippingAddress || c.address?.line1 || '',
+                registeredAt: new Date(c.created * 1000).toISOString(),
+                source: 'stripe_only',
+                cardLast4: last4,
+                status: 'ENTERED',
+              });
+            }
+          }
         }
-      }
+      } catch {}
     }
+
+    // Sort entries by registeredAt (newest first)
+    entries.sort((a, b) => {
+      const dateA = new Date(a.registeredAt || 0).getTime();
+      const dateB = new Date(b.registeredAt || 0).getTime();
+      return dateB - dateA;
+    });
 
     if (entries.length === 0) {
       return NextResponse.json({ error: 'No matching entry found.' }, { status: 404 });

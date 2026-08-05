@@ -51,6 +51,7 @@ export default function AccountPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [editingAddressFor, setEditingAddressFor] = useState<string | null>(null);
   const [addressDraft, setAddressDraft] = useState('');
+  const [paymentPortalFor, setPaymentPortalFor] = useState<string | null>(null);
 
   const lookup = async () => {
     setIsBusy(true);
@@ -122,13 +123,14 @@ export default function AccountPage() {
     }
   };
 
-  const openPaymentPortal = async () => {
+  const openPaymentPortal = async (entry?: EntryRecord) => {
     setIsBusy(true);
+    setPaymentPortalFor(entry ? `${entry.variant}|${entry.size}` : 'all');
     try {
       const res = await fetch('/api/account/payment-portal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, last4 }),
+        body: JSON.stringify({ email, last4, variant: entry?.variant, size: entry?.size }),
       });
       const data = await res.json();
       if (res.ok && data.url) window.location.assign(data.url);
@@ -137,6 +139,7 @@ export default function AccountPage() {
       setMessage('Connection failed. Please try again.');
     } finally {
       setIsBusy(false);
+      setPaymentPortalFor(null);
     }
   };
 
@@ -176,7 +179,7 @@ export default function AccountPage() {
 
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
-          Verify with the email and last 4 digits of the card used to enter.
+          Verify with the email and last 4 digits of the card used to enter. All your entries across all products will be shown.
         </p>
 
         <div
@@ -239,7 +242,7 @@ export default function AccountPage() {
               cursor: isBusy ? 'not-allowed' : 'pointer',
             }}
           >
-            {isBusy ? 'Checking…' : 'Find My Entry'}
+            {isBusy ? 'Checking…' : 'Find My Entries'}
           </button>
         </div>
 
@@ -249,14 +252,14 @@ export default function AccountPage() {
 
         {entries && entries.length > 0 && (
           <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {entries.map((entry) => {
+            {entries.map((entry, idx) => {
               const isWinner = entry.status === 'WINNER_CHARGED';
               const isSettled = entry.status && entry.status !== 'ENTERED';
               const canEdit = !isSettled;
               const banner = statusBanner(entry);
               return (
                 <div
-                  key={`${entry.variant}-${entry.size}-${entry.registeredAt}`}
+                  key={`${entry.variant}-${entry.size}-${entry.registeredAt}-${idx}`}
                   style={{
                     background: configPalette.cardBackground,
                     border: `1px solid ${configPalette.cardBorder}`,
@@ -266,6 +269,9 @@ export default function AccountPage() {
                 >
                   <div style={{ fontWeight: 'bold', fontSize: 14 }}>
                     {entry.variant} — {entry.size}
+                  </div>
+                  <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 2 }}>
+                    {entry.status || 'Active entry'}
                   </div>
                   {(typeof entry.listPrice === 'number' ||
                     typeof entry.amountCents === 'number' ||
@@ -325,97 +331,116 @@ export default function AccountPage() {
                     </div>
                   )}
 
-                  {canEdit &&
-                    (editingAddressFor === `${entry.variant}-${entry.size}` ? (
-                      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <input
-                          type="text"
-                          value={addressDraft}
-                          onChange={(e) => setAddressDraft(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: 10,
-                            borderRadius: 10,
-                            background: '#16161a',
-                            border: `1px solid ${configPalette.cardBorder}`,
-                            color: '#fff',
-                            fontSize: 12,
-                            boxSizing: 'border-box',
-                          }}
-                        />
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            onClick={() => saveAddress(entry)}
-                            disabled={isBusy}
+                  {canEdit && (
+                    <>
+                      {editingAddressFor === `${entry.variant}-${entry.size}` ? (
+                        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <input
+                            type="text"
+                            value={addressDraft}
+                            onChange={(e) => setAddressDraft(e.target.value)}
                             style={{
-                              flex: 1,
-                              minHeight: 44,
+                              width: '100%',
+                              padding: 10,
                               borderRadius: 10,
-                              border: 'none',
-                              background: '#34c759',
-                              color: '#000',
+                              background: '#16161a',
+                              border: `1px solid ${configPalette.cardBorder}`,
+                              color: '#fff',
                               fontSize: 12,
-                              fontWeight: 'bold',
-                              cursor: 'pointer',
+                              boxSizing: 'border-box',
                             }}
-                          >
-                            Save
-                          </button>
+                          />
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              onClick={() => saveAddress(entry)}
+                              disabled={isBusy}
+                              style={{
+                                flex: 1,
+                                minHeight: 44,
+                                borderRadius: 10,
+                                border: 'none',
+                                background: '#34c759',
+                                color: '#000',
+                                fontSize: 12,
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingAddressFor(null)}
+                              style={{
+                                flex: 1,
+                                minHeight: 44,
+                                borderRadius: 10,
+                                border: `1px solid ${configPalette.cardBorder}`,
+                                background: 'transparent',
+                                color: '#aaa',
+                                fontSize: 12,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                           <button
-                            onClick={() => setEditingAddressFor(null)}
+                            onClick={() => {
+                              setEditingAddressFor(`${entry.variant}-${entry.size}`);
+                              setAddressDraft(entry.shippingAddress || '');
+                            }}
                             style={{
-                              flex: 1,
                               minHeight: 44,
+                              padding: '0 14px',
                               borderRadius: 10,
                               border: `1px solid ${configPalette.cardBorder}`,
                               background: 'transparent',
-                              color: '#aaa',
+                              color: '#ccc',
                               fontSize: 12,
                               cursor: 'pointer',
                             }}
                           >
-                            Cancel
+                            Edit address
+                          </button>
+                          <button
+                            onClick={() => cancelEntry(entry)}
+                            disabled={isBusy}
+                            style={{
+                              minHeight: 44,
+                              padding: '0 14px',
+                              borderRadius: 10,
+                              border: '1px solid #ff3b30',
+                              background: 'transparent',
+                              color: '#ff3b30',
+                              fontSize: 12,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Cancel entry
+                          </button>
+                          <button
+                            onClick={() => openPaymentPortal(entry)}
+                            disabled={isBusy || paymentPortalFor !== null}
+                            style={{
+                              minHeight: 44,
+                              padding: '0 14px',
+                              borderRadius: 10,
+                              border: `1px solid ${configPalette.cardBorder}`,
+                              background: 'transparent',
+                              color: '#60a5fa',
+                              fontSize: 12,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {paymentPortalFor === `${entry.variant}|${entry.size}` ? 'Loading…' : 'Update payment'}
                           </button>
                         </div>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                        <button
-                          onClick={() => {
-                            setEditingAddressFor(`${entry.variant}-${entry.size}`);
-                            setAddressDraft(entry.shippingAddress || '');
-                          }}
-                          style={{
-                            minHeight: 44,
-                            padding: '0 14px',
-                            borderRadius: 10,
-                            border: `1px solid ${configPalette.cardBorder}`,
-                            background: 'transparent',
-                            color: '#ccc',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Edit address
-                        </button>
-                        <button
-                          onClick={() => cancelEntry(entry)}
-                          disabled={isBusy}
-                          style={{
-                            minHeight: 44,
-                            padding: '0 14px',
-                            borderRadius: 10,
-                            border: '1px solid #ff3b30',
-                            background: 'transparent',
-                            color: '#ff3b30',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Cancel entry
-                        </button>
-                      </div>
-                    ))}
+                      )}
+                    </>
+                  )}
 
                   {isWinner && (
                     <p style={{ margin: '10px 0 0', fontSize: 11, color: '#666' }}>
@@ -428,7 +453,7 @@ export default function AccountPage() {
 
             {hasOpenEntry && (
               <button
-                onClick={openPaymentPortal}
+                onClick={() => openPaymentPortal()}
                 disabled={isBusy}
                 style={{
                   width: '100%',
@@ -443,7 +468,7 @@ export default function AccountPage() {
                   marginTop: 8,
                 }}
               >
-                Update payment method
+                Update payment method for all entries
               </button>
             )}
           </div>

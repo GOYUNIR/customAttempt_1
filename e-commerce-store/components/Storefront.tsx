@@ -97,6 +97,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [manualPromoInput, setManualPromoInput] = useState('');
   const [showManualPromo, setShowManualPromo] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
+  const [promoValidated, setPromoValidated] = useState<boolean>(false);
 
   useEffect(() => {
     try {
@@ -263,10 +264,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             const data = await res.json();
             if (res.ok && data.success) {
               setFeedbackStatus('success');
-              setFeedbackMessage(data.message || 'Entry locked in. Good luck.');
+              // Use the message from the API (which now contains the promo info)
+              setFeedbackMessage(data.message || '🎉 You\'re in! Your entry is locked. Good luck!');
               if (data.promoCode) {
                 setPromoCode(data.promoCode);
                 setPromoDiscount(data.discountPercent || 0);
+                setPromoValidated(true);
               } else {
                 setPromoCode(null);
                 setPromoDiscount(0);
@@ -368,8 +371,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         if (data.valid) {
           setPromoCode(data.code);
           setPromoDiscount(data.customerDiscountPercent || 0);
+          setPromoValidated(true);
         } else if (!stored) {
           window.sessionStorage.removeItem('goyunir_promo_ref');
+          setPromoValidated(false);
         }
       })
       .catch(() => {});
@@ -385,12 +390,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         if (data.valid) {
           setPromoCode(data.code);
           setPromoDiscount(data.customerDiscountPercent || 0);
+          setPromoValidated(true);
           setManualPromoInput('');
           setShowManualPromo(false);
+          setFeedbackStatus('success');
+          setFeedbackMessage(`✅ Promo ${data.code} applied! ${data.customerDiscountPercent > 0 ? `${data.customerDiscountPercent}% off if selected.` : ''}`);
         } else {
           setFeedbackStatus('error');
           setFeedbackMessage("That code isn't valid or is no longer active.");
           window.sessionStorage.removeItem('goyunir_promo_ref');
+          setPromoValidated(false);
         }
       })
       .catch(() => {});
@@ -621,10 +630,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 border: `1px solid ${configPalette.cardBorder}`,
                 overflow: 'hidden',
                 boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                background: 'rgba(17,17,17,0.85)',
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.9 }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'rgba(17,17,17,0.55)', backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }} />
+              <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.5 }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
                 <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>
@@ -635,6 +646,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     <div style={{ display: 'flex', gap: 6 }}>
                       {sizes.map((sz) => {
                         const isSelected = selectedSize === sz;
+                        const price = priceFor(currentProduct, sz);
+                        const discountedPrice = promoDiscount > 0 ? Math.max(1, Math.round(price * (1 - promoDiscount / 100))) : price;
                         return (
                           <button key={sz} type="button" onClick={() => setSelectedSize(sz)}
                             style={{
@@ -643,7 +656,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                               background: isSelected ? '#fff' : 'rgba(22,22,26,0.5)',
                               color: isSelected ? '#000' : configPalette.textMain, fontSize: 13, fontWeight: 'bold', cursor: 'pointer',
                             }}>
-                            {sz} — ${priceFor(currentProduct, sz)}
+                            {sz} — {promoDiscount > 0 && isSelected ? (
+                              <>
+                                <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 4 }}>${price}</span>
+                                <span style={{ color: '#edb210' }}>${discountedPrice}</span>
+                              </>
+                            ) : (
+                              `$${price}`
+                            )}
                           </button>
                         );
                       })}
@@ -651,10 +671,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                   ) : (
                     <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>
                       {sizes[0]} —{' '}
-                      {promoDiscount > 0 ? (
+                      {promoDiscount > 0 && promoValidated ? (
                         <>
                           <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 6 }}>${priceFor(currentProduct, sizes[0])}</span>
                           <span style={{ color: '#edb210' }}>${Math.max(1, Math.round(priceFor(currentProduct, sizes[0]) * (1 - promoDiscount / 100)))}</span>
+                          {promoCode && <span style={{ fontSize: 10, color: '#34c759', marginLeft: 6 }}>({promoCode})</span>}
                         </>
                       ) : (
                         <>${priceFor(currentProduct, sizes[0])}</>
@@ -667,7 +688,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                   <input required type="text" value={form.shippingAddress} onChange={(e) => setForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
                     id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} autoComplete="shipping street-address" name="shipping-address"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
-                  {promoCode ? (
+                  {promoCode && promoValidated ? (
                     <div style={{ background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
                       <span style={{ color: '#34c759', fontWeight: 600 }}>
                         🏷 {promoCode} applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}

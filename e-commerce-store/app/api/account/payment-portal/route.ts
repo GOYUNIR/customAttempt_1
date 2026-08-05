@@ -53,13 +53,24 @@ export async function POST(request: Request) {
       .trim()
       .toLowerCase();
     const last4 = String(body?.last4 || '').trim();
+    const variant = String(body?.variant || '').trim();
+    const size = String(body?.size || '').trim();
+
     if (!email || last4.length !== 4) {
       return NextResponse.json({ error: 'Enter your email and card digits first.' }, { status: 400 });
     }
 
     const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
     const matches = await findPoolEntriesByEmail(redis, productNames, email);
-    const target = matches.find((m) => String(m.parsed.cardLast4 || '') === last4);
+    
+    // Filter by variant/size if provided
+    let targetMatches = matches;
+    if (variant && size) {
+      targetMatches = matches.filter((m) => m.variant === variant && m.size === size);
+    }
+    
+    const target = targetMatches.find((m) => String(m.parsed.cardLast4 || '') === last4) || 
+                   matches.find((m) => String(m.parsed.cardLast4 || '') === last4);
 
     let customerId = target?.parsed?.customerId || target?.parsed?.stripeCustomerId || '';
 

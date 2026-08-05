@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, getCatalogArchiveRecords } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, getCatalogArchiveRecords, getProductOverride } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   getNextDrawTimestampForSchedule,
@@ -73,7 +73,18 @@ export async function GET(request: Request) {
       push(`${product.name}: schedule`, false, e.message);
     }
     for (const size of getAvailableSizes(GOYUNIR_STORE_SUITE)) {
-      const price = getProductPrice(product, size);
+      // Get the actual current price (with override)
+      let price = getProductPrice(product, size);
+      if (redis) {
+        try {
+          const override = await getProductOverride(redis, product.id);
+          if (size === '100ml' && typeof override?.price100ml === 'number') {
+            price = override.price100ml;
+          } else if (size !== '100ml' && typeof override?.price50ml === 'number') {
+            price = override.price50ml;
+          }
+        } catch {}
+      }
       push(`${product.name} ${size}: price`, price > 0, `$${price}`);
     }
   }

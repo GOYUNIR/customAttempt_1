@@ -1,7 +1,31 @@
+import Link from 'next/link';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+
 export default function PrivacyPage() {
+  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  
   return (
     <main style={{ maxWidth: 640, margin: '0 auto', padding: '48px 20px 80px', color: '#e5e5e5', background: '#0a0a0a', minHeight: '100vh', fontFamily: 'system-ui,sans-serif', lineHeight: 1.6, fontSize: 14 }}>
-      <a href="/" style={{ color: '#888', fontSize: 12 }}>← Store</a>
+      <Link
+        href="/"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 44,
+          padding: '0 18px',
+          borderRadius: 999,
+          fontSize: 13,
+          fontWeight: 600,
+          color: configPalette.textMain,
+          textDecoration: 'none',
+          background: 'rgba(255,255,255,0.06)',
+          border: `1px solid ${configPalette.cardBorder}`,
+          marginBottom: 24,
+        }}
+      >
+        ← Back to store
+      </Link>
       <h1 style={{ fontSize: 28, margin: '24px 0 8px' }}>Privacy Policy</h1>
       <p style={{ color: '#888', fontSize: 12 }}>Last updated: {new Date().toISOString().slice(0, 10)}</p>
 

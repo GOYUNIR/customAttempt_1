@@ -51,7 +51,13 @@ export async function POST(request: Request) {
 
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      return NextResponse.json({ success: true, entryCreated: false, message: 'This confirmation was already processed.' });
+      // Still return success so the user doesn't see an error
+      return NextResponse.json({
+        success: true,
+        entryCreated: false,
+        message: '✅ You\'re already locked in! Good luck with the allocation.',
+        alreadyEntered: true,
+      });
     }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
@@ -59,7 +65,7 @@ export async function POST(request: Request) {
     });
 
     if (session.mode !== 'setup' || session.status !== 'complete') {
-      return NextResponse.json({ error: 'Session not complete.' }, { status: 400 });
+      return NextResponse.json({ error: 'Payment setup was not completed. Please try again.' }, { status: 400 });
     }
 
     const meta = session.metadata || {};
@@ -74,7 +80,7 @@ export async function POST(request: Request) {
       .toUpperCase();
 
     if (!email || !variant) {
-      return NextResponse.json({ error: 'Missing metadata on session.' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
     }
 
     const setupIntent = session.setup_intent as any;
@@ -120,7 +126,7 @@ export async function POST(request: Request) {
         success: true,
         entryCreated: false,
         alreadyEntered: true,
-        message: "You're already locked in for this drop — sit tight, we'll email you if you're selected.",
+        message: "✅ You're already locked in for this drop — sit tight, we'll email you if you're selected.",
       });
     }
 
@@ -212,6 +218,7 @@ export async function POST(request: Request) {
 
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
 
+    // Send confirmation email
     const emailDedupe = `${variant}:${size}:${email}`;
     try {
       const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
@@ -239,10 +246,16 @@ export async function POST(request: Request) {
       console.error('[confirm-setup] entry email', e);
     }
 
+    // Build success message with promo info
+    let successMessage = '🎉 You\'re in! Your entry is locked for the allocation. Good luck!';
+    if (appliedPromo) {
+      successMessage += ` Promo ${appliedPromo} applied${discountPercent > 0 ? ` (${discountPercent}% off if selected)` : ''}.`;
+    }
+
     return NextResponse.json({
       success: true,
       entryCreated: true,
-      message: 'Entry locked in. Good luck.',
+      message: successMessage,
       email,
       address: shippingAddress,
       promoCode: appliedPromo || null,

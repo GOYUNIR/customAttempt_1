@@ -1,0 +1,48 @@
+import { NextResponse } from 'next/server';
+import {
+  createRedisClient,
+  findAllOpenOrders,
+  adminCancelOrder,
+} from '@/lib/server-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(request: Request) {
+  try {
+    const redis = createRedisClient();
+    if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
+
+    const body = await request.json();
+    const password = String(body?.password || '');
+    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    if (!master || password !== master) {
+      return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+    }
+
+    const variant = String(body?.variant || '');
+    const size = String(body?.size || '');
+    const email = String(body?.email || '').trim().toLowerCase();
+    const reason = String(body?.reason || 'Cancelled by admin');
+
+    if (!variant || !size || !email) {
+      return NextResponse.json({ error: 'Missing entry identification.' }, { status: 400 });
+    }
+
+    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const orders = await findAllOpenOrders(redis, productNames);
+    const target = orders.find(
+      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,
+    );
+
+    if (!target) {
+      return NextResponse.json({ error: 'Entry not found — it may have already been cancelled or charged.' }, { status: 404 });
+    }
+
+    await adminCancelOrder(redis, target, reason);
+
+    return NextResponse.json({ success: true, message: 'Entry cancelled.' });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
