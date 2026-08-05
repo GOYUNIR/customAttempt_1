@@ -32,13 +32,30 @@ export async function GET(request: Request) {
   const maxPerEmail =
     typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
 
+  // Check if this email has already used this promo
+  let alreadyUsed = false;
   if (email && maxPerEmail > 0) {
     const used = await redis.sismember(usedEmailsKey(code), email);
     if (used === 1) {
+      alreadyUsed = true;
       return NextResponse.json({
         valid: false,
-        error: 'This code was already used with this email',
+        error: 'This code has already been used with this email address',
         alreadyUsed: true,
+        code,
+      });
+    }
+  }
+
+  // Check if the promoter is trying to use their own code
+  if (email && promo.promoterEmail) {
+    const promoterEmail = String(promo.promoterEmail).toLowerCase();
+    if (promoterEmail === email) {
+      return NextResponse.json({
+        valid: false,
+        error: 'Promoters cannot use their own code',
+        alreadyUsed: false,
+        code,
       });
     }
   }
@@ -51,4 +68,4 @@ export async function GET(request: Request) {
     customerDiscountPercent: Math.min(50, Math.max(0, Number(promo.customerDiscountPercent) || 0)),
     maxUsesPerEmail: maxPerEmail,
   });
-} 
+}

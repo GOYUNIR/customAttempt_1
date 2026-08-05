@@ -98,6 +98,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [showManualPromo, setShowManualPromo] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
   const [promoValidated, setPromoValidated] = useState<boolean>(false);
+  const [promoErrorMessage, setPromoErrorMessage] = useState<string>('');
 
   useEffect(() => {
     try {
@@ -264,7 +265,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             const data = await res.json();
             if (res.ok && data.success) {
               setFeedbackStatus('success');
-              // Use the message from the API (which now contains the promo info)
               setFeedbackMessage(data.message || '🎉 You\'re in! Your entry is locked. Good luck!');
               if (data.promoCode) {
                 setPromoCode(data.promoCode);
@@ -365,41 +365,50 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
     if (urlRef) window.sessionStorage.setItem('goyunir_promo_ref', urlRef.toUpperCase());
 
-    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}`)
+    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(form.email || '')}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.valid) {
           setPromoCode(data.code);
           setPromoDiscount(data.customerDiscountPercent || 0);
           setPromoValidated(true);
-        } else if (!stored) {
+          setPromoErrorMessage('');
+        } else {
           window.sessionStorage.removeItem('goyunir_promo_ref');
           setPromoValidated(false);
+          setPromoErrorMessage(data.error || 'Invalid promo code');
+          if (data.alreadyUsed) {
+            setFeedbackStatus('error');
+            setFeedbackMessage(`❌ Promo code ${code} has already been used with this email address.`);
+          }
         }
       })
       .catch(() => {});
-  }, [searchParams]);
+  }, [searchParams, form.email]);
 
   const applyManualPromo = () => {
     const code = manualPromoInput.trim().toUpperCase();
     if (!code) return;
-    window.sessionStorage.setItem('goyunir_promo_ref', code);
-    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}`)
+    
+    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(form.email || '')}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.valid) {
+          window.sessionStorage.setItem('goyunir_promo_ref', code);
           setPromoCode(data.code);
           setPromoDiscount(data.customerDiscountPercent || 0);
           setPromoValidated(true);
+          setPromoErrorMessage('');
           setManualPromoInput('');
           setShowManualPromo(false);
           setFeedbackStatus('success');
           setFeedbackMessage(`✅ Promo ${data.code} applied! ${data.customerDiscountPercent > 0 ? `${data.customerDiscountPercent}% off if selected.` : ''}`);
         } else {
           setFeedbackStatus('error');
-          setFeedbackMessage("That code isn't valid or is no longer active.");
+          setFeedbackMessage(data.alreadyUsed ? `❌ This code has already been used with this email address.` : "That code isn't valid or is no longer active.");
           window.sessionStorage.removeItem('goyunir_promo_ref');
           setPromoValidated(false);
+          setPromoErrorMessage(data.error || 'Invalid promo code');
         }
       })
       .catch(() => {});
@@ -466,6 +475,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const prod = allVisible[idx];
     if (!prod?.slug) return;
     if (typeof window !== 'undefined') window.location.href = `/${prod.slug}`;
+  };
+
+  const clearPromo = () => {
+    setPromoCode(null);
+    setPromoDiscount(0);
+    setPromoValidated(false);
+    window.sessionStorage.removeItem('goyunir_promo_ref');
+    setManualPromoInput('');
+    setShowManualPromo(false);
+    setFeedbackStatus('notice');
+    setFeedbackMessage('Promo code removed.');
   };
 
   const bannerColor =
@@ -588,9 +608,22 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           })}
         </div>
 
-        <section style={{ minHeight: '130vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 15px 40px', background: configPalette.primaryBackground, position: 'relative', zIndex: 10, boxSizing: 'border-box' }}>
+        <section style={{ 
+          minHeight: '130vh', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          padding: '100px 15px 40px', 
+          background: 'rgba(10,10,10,0.88)', 
+          backdropFilter: 'blur(15px)', 
+          WebkitBackdropFilter: 'blur(15px)',
+          position: 'relative', 
+          zIndex: 10, 
+          boxSizing: 'border-box' 
+        }}>
           <div style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 24, marginBottom: 80 }}>
-            <div style={{ background: '#141416', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
+            <div style={{ background: 'rgba(20,20,22,0.8)', backdropFilter: 'blur(10px)', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               {timeLeft.expired || isCurrentArchived ? (
                 <div>
                   <span style={{ fontSize: 11, color: '#edb210', fontWeight: 'bold', letterSpacing: 1 }}>
@@ -611,7 +644,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               )}
             </div>
 
-            <div style={{ background: '#141416', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
+            <div style={{ background: 'rgba(20,20,22,0.8)', backdropFilter: 'blur(10px)', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: 6 }}>
                 {GOYUNIR_STORE_SUITE.socialProof.label}
               </div>
@@ -647,7 +680,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                       {sizes.map((sz) => {
                         const isSelected = selectedSize === sz;
                         const price = priceFor(currentProduct, sz);
-                        const discountedPrice = promoDiscount > 0 ? Math.max(1, Math.round(price * (1 - promoDiscount / 100))) : price;
+                        const discountedPrice = promoDiscount > 0 && promoValidated ? Math.max(1, Math.round(price * (1 - promoDiscount / 100))) : price;
                         return (
                           <button key={sz} type="button" onClick={() => setSelectedSize(sz)}
                             style={{
@@ -656,7 +689,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                               background: isSelected ? '#fff' : 'rgba(22,22,26,0.5)',
                               color: isSelected ? '#000' : configPalette.textMain, fontSize: 13, fontWeight: 'bold', cursor: 'pointer',
                             }}>
-                            {sz} — {promoDiscount > 0 && isSelected ? (
+                            {sz} — {promoDiscount > 0 && promoValidated && isSelected ? (
                               <>
                                 <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 4 }}>${price}</span>
                                 <span style={{ color: '#edb210' }}>${discountedPrice}</span>
@@ -689,10 +722,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} autoComplete="shipping street-address" name="shipping-address"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
                   {promoCode && promoValidated ? (
-                    <div style={{ background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
                       <span style={{ color: '#34c759', fontWeight: 600 }}>
                         🏷 {promoCode} applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}
                       </span>
+                      <button type="button" onClick={clearPromo} style={{ background: 'none', border: 'none', color: '#ff6b5a', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                        Remove
+                      </button>
                     </div>
                   ) : (
                     <div>

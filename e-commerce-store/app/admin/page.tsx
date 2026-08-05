@@ -145,6 +145,7 @@ export default function AdminPortal() {
   
   const [drawHistory, setDrawHistory] = useState<any[]>([]);
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
+  const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -589,6 +590,7 @@ export default function AdminPortal() {
                 if (t.id === 'growth') { fetchPromos(); fetchAudit(); }
                 if (t.id === 'system') { fetchAudit(); fetchDrawHistory(); }
                 if (t.id === 'drops') fetchConfig();
+                if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -701,32 +703,48 @@ export default function AdminPortal() {
                   )}
                   {drawHistoryLoading && <p style={{ color: '#555' }}>Loading history…</p>}
                   <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-                    {drawHistory.map((draw: any, idx: number) => (
-                      <div key={idx} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ color: '#34d399', fontWeight: 600 }}>Draw #{draw.drawNumber || idx + 1}</span>
-                          <span style={{ color: '#666', fontSize: 11 }}>{draw.executionTime || draw.timestamp || 'Unknown time'}</span>
-                        </div>
-                        <div style={{ color: '#888', fontSize: 11 }}>
-                          {draw.totalSuccessfulCharges ?? draw.chargedCount ?? 0} charged · 
-                          {draw.totalRevenueCents != null ? ` $${(draw.totalRevenueCents / 100).toFixed(2)}` : ''}
-                          {draw.winnerCount != null ? ` · ${draw.winnerCount} winners` : ''}
-                        </div>
-                        {(draw.processedWinners || []).slice(0, 5).map((w: any, i: number) => (
-                          <div key={i} style={{ fontSize: 11, color: '#666', marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #222' }}>
-                            {w.email} · {w.product || w.variant || ''} {w.size || ''}
-                            {w.status === 'SUCCESS_CHARGED' || w.status === 'charged' ? (
-                              <span style={{ color: '#34d399' }}> ✓ ${((w.amountCents || 0) / 100).toFixed(2)}</span>
-                            ) : (
-                              <span style={{ color: '#f87171' }}> ✗ {w.status}</span>
-                            )}
+                    {drawHistory.map((draw: any, idx: number) => {
+                      const isExpanded = expandedDraw === idx;
+                      const winners = draw.processedWinners || [];
+                      const chargedCount = winners.filter((w: any) => w.status === 'SUCCESS_CHARGED' || w.status === 'charged').length;
+                      const totalRevenue = draw.totalRevenueCents != null ? draw.totalRevenueCents : 
+                        winners.filter((w: any) => w.status === 'SUCCESS_CHARGED' || w.status === 'charged')
+                          .reduce((s: number, w: any) => s + (Number(w.amountCents) || 0), 0);
+                      
+                      return (
+                        <div key={idx} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 8 }}>
+                          <div 
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                            onClick={() => setExpandedDraw(isExpanded ? null : idx)}
+                          >
+                            <span style={{ color: '#34d399', fontWeight: 600 }}>
+                              Draw #{draw.drawNumber || idx + 1}
+                              {draw.executionTime ? ` · ${draw.executionTime}` : ''}
+                            </span>
+                            <span style={{ color: '#888', fontSize: 11 }}>
+                              {chargedCount} charged · ${(totalRevenue / 100).toFixed(2)}
+                              <span style={{ marginLeft: 8 }}>{isExpanded ? '▼' : '▶'}</span>
+                            </span>
                           </div>
-                        ))}
-                        {(draw.processedWinners || []).length > 5 && (
-                          <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>+ {(draw.processedWinners || []).length - 5} more</div>
-                        )}
-                      </div>
-                    ))}
+                          {isExpanded && (
+                            <div style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto' }}>
+                              {winners.length === 0 && <div style={{ color: '#555', fontSize: 11 }}>No winners recorded.</div>}
+                              {winners.map((w: any, wi: number) => (
+                                <div key={wi} style={{ fontSize: 11, color: '#666', marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #222' }}>
+                                  {w.email} · {w.product || w.variant || ''} {w.size || ''}
+                                  {w.status === 'SUCCESS_CHARGED' || w.status === 'charged' ? (
+                                    <span style={{ color: '#34d399' }}> ✓ ${((w.amountCents || 0) / 100).toFixed(2)}</span>
+                                  ) : (
+                                    <span style={{ color: '#f87171' }}> ✗ {w.status}</span>
+                                  )}
+                                  {w.promoCode && <span style={{ color: '#edb210', marginLeft: 4 }}>· {w.promoCode}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -828,7 +846,7 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 11 }}>Hour (0-23)
                         <input type="number" min={0} max={23} value={scheduleForm.drawHour ?? 21}
                           onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawHour: Number(e.target.value) }))}
-                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                       </label>
                       <label style={{ fontSize: 11 }}>Minute (0-59)
                         <input type="number" min={0} max={59} value={scheduleForm.drawMinute ?? 0}

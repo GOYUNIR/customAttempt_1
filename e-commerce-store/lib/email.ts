@@ -7,7 +7,7 @@ function getResend() {
 }
 
 const from = () => process.env.RESEND_FROM || 'GOYUNIR <onboarding@resend.dev>';
-const replyTo = () => process.env.RESEND_REPLY_TO || process.env.RESEND_FROM || undefined;
+const replyTo = () => 'goyunir.support@gmail.com';
 
 /** One confirmation when raffle entry is secured (card saved, not charged yet). */
 export async function sendEntryConfirmedEmail(opts: {
@@ -33,7 +33,7 @@ export async function sendEntryConfirmedEmail(opts: {
     typeof opts.listPrice === 'number';
 
   const priceLine = hasDiscount
-    ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> · ${opts.discountPercent}% off if selected (list $${opts.listPrice}). Charged only if selected.</p>`
+    ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> · ${opts.discountPercent}% off if selected (list $${opts.listPrice.toFixed(2)}). Charged only if selected.</p>`
     : opts.promoCode
       ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> is on your entry. Charged only if selected.</p>`
       : `<p style="margin:0 0 12px">Your card is saved and charged <strong>only if selected</strong> in the draw.</p>`;
@@ -47,21 +47,26 @@ export async function sendEntryConfirmedEmail(opts: {
       ? `<p style="margin:16px 0 0"><a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="color:#111;font-size:13px">Manage My Entry</a></p>`
       : '';
 
+  // Generate a unique order reference
+  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
   try {
     const { data, error } = await resend.emails.send({
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `You're entered — ${opts.product} (${opts.size})`,
+      subject: `✅ You're entered — ${opts.product} (${opts.size})`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You're entered!</h1>
           <p style="margin:0 0 12px">You're in the allocation for <strong>${opts.product}</strong> · ${opts.size}.</p>
+          <p style="margin:0 0 12px;color:#666;font-size:12px">Reference: ${orderRef}</p>
           ${priceLine}
           ${addressLine}
           <p style="margin:0 0 12px">After the draw, check this inbox if selected. Results are final once processing completes.</p>
-          <p style="color:#666;font-size:13px;margin:0">One entry per email for this scent. Questions? Reply to this email.</p>
+          <p style="color:#666;font-size:13px;margin:0">One entry per email for this scent.</p>
+          <p style="color:#666;font-size:12px;margin:8px 0 0">Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
           ${manage}
         </div>
       `,
@@ -89,20 +94,24 @@ export async function sendWinnerEmail(opts: {
     console.warn('[email] RESEND_API_KEY missing — skip winner email');
     return { ok: false, skipped: true };
   }
+  
+  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  
   try {
     const { data, error } = await resend.emails.send({
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `Selected — ${opts.product} (${opts.size})`,
+      subject: `🎉 Selected — ${opts.product} (${opts.size})`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You've been selected!</h1>
           <p style="margin:0 0 12px">Your card was charged for <strong>${opts.product}</strong> · ${opts.size}${opts.amountLabel ? ` (${opts.amountLabel})` : ''}.</p>
+          <p style="margin:0 0 12px;color:#666;font-size:12px">Order Reference: ${orderRef}</p>
           ${opts.promoCode ? `<p style="margin:0 0 12px;color:#666;font-size:13px">Promo <strong>${opts.promoCode}</strong> applied.</p>` : ''}
           <p style="margin:0 0 12px">We'll ship to the address on your entry. Tracking follows when the label is created.</p>
-          <p style="color:#666;font-size:13px;margin:0">Questions: reply to this email or use Manage My Entry on the site.</p>
+          <p style="color:#666;font-size:13px;margin:0">Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
         </div>
       `,
     });
@@ -128,8 +137,8 @@ export async function sendEntryRecoveryEmail(opts: {
   if (!resend) return { ok: false, skipped: true };
   const subject =
     opts.kind === 'pre_draw'
-      ? `${opts.product} — finish your entry before the draw`
-      : `${opts.product} — finish securing your entry`;
+      ? `⏰ ${opts.product} — finish your entry before the draw`
+      : `⏳ ${opts.product} — finish securing your entry`;
   const body =
     opts.kind === 'pre_draw'
       ? `The draw for <strong>${opts.product}</strong> (${opts.size}) is coming up. You started an entry but didn't finish card setup.`
@@ -150,6 +159,7 @@ export async function sendEntryRecoveryEmail(opts: {
             <a href="${opts.siteUrl}" style="display:inline-block;padding:12px 20px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-size:13px;font-weight:600">Continue on site</a>
           </p>
           <p style="color:#999;font-size:12px;margin:0">If you already finished, ignore this. We send at most a couple of reminders.</p>
+          <p style="color:#999;font-size:12px;margin:8px 0 0">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
         </div>
       `,
     });
@@ -175,19 +185,22 @@ export async function sendPromoterInvoiceEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
+  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   try {
     const { data, error } = await resend.emails.send({
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `Affiliate credit — ${opts.code}`,
+      subject: `💰 Affiliate credit — ${opts.code}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">Promo credited</h1>
           <p style="margin:0 0 12px">Code <strong>${opts.code}</strong> produced a paid allocation for ${opts.product}.</p>
+          <p style="margin:0 0 12px;color:#666;font-size:12px">Order Ref: ${orderRef}</p>
           <p style="margin:0 0 12px">Order ~$${(opts.amountCents / 100).toFixed(2)} · estimated credit $${(opts.payoutCents / 100).toFixed(2)}.</p>
           <p style="color:#666;font-size:13px;margin:0">Payouts are settled offline. Customer email is not shared beyond attribution.</p>
+          <p style="color:#666;font-size:12px;margin:8px 0 0">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
         </div>
       `,
     });
@@ -233,13 +246,13 @@ export async function sendAccountUpdateEmail(opts: {
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `${heading} — ${opts.product}`,
+      subject: `📦 ${heading} — ${opts.product}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">${heading}</h1>
           <p style="margin:0 0 12px">${body}</p>
-          <p style="color:#666;font-size:13px;margin:0">Didn't make this change? Reply to this email right away.</p>
+          <p style="color:#666;font-size:13px;margin:0">Didn't make this change? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a> right away.</p>
         </div>
       `,
     });
