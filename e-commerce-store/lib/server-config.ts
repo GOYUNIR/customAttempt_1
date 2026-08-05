@@ -101,15 +101,16 @@ export async function getOrSeedLiveState(
       winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
     };
   }
+  // Default to 0 inventory if not seeded (prevents showing fake inventory)
   const seed: LiveStateRecord = {
     productId: field,
     productName: product.name,
     slug: product.slug,
     size,
     isActive: true,
-    totalInventory: Math.max(0, product.maxRaffleAllocationLimit),
-    inventoryRemaining: Math.max(0, product.maxRaffleAllocationLimit),
-    winnersPerDraw: normalizeWinners(winnersPerDraw, 1),
+    totalInventory: 0,
+    inventoryRemaining: 0,
+    winnersPerDraw: 0,
     drawsCompleted: 0,
     salesCompleted: 0,
   };
@@ -434,3 +435,4 @@ export async function trackPromoClick(redis: Redis, code: string) {
   await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
   return true;
 }
+

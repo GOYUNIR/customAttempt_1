@@ -49,9 +49,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
 
+    // Check if already processed
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      // Check if we already have a promo recorded for this session
+      // Try to get the promo from the session metadata
       let existingPromo = null;
       let existingDiscount = 0;
       try {
@@ -98,6 +99,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
     }
 
+    // Get payment method details
     const setupIntent = session.setup_intent as any;
     let paymentMethodId: string | null = null;
     let cardLast4 = '';
@@ -146,7 +148,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Validate promo code before applying
+    // Validate and apply promo code
     let appliedPromo: string | undefined = promoCode || undefined;
     let discountPercent = 0;
     if (promoCode) {
@@ -185,6 +187,7 @@ export async function POST(request: Request) {
       }
     }
 
+    // Create the entry
     const entry = {
       email,
       variant,
@@ -201,6 +204,7 @@ export async function POST(request: Request) {
       registeredAt: new Date().toISOString(),
     };
 
+    // Save to Redis
     await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
     await redis.sadd(emailBlockKey(variant, size), email);
     if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
@@ -220,6 +224,7 @@ export async function POST(request: Request) {
         : {}),
     } as any);
 
+    // Track promo usage
     if (appliedPromo) {
       try {
         await redis.sadd(usedEmailsKey(appliedPromo), email);
@@ -236,13 +241,14 @@ export async function POST(request: Request) {
 
     // Send confirmation email
     const emailDedupe = `${variant}:${size}:${email}`;
+    let emailSent = false;
     try {
       const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
       if (sent !== 1) {
         const product = GOYUNIR_STORE_SUITE.productCatalog.find(
           (p) => p.name === variant || p.id === variant,
         );
-        const listPrice = product ? getProductPrice(product, size) : undefined;
+        const listPrice = product ? getProductPrice(product, size) : 0;
         const emailResult = await sendEntryConfirmedEmail({
           to: email,
           product: variant,
@@ -250,23 +256,33 @@ export async function POST(request: Request) {
           address: shippingAddress,
           promoCode: appliedPromo,
           discountPercent: discountPercent || undefined,
-          listPrice,
+          listPrice: listPrice > 0 ? listPrice : undefined,
           siteUrl: siteUrlFromRequest(request),
         });
-        if (!(emailResult as any)?.ok && !(emailResult as any)?.skipped) {
+        if ((emailResult as any)?.ok) {
+          emailSent = true;
+          await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+        } else {
           console.error('[confirm-setup] entry email failed', email, emailResult);
         }
-        await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+      } else {
+        emailSent = true;
       }
     } catch (e) {
-      console.error('[confirm-setup] entry email', e);
+      console.error('[confirm-setup] entry email error', e);
     }
 
-    // Build success message with promo info
+    // Build success message
     let successMessage = '🎉 You\'re in! Your entry is locked for the allocation. Good luck!';
     if (appliedPromo) {
       successMessage += ` Promo ${appliedPromo} applied${discountPercent > 0 ? ` (${discountPercent}% off if selected)` : ''}.`;
     }
+    if (!emailSent) {
+      successMessage += ' (We couldn\'t send a confirmation email, but your entry is saved.)';
+    }
+
+    // Clear the promo from session storage (will be handled client-side)
+    // We return the promo info so the client can clear it
 
     return NextResponse.json({
       success: true,
@@ -276,6 +292,7 @@ export async function POST(request: Request) {
       address: shippingAddress,
       promoCode: appliedPromo || null,
       discountPercent: discountPercent || 0,
+      clearPromo: !!appliedPromo, // Tell client to clear the promo display
     });
   } catch (err: any) {
     console.error('confirm-setup', err);

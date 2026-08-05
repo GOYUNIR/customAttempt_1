@@ -112,11 +112,12 @@ export async function GET() {
             size,
             intCount,
             subCount,
-            salesCount: live.salesCompleted,
-            maxLimit: live.inventoryRemaining,
-            totalInventory: live.totalInventory,
-            winnersPerDraw: live.winnersPerDraw,
-            drawsCompleted: live.drawsCompleted,
+            salesCount: live.salesCompleted || 0,
+            // Show 0 if not properly set, not the placeholder
+            maxLimit: live.inventoryRemaining || 0,
+            totalInventory: live.totalInventory || 0,
+            winnersPerDraw: live.winnersPerDraw || 0,
+            drawsCompleted: live.drawsCompleted || 0,
           });
         }
       }

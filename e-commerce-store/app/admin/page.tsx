@@ -124,13 +124,15 @@ export default function AdminPortal() {
   const [editingShipEntry, setEditingShipEntry] = useState<string | null>(null);
   const [shipStatusDraft, setShipStatusDraft] = useState('');
   const [shipTrackingDraft, setShipTrackingDraft] = useState('');
+  const [editingAddressEntry, setEditingAddressEntry] = useState<string | null>(null);
+  const [addressDraft, setAddressDraft] = useState('');
 
-  const [recovery, setRecovery] = useState({ enabled: true, earlyDelayHours: 3, preDrawHours: 24, preDrawEnabled: true });
+  const [recovery, setRecovery] = useState({ enabled: true, earlyDelayHours: 3, preDrawHours: 6, preDrawEnabled: true });
   const [recoveryMsg, setRecoveryMsg] = useState('');
 
   const [promos, setPromos] = useState<any[]>([]);
   const [promoForm, setPromoForm] = useState({
-    code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10', maxUsesPerEmail: '1',
+    code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '',
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
@@ -155,6 +157,7 @@ export default function AdminPortal() {
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [settingsMsg, setSettingsMsg] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -182,6 +185,7 @@ export default function AdminPortal() {
       fetchPromos(),
       fetchConfig(),
       fetchDrawHistory(),
+      fetchSettings(),
     ]);
     setIsRefreshing(false);
     showToast('🔄 All data refreshed');
@@ -202,7 +206,7 @@ export default function AdminPortal() {
       setRecovery({
         enabled: data.enabled !== false,
         earlyDelayHours: data.earlyDelayHours ?? 3,
-        preDrawHours: data.preDrawHours ?? 24,
+        preDrawHours: data.preDrawHours ?? 6,
         preDrawEnabled: data.preDrawEnabled !== false,
       });
     } catch {}
@@ -239,7 +243,6 @@ export default function AdminPortal() {
       }
       setPriceForm(pf);
       
-      // Initialize product notes
       const notes: Record<string, any[]> = {};
       for (const p of GOYUNIR_STORE_SUITE.productCatalog) {
         notes[p.id] = p.notes || [];
@@ -256,6 +259,25 @@ export default function AdminPortal() {
       if (Array.isArray(data.draws)) setDrawHistory(data.draws);
     } catch {}
     setDrawHistoryLoading(false);
+  };
+
+  const fetchSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/settings');
+      const data = await res.json();
+      if (data.settings) {
+        if (data.settings.theme) setThemeSettings(data.settings.theme);
+        if (data.settings.hero) setHeroSettings(data.settings.hero);
+        if (data.settings.form) setFormSettings(data.settings.form);
+        if (data.settings.footer) setFooterSettings(data.settings.footer);
+        if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
+      }
+      setSettingsMsg('');
+    } catch (err: any) {
+      setSettingsMsg('Could not load settings: ' + err.message);
+    }
+    setSettingsLoading(false);
   };
 
   const saveSchedule = async () => {
@@ -408,14 +430,14 @@ export default function AdminPortal() {
     }
     if (winnersEdits[key] !== undefined && winnersEdits[key] !== '') {
       let w = Number(winnersEdits[key]);
-      if (!Number.isFinite(w) || w < 1) return alert('Winners per draw must be at least 1');
+      if (!Number.isFinite(w) || w < 0) return alert('Winners per draw must be 0 or more');
       w = Math.floor(w);
       const invCap = payload.inventoryRemaining !== undefined
         ? payload.inventoryRemaining
-        : Number(pools.find((p: any) => p.product === productName && p.size === size)?.maxLimit ?? 999);
-      if (w > invCap) {
-        alert(`Winners per draw cannot exceed inventory left (${invCap}). Capping to ${Math.max(1, invCap)}.`);
-        w = Math.max(1, invCap);
+        : Number(pools.find((p: any) => p.product === productName && p.size === size)?.maxLimit ?? 0);
+      if (w > invCap && invCap > 0) {
+        alert(`Winners per draw cannot exceed inventory left (${invCap}). Capping to ${Math.max(0, invCap)}.`);
+        w = Math.max(0, invCap);
       }
       payload.winnersPerDraw = w;
     }
@@ -501,6 +523,32 @@ export default function AdminPortal() {
     }
   };
 
+  const updateAddress = async (entry: any, newAddress: string) => {
+    if (!password) return alert('Enter password');
+    setShipMsg('Updating address…');
+    try {
+      const res = await adminFetch('/api/admin/update-address', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          password, 
+          email: entry.email, 
+          variant: entry.variant, 
+          size: entry.size, 
+          newAddress
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShipMsg('Address updated.');
+        showToast('UPDATED · Address');
+        await fetchStatus();
+        setEditingAddressEntry(null);
+      } else setShipMsg(data.error || 'Failed');
+    } catch {
+      setShipMsg('Failed');
+    }
+  };
+
   const saveRecovery = async () => {
     if (!password) return alert('Enter password');
     try {
@@ -514,18 +562,32 @@ export default function AdminPortal() {
 
   const savePromo = async () => {
     if (!password) return alert('Enter password');
+    const customerDiscount = Number(promoForm.customerDiscountPercent);
+    const promoterPayout = Number(promoForm.promoterPayoutPercent);
+    const maxUses = Number(promoForm.maxUsesPerEmail);
+    
+    if (isNaN(customerDiscount) || customerDiscount < 0 || customerDiscount > 50) {
+      return alert('Customer discount must be between 0 and 50');
+    }
+    if (isNaN(promoterPayout) || promoterPayout < 0 || promoterPayout > 50) {
+      return alert('Promoter payout must be between 0 and 50');
+    }
+    if (isNaN(maxUses) || maxUses < 0) {
+      return alert('Max uses must be 0 or more');
+    }
+    
     try {
       const res = await adminFetch('/api/admin/promos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           password, action: 'upsert', code: promoForm.code, promoterName: promoForm.promoterName, promoterEmail: promoForm.promoterEmail,
-          customerDiscountPercent: Number(promoForm.customerDiscountPercent), promoterPayoutPercent: Number(promoForm.promoterPayoutPercent), maxUsesPerEmail: Number(promoForm.maxUsesPerEmail ?? 1), active: true,
+          customerDiscountPercent: customerDiscount, promoterPayoutPercent: promoterPayout, maxUsesPerEmail: maxUses, active: true,
         }),
       });
       const data = await res.json();
       if (res.ok) {
         setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
-        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '0', promoterPayoutPercent: '10', maxUsesPerEmail: '1' });
+        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '' });
         await fetchPromos();
       } else setPromoMsg(data.error || 'Failed');
     } catch {
@@ -558,6 +620,7 @@ export default function AdminPortal() {
 
   const saveSettings = async () => {
     if (!password) return alert('Enter password');
+    setSettingsLoading(true);
     try {
       const res = await adminFetch('/api/admin/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -572,12 +635,13 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setSettingsMsg('Settings saved — will apply on next deploy.');
+        setSettingsMsg('Settings saved successfully!');
         showToast('UPDATED · Settings');
       } else setSettingsMsg(data.error || 'Failed to save settings.');
-    } catch {
-      setSettingsMsg('Connection failed.');
+    } catch (err: any) {
+      setSettingsMsg('Connection failed: ' + err.message);
     }
+    setSettingsLoading(false);
   };
 
   const pools = status?.pools || [];
@@ -594,7 +658,6 @@ export default function AdminPortal() {
   const filteredEntries = rawFilteredEntries.filter((e) => ledgerTypeFilter === 'ALL' || e.type === ledgerTypeFilter);
   const totalPages = Math.ceil(filteredEntries.length / itemsPerPage) || 1;
   const currentEntries = filteredEntries.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const winnerRows = (status?.fallbackEntries || []).filter((e: any) => e?.type === 'WINNER_CHARGED');
 
   const totalOwed = promos.reduce((s, p) => s + (p.payoutOwedCents || 0), 0);
 
@@ -602,7 +665,7 @@ export default function AdminPortal() {
     { id: 'overview', label: 'Overview' },
     { id: 'drops', label: 'Drops' },
     { id: 'ledger', label: 'Ledger' },
-    { id: 'growth', label: 'Growth', badge: totalOwed > 0 ? Math.round(totalOwed / 100) : undefined },
+    { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
   ];
@@ -651,7 +714,7 @@ export default function AdminPortal() {
                 if (t.id === 'system') { fetchAudit(); fetchDrawHistory(); }
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
-                if (t.id === 'settings') fetchConfig();
+                if (t.id === 'settings') fetchSettings();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -833,7 +896,7 @@ export default function AdminPortal() {
                       const key = `${pool.product}:${pool.size}`;
                       const currentWinners = Array.isArray(pool.winnersPerDraw)
                         ? pool.winnersPerDraw[0]
-                        : (pool.winnersPerDraw ?? 1);
+                        : (pool.winnersPerDraw ?? 0);
                       return (
                         <div key={key} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
                           <div style={{ fontSize: 11, color: '#888', minWidth: 50 }}>{pool.size}</div>
@@ -848,7 +911,7 @@ export default function AdminPortal() {
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Winners / draw</span>
-                            <input type="number" min={1} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
+                            <input type="number" min={0} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
                               onChange={(e) => setWinnersEdits((prev) => ({ ...prev, [key]: e.target.value }))}
                               style={{ ...inputStyle, width: 72 }} />
                           </div>
@@ -943,7 +1006,7 @@ export default function AdminPortal() {
 
                 <h4 style={{ fontSize: 11, color: '#aaa', margin: '20px 0 8px', textTransform: 'uppercase' }}>Abandoned Entry Recovery</h4>
                 <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                  Emails people who started but never finished checkout — an early nudge, and an optional pre-draw reminder. Sends at most twice per person per product.
+                  When someone starts an entry (enters email + address) but doesn't complete card setup in Stripe, this system sends them reminder emails to finish. The "early nudge" goes out a few hours after they start, and the "pre-draw reminder" goes out before the allocation closes (default 6 hours before). Each person gets at most one of each type per product, so they won't be spammed.
                 </p>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                   <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -999,33 +1062,50 @@ export default function AdminPortal() {
             <div>
               {currentEntries.map((e: any, i: number) => {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
-                const isEditing = editingShipEntry === entryKey;
+                const isEditingShip = editingShipEntry === entryKey;
+                const isEditingAddress = editingAddressEntry === entryKey;
+                const orderRef = e.orderRef || `GOY-${new Date(e.registeredAt || 0).getTime().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
                     <div style={{ fontWeight: 600 }}>{e.email}</div>
+                    <div style={{ color: '#666', fontSize: 10 }}>Ref: {orderRef}</div>
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
                       {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {e.promoCode}</span>}
                       {e.amountCents && <span style={{ color: '#34d399', marginLeft: 6 }}>· ${(e.amountCents / 100).toFixed(2)}</span>}
                     </div>
-                    <div style={{ color: '#666', marginTop: 4 }}>{revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}</div>
+                    <div style={{ color: '#666', marginTop: 4 }}>
+                      📍 {revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}
+                      {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 ••{e.cardLast4}</span>}
+                    </div>
                     {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {isEditing ? (
+                        {isEditingShip ? (
                           <>
                             <select value={shipStatusDraft} onChange={(ev) => setShipStatusDraft(ev.target.value)}
                               style={{ ...inputStyle, padding: 6, flex: 1 }}>
                               {SHIP_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
                             </select>
                             <input type="text" value={shipTrackingDraft} onChange={(ev) => setShipTrackingDraft(ev.target.value)}
-                              placeholder="Tracking # (optional)" style={{ ...inputStyle, padding: 6, flex: 1 }} />
+                              placeholder="Tracking #" style={{ ...inputStyle, padding: 6, flex: 1 }} />
                             <button onClick={() => updateShipping(e, shipStatusDraft, shipTrackingDraft)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
                             <button onClick={() => setEditingShipEntry(null)} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Cancel</button>
+                          </>
+                        ) : isEditingAddress ? (
+                          <>
+                            <input type="text" value={addressDraft} onChange={(ev) => setAddressDraft(ev.target.value)}
+                              placeholder="New address" style={{ ...inputStyle, padding: 6, flex: 2 }} />
+                            <button onClick={() => updateAddress(e, addressDraft)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save</button>
+                            <button onClick={() => setEditingAddressEntry(null)} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Cancel</button>
                           </>
                         ) : (
                           <>
                             <button onClick={() => { setEditingShipEntry(entryKey); setShipStatusDraft(e.shippingStatus || 'PENDING_FULFILLMENT'); setShipTrackingDraft(e.trackingNumber || ''); }} style={buttonGhost}>
                               Update Shipping
+                            </button>
+                            <button onClick={() => { setEditingAddressEntry(entryKey); setAddressDraft(e.shippingAddress || ''); }} style={buttonGhost}>
+                              Edit Address
                             </button>
                             <button onClick={() => cancelOrder(e)} style={{ ...buttonGhost, border: '1px solid #f87171', color: '#f87171' }}>Cancel Entry</button>
                           </>
@@ -1058,9 +1138,12 @@ export default function AdminPortal() {
                 <input placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} style={inputStyle} />
                 <input placeholder="Promoter Name" value={promoForm.promoterName} onChange={(e) => setPromoForm((f) => ({ ...f, promoterName: e.target.value }))} style={inputStyle} />
                 <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
-                <input placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
-                <input placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
-                <input placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
+                <input type="number" min="0" max="50" placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} 
+                  onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
+                <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} 
+                  onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
+                <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} 
+                  onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               </div>
               <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
               {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
@@ -1074,7 +1157,9 @@ export default function AdminPortal() {
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button onClick={() => setPromoForm({
                           code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
-                          customerDiscountPercent: String(p.customerDiscountPercent), promoterPayoutPercent: String(p.promoterPayoutPercent), maxUsesPerEmail: String(p.maxUsesPerEmail ?? 1),
+                          customerDiscountPercent: String(p.customerDiscountPercent || ''), 
+                          promoterPayoutPercent: String(p.promoterPayoutPercent || ''), 
+                          maxUsesPerEmail: String(p.maxUsesPerEmail ?? ''),
                         })} style={buttonGhost}>Edit</button>
                         <button onClick={async () => {
                           if (!password) return alert('Enter password');
@@ -1151,8 +1236,11 @@ export default function AdminPortal() {
                 <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Admin Action Audit Log</h2>
                 <button onClick={fetchAudit} style={buttonGhost}>Refresh</button>
               </div>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
+                Tracks admin actions like cancelling entries, updating shipping, and archiving products. Only shows actions performed from this admin portal.
+              </p>
               <div style={{ maxHeight: 220, overflowY: 'auto', marginTop: 10, fontSize: 11, color: '#888' }}>
-                {audit.length === 0 && <p>No audit entries loaded (requires password).</p>}
+                {audit.length === 0 && <p>No audit entries yet. Actions like cancelling entries, updating shipping, or archiving products will appear here.</p>}
                 {audit.map((a, i) => <div key={i} style={{ marginBottom: 6 }}>{a.at} — {a.action} {a.detail || ''}</div>)}
               </div>
             </div>
@@ -1165,8 +1253,9 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Edit site appearance and content. Changes require a redeploy to take effect.
+                Edit site appearance and content. Changes require a redeploy to take effect (settings are stored in Redis and applied at build time).
               </p>
+              {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
               
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -1281,8 +1370,10 @@ export default function AdminPortal() {
                 </div>
               ))}
 
-              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }}>Save All Settings</button>
-              {settingsMsg && <p style={{ fontSize: 12, color: '#34d399', marginTop: 10 }}>{settingsMsg}</p>}
+              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
+                {settingsLoading ? 'Saving…' : 'Save All Settings'}
+              </button>
+              {settingsMsg && <p style={{ fontSize: 12, color: settingsMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{settingsMsg}</p>}
             </div>
           </div>
         )}

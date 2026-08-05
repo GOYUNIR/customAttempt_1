@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
     const poolMatches = await findPoolEntriesByEmail(redis, productNames, email);
 
-    // Build a map of ALL statuses from the ledger (not just terminal)
+    // Build a map of ALL statuses from the ledger
     const statusByKey: Record<
       string,
       {
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
         promoCode?: string;
         discountPercent?: number;
         shippingAddress?: string;
+        orderRef?: string;
       }
     > = {};
     try {
@@ -51,7 +52,6 @@ export async function POST(request: Request) {
         if (String(e.email || '').toLowerCase() !== email) continue;
         const key = `${e.variant}|${e.size}`;
         const existing = statusByKey[key];
-        // Keep the most recent status for each variant/size
         if (!existing || new Date(e.registeredAt).getTime() >= new Date(existing.registeredAt).getTime()) {
           statusByKey[key] = {
             type: e.type,
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
             promoCode: e.promoCode,
             discountPercent: e.discountPercent,
             shippingAddress: e.shippingAddress || e.address,
+            orderRef: e.orderRef,
           };
         }
       }
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
         Number(settled?.discountPercent) ||
         0;
       const expectedCents =
-        typeof listPrice === 'number'
+        typeof listPrice === 'number' && listPrice > 0
           ? Math.max(
               50,
               Math.round(
@@ -104,7 +105,6 @@ export async function POST(request: Request) {
             )
           : undefined;
 
-      // Use the status from the ledger if it exists, otherwise ENTERED
       const status = settled && TERMINAL_TYPES.includes(settled.type) ? settled.type : 'ENTERED';
 
       entries.push({
@@ -119,12 +119,13 @@ export async function POST(request: Request) {
         amountCents: settled?.amountCents,
         promoCode,
         discountPercent: discountPercent || undefined,
-        listPrice,
+        listPrice: listPrice && listPrice > 0 ? listPrice : undefined,
         expectedAmountCents: expectedCents,
+        orderRef: settled?.orderRef,
       });
     }
 
-    // Add ALL ledger entries (not just terminal) that aren't already in the pool list
+    // Add ledger entries
     for (const [key, s] of Object.entries(statusByKey)) {
       const [variant, size] = key.split('|');
       const alreadyListed = entries.some((e) => e.variant === variant && e.size === size);
@@ -156,12 +157,13 @@ export async function POST(request: Request) {
         amountCents: s.amountCents,
         promoCode: s.promoCode,
         discountPercent: s.discountPercent,
-        listPrice,
+        listPrice: listPrice && listPrice > 0 ? listPrice : undefined,
         expectedAmountCents: s.amountCents,
+        orderRef: s.orderRef,
       });
     }
 
-    // Also check Stripe for any customers with this card that might not have entries
+    // Also check Stripe for saved cards without entries - but only show if there's actual data
     if (stripe) {
       try {
         const customers = await stripe.customers.list({ email, limit: 5 });
@@ -169,16 +171,20 @@ export async function POST(request: Request) {
           const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
           const matchPm = pms.data.find((pm) => pm.card?.last4 === last4);
           if (matchPm) {
-            const alreadyInEntries = entries.some((e) => e.source === 'stripe_only');
-            if (!alreadyInEntries) {
+            // Check if this customer has any actual entries
+            const hasRealEntry = entries.some((e) => e.source === 'active_pool' || e.source === 'ledger');
+            if (!hasRealEntry) {
+              // Only show if they have a saved card but no entries - helps them know they need to enter
               entries.push({
-                variant: '(saved card)',
+                variant: '💳 Saved Card',
                 size: '—',
                 shippingAddress: c.metadata?.initialShippingAddress || c.address?.line1 || '',
                 registeredAt: new Date(c.created * 1000).toISOString(),
                 source: 'stripe_only',
                 cardLast4: last4,
-                status: 'ENTERED',
+                status: 'NO_ACTIVE_ENTRY',
+                listPrice: undefined,
+                expectedAmountCents: undefined,
               });
             }
           }

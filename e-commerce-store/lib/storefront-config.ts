@@ -46,10 +46,6 @@ export interface StorefrontProduct {
   scheduledArchiveAt?: string;
   scheduledUnarchiveAt?: string;
   catalogImage?: string;
-  // Seed-only: how many total units this product starts with, and how many
-  // winners to draw per round until it hits 0 (tiers — last value repeats).
-  // e.g. totalInventory: 9, winnerTiers: [2,2,2,2,1] draws 2/round for 4
-  // rounds then 1 for the 5th, hitting exactly 0. Admin-editable after seed.
   totalInventory?: number;
   winnerTiers?: number[];
 }
@@ -283,13 +279,18 @@ export function getProductBySlug(config: StorefrontConfig, slug: string): Storef
   return config.productCatalog.find((product) => product.slug === slug);
 }
 export function getProductPrice(product: StorefrontProduct, size: string): number {
-  return size === '100ml' ? product.price100ml : product.price50ml;
+  const price = size === '100ml' ? product.price100ml : product.price50ml;
+  // If price is unreasonably high (placeholder), return 0 to indicate not set
+  if (price > 999999) return 0;
+  return price;
 }
 export function getProductStripeId(product: StorefrontProduct, size: string): string {
   return size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
 }
 export function getWinnerCount(config: StorefrontConfig, size: string): number {
-  return size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;
+  const count = size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;
+  // Default to 0 if not properly set
+  return Math.max(0, count || 0);
 }
 export function getAvailableSizes(config: StorefrontConfig): string[] {
   return config.availableSizes?.length ? config.availableSizes : ['50ml'];
@@ -433,5 +434,3 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
 export function getNextDrawTimestamp(config: StorefrontConfig): number {
   return getNextDrawTimestampForSchedule(config.dropSchedule);
 }
-
-

@@ -9,7 +9,7 @@ function defaultConfig() {
   return {
     enabled: true,
     earlyDelayHours: 3,
-    preDrawHours: 24,
+    preDrawHours: 6,  // Changed from 24 to 6
     preDrawEnabled: true,
   };
 }

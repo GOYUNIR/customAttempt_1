@@ -33,19 +33,45 @@ export async function sendEntryConfirmedEmail(opts: {
     typeof opts.listPrice === 'number' &&
     opts.listPrice > 0;
 
-  const priceLine = hasDiscount && opts.listPrice
-    ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> · ${opts.discountPercent}% off if selected (list $${opts.listPrice.toFixed(2)}). Charged only if selected.</p>`
+  const displayPrice = opts.listPrice && opts.listPrice > 0 ? opts.listPrice : 0;
+  const discountedPrice = hasDiscount && displayPrice > 0 
+    ? Math.max(1, Math.round(displayPrice * (1 - (opts.discountPercent || 0) / 100)))
+    : displayPrice;
+
+  const priceHtml = displayPrice > 0 ? `
+    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin: 12px 0;">
+      ${hasDiscount ? `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #666; text-decoration: line-through;">$${displayPrice.toFixed(2)}</span>
+          <span style="color: #10b981; font-weight: 700; font-size: 18px;">$${discountedPrice.toFixed(2)}</span>
+          <span style="background: #10b981; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;">${opts.discountPercent}% OFF</span>
+        </div>
+        <div style="font-size: 11px; color: #666; margin-top: 4px;">Promo code: <strong>${opts.promoCode}</strong> applied</div>
+      ` : `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #666;">Price if selected:</span>
+          <span style="color: #111; font-weight: 700; font-size: 18px;">$${displayPrice.toFixed(2)}</span>
+        </div>
+      `}
+      <div style="font-size: 11px; color: #888; margin-top: 4px;">Charged only if selected in the draw</div>
+    </div>
+  ` : '';
+
+  const priceLine = hasDiscount
+    ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> · ${opts.discountPercent}% off if selected (list $${displayPrice.toFixed(2)} → $${discountedPrice.toFixed(2)}). Charged only if selected.</p>`
     : opts.promoCode
       ? `<p style="margin:0 0 12px">Promo <strong>${opts.promoCode}</strong> is on your entry. Charged only if selected.</p>`
-      : `<p style="margin:0 0 12px">Your card is saved and charged <strong>only if selected</strong> in the draw.</p>`;
+      : displayPrice > 0
+        ? `<p style="margin:0 0 12px">Your card is saved and charged <strong>$${displayPrice.toFixed(2)} only if selected</strong> in the draw.</p>`
+        : `<p style="margin:0 0 12px">Your card is saved and charged <strong>only if selected</strong> in the draw.</p>`;
 
   const addressLine = opts.address
-    ? `<p style="margin:0 0 12px;color:#444;font-size:13px">Ship to: ${opts.address}</p>`
+    ? `<p style="margin:0 0 12px;color:#444;font-size:13px">📦 Ship to: ${opts.address}</p>`
     : '';
 
   const manage =
     opts.siteUrl
-      ? `<p style="margin:16px 0 0"><a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="color:#111;font-size:13px">Manage My Entry</a></p>`
+      ? `<p style="margin:16px 0 0"><a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="color:#10b981;font-weight:600;font-size:13px;text-decoration:none;">Manage My Entry →</a></p>`
       : '';
 
   // Generate a unique order reference
@@ -58,17 +84,32 @@ export async function sendEntryConfirmedEmail(opts: {
       replyTo: replyTo(),
       subject: `✅ You're entered — ${opts.product} (${opts.size})`,
       html: `
-        <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
-          <h1 style="font-size:22px;font-weight:600;margin:0 0 12px">🎉 You're entered!</h1>
-          <p style="margin:0 0 12px">You're in the allocation for <strong>${opts.product}</strong> · ${opts.size}.</p>
-          <p style="margin:0 0 12px;color:#666;font-size:12px">Reference: ${orderRef}</p>
-          ${priceLine}
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <div style="text-align:center;margin-bottom:24px;">
+            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">GOYUNIR</div>
+            <div style="width:60px;height:3px;background:linear-gradient(90deg,#a855f7,#3b82f6);margin:8px auto 0;border-radius:4px;"></div>
+          </div>
+          
+          <h1 style="font-size:26px;font-weight:700;margin:0 0 8px;color:#111;">🎉 You're entered!</h1>
+          <p style="color:#6b7280;font-size:14px;margin:0 0 4px;">Reference: <span style="font-family:monospace;color:#111;font-weight:600;">${orderRef}</span></p>
+          
+          <div style="background:#f9fafb;border-radius:10px;padding:16px 20px;margin:16px 0;">
+            <p style="margin:0;font-size:16px;font-weight:600;">${opts.product} <span style="font-weight:400;color:#6b7280;">· ${opts.size}</span></p>
+          </div>
+          
+          ${priceHtml || priceLine}
           ${addressLine}
-          <p style="margin:0 0 12px">After the draw, check this inbox if selected. Results are final once processing completes.</p>
-          <p style="color:#666;font-size:13px;margin:0">One entry per email for this scent.</p>
-          <p style="color:#666;font-size:12px;margin:8px 0 0">Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
-          ${manage}
+          
+          <div style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px 16px;border-radius:4px;margin:16px 0;">
+            <p style="margin:0;font-size:13px;color:#065f46;">💡 Your card is saved but <strong>won't be charged</strong> unless you're selected in the allocation draw.</p>
+          </div>
+          
+          <p style="margin:16px 0 8px;font-size:14px;color:#374151;">After the draw, check this inbox — if you're selected, you'll receive a confirmation and shipping details.</p>
+          
+          <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
+            <p style="margin:0;font-size:13px;color:#6b7280;">📧 Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#3b82f6;text-decoration:none;">goyunir.support@gmail.com</a></p>
+            ${manage}
+          </div>
         </div>
       `,
     });
