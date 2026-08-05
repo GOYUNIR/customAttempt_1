@@ -245,7 +245,7 @@ export default function AdminPortal() {
     } catch {}
   };
 
-  const fetchAudit = async () => {
+    const fetchAudit = async () => {
     // Don't try to fetch audit without a password
     if (!password) {
       setAudit([]);

@@ -12,8 +12,6 @@ export default async function ProductPage({
 }) {
   const { slug } = await params;
   
-  console.log('[ProductPage] Checking slug:', slug);
-  
   const redis = createRedisClient();
   let exists = false;
   
@@ -26,7 +24,6 @@ export default async function ProductPage({
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
             if (product.slug === slug) {
               exists = true;
-              console.log('[ProductPage] Found product in Redis:', product.name);
               break;
             }
           } catch (e) {
@@ -40,7 +37,6 @@ export default async function ProductPage({
   }
   
   if (!exists) {
-    console.log('[ProductPage] Product not found in Redis, redirecting to catalog');
     redirect('/catalog');
   }
 

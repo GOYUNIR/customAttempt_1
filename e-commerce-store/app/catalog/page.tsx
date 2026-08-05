@@ -37,29 +37,8 @@ export default function CatalogPage() {
         if (Array.isArray(data.activeDrops)) {
           setActiveDrops(data.activeDrops);
         }
-        // Load upcoming from Redis or use empty array
-        if (data.upcomingDrops && Array.isArray(data.upcomingDrops)) {
+        if (Array.isArray(data.upcomingDrops)) {
           setUpcomingDrops(data.upcomingDrops);
-        } else {
-          // Try to fetch upcoming products directly
-          fetch('/api/admin/products?includeInactive=true')
-            .then((r) => r.json())
-            .then((prodData) => {
-              if (prodData.products) {
-                const upcoming = prodData.products
-                  .filter((p: any) => p.isUpcoming)
-                  .map((p: any) => ({
-                    name: p.name,
-                    status: 'Upcoming',
-                    eta: p.tagline || 'Coming soon',
-                    image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-                    description: p.desc,
-                    slug: p.slug,
-                  }));
-                setUpcomingDrops(upcoming);
-              }
-            })
-            .catch(() => {});
         }
         if (Array.isArray(data.archiveScents)) {
           setArchiveScents(data.archiveScents);
@@ -138,34 +117,14 @@ export default function CatalogPage() {
   return (
     <main
       style={{
-        minHeight: '100vh',
+        minHeight: 'calc(100vh - 56px)',
         background: configPalette.primaryBackground,
         color: configPalette.textMain,
-        padding: '80px 20px 60px',
+        padding: '24px 20px 60px',
         boxSizing: 'border-box',
       }}
     >
       <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-        <Link
-          href="/"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 44,
-            padding: '0 18px',
-            borderRadius: 999,
-            fontSize: 13,
-            fontWeight: 600,
-            color: configPalette.textMain,
-            textDecoration: 'none',
-            background: 'rgba(255,255,255,0.06)',
-            border: `1px solid ${configPalette.cardBorder}`,
-            marginBottom: 24,
-          }}
-        >
-          ← Back to store
-        </Link>
         <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
           Browse available and past allocations.

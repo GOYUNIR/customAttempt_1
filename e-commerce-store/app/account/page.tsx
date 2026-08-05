@@ -67,7 +67,6 @@ export default function AccountPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        // Filter out NO_ACTIVE_ENTRY entries - they're just saved cards with no actual entries
         const filteredEntries = (data.entries || []).filter(
           (e: EntryRecord) => e.status !== 'NO_ACTIVE_ENTRY'
         );
@@ -161,7 +160,7 @@ export default function AccountPage() {
   return (
     <main
       style={{
-        minHeight: '100vh',
+        minHeight: 'calc(100vh - 56px)',
         background: configPalette.primaryBackground,
         color: configPalette.textMain,
         padding: '24px 16px 60px',
@@ -169,27 +168,6 @@ export default function AccountPage() {
       }}
     >
       <div style={{ maxWidth: 420, margin: '0 auto' }}>
-        <Link
-          href="/"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 44,
-            padding: '0 18px',
-            borderRadius: 999,
-            fontSize: 13,
-            fontWeight: 600,
-            color: configPalette.textMain,
-            textDecoration: 'none',
-            background: 'rgba(255,255,255,0.06)',
-            border: `1px solid ${configPalette.cardBorder}`,
-            marginBottom: 24,
-          }}
-        >
-          ← Back to store
-        </Link>
-
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
           Verify with the email and last 4 digits of the card used to enter. All your entries across all products will be shown.

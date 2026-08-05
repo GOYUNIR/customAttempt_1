@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 const PRODUCTS_KEY = 'store:products';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
+const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const CONFIG_KEY = 'store:config';
 
 const DEFAULT_PRODUCTS = [
@@ -16,11 +17,11 @@ const DEFAULT_PRODUCTS = [
     prefix: 'elysian-white',
     tagline: 'WHITE ALLOCATION / 01',
     desc: 'Clean, electric profile variant constructed with premium bergamot.',
-    price50ml: 0,  // FIXED: WAS 85
-    price100ml: 0, // FIXED: WAS 140
-    stripeId50ml: '',
-    stripeId100ml: '',
-    maxRaffleAllocationLimit: 0, // FIXED: WAS 10
+    price50ml: 0,
+    price100ml: 0,
+    stripeId50ml: 'price_placeholder_50ml',
+    stripeId100ml: 'price_placeholder_100ml',
+    maxRaffleAllocationLimit: 0,
     isActive: true,
     isArchived: false,
     isUpcoming: false,
@@ -30,8 +31,8 @@ const DEFAULT_PRODUCTS = [
       { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
     ],
     images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-    totalInventory: 0, // FIXED: WAS 9
-    winnerTiers: [0], // FIXED: WAS [2,2,2,2,1]
+    totalInventory: 0,
+    winnerTiers: [0],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -42,11 +43,11 @@ const DEFAULT_PRODUCTS = [
     prefix: 'obsidian-void',
     tagline: 'BLACK ALLOCATION / 02',
     desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-    price50ml: 0,  // FIXED: WAS 85
-    price100ml: 0, // FIXED: WAS 140
-    stripeId50ml: '',
-    stripeId100ml: '',
-    maxRaffleAllocationLimit: 0, // FIXED: WAS 5
+    price50ml: 0,
+    price100ml: 0,
+    stripeId50ml: 'price_placeholder_50ml',
+    stripeId100ml: 'price_placeholder_100ml',
+    maxRaffleAllocationLimit: 0,
     isActive: true,
     isArchived: false,
     isUpcoming: false,
@@ -56,13 +57,12 @@ const DEFAULT_PRODUCTS = [
       { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
     ],
     images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
-    totalInventory: 0, // FIXED: WAS 5
-    winnerTiers: [0], // FIXED: WAS [1]
+    totalInventory: 0,
+    winnerTiers: [0],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
 ];
-
 
 const DEFAULT_CONFIG = {
   themeColors: {
@@ -169,6 +169,8 @@ export async function GET(request: Request) {
         await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
       } else if (product.isArchived) {
         await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+      } else if (product.isUpcoming) {
+        await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
       }
       seeded++;
     }
