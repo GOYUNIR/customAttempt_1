@@ -233,22 +233,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           });
         }
         
-        if (data.activeProducts && data.activeProducts.length > 0) {
-          console.log('[Storefront] Setting active products:', data.activeProducts);
-          setActiveProducts(data.activeProducts);
-          setAllProducts(data.allProducts || data.activeProducts);
-          setArchivedProducts(data.archivedProducts || []);
-          const ids = (data.archivedProducts || []).map((p: any) => p.id);
-          setArchivedIds(ids);
-        } else {
-          console.log('[Storefront] No active products found, using fallback');
-          const fallbackProducts = getDefaultProducts();
-          setActiveProducts(fallbackProducts);
-          setAllProducts(fallbackProducts);
-          setArchivedProducts([]);
-          setArchivedIds([]);
-        }
-        
+      // In the loadConfig useEffect, make sure this logic is correct:
+      if (data.activeProducts && data.activeProducts.length > 0) {
+        setActiveProducts(data.activeProducts);
+        setAllProducts(data.allProducts || data.activeProducts);
+        setArchivedProducts(data.archivedProducts || []);
+      } else {
+        // Only use fallback if Redis returns no products
+        const fallbackProducts = getDefaultProducts();
+        setActiveProducts(fallbackProducts);
+        setAllProducts(fallbackProducts);
+      }
+      
         if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
       } catch (err) {
         console.error('[Storefront] Failed to load store config:', err);

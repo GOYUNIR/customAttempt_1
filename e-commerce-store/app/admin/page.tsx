@@ -1,8 +1,3 @@
-// ============================================================
-// GOYUNIR ADMIN PORTAL - COMPLETE FILE
-// SEARCH FOR "ADMIN_UPDATE_MARKER" TO FIND THE LATEST CHANGES
-// ============================================================
-
 'use client';
 
 import Link from 'next/link';
@@ -162,13 +157,14 @@ export default function AdminPortal() {
     name: '', slug: '', prefix: '', tagline: '', desc: '',
     price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
     maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []  // <-- ADD isUpcoming: false
+    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
   });
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);
   const [imageInput, setImageInput] = useState('');
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
+  const [productActionLoading, setProductActionLoading] = useState(false);
 
   const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
@@ -182,6 +178,10 @@ export default function AdminPortal() {
     setToast(msg);
     window.setTimeout(() => setToast(''), 2800);
   };
+
+  // ============================================================
+  // FETCH FUNCTIONS
+  // ============================================================
 
   const fetchStatus = async () => {
     try {
@@ -245,8 +245,7 @@ export default function AdminPortal() {
     } catch {}
   };
 
-    const fetchAudit = async () => {
-    // Don't try to fetch audit without a password
+  const fetchAudit = async () => {
     if (!password) {
       setAudit([]);
       return;
@@ -321,14 +320,50 @@ export default function AdminPortal() {
         setAllProducts(data.products);
         setProducts(data.products.filter((p: any) => !p.isArchived));
       }
-    } catch {}
+    } catch (err) {
+      console.error('[Products] Fetch error:', err);
+    }
     setProductsLoading(false);
   };
 
+  // ============================================================
+  // PRODUCT FUNCTIONS
+  // ============================================================
+
+  const resetProductForm = () => {
+    setProductForm({
+      name: '', slug: '', prefix: '', tagline: '', desc: '',
+      price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
+      maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
+      isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
+    });
+    setEditingProduct(null);
+    setEditingNoteIdx(null);
+    setNoteForm({ label: '', name: '', text: '' });
+    setImageInput('');
+  };
+
+  const editProduct = (product: any) => {
+    setEditingProduct(product.id);
+    setProductForm({
+      ...product,
+      price50ml: product.price50ml || '',
+      price100ml: product.price100ml || '',
+      maxRaffleAllocationLimit: product.maxRaffleAllocationLimit || '',
+      totalInventory: product.totalInventory || '',
+      winnerTiers: product.winnerTiers ? product.winnerTiers.join(',') : '',
+      notes: product.notes || [],
+      images: product.images || [],
+      isUpcoming: product.isUpcoming || false,
+    });
+    setShowProductForm(true);
+  };
+
   const saveProduct = async () => {
-    if (!password) return alert('Enter password');
-    if (!productForm.name) return alert('Product name is required');
+    if (!password) { alert('Enter admin password first'); return; }
+    if (!productForm.name) { alert('Product name is required'); return; }
     
+    setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
@@ -348,22 +383,24 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setProductMsg(`Product "${data.product.name}" saved successfully!`);
+        setProductMsg(`✅ Product "${data.product.name}" saved successfully!`);
         showToast('UPDATED · Product');
         await fetchProducts();
         setShowProductForm(false);
         resetProductForm();
       } else {
-        setProductMsg('Error: ' + (data.error || 'Unknown error'));
+        setProductMsg('❌ Error: ' + (data.error || 'Unknown error'));
       }
     } catch (err: any) {
-      setProductMsg('Error: ' + err.message);
+      setProductMsg('❌ Error: ' + err.message);
     }
+    setProductActionLoading(false);
   };
 
   const deleteProduct = async (id: string) => {
-    if (!password) return alert('Enter password');
+    if (!password) { alert('Enter admin password first'); return; }
     if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
+    setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
@@ -373,15 +410,20 @@ export default function AdminPortal() {
       if (res.ok) {
         showToast('DELETED · Product');
         await fetchProducts();
+      } else {
+        const data = await res.json();
+        alert('Error: ' + (data.error || 'Unknown error'));
       }
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
+    setProductActionLoading(false);
   };
 
   const toggleArchive = async (id: string, currentArchived: boolean) => {
-    if (!password) return alert('Enter password');
+    if (!password) { alert('Enter admin password first'); return; }
     const action = currentArchived ? 'unarchive' : 'archive';
+    setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
@@ -396,10 +438,12 @@ export default function AdminPortal() {
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
+    setProductActionLoading(false);
   };
 
   const toggleActive = async (id: string, currentActive: boolean) => {
-    if (!password) return alert('Enter password');
+    if (!password) { alert('Enter admin password first'); return; }
+    setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
@@ -413,14 +457,13 @@ export default function AdminPortal() {
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
+    setProductActionLoading(false);
   };
 
-  // ============================================================
-  // ADMIN_UPDATE_MARKER - "Move to Upcoming" feature added here
-  // ============================================================
   const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
-    if (!password) return alert('Enter password');
+    if (!password) { alert('Enter admin password first'); return; }
     const action = currentUpcoming ? 'moveToActive' : 'moveToUpcoming';
+    setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
@@ -434,6 +477,29 @@ export default function AdminPortal() {
     } catch (err: any) {
       alert('Error: ' + err.message);
     }
+    setProductActionLoading(false);
+  };
+
+  const addNote = () => {
+    if (!noteForm.label || !noteForm.name) return;
+    setProductForm((prev: any) => ({
+      ...prev,
+      notes: [...prev.notes, { ...noteForm }]
+    }));
+    setNoteForm({ label: '', name: '', text: '' });
+    setEditingNoteIdx(null);
+  };
+
+  const removeNote = (idx: number) => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      notes: prev.notes.filter((_: any, i: number) => i !== idx)
+    }));
+  };
+
+  const editNote = (idx: number) => {
+    setEditingNoteIdx(idx);
+    setNoteForm(productForm.notes[idx]);
   };
 
   const addImage = async () => {
@@ -486,56 +552,29 @@ export default function AdminPortal() {
     }
   };
 
-  const resetProductForm = () => {
-    setProductForm({
-      name: '', slug: '', prefix: '', tagline: '', desc: '',
-      price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
-      maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-      isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
-    });
-    setEditingProduct(null);
-    setEditingNoteIdx(null);
-    setNoteForm({ label: '', name: '', text: '' });
-    setImageInput('');
+  const seedDefaultProducts = async () => {
+    if (!password) { alert('Enter admin password first'); return; }
+    if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
+    setProductActionLoading(true);
+    try {
+      const res = await adminFetch(`/api/admin/seed?password=${encodeURIComponent(password)}`);
+      const data = await res.json();
+      if (res.ok) {
+        setProductMsg('✅ ' + data.message);
+        showToast('SEEDED · Default products');
+        await fetchProducts();
+      } else {
+        setProductMsg('❌ Error: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      setProductMsg('❌ Error: ' + err.message);
+    }
+    setProductActionLoading(false);
   };
 
-  const editProduct = (product: any) => {
-    setEditingProduct(product.id);
-    setProductForm({
-      ...product,
-      price50ml: product.price50ml || '',
-      price100ml: product.price100ml || '',
-      maxRaffleAllocationLimit: product.maxRaffleAllocationLimit || '',
-      totalInventory: product.totalInventory || '',
-      winnerTiers: product.winnerTiers ? product.winnerTiers.join(',') : '',
-      notes: product.notes || [],
-      images: product.images || [],
-      isUpcoming: product.isUpcoming || false,
-    });
-    setShowProductForm(true);
-  };
-
-  const addNote = () => {
-    if (!noteForm.label || !noteForm.name) return;
-    setProductForm((prev: any) => ({
-      ...prev,
-      notes: [...prev.notes, { ...noteForm }]
-    }));
-    setNoteForm({ label: '', name: '', text: '' });
-    setEditingNoteIdx(null);
-  };
-
-  const removeNote = (idx: number) => {
-    setProductForm((prev: any) => ({
-      ...prev,
-      notes: prev.notes.filter((_: any, i: number) => i !== idx)
-    }));
-  };
-
-  const editNote = (idx: number) => {
-    setEditingNoteIdx(idx);
-    setNoteForm(productForm.notes[idx]);
-  };
+  // ============================================================
+  // OTHER FUNCTIONS
+  // ============================================================
 
   const saveSchedule = async () => {
     if (!password) return alert('Enter password');
@@ -579,46 +618,6 @@ export default function AdminPortal() {
       setSelftestRunning(false);
     }
   };
-
-  useEffect(() => {
-    fetchStatus();
-    fetchCatalogStatus();
-    fetchRecovery();
-    fetchPromos();
-    fetchProducts();
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
-    const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
-    const vis = () => { if (document.visibilityState === 'visible') { fetchStatus(); start(); } else stop(); };
-    start();
-    document.addEventListener('visibilitychange', vis);
-    return () => { stop(); document.removeEventListener('visibilitychange', vis); };
-  }, []);
-
-  useEffect(() => {
-    const t = setInterval(() => { if (lastUpdatedAt) setSecondsAgo(Math.round((Date.now() - lastUpdatedAt) / 1000)); }, 1000);
-    return () => clearInterval(t);
-  }, [lastUpdatedAt]);
-
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    const term = searchTerm.trim();
-    if (!term) { setSearchResults(null); setCurrentPage(1); return; }
-    setIsSearching(true);
-    searchDebounceRef.current = setTimeout(async () => {
-      try {
-        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
-        const data = await res.json();
-        setSearchResults(Array.isArray(data.results) ? data.results : []);
-      } catch {
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-        setCurrentPage(1);
-      }
-    }, 400);
-    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
-  }, [searchTerm]);
 
   const toggleReveal = async () => {
     if (revealAddresses) { setRevealAddresses(false); return; }
@@ -866,7 +865,7 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setSettingsMsg('Settings saved successfully! (Will apply on next deploy)');
+        setSettingsMsg('Settings saved successfully!');
         showToast('UPDATED · Settings');
       } else setSettingsMsg(data.error || 'Failed to save settings.');
     } catch (err: any) {
@@ -875,23 +874,49 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
-  const seedDefaultProducts = async () => {
-    if (!password) return alert('Enter password');
-    if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
-    try {
-      const res = await adminFetch(`/api/admin/seed?password=${encodeURIComponent(password)}`);
-      const data = await res.json();
-      if (res.ok) {
-        setProductMsg(data.message);
-        showToast('SEEDED · Default products');
-        await fetchProducts();
-      } else {
-        setProductMsg('Error: ' + (data.error || 'Unknown error'));
+  // ============================================================
+  // USE EFFECTS
+  // ============================================================
+
+  useEffect(() => {
+    fetchStatus();
+    fetchCatalogStatus();
+    fetchRecovery();
+    fetchPromos();
+    fetchProducts();
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
+    const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
+    const vis = () => { if (document.visibilityState === 'visible') { fetchStatus(); start(); } else stop(); };
+    start();
+    document.addEventListener('visibilitychange', vis);
+    return () => { stop(); document.removeEventListener('visibilitychange', vis); };
+  }, []);
+
+  useEffect(() => {
+    const t = setInterval(() => { if (lastUpdatedAt) setSecondsAgo(Math.round((Date.now() - lastUpdatedAt) / 1000)); }, 1000);
+    return () => clearInterval(t);
+  }, [lastUpdatedAt]);
+
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    const term = searchTerm.trim();
+    if (!term) { setSearchResults(null); setCurrentPage(1); return; }
+    setIsSearching(true);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
+        const data = await res.json();
+        setSearchResults(Array.isArray(data.results) ? data.results : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+        setCurrentPage(1);
       }
-    } catch (err: any) {
-      setProductMsg('Error: ' + err.message);
-    }
-  };
+    }, 400);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [searchTerm]);
 
   const pools = status?.pools || [];
   const totalInt = pools.reduce((s: number, p: any) => s + (p.intCount || 0), 0);
@@ -1369,8 +1394,8 @@ export default function AdminPortal() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Product Management</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={seedDefaultProducts} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
-                  Seed Defaults
+                <button onClick={seedDefaultProducts} disabled={productActionLoading} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
+                  {productActionLoading ? 'Loading…' : 'Seed Defaults'}
                 </button>
                 <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); }} style={buttonPrimary}>
                   + Add Product
@@ -1383,7 +1408,7 @@ export default function AdminPortal() {
             </p>
             
             {productMsg && (
-              <p style={{ fontSize: 12, color: productMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>
+              <p style={{ fontSize: 12, color: productMsg.includes('Error') || productMsg.includes('❌') ? '#f87171' : '#34d399', marginBottom: 10 }}>
                 {productMsg}
               </p>
             )}
@@ -1446,7 +1471,7 @@ export default function AdminPortal() {
                 <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Images (360° rotation)</h5>
                 <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                   <input type="text" placeholder="Image URL" value={imageInput} onChange={(e) => setImageInput(e.target.value)} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
-                  <button onClick={addImage} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Add Image</button>
+                  <button onClick={addImage} disabled={!editingProduct} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Add Image</button>
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {(productForm.images || []).map((img: string, idx: number) => (
@@ -1458,7 +1483,9 @@ export default function AdminPortal() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button onClick={saveProduct} style={buttonPrimary}>Save Product</button>
+                  <button onClick={saveProduct} disabled={productActionLoading} style={buttonPrimary}>
+                    {productActionLoading ? 'Saving…' : 'Save Product'}
+                  </button>
                   <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={buttonGhost}>Cancel</button>
                 </div>
               </div>
@@ -1474,31 +1501,32 @@ export default function AdminPortal() {
                 const isActive = product.isActive && !product.isArchived && !product.isUpcoming;
                 const isArchived = product.isArchived;
                 const isUpcoming = product.isUpcoming;
+                const isHidden = !isActive && !isArchived && !isUpcoming;
                 return (
                   <div key={product.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: `1px solid ${isActive ? '#1c1c1e' : isArchived ? '#5a3d1a' : isUpcoming ? '#1a3a5a' : '#2a1a1a'}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
                         <div style={{ fontSize: 10, color: '#666' }}>
-                          slug: {product.slug} · {product.images?.length || 0} images · ${product.price50ml || 0} / ${product.price100ml || 0}
+                          slug: {product.slug} · images: {product.images?.length || 0} · ${product.price50ml || 0} / ${product.price100ml || 0}
                           {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
                           {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
-                          {!isActive && !isArchived && !isUpcoming && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
+                          {isHidden && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
-                        <button onClick={() => toggleActive(product.id, isActive)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
+                        <button onClick={() => toggleActive(product.id, isActive)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
                           {isActive ? 'Hide' : 'Show'}
                         </button>
-                        <button onClick={() => toggleArchive(product.id, isArchived)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
+                        <button onClick={() => toggleArchive(product.id, isArchived)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
                           {isArchived ? 'Unarchive' : 'Archive'}
                         </button>
-                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
+                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
                           {isUpcoming ? 'Remove from Upcoming' : 'Move to Upcoming'}
                         </button>
-                        <button onClick={() => deleteProduct(product.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
+                        <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>
                     </div>
                   </div>
