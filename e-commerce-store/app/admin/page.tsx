@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -84,7 +84,6 @@ const buttonGhost: React.CSSProperties = {
 };
 
 function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  // Always include credentials
   return fetch(input, { ...init, credentials: 'include' });
 }
 
@@ -149,6 +148,23 @@ export default function AdminPortal() {
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
   const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
+  // Products state
+  const [products, setProducts] = useState<any[]>([]);
+  const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState<any>({
+    name: '', slug: '', prefix: '', tagline: '', desc: '',
+    price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
+    maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
+    isActive: true, isArchived: false, notes: [], images: []
+  });
+  const [productMsg, setProductMsg] = useState('');
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [imageInput, setImageInput] = useState('');
+  const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
+  const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
+
   const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
   const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
@@ -189,6 +205,7 @@ export default function AdminPortal() {
       fetchConfig(),
       fetchDrawHistory(),
       fetchSettings(),
+      fetchProducts(),
     ]);
     setIsRefreshing(false);
     showToast('🔄 All data refreshed');
@@ -282,6 +299,209 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
+  const fetchProducts = async () => {
+    setProductsLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/products?includeArchived=true');
+      const data = await res.json();
+      if (data.products) {
+        setAllProducts(data.products);
+        setProducts(data.products.filter((p: any) => !p.isArchived));
+      }
+    } catch {}
+    setProductsLoading(false);
+  };
+
+  const saveProduct = async () => {
+    if (!password) return alert('Enter password');
+    if (!productForm.name) return alert('Product name is required');
+    
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          action: 'upsert',
+          ...productForm,
+          price50ml: Number(productForm.price50ml) || 0,
+          price100ml: Number(productForm.price100ml) || 0,
+          maxRaffleAllocationLimit: Number(productForm.maxRaffleAllocationLimit) || 0,
+          totalInventory: Number(productForm.totalInventory) || 0,
+          winnerTiers: productForm.winnerTiers ? productForm.winnerTiers.split(',').map(Number) : [0],
+          notes: productForm.notes || [],
+          images: productForm.images || [],
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setProductMsg(`Product "${data.product.name}" saved successfully!`);
+        showToast('UPDATED · Product');
+        await fetchProducts();
+        setShowProductForm(false);
+        resetProductForm();
+      } else {
+        setProductMsg('Error: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      setProductMsg('Error: ' + err.message);
+    }
+  };
+
+  const deleteProduct = async (id: string) => {
+    if (!password) return alert('Enter password');
+    if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'delete', id }),
+      });
+      if (res.ok) {
+        showToast('DELETED · Product');
+        await fetchProducts();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const toggleArchive = async (id: string, currentArchived: boolean) => {
+    if (!password) return alert('Enter password');
+    const action = currentArchived ? 'unarchive' : 'archive';
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action, id }),
+      });
+      if (res.ok) {
+        showToast(`UPDATED · ${currentArchived ? 'Unarchived' : 'Archived'}`);
+        await fetchProducts();
+        await fetchCatalogStatus();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const toggleActive = async (id: string, currentActive: boolean) => {
+    if (!password) return alert('Enter password');
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'toggleActive', id }),
+      });
+      if (res.ok) {
+        showToast(`UPDATED · ${currentActive ? 'Hidden' : 'Visible'}`);
+        await fetchProducts();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const addImage = async () => {
+    if (!imageInput.trim()) return;
+    if (!editingProduct) return;
+    try {
+      const res = await adminFetch('/api/admin/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          productId: editingProduct,
+          action: 'add',
+          images: [imageInput.trim()]
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProductForm((prev: any) => ({ ...prev, images: data.images }));
+        setImageInput('');
+        await fetchProducts();
+        showToast('UPDATED · Image added');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const removeImage = async (index: number) => {
+    if (!editingProduct) return;
+    try {
+      const res = await adminFetch('/api/admin/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          productId: editingProduct,
+          action: 'remove',
+          index
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProductForm((prev: any) => ({ ...prev, images: data.images }));
+        await fetchProducts();
+        showToast('UPDATED · Image removed');
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  const resetProductForm = () => {
+    setProductForm({
+      name: '', slug: '', prefix: '', tagline: '', desc: '',
+      price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
+      maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
+      isActive: true, isArchived: false, notes: [], images: []
+    });
+    setEditingProduct(null);
+    setEditingNoteIdx(null);
+    setNoteForm({ label: '', name: '', text: '' });
+    setImageInput('');
+  };
+
+  const editProduct = (product: any) => {
+    setEditingProduct(product.id);
+    setProductForm({
+      ...product,
+      price50ml: product.price50ml || '',
+      price100ml: product.price100ml || '',
+      maxRaffleAllocationLimit: product.maxRaffleAllocationLimit || '',
+      totalInventory: product.totalInventory || '',
+      winnerTiers: product.winnerTiers ? product.winnerTiers.join(',') : '',
+      notes: product.notes || [],
+      images: product.images || [],
+    });
+    setShowProductForm(true);
+  };
+
+  const addNote = () => {
+    if (!noteForm.label || !noteForm.name) return;
+    setProductForm((prev: any) => ({
+      ...prev,
+      notes: [...prev.notes, { ...noteForm }]
+    }));
+    setNoteForm({ label: '', name: '', text: '' });
+    setEditingNoteIdx(null);
+  };
+
+  const removeNote = (idx: number) => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      notes: prev.notes.filter((_: any, i: number) => i !== idx)
+    }));
+  };
+
+  const editNote = (idx: number) => {
+    setEditingNoteIdx(idx);
+    setNoteForm(productForm.notes[idx]);
+  };
+
   const saveSchedule = async () => {
     if (!password) return alert('Enter password');
     const res = await adminFetch('/api/admin/config', {
@@ -330,6 +550,7 @@ export default function AdminPortal() {
     fetchCatalogStatus();
     fetchRecovery();
     fetchPromos();
+    fetchProducts();
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
     const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
@@ -619,6 +840,24 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
+  const seedDefaultProducts = async () => {
+    if (!password) return alert('Enter password');
+    if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
+    try {
+      const res = await adminFetch(`/api/admin/seed?password=${encodeURIComponent(password)}`);
+      const data = await res.json();
+      if (res.ok) {
+        setProductMsg(data.message);
+        showToast('SEEDED · Default products');
+        await fetchProducts();
+      } else {
+        setProductMsg('Error: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      setProductMsg('Error: ' + err.message);
+    }
+  };
+
   const pools = status?.pools || [];
   const totalInt = pools.reduce((s: number, p: any) => s + (p.intCount || 0), 0);
   const totalSub = pools.reduce((s: number, p: any) => s + (p.subCount || 0), 0);
@@ -640,6 +879,7 @@ export default function AdminPortal() {
     { id: 'overview', label: 'Overview' },
     { id: 'drops', label: 'Drops' },
     { id: 'ledger', label: 'Ledger' },
+    { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived).length || undefined },
     { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
@@ -690,6 +930,7 @@ export default function AdminPortal() {
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                 if (t.id === 'settings') fetchSettings();
+                if (t.id === 'products') fetchProducts();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -772,7 +1013,7 @@ export default function AdminPortal() {
                 <select value={selectedDrawTarget} onChange={(e) => setSelectedDrawTarget(e.target.value)}
                   style={{ ...inputStyle, width: '100%', marginBottom: 10 }}>
                   <option value="ALL_POOLS">All pools</option>
-                  {GOYUNIR_STORE_SUITE.productCatalog.flatMap((p) =>
+                  {allProducts.map((p) =>
                     ['50ml', '100ml'].map((sz) => (
                       <option key={`${p.name}-${sz}`} value={`drop_pool:${p.name}:${sz}`}>{p.name} — {sz}</option>
                     )),
@@ -855,17 +1096,15 @@ export default function AdminPortal() {
                 <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0, marginBottom: 12 }}>
                   Manage pricing, inventory levels, and winners per draw all in one place. Takes effect immediately — no redeploy.
                 </p>
-                {(configData?.products || []).map((p: any) => (
+                {allProducts.map((p: any) => (
                   <div key={p.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 10 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{p.name}</div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <input type="number" value={priceForm[p.id]?.price50ml ?? ''} placeholder="50ml $"
-                        onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price50ml: e.target.value } }))}
-                        style={{ ...inputStyle, width: 80 }} />
-                      <input type="number" value={priceForm[p.id]?.price100ml ?? ''} placeholder="100ml $"
-                        onChange={(e) => setPriceForm((f) => ({ ...f, [p.id]: { ...f[p.id], price100ml: e.target.value } }))}
-                        style={{ ...inputStyle, width: 80 }} />
-                      <button onClick={() => savePrice(p.id)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save Price</button>
+                      <input type="number" value={p.price50ml || 0} placeholder="50ml $"
+                        style={{ ...inputStyle, width: 80, opacity: 0.6 }} disabled />
+                      <input type="number" value={p.price100ml || 0} placeholder="100ml $"
+                        style={{ ...inputStyle, width: 80, opacity: 0.6 }} disabled />
+                      <span style={{ fontSize: 10, color: '#666' }}>Edit in Products tab</span>
                     </div>
                     {pools.filter((pool: any) => pool.product === p.name).map((pool: any) => {
                       const key = `${pool.product}:${pool.size}`;
@@ -1089,6 +1328,142 @@ export default function AdminPortal() {
           </div>
         )}
 
+        {/* ============ PRODUCTS ============ */}
+        {tab === 'products' && (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Product Management</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={seedDefaultProducts} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
+                  Seed Defaults
+                </button>
+                <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); }} style={buttonPrimary}>
+                  + Add Product
+                </button>
+              </div>
+            </div>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              Manage all products. Active products appear on the storefront. Archived products go to the catalog archive.
+              {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
+            </p>
+            
+            {productMsg && (
+              <p style={{ fontSize: 12, color: productMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>
+                {productMsg}
+              </p>
+            )}
+
+            {showProductForm && (
+              <div style={{ background: '#09090b', padding: 16, borderRadius: 12, marginBottom: 16 }}>
+                <h4 style={{ margin: '0 0 8px', fontSize: 12, color: '#aaa' }}>
+                  {editingProduct ? 'Edit Product' : 'New Product'}
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <input type="text" placeholder="Name *" value={productForm.name} onChange={(e) => setProductForm((p: any) => ({ ...p, name: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Slug (auto-generated if blank)" value={productForm.slug} onChange={(e) => setProductForm((p: any) => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-') }))} style={inputStyle} />
+                  <input type="text" placeholder="Prefix (image folder name)" value={productForm.prefix} onChange={(e) => setProductForm((p: any) => ({ ...p, prefix: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Tagline" value={productForm.tagline} onChange={(e) => setProductForm((p: any) => ({ ...p, tagline: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Description" value={productForm.desc} onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
+                  <input type="number" placeholder="Price 50ml" value={productForm.price50ml} onChange={(e) => setProductForm((p: any) => ({ ...p, price50ml: e.target.value }))} style={inputStyle} />
+                  <input type="number" placeholder="Price 100ml" value={productForm.price100ml} onChange={(e) => setProductForm((p: any) => ({ ...p, price100ml: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Stripe ID 50ml" value={productForm.stripeId50ml} onChange={(e) => setProductForm((p: any) => ({ ...p, stripeId50ml: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Stripe ID 100ml" value={productForm.stripeId100ml} onChange={(e) => setProductForm((p: any) => ({ ...p, stripeId100ml: e.target.value }))} style={inputStyle} />
+                  <input type="number" placeholder="Max Inventory" value={productForm.maxRaffleAllocationLimit} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: e.target.value }))} style={inputStyle} />
+                  <input type="number" placeholder="Total Inventory" value={productForm.totalInventory} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: e.target.value }))} style={inputStyle} />
+                  <input type="text" placeholder="Winner Tiers (comma separated, e.g. 2,2,2,1)" value={productForm.winnerTiers} onChange={(e) => setProductForm((p: any) => ({ ...p, winnerTiers: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
+                </div>
+                
+                <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
+                    Active (visible on storefront)
+                  </label>
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked }))} />
+                    Archived (moved to catalog archive)
+                  </label>
+                </div>
+
+                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Product Notes (scrollable cards on product page)</h5>
+                <div style={{ marginBottom: 8 }}>
+                  {productForm.notes && productForm.notes.map((note: any, idx: number) => (
+                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#060606', padding: 6, borderRadius: 6 }}>
+                      <span style={{ fontSize: 10, color: '#888', minWidth: 60 }}>{note.label}</span>
+                      <span style={{ fontSize: 11, color: '#ccc', flex: 1 }}>{note.name}</span>
+                      <span style={{ fontSize: 10, color: '#666', flex: 1 }}>{note.text}</span>
+                      <button onClick={() => editNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10 }}>Edit</button>
+                      <button onClick={() => removeNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <input type="text" placeholder="Label (e.g. TOP PROFILE)" value={noteForm.label} onChange={(e) => setNoteForm((n) => ({ ...n, label: e.target.value }))} style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }} />
+                  <input type="text" placeholder="Name" value={noteForm.name} onChange={(e) => setNoteForm((n) => ({ ...n, name: e.target.value }))} style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }} />
+                  <input type="text" placeholder="Text" value={noteForm.text} onChange={(e) => setNoteForm((n) => ({ ...n, text: e.target.value }))} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
+                  <button onClick={addNote} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>{editingNoteIdx !== null ? 'Update' : 'Add'}</button>
+                  {editingNoteIdx !== null && <button onClick={() => { setEditingNoteIdx(null); setNoteForm({ label: '', name: '', text: '' }); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Cancel</button>}
+                </div>
+
+                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Images (360° rotation)</h5>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                  <input type="text" placeholder="Image URL" value={imageInput} onChange={(e) => setImageInput(e.target.value)} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
+                  <button onClick={addImage} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Add Image</button>
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {(productForm.images || []).map((img: string, idx: number) => (
+                    <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4 }}>
+                      <span style={{ fontSize: 10, color: '#888' }}>#{idx + 1}</span>
+                      <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171', marginLeft: 4 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button onClick={saveProduct} style={buttonPrimary}>Save Product</button>
+                  <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={buttonGhost}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {allProducts.length === 0 && !productsLoading && (
+                <div style={{ textAlign: 'center', padding: 30, color: '#555', border: '1px dashed #333', borderRadius: 12 }}>
+                  No products yet. Click "Seed Defaults" to add placeholder products or "Add Product" to create your own.
+                </div>
+              )}
+              {allProducts.map((product) => {
+                const isActive = product.isActive && !product.isArchived;
+                const isArchived = product.isArchived;
+                return (
+                  <div key={product.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: `1px solid ${isActive ? '#1c1c1e' : isArchived ? '#5a3d1a' : '#2a1a1a'}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
+                        <div style={{ fontSize: 10, color: '#666' }}>
+                          slug: {product.slug} · {product.images?.length || 0} images · ${product.price50ml || 0} / ${product.price100ml || 0}
+                          {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
+                          {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
+                          {!isActive && !isArchived && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
+                        <button onClick={() => toggleActive(product.id, isActive)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
+                          {isActive ? 'Hide' : 'Show'}
+                        </button>
+                        <button onClick={() => toggleArchive(product.id, isArchived)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
+                          {isArchived ? 'Unarchive' : 'Archive'}
+                        </button>
+                        <button onClick={() => deleteProduct(product.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ============ GROWTH ============ */}
         {tab === 'growth' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1275,64 +1650,6 @@ export default function AdminPortal() {
                   </label>
                 ))}
               </div>
-
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Product Notes</h4>
-              <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>These notes appear as scrollable cards on the product page (e.g., "TOP PROFILE", "HEART PROFILE", "BASE PROFILE").</p>
-              {GOYUNIR_STORE_SUITE.productCatalog.map((product) => (
-                <div key={product.id} style={{ marginBottom: 8, padding: 8, background: '#09090b', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{product.name}</div>
-                  {(productNotes[product.id] || []).map((note: any, idx: number) => (
-                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-                      <input 
-                        type="text" 
-                        value={note.label || ''} 
-                        placeholder="Label (e.g. TOP PROFILE)"
-                        onChange={(e) => {
-                          const newNotes = [...(productNotes[product.id] || [])];
-                          newNotes[idx] = { ...newNotes[idx], label: e.target.value };
-                          setProductNotes({ ...productNotes, [product.id]: newNotes });
-                        }}
-                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11 }} />
-                      <input 
-                        type="text" 
-                        value={note.name || ''} 
-                        placeholder="Name (e.g. White Bergamot)"
-                        onChange={(e) => {
-                          const newNotes = [...(productNotes[product.id] || [])];
-                          newNotes[idx] = { ...newNotes[idx], name: e.target.value };
-                          setProductNotes({ ...productNotes, [product.id]: newNotes });
-                        }}
-                        style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
-                      <input 
-                        type="text" 
-                        value={note.text || ''} 
-                        placeholder="Description"
-                        onChange={(e) => {
-                          const newNotes = [...(productNotes[product.id] || [])];
-                          newNotes[idx] = { ...newNotes[idx], text: e.target.value };
-                          setProductNotes({ ...productNotes, [product.id]: newNotes });
-                        }}
-                        style={{ ...inputStyle, flex: 2, padding: 6, fontSize: 11 }} />
-                      <button 
-                        onClick={() => {
-                          const newNotes = (productNotes[product.id] || []).filter((_: any, i: number) => i !== idx);
-                          setProductNotes({ ...productNotes, [product.id]: newNotes });
-                        }}
-                        style={{ ...buttonGhost, padding: '4px 8px', fontSize: 11, color: '#f87171', borderColor: '#f87171' }}>
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button 
-                    onClick={() => {
-                      const current = productNotes[product.id] || [];
-                      setProductNotes({ ...productNotes, [product.id]: [...current, { label: 'PROFILE', name: 'New Note', text: '' }] });
-                    }}
-                    style={{ ...buttonGhost, padding: '4px 10px', fontSize: 11, marginTop: 4 }}>
-                    + Add Note
-                  </button>
-                </div>
-              ))}
 
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
                 {settingsLoading ? 'Saving…' : 'Save All Settings'}

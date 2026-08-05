@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 const PRODUCTS_KEY = 'store:products';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
+const IMAGES_KEY = 'store:product_images';
 
 export type StoreProduct = {
   id: string;
@@ -42,6 +43,7 @@ async function loadProducts(redis: any): Promise<Record<string, StoreProduct>> {
 
 async function saveProduct(redis: any, product: StoreProduct) {
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+  
   // Update active/archived indexes
   if (product.isActive && !product.isArchived) {
     await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
@@ -53,32 +55,45 @@ async function saveProduct(redis: any, product: StoreProduct) {
     await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
     await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
   }
+  
+  // Save images separately if provided
+  if (product.images && product.images.length > 0) {
+    const imgKey = `${IMAGES_KEY}:${product.id}`;
+    await redis.set(imgKey, JSON.stringify(product.images));
+  }
 }
 
 async function deleteProduct(redis: any, productId: string) {
   await redis.hdel(PRODUCTS_KEY, productId);
   await redis.hdel(ACTIVE_PRODUCTS_KEY, productId);
   await redis.hdel(ARCHIVED_PRODUCTS_KEY, productId);
+  await redis.del(`${IMAGES_KEY}:${productId}`);
+}
+
+function generateSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const includeArchived = url.searchParams.get('includeArchived') === 'true';
+    const includeInactive = url.searchParams.get('includeInactive') === 'true';
     
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ products: [] });
     
     let products: StoreProduct[] = [];
+    const all = await loadProducts(redis);
     
     if (includeArchived) {
-      const all = await loadProducts(redis);
       products = Object.values(all);
+    } else if (includeInactive) {
+      products = Object.values(all).filter(p => !p.isArchived);
     } else {
       const raw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
       if (raw) {
         const parsed = Object.values(raw).map((v) => safeParseRedisItem<StoreProduct>(v));
-        // Filter out null values
         products = parsed.filter((p): p is StoreProduct => p !== null);
       }
     }
@@ -149,15 +164,21 @@ export async function POST(request: Request) {
     }
 
     // upsert - create or update
+    const name = String(body?.name || '').trim();
+    if (!name) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });
+    
     const id = String(body?.id || `prod_${Date.now().toString(36)}`);
     const allProducts = await loadProducts(redis);
     const existing = allProducts[id] || null;
     
+    const slug = String(body?.slug || existing?.slug || generateSlug(name));
+    const prefix = String(body?.prefix || existing?.prefix || slug);
+    
     const product: StoreProduct = {
       id,
-      name: String(body?.name || existing?.name || 'New Product'),
-      slug: String(body?.slug || existing?.slug || id).toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
-      prefix: String(body?.prefix || existing?.prefix || id),
+      name,
+      slug,
+      prefix,
       tagline: String(body?.tagline || existing?.tagline || 'LIMITED DROP'),
       desc: String(body?.desc || existing?.desc || 'A refined signature profile.'),
       price50ml: Number(body?.price50ml ?? existing?.price50ml ?? 0),

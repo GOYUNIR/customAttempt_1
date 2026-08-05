@@ -48,6 +48,8 @@ export async function POST(request: Request) {
       const current = safeParseRedisItem<string[]>(await redis.get(key)) || [];
       const newImages = [...current, ...images];
       await redis.set(key, JSON.stringify(newImages));
+      // Also update the product's images field
+      await updateProductImages(redis, productId, newImages);
       return NextResponse.json({ success: true, images: newImages });
     }
 
@@ -58,6 +60,7 @@ export async function POST(request: Request) {
       if (index >= current.length) return NextResponse.json({ error: 'Index out of range' }, { status: 400 });
       current.splice(index, 1);
       await redis.set(key, JSON.stringify(current));
+      await updateProductImages(redis, productId, current);
       return NextResponse.json({ success: true, images: current });
     }
 
@@ -76,14 +79,33 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Invalid order array - must contain all indices' }, { status: 400 });
       }
       await redis.set(key, JSON.stringify(reordered));
+      await updateProductImages(redis, productId, reordered);
       return NextResponse.json({ success: true, images: reordered });
     }
 
     // set - replace all
     await redis.set(key, JSON.stringify(images));
+    await updateProductImages(redis, productId, images);
     return NextResponse.json({ success: true, images });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+async function updateProductImages(redis: any, productId: string, images: string[]) {
+  const PRODUCTS_KEY = 'store:products';
+  const raw = await redis.hget(PRODUCTS_KEY, productId);
+  const product = safeParseRedisItem<any>(raw);
+  if (product) {
+    product.images = images;
+    product.updatedAt = new Date().toISOString();
+    await redis.hset(PRODUCTS_KEY, { [productId]: JSON.stringify(product) });
+    // Also update active/archived indexes
+    if (product.isActive && !product.isArchived) {
+      await redis.hset('store:active_products', { [productId]: JSON.stringify(product) });
+    } else if (product.isArchived) {
+      await redis.hset('store:archived_products', { [productId]: JSON.stringify(product) });
+    }
   }
 }
 
@@ -106,6 +128,7 @@ export async function DELETE(request: Request) {
 
     const key = `${IMAGES_KEY}:${productId}`;
     await redis.del(key);
+    await updateProductImages(redis, productId, []);
     return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
