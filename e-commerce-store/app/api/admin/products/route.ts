@@ -22,6 +22,7 @@ export type StoreProduct = {
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
+  isUpcoming: boolean;  // <-- ADD THIS LINE
   notes: { label: string; name: string; text: string }[];
   images: string[];
   totalInventory: number;
@@ -44,16 +45,22 @@ async function loadProducts(redis: any): Promise<Record<string, StoreProduct>> {
 async function saveProduct(redis: any, product: StoreProduct) {
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   
-  // Update active/archived indexes
-  if (product.isActive && !product.isArchived) {
+  // Update active/archived/upcoming indexes
+  if (product.isActive && !product.isArchived && !product.isUpcoming) {
     await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
     await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
   } else if (product.isArchived) {
     await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
     await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
+  } else if (product.isUpcoming) {
+    // Upcoming products are stored in a separate upcoming index
+    await redis.hset('store:upcoming_products', { [product.id]: JSON.stringify(product) });
+    await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
+    await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
   } else {
     await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
     await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
+    await redis.hdel('store:upcoming_products', product.id);
   }
   
   // Save images separately if provided
@@ -62,6 +69,7 @@ async function saveProduct(redis: any, product: StoreProduct) {
     await redis.set(imgKey, JSON.stringify(product.images));
   }
 }
+
 
 async function deleteProduct(redis: any, productId: string) {
   await redis.hdel(PRODUCTS_KEY, productId);
@@ -204,9 +212,9 @@ export async function POST(request: Request) {
     
     const product: StoreProduct = {
       id,
-      name,
-      slug,
-      prefix,
+      name: String(body?.name || existing?.name || 'New Product'),
+      slug: String(body?.slug || existing?.slug || id).toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
+      prefix: String(body?.prefix || existing?.prefix || id),
       tagline: String(body?.tagline || existing?.tagline || 'LIMITED DROP'),
       desc: String(body?.desc || existing?.desc || 'A refined signature profile.'),
       price50ml: Number(body?.price50ml ?? existing?.price50ml ?? 0),
@@ -216,6 +224,7 @@ export async function POST(request: Request) {
       maxRaffleAllocationLimit: Number(body?.maxRaffleAllocationLimit ?? existing?.maxRaffleAllocationLimit ?? 0),
       isActive: body?.isActive !== undefined ? body.isActive : (existing?.isActive ?? true),
       isArchived: body?.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
+      isUpcoming: body?.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),  // <-- ADD THIS LINE
       notes: Array.isArray(body?.notes) ? body.notes : (existing?.notes || []),
       images: Array.isArray(body?.images) ? body.images : (existing?.images || []),
       totalInventory: Number(body?.totalInventory ?? existing?.totalInventory ?? 0),
@@ -223,6 +232,7 @@ export async function POST(request: Request) {
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
 
     await saveProduct(redis, product);
     return NextResponse.json({ success: true, product });

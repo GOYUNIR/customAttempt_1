@@ -162,7 +162,7 @@ export default function AdminPortal() {
     name: '', slug: '', prefix: '', tagline: '', desc: '',
     price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
     maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
+    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []  // <-- ADD isUpcoming: false
   });
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);

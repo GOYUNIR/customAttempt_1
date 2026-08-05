@@ -23,7 +23,7 @@ const DEFAULT_PRODUCTS = [
     maxRaffleAllocationLimit: 10,
     isActive: true,
     isArchived: false,
-    isUpcoming: false,
+    isUpcoming: false,  // <-- ADD THIS LINE
     notes: [
       { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
       { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
@@ -49,7 +49,7 @@ const DEFAULT_PRODUCTS = [
     maxRaffleAllocationLimit: 5,
     isActive: true,
     isArchived: false,
-    isUpcoming: false,
+    isUpcoming: false,  // <-- ADD THIS LINE
     notes: [
       { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
       { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
@@ -62,6 +62,7 @@ const DEFAULT_PRODUCTS = [
     updatedAt: new Date().toISOString(),
   }
 ];
+
 
 const DEFAULT_CONFIG = {
   themeColors: {
