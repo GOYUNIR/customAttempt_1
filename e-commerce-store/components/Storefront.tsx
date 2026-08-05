@@ -4,14 +4,6 @@ import Link from 'next/link';
 import { useRef, useEffect, useState } from 'react';
 import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import {
-  getProductPrice,
-  getVisibleProducts,
-  getNextDrawTimestampForSchedule,
-  resolveProductSchedule,
-  getAvailableSizes,
-} from '@/lib/storefront-config';
 import { EntryFormState, isValidEmail, normalizeEntryForm } from '@/lib/validation';
 
 interface TimeLeftState {
@@ -21,6 +13,175 @@ interface TimeLeftState {
   s: number;
   expired: boolean;
 }
+
+interface StoreProduct {
+  id: string;
+  name: string;
+  slug: string;
+  prefix: string;
+  tagline: string;
+  desc: string;
+  price50ml: number;
+  price100ml: number;
+  stripeId50ml: string;
+  stripeId100ml: string;
+  maxRaffleAllocationLimit: number;
+  isActive: boolean;
+  isArchived: boolean;
+  notes: { label: string; name: string; text: string }[];
+  images: string[];
+  totalInventory: number;
+  winnerTiers: number[];
+}
+
+interface StoreConfig {
+  themeColors: {
+    primaryBackground: string;
+    cardBackground: string;
+    cardBorder: string;
+    accentPurple: string;
+    accentBlue: string;
+    textMain: string;
+    textMuted: string;
+    checkoutCtaButton: string;
+  };
+  availableSizes: string[];
+  homeRedirectSlug?: string;
+  dropSchedule: {
+    mode: 'fixed' | 'daily' | 'weekly' | 'monthly';
+    timezone: string;
+    targetEndDateTime: string;
+    drawDayOfWeek: number;
+    drawDayOfMonth: number;
+    drawHour: number;
+    drawMinute: number;
+    drawSecond?: number;
+    countdownExpiredText: string;
+    daysLabel: string;
+    hoursLabel: string;
+    minutesLabel: string;
+    secondsLabel: string;
+    winnersPer50ml: number;
+    winnersPer100ml: number;
+  };
+  animationMechanics: {
+    totalFramesToLoad: number;
+    maxRotationDegrees: number;
+    spinReverseOnAlternatingProgress: boolean;
+    spinCyclesTopToCheckout: number;
+  };
+  raffleRegistrationForm: {
+    titleHeader: string;
+    emailLabel: string;
+    emailPlaceholder: string;
+    addressLabel: string;
+    addressPlaceholder: string;
+    submitButtonText: string;
+    submitButtonLoadingText: string;
+  };
+  heroContent: {
+    eyebrow: string;
+    headline: string;
+    body: string;
+    ctaLabel: string;
+  };
+  socialProof: {
+    label: string;
+    baseCount: number;
+    caption: string;
+    autoIncrementEnabled: boolean;
+    autoIncrementChancePerHeartbeat: number;
+    autoIncrementAmount: number;
+    autoIncrementMaxPerDay: number;
+    autoIncrementMinHourGap: number;
+  };
+  brandFooterData: {
+    instagramLink: string;
+    tiktokLink: string;
+    supportEmail: string;
+    shippingReturnPolicyText: string;
+    corporateEntityCopyright: string;
+  };
+  catalogPreview: {
+    upcomingDrops: any[];
+    archiveScents: any[];
+  };
+  productCatalog: StoreProduct[];
+}
+
+const DEFAULT_CONFIG: StoreConfig = {
+  themeColors: {
+    primaryBackground: '#0a0a0a',
+    cardBackground: '#111111',
+    cardBorder: '#222222',
+    accentPurple: '#a855f7',
+    accentBlue: '#3b82f6',
+    textMain: '#ffffff',
+    textMuted: '#888888',
+    checkoutCtaButton: '#635bff',
+  },
+  availableSizes: ['50ml'],
+  dropSchedule: {
+    mode: 'weekly',
+    timezone: 'America/Los_Angeles',
+    targetEndDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', 'T') + ':00',
+    drawDayOfWeek: 6,
+    drawDayOfMonth: 1,
+    drawHour: 21,
+    drawMinute: 0,
+    drawSecond: 0,
+    countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
+    daysLabel: 'd',
+    hoursLabel: 'h',
+    minutesLabel: 'm',
+    secondsLabel: 's',
+    winnersPer50ml: 0,
+    winnersPer100ml: 0,
+  },
+  animationMechanics: {
+    totalFramesToLoad: 29,
+    maxRotationDegrees: 360,
+    spinReverseOnAlternatingProgress: false,
+    spinCyclesTopToCheckout: 1,
+  },
+  raffleRegistrationForm: {
+    titleHeader: 'Join The Allocation Draw',
+    emailLabel: 'Contact Email Address',
+    emailPlaceholder: 'name@domain.com',
+    addressLabel: 'Full Shipping Destination',
+    addressPlaceholder: '123 Luxury Dr, New York, NY',
+    submitButtonText: '🏆 Secure Entry Allocation Ticket',
+    submitButtonLoadingText: 'Encrypting Entry Base...',
+  },
+  heroContent: {
+    eyebrow: 'The Architecture of Scent',
+    headline: 'A drop that moves faster than attention itself.',
+    body: 'We design fragrances that move faster than time itself.',
+    ctaLabel: '↓ Scroll To Explore',
+  },
+  socialProof: {
+    label: 'Limited drop access',
+    baseCount: 0,
+    caption: 'Hype is compounding fast—reserve now before inventory closes.',
+    autoIncrementEnabled: true,
+    autoIncrementChancePerHeartbeat: 0.15,
+    autoIncrementAmount: 1,
+    autoIncrementMaxPerDay: 4,
+    autoIncrementMinHourGap: 3,
+  },
+  brandFooterData: {
+    instagramLink: 'https://instagram.com/goyunir',
+    tiktokLink: 'https://tiktok.com/goyunir',
+    supportEmail: 'goyunir.support@gmail.com',
+    shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
+    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+  },
+  catalogPreview: {
+    upcomingDrops: [],
+    archiveScents: [],
+  },
+  productCatalog: [],
+};
 
 const PREFILL_KEY = 'goyunir_entry_prefill';
 
@@ -40,48 +201,71 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [archivedProductIds, setArchivedProductIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
+  const [allProducts, setAllProducts] = useState<StoreProduct[]>([]);
+  const [activeProducts, setActiveProducts] = useState<StoreProduct[]>([]);
+  const [archivedProducts, setArchivedProducts] = useState<StoreProduct[]>([]);
+  const [archivedIds, setArchivedIds] = useState<string[]>([]);
   const [archiveNotesMap, setArchiveNotesMap] = useState<Record<string, string>>({});
   const [archiveFromMap, setArchiveFromMap] = useState<Record<string, string>>({});
   const [productOverrides, setProductOverrides] = useState<Record<string, any>>({});
   const [globalScheduleOverride, setGlobalScheduleOverride] = useState<any>(null);
 
+  // Load config from API
   useEffect(() => {
-    fetch('/api/config/public')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.productOverrides) setProductOverrides(data.productOverrides);
-        if (data.globalScheduleOverride) setGlobalScheduleOverride(data.globalScheduleOverride);
-      })
-      .catch(() => {});
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/store/config');
+        const data = await res.json();
+        if (data.config) {
+          setConfig({
+            ...DEFAULT_CONFIG,
+            ...data.config,
+            themeColors: { ...DEFAULT_CONFIG.themeColors, ...data.config.themeColors },
+            dropSchedule: { ...DEFAULT_CONFIG.dropSchedule, ...data.config.dropSchedule, ...data.scheduleOverride },
+            socialProof: { ...DEFAULT_CONFIG.socialProof, ...data.config.socialProof, ...data.socialOverride },
+          });
+        }
+        if (data.activeProducts) {
+          setActiveProducts(data.activeProducts);
+          setAllProducts(data.allProducts || []);
+          setArchivedProducts(data.archivedProducts || []);
+          const ids = (data.archivedProducts || []).map((p: any) => p.id);
+          setArchivedIds(ids);
+        }
+        if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
+      } catch (err) {
+        console.error('Failed to load store config:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadConfig();
   }, []);
 
+  // Update archived IDs when products change
   useEffect(() => {
-    fetch('/api/catalog/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data.archivedProductIds)) setArchivedProductIds(data.archivedProductIds);
-        if (data.notesByProductId) setArchiveNotesMap(data.notesByProductId);
-        if (data.availableFromByProductId) setArchiveFromMap(data.availableFromByProductId);
-      })
-      .catch(() => {});
-  }, []);
+    const ids = archivedProducts.map(p => p.id);
+    setArchivedIds(ids);
+  }, [archivedProducts]);
 
-  const allVisible = getVisibleProducts(GOYUNIR_STORE_SUITE).filter((p) => !archivedProductIds.includes(p.id));
-
-  const requestedProduct = initialSlug ? GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.slug === initialSlug) : undefined;
-  const requestedIsArchived = requestedProduct ? archivedProductIds.includes(requestedProduct.id) : false;
-
-  const sizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
+  const sizes = config.availableSizes || ['50ml'];
   const defaultSize = sizes.includes('100ml') && searchParams?.get('size') === '100ml' ? '100ml' : sizes[0] || '50ml';
+
+  const allVisible = activeProducts.filter((p) => p.isActive !== false && !archivedIds.includes(p.id));
+
+  const requestedProduct = initialSlug 
+    ? allProducts.find((p) => p.slug === initialSlug) || activeProducts.find((p) => p.slug === initialSlug)
+    : undefined;
+  const requestedIsArchived = requestedProduct ? archivedIds.includes(requestedProduct.id) : false;
 
   const [activeProductIndex, setActiveProductIndex] = useState(() => {
     if (requestedProduct && !requestedIsArchived) {
       const idx = allVisible.findIndex((p) => p.id === requestedProduct.id);
       if (idx >= 0) return idx;
     }
-    const firstVisibleIndex = allVisible.findIndex((product) => product.isActive !== false);
-    return firstVisibleIndex >= 0 ? firstVisibleIndex : 0;
+    return 0;
   });
 
   const [selectedSize, setSelectedSize] = useState(defaultSize);
@@ -90,7 +274,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'loading' | 'success' | 'notice' | 'error'>('idle');
   const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
-  const [socialProofDisplay, setSocialProofDisplay] = useState(GOYUNIR_STORE_SUITE.socialProof.baseCount);
+  const [socialProofDisplay, setSocialProofDisplay] = useState(config.socialProof?.baseCount || 0);
 
   const [promoCode, setPromoCode] = useState<string | null>(null);
   const [promoDiscount, setPromoDiscount] = useState<number>(0);
@@ -98,7 +282,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [showManualPromo, setShowManualPromo] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
   const [promoValidated, setPromoValidated] = useState<boolean>(false);
-  const [promoErrorMessage, setPromoErrorMessage] = useState<string>('');
+  const [promoErrorMessage, setPromoErrorMessage] = useState('');
 
   useEffect(() => {
     try {
@@ -143,30 +327,32 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     document.head.appendChild(s);
   }, []);
 
-  const TOTAL_IMAGES = GOYUNIR_STORE_SUITE.animationMechanics.totalFramesToLoad;
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
-  const heroContent = GOYUNIR_STORE_SUITE.heroContent;
+  const currentProduct = requestedProduct && requestedIsArchived
+    ? requestedProduct
+    : allVisible[activeProductIndex] ?? allVisible[0] ?? activeProducts[0];
 
-  const currentProduct =
-    requestedProduct && requestedIsArchived
-      ? requestedProduct
-      : allVisible[activeProductIndex] ?? allVisible[0] ?? GOYUNIR_STORE_SUITE.productCatalog[0];
+  const isCurrentArchived = currentProduct ? archivedIds.includes(currentProduct.id) : false;
 
-  const isCurrentArchived = archivedProductIds.includes(currentProduct?.id);
-  const priceFor = (product: typeof currentProduct, size: string) => {
-    const ov = productOverrides[product?.id];
+  const priceFor = (product: StoreProduct | undefined, size: string) => {
+    if (!product) return 0;
+    const ov = productOverrides[product.id];
     if (size === '100ml' && typeof ov?.price100ml === 'number') return ov.price100ml;
     if (size !== '100ml' && typeof ov?.price50ml === 'number') return ov.price50ml;
-    return getProductPrice(product, size);
+    return size === '100ml' ? product.price100ml : product.price50ml;
   };
 
   const effectiveSchedule = {
-    ...resolveProductSchedule(GOYUNIR_STORE_SUITE, currentProduct),
+    ...config.dropSchedule,
     ...(globalScheduleOverride || {}),
-    ...(productOverrides[currentProduct?.id]?.customDropSchedule || {}),
+    ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
   };
-  const archiveNote = archiveNotesMap[currentProduct?.id] || '';
-  const archiveFrom = archiveFromMap[currentProduct?.id] || '';
+
+  const archiveNote = currentProduct ? archiveNotesMap[currentProduct.id] || '' : '';
+  const archiveFrom = currentProduct ? archiveFromMap[currentProduct.id] || '' : '';
+
+  const TOTAL_IMAGES = config.animationMechanics?.totalFramesToLoad || 29;
+  const configPalette = config.themeColors || DEFAULT_CONFIG.themeColors;
+  const heroContent = config.heroContent || DEFAULT_CONFIG.heroContent;
 
   useEffect(() => {
     try {
@@ -184,7 +370,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (!initialSlug) return;
     const idx = allVisible.findIndex((p) => p.slug === initialSlug);
     if (idx >= 0 && idx !== activeProductIndex) setActiveProductIndex(idx);
-  }, [initialSlug, archivedProductIds.join(',')]);
+  }, [initialSlug, archivedIds.join(',')]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !currentProduct?.slug) return;
@@ -195,7 +381,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   }, [currentProduct?.slug]);
 
   const { scrollYProgress } = useScroll({ target: containerRef, offset: ['start start', 'end end'] });
-  const cycles = Math.max(1, GOYUNIR_STORE_SUITE.animationMechanics.spinCyclesTopToCheckout);
+  const cycles = Math.max(1, config.animationMechanics?.spinCyclesTopToCheckout || 1);
   const spinRange = 0.85;
   const framePositions: number[] = [0];
   const frameValues: number[] = [1];
@@ -273,6 +459,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               } else {
                 setPromoCode(null);
                 setPromoDiscount(0);
+                setPromoValidated(false);
                 try { window.sessionStorage.removeItem('goyunir_promo_ref'); } catch {}
               }
               try {
@@ -342,19 +529,25 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         context.drawImage(img, 0, 0, 600, 600);
       }
     };
-    for (let i = 1; i <= TOTAL_IMAGES; i += 1) {
+    
+    const productPrefix = currentProduct?.prefix || 'default';
+    const imageUrls = currentProduct?.images?.length > 0 
+      ? currentProduct.images 
+      : Array.from({ length: TOTAL_IMAGES }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
+    
+    for (let i = 0; i < Math.min(imageUrls.length, TOTAL_IMAGES); i++) {
       const img = new Image();
-      img.src = `/images/${currentProduct.prefix}/${i}.jpeg`;
-      img.onload = () => { if (i === 1) drawFrame(img); };
+      img.src = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
+      img.onload = () => { if (i === 0) drawFrame(img); };
       preloadedImages.push(img);
     }
     const unsubscribe = frameIndex.on('change', (value) => {
-      const index = Math.min(Math.max(Math.round(value), 1), TOTAL_IMAGES);
+      const index = Math.min(Math.max(Math.round(value), 1), preloadedImages.length);
       const activeFrameImage = preloadedImages[index - 1];
       if (activeFrameImage) drawFrame(activeFrameImage);
     });
     return () => unsubscribe();
-  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct.prefix, currentProduct.id]);
+  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -412,6 +605,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }
       })
       .catch(() => {});
+  };
+
+  const clearPromo = () => {
+    setPromoCode(null);
+    setPromoDiscount(0);
+    setPromoValidated(false);
+    window.sessionStorage.removeItem('goyunir_promo_ref');
+    setManualPromoInput('');
+    setShowManualPromo(false);
+    setFeedbackStatus('notice');
+    setFeedbackMessage('Promo code removed.');
   };
 
   const submitRaffleEntry = async (event: React.FormEvent) => {
@@ -477,19 +681,26 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (typeof window !== 'undefined') window.location.href = `/${prod.slug}`;
   };
 
-  const clearPromo = () => {
-    setPromoCode(null);
-    setPromoDiscount(0);
-    setPromoValidated(false);
-    window.sessionStorage.removeItem('goyunir_promo_ref');
-    setManualPromoInput('');
-    setShowManualPromo(false);
-    setFeedbackStatus('notice');
-    setFeedbackMessage('Promo code removed.');
-  };
-
   const bannerColor =
     feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'notice' ? '#edb210' : feedbackStatus === 'error' ? '#ff6b5a' : '#9ca3af';
+
+  if (loading) {
+    return (
+      <div style={{ 
+        minHeight: '100vh', 
+        background: configPalette?.primaryBackground || '#0a0a0a',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: '#666' }}>Loading</div>
+          <div style={{ marginTop: 12, width: 40, height: 2, background: '#a855f7', margin: '12px auto' }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
@@ -558,7 +769,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', boxSizing: 'border-box' }}>
           <motion.div initial={{ opacity: 0, y: 15 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
             <span style={{ textTransform: 'uppercase', letterSpacing: '6px', fontSize: '9px', color: '#555', fontWeight: 'bold' }}>{heroContent.eyebrow}</span>
-            <h1 style={{ fontSize: '36px', margin: '10px 0', fontFamily: 'serif', letterSpacing: '1px' }}>{currentProduct.name}</h1>
+            <h1 style={{ fontSize: '36px', margin: '10px 0', fontFamily: 'serif', letterSpacing: '1px' }}>{currentProduct?.name || 'Product'}</h1>
             {isCurrentArchived && (
               <div style={{ display: 'inline-block', marginBottom: 12, padding: '6px 14px', borderRadius: 20, border: '1px solid #f59e0b', color: '#f59e0b', fontSize: 11, fontWeight: 'bold' }}>
                 Archived — stay entered for the return
@@ -591,7 +802,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
-          {currentProduct.notes.map((note, idx) => {
+          {(currentProduct?.notes || []).map((note, idx) => {
             const isLeft = idx % 2 === 0;
             const topOffset = 100 + idx * 90;
             const activeColor = idx % 2 === 0 ? configPalette.accentPurple : configPalette.accentBlue;
@@ -646,13 +857,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
             <div style={{ background: 'rgba(20,20,22,0.8)', backdropFilter: 'blur(10px)', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
               <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: 6 }}>
-                {GOYUNIR_STORE_SUITE.socialProof.label}
+                {config.socialProof?.label || 'Limited drop access'}
               </div>
               <div style={{ fontSize: 18, fontWeight: 'bold', fontFamily: 'monospace' }}>{socialProofDisplay.toLocaleString()}</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{GOYUNIR_STORE_SUITE.socialProof.caption}</div>
+              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{config.socialProof?.caption || ''}</div>
             </div>
 
-            <h2 style={{ fontSize: 24, textAlign: 'center', fontFamily: 'serif', margin: 0 }}>{GOYUNIR_STORE_SUITE.raffleRegistrationForm.titleHeader}</h2>
+            <h2 style={{ fontSize: 24, textAlign: 'center', fontFamily: 'serif', margin: 0 }}>{config.raffleRegistrationForm?.titleHeader || 'Join The Allocation Draw'}</h2>
 
             <motion.div
               initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
@@ -671,8 +882,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.5 }} />
 
               <div style={{ position: 'relative', zIndex: 1 }}>
-                <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct.name}</h3>
-                <p style={{ color: configPalette.textMuted, fontSize: 12, margin: '0 0 20px', textAlign: 'center' }}>{currentProduct.desc}</p>
+                <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct?.name || 'Product'}</h3>
+                <p style={{ color: configPalette.textMuted, fontSize: 12, margin: '0 0 20px', textAlign: 'center' }}>{currentProduct?.desc || ''}</p>
 
                 <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {sizes.length > 1 ? (
@@ -716,10 +927,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     </div>
                   )}
                   <input required type="email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                    placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.emailPlaceholder} autoComplete="email"
+                    placeholder={config.raffleRegistrationForm?.emailPlaceholder || 'name@domain.com'} autoComplete="email"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
                   <input required type="text" value={form.shippingAddress} onChange={(e) => setForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
-                    id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={GOYUNIR_STORE_SUITE.raffleRegistrationForm.addressPlaceholder} autoComplete="shipping street-address" name="shipping-address"
+                    id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={config.raffleRegistrationForm?.addressPlaceholder || '123 Luxury Dr, New York, NY'} autoComplete="shipping street-address" name="shipping-address"
                     style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
                   {promoCode && promoValidated ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
@@ -771,10 +982,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                       border: 'none', fontWeight: 'bold', fontSize: 14, cursor: isProcessing ? 'not-allowed' : 'pointer',
                     }}>
                     {isProcessing
-                      ? GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonLoadingText
+                      ? config.raffleRegistrationForm?.submitButtonLoadingText || 'Encrypting Entry Base...'
                       : timeLeft.expired || isCurrentArchived
                         ? 'Stay entered for the return'
-                        : GOYUNIR_STORE_SUITE.raffleRegistrationForm.submitButtonText}
+                        : config.raffleRegistrationForm?.submitButtonText || '🏆 Secure Entry Allocation Ticket'}
                   </button>
                 </form>
               </div>
@@ -785,12 +996,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
               <div>
                 <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>CONNECT</p>
-                <a href={GOYUNIR_STORE_SUITE.brandFooterData.instagramLink} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none', marginBottom: 6 }}>Instagram</a>
-                <a href={GOYUNIR_STORE_SUITE.brandFooterData.tiktokLink} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none' }}>TikTok</a>
+                <a href={config.brandFooterData?.instagramLink || '#'} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none', marginBottom: 6 }}>Instagram</a>
+                <a href={config.brandFooterData?.tiktokLink || '#'} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none' }}>TikTok</a>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>SUPPORT</p>
-                <span style={{ color: '#888', display: 'block', marginBottom: 6 }}>{GOYUNIR_STORE_SUITE.brandFooterData.supportEmail}</span>
+                <span style={{ color: '#888', display: 'block', marginBottom: 6 }}>{config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}</span>
                 <a href="/account" style={{ color: '#888', display: 'block', marginBottom: 6 }}>Manage My Entry</a>
               </div>
             </div>
@@ -800,11 +1011,25 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <a href="/shipping" style={{ color: '#555' }}>Shipping</a>
             </div>
             <div style={{ textAlign: 'center', color: '#333', fontSize: 10, marginTop: 24 }}>
-              © {new Date().getFullYear()} {GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright}
+              © {new Date().getFullYear()} {config.brandFooterData?.corporateEntityCopyright || 'GOYUNIR ALL RIGHTS RESERVED.'}
             </div>
           </footer>
         </section>
       </div>
     </div>
   );
+}
+
+function getNextDrawTimestampForSchedule(schedule: any): number {
+  if (!schedule) return Date.now() + 24 * 60 * 60 * 1000;
+  
+  if (schedule.mode === 'fixed') {
+    try {
+      const date = new Date(schedule.targetEndDateTime);
+      if (!isNaN(date.getTime())) return date.getTime();
+    } catch {}
+  }
+  
+  // Default: 24 hours from now
+  return Date.now() + 24 * 60 * 60 * 1000;
 }

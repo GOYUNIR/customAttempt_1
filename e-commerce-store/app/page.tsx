@@ -1,7 +1,5 @@
 import { redirect } from 'next/navigation';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getVisibleProducts } from '@/lib/storefront-config';
-import { createRedisClient, getCatalogArchiveRecords } from '@/lib/server-config';
+import { createRedisClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,19 +18,30 @@ export default async function HomePage({
   const suffix = qs ? `?${qs}` : '';
 
   const redis = createRedisClient();
-  let archivedIds: string[] = [];
+  
+  let homeRedirectSlug: string | undefined;
+  let activeProducts: any[] = [];
+
   if (redis) {
     try {
-      const records = await getCatalogArchiveRecords(redis);
-      archivedIds = records.map((r) => r.productId);
+      // Get config
+      const configRaw = await redis.get('store:config');
+      const config = JSON.parse(typeof configRaw === 'string' ? configRaw : '{}');
+      homeRedirectSlug = config.homeRedirectSlug;
+      
+      // Get active products
+      const activeRaw = await redis.hgetall('store:active_products');
+      if (activeRaw) {
+        activeProducts = Object.values(activeRaw)
+          .map((v) => JSON.parse(typeof v === 'string' ? v : '{}'))
+          .filter((p) => p.isActive && !p.isArchived);
+      }
     } catch {}
   }
 
-  const visible = getVisibleProducts(GOYUNIR_STORE_SUITE).filter((p) => !archivedIds.includes(p.id));
-  const preferredSlug = GOYUNIR_STORE_SUITE.homeRedirectSlug;
-  const preferred = preferredSlug ? visible.find((p) => p.slug === preferredSlug) : undefined;
-  const target = preferred ?? visible[0];
-
-  if (target?.slug) redirect(`/${target.slug}${suffix}`);
+  // Fallback to first active product
+  const targetSlug = homeRedirectSlug || activeProducts[0]?.slug;
+  
+  if (targetSlug) redirect(`/${targetSlug}${suffix}`);
   redirect(`/catalog${suffix}`);
 }

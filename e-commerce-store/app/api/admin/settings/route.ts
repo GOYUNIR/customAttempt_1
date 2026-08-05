@@ -3,7 +3,10 @@ import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
-const SETTINGS_KEY = 'admin:site_settings';
+const SETTINGS_KEY = 'store:config';
+const PRODUCTS_KEY = 'store:products';
+const ACTIVE_PRODUCTS_KEY = 'store:active_products';
+const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
 
 export async function GET(request: Request) {
   const redis = createRedisClient();
@@ -26,14 +29,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    const { theme, hero, form, footer, productNotes } = body;
+    const { 
+      theme, hero, form, footer, 
+      productNotes, availableSizes, 
+      animationMechanics, dropSchedule,
+      socialProof, homeRedirectSlug
+    } = body;
+    
+    // Get current config to merge
+    const currentRaw = await redis.get(SETTINGS_KEY);
+    const current = safeParseRedisItem<any>(currentRaw) || {};
     
     const settings = {
-      theme: theme || {},
-      hero: hero || {},
-      form: form || {},
-      footer: footer || {},
-      productNotes: productNotes || {},
+      ...current,
+      themeColors: theme || current.themeColors || {},
+      heroContent: hero || current.heroContent || {},
+      raffleRegistrationForm: form || current.raffleRegistrationForm || {},
+      brandFooterData: footer || current.brandFooterData || {},
+      productNotes: productNotes || current.productNotes || {},
+      availableSizes: availableSizes || current.availableSizes || ['50ml'],
+      animationMechanics: animationMechanics || current.animationMechanics || {},
+      dropSchedule: dropSchedule || current.dropSchedule || {},
+      socialProof: socialProof || current.socialProof || {},
+      homeRedirectSlug: homeRedirectSlug || current.homeRedirectSlug || undefined,
       updatedAt: new Date().toISOString(),
     };
 
