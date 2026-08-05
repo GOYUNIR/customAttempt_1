@@ -39,6 +39,9 @@ function statusBanner(entry: EntryRecord) {
   if (entry.status === 'CANCELLED_BY_USER' || entry.status === 'CANCELLED_BY_ADMIN') {
     return { color: '#94a3b8', text: 'This entry was cancelled.' };
   }
+  if (entry.status === 'NO_ACTIVE_ENTRY') {
+    return { color: '#94a3b8', text: 'No active entries found. Enter a drop to get started.' };
+  }
   return null;
 }
 
@@ -63,8 +66,18 @@ export default function AccountPage() {
         body: JSON.stringify({ email, last4 }),
       });
       const data = await res.json();
-      if (res.ok) setEntries(data.entries);
-      else {
+      if (res.ok) {
+        // Filter out NO_ACTIVE_ENTRY entries - they're just saved cards with no actual entries
+        const filteredEntries = (data.entries || []).filter(
+          (e: EntryRecord) => e.status !== 'NO_ACTIVE_ENTRY'
+        );
+        if (filteredEntries.length === 0) {
+          setEntries([]);
+          setMessage('No active entries found for this email and card.');
+        } else {
+          setEntries(filteredEntries);
+        }
+      } else {
         setEntries(null);
         setMessage(data.error || 'No matching entry found.');
       }

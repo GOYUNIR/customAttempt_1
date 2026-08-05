@@ -36,7 +36,7 @@ export default function RootLayout({
             <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
               <a href="https://instagram.com/goyunir" target="_blank" rel="noreferrer" style={{ color: '#555', textDecoration: 'none' }}>Instagram</a>
               <a href="https://tiktok.com/goyunir" target="_blank" rel="noreferrer" style={{ color: '#555', textDecoration: 'none' }}>TikTok</a>
-              <a href="mailto:goyunir.support@gmail.com" style={{ color: '#555', textDecoration: 'none' }}>Support</a>
+              <a href="mailto:goyunir.support@gmail.com" style={{ color: '#555', textDecoration: 'none' }}>goyunir.support@gmail.com</a>
             </div>
             <div style={{ color: '#333', fontSize: 10 }}>
               © {new Date().getFullYear()} GOYUNIR ALL RIGHTS RESERVED.

@@ -1,11 +1,9 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  // For now, just show a simple landing that links to catalog
-  // This avoids the 404 redirect loop
+  // Simple landing page - NO ADMIN BUTTON
   return (
     <main style={{ 
       minHeight: '100vh', 
@@ -37,39 +35,23 @@ export default async function HomePage() {
           Coming Soon
         </h1>
         <p style={{ color: '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
-          Our allocation drops are being prepared. Check back soon or visit the catalog.
+          Our allocation drops are being prepared. Check back soon.
         </p>
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <Link 
-            href="/catalog" 
-            style={{
-              padding: '12px 28px',
-              borderRadius: '30px',
-              background: '#ffffff',
-              color: '#000000',
-              textDecoration: 'none',
-              fontWeight: '600',
-              fontSize: '14px',
-            }}
-          >
-            View Catalog
-          </Link>
-          <Link 
-            href="/admin" 
-            style={{
-              padding: '12px 28px',
-              borderRadius: '30px',
-              background: 'transparent',
-              color: '#ffffff',
-              textDecoration: 'none',
-              fontWeight: '600',
-              fontSize: '14px',
-              border: '1px solid #333',
-            }}
-          >
-            Admin
-          </Link>
-        </div>
+        <Link 
+          href="/catalog" 
+          style={{
+            padding: '12px 28px',
+            borderRadius: '30px',
+            background: '#ffffff',
+            color: '#000000',
+            textDecoration: 'none',
+            fontWeight: '600',
+            fontSize: '14px',
+            display: 'inline-block',
+          }}
+        >
+          View Catalog
+        </Link>
       </div>
     </main>
   );

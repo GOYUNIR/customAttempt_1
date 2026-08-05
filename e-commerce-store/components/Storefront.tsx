@@ -1077,8 +1077,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>SUPPORT</p>
-                <span style={{ color: '#888', display: 'block', marginBottom: 6 }}>{config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}</span>
-                <a href="/account" style={{ color: '#888', display: 'block', marginBottom: 6 }}>Manage My Entry</a>
+                <a 
+                  href={`mailto:${config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}`} 
+                  style={{ color: '#888', display: 'block', marginBottom: 6, textDecoration: 'none' }}
+                >
+                  {config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}
+                </a>
+                <Link href="/account" style={{ color: '#888', display: 'block', marginBottom: 6, textDecoration: 'none' }}>Manage My Entry</Link>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', fontSize: 10 }}>
