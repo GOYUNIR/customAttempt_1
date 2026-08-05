@@ -215,7 +215,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [productOverrides, setProductOverrides] = useState<Record<string, any>>({});
   const [globalScheduleOverride, setGlobalScheduleOverride] = useState<any>(null);
 
-  // Load config from API
+  // Load config from API - NO FALLBACK PRODUCTS
   useEffect(() => {
     async function loadConfig() {
       try {
@@ -233,24 +233,29 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           });
         }
         
-      // In the loadConfig useEffect, make sure this logic is correct:
-      if (data.activeProducts && data.activeProducts.length > 0) {
-        setActiveProducts(data.activeProducts);
-        setAllProducts(data.allProducts || data.activeProducts);
-        setArchivedProducts(data.archivedProducts || []);
-      } else {
-        // Only use fallback if Redis returns no products
-        const fallbackProducts = getDefaultProducts();
-        setActiveProducts(fallbackProducts);
-        setAllProducts(fallbackProducts);
-      }
-      
+        // ONLY use products from Redis - NO FALLBACKS
+        if (data.activeProducts && data.activeProducts.length > 0) {
+          console.log('[Storefront] Setting active products from Redis:', data.activeProducts);
+          setActiveProducts(data.activeProducts);
+          setAllProducts(data.allProducts || data.activeProducts);
+          setArchivedProducts(data.archivedProducts || []);
+          const ids = (data.archivedProducts || []).map((p: any) => p.id);
+          setArchivedIds(ids);
+        } else {
+          console.log('[Storefront] No active products in Redis');
+          setActiveProducts([]);
+          setAllProducts([]);
+          setArchivedProducts([]);
+          setArchivedIds([]);
+        }
+        
         if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
       } catch (err) {
         console.error('[Storefront] Failed to load store config:', err);
-        const fallbackProducts = getDefaultProducts();
-        setActiveProducts(fallbackProducts);
-        setAllProducts(fallbackProducts);
+        setActiveProducts([]);
+        setAllProducts([]);
+        setArchivedProducts([]);
+        setArchivedIds([]);
       } finally {
         setLoading(false);
       }

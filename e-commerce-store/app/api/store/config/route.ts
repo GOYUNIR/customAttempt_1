@@ -7,6 +7,7 @@ const CONFIG_KEY = 'store:config';
 const PRODUCTS_KEY = 'store:products';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
+const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const IMAGES_KEY = 'store:product_images';
 
 type StoreProduct = {
@@ -23,6 +24,7 @@ type StoreProduct = {
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
+  isUpcoming: boolean;
   notes: { label: string; name: string; text: string }[];
   images: string[];
   totalInventory: number;
@@ -43,7 +45,7 @@ const DEFAULT_CONFIG = {
     checkoutCtaButton: '#635bff',
   },
   availableSizes: ['50ml'],
-  homeRedirectSlug: 'elysian-white',
+  homeRedirectSlug: undefined,
   dropSchedule: {
     mode: 'daily',
     timezone: 'America/Los_Angeles',
@@ -58,8 +60,8 @@ const DEFAULT_CONFIG = {
     hoursLabel: 'h',
     minutesLabel: 'm',
     secondsLabel: 's',
-    winnersPer50ml: 10,
-    winnersPer100ml: 5,
+    winnersPer50ml: 0,
+    winnersPer100ml: 0,
   },
   animationMechanics: {
     totalFramesToLoad: 29,
@@ -109,17 +111,16 @@ export async function GET() {
   try {
     const redis = createRedisClient();
     if (!redis) {
-      // Return fallback data if Redis is unavailable
       return NextResponse.json({ 
         config: DEFAULT_CONFIG,
-        activeProducts: DEFAULT_PRODUCTS_FALLBACK,
+        activeProducts: [],
         archivedProducts: [],
-        allProducts: DEFAULT_PRODUCTS_FALLBACK,
+        allProducts: [],
         scheduleOverride: {},
         socialOverride: {},
         timestamp: Date.now(),
         fromCache: true,
-        note: 'Redis unavailable - using fallback products'
+        note: 'Redis unavailable'
       });
     }
 
@@ -127,35 +128,19 @@ export async function GET() {
     const configRaw = await redis.get(CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
 
-    // Get all active products
+    // Get active products from Redis
     const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
     const activeProducts: StoreProduct[] = [];
-    if (activeRaw && Object.keys(activeRaw).length > 0) {
+    if (activeRaw) {
       for (const [k, v] of Object.entries(activeRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
         if (p) {
-          // Load images for this product
           const imgKey = `${IMAGES_KEY}:${p.id}`;
           const imgRaw = await redis.get(imgKey);
           const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
           activeProducts.push({ ...p, images });
         }
       }
-    }
-
-    // If no active products, use fallback
-    if (activeProducts.length === 0) {
-      return NextResponse.json({ 
-        config,
-        activeProducts: DEFAULT_PRODUCTS_FALLBACK,
-        archivedProducts: [],
-        allProducts: DEFAULT_PRODUCTS_FALLBACK,
-        scheduleOverride: {},
-        socialOverride: {},
-        timestamp: Date.now(),
-        fromCache: true,
-        note: 'No active products in Redis - using fallback'
-      });
     }
 
     // Get archived products
@@ -169,6 +154,21 @@ export async function GET() {
           const imgRaw = await redis.get(imgKey);
           const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
           archivedProducts.push({ ...p, images });
+        }
+      }
+    }
+
+    // Get upcoming products
+    const upcomingRaw = await redis.hgetall(UPCOMING_PRODUCTS_KEY);
+    const upcomingProducts: StoreProduct[] = [];
+    if (upcomingRaw) {
+      for (const [k, v] of Object.entries(upcomingRaw)) {
+        const p = safeParseRedisItem<StoreProduct>(v);
+        if (p) {
+          const imgKey = `${IMAGES_KEY}:${p.id}`;
+          const imgRaw = await redis.get(imgKey);
+          const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
+          upcomingProducts.push({ ...p, images });
         }
       }
     }
@@ -198,9 +198,10 @@ export async function GET() {
 
     return NextResponse.json({
       config,
-      activeProducts: activeProducts.length > 0 ? activeProducts : DEFAULT_PRODUCTS_FALLBACK,
+      activeProducts,
       archivedProducts,
-      allProducts: allProducts.length > 0 ? allProducts : DEFAULT_PRODUCTS_FALLBACK,
+      upcomingProducts,
+      allProducts,
       scheduleOverride,
       socialOverride,
       timestamp: Date.now(),
@@ -211,9 +212,10 @@ export async function GET() {
     return NextResponse.json({ 
       error: err.message,
       config: DEFAULT_CONFIG,
-      activeProducts: DEFAULT_PRODUCTS_FALLBACK,
+      activeProducts: [],
       archivedProducts: [],
-      allProducts: DEFAULT_PRODUCTS_FALLBACK,
+      upcomingProducts: [],
+      allProducts: [],
       scheduleOverride: {},
       socialOverride: {},
       timestamp: Date.now(),
@@ -221,57 +223,3 @@ export async function GET() {
     }, { status: 500 });
   }
 }
-
-// Fallback products - these will show if Redis is empty
-const DEFAULT_PRODUCTS_FALLBACK: StoreProduct[] = [
-  {
-    id: 'prod_elysian_white',
-    name: 'Elysian White',
-    slug: 'elysian-white',
-    prefix: 'elysian-white',
-    tagline: 'WHITE ALLOCATION / 01',
-    desc: 'Clean, electric profile variant constructed with premium bergamot.',
-    price50ml: 85,
-    price100ml: 140,
-    stripeId50ml: 'price_1TxGXQPIsR6ijfBZUKefFNOI',
-    stripeId100ml: 'price_1Txn9YPIsR6ijfBZJZhSdHEr',
-    maxRaffleAllocationLimit: 10,
-    isActive: true,
-    isArchived: false,
-    notes: [
-      { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
-      { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
-      { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' }
-    ],
-    images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-    totalInventory: 9,
-    winnerTiers: [2, 2, 2, 2, 1],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'prod_obsidian_void',
-    name: 'Obsidian Void',
-    slug: 'obsidian-void',
-    prefix: 'obsidian-void',
-    tagline: 'BLACK ALLOCATION / 02',
-    desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-    price50ml: 85,
-    price100ml: 140,
-    stripeId50ml: 'price_1TxnJ3PIsR6ijfBZUFXVhIfF',
-    stripeId100ml: 'price_1TxnJpPIsR6ijfBZVvlrffeO',
-    maxRaffleAllocationLimit: 5,
-    isActive: true,
-    isArchived: false,
-    notes: [
-      { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
-      { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
-      { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' }
-    ],
-    images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
-    totalInventory: 5,
-    winnerTiers: [1],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-];

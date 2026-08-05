@@ -1394,10 +1394,24 @@ export default function AdminPortal() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Product Management</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={seedDefaultProducts} disabled={productActionLoading} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
+                <button 
+                  onClick={() => {
+                    if (!password) { alert('Enter admin password first'); return; }
+                    seedDefaultProducts();
+                  }} 
+                  disabled={productActionLoading} 
+                  style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}
+                >
                   {productActionLoading ? 'Loading…' : 'Seed Defaults'}
                 </button>
-                <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); }} style={buttonPrimary}>
+                <button 
+                  onClick={() => { 
+                    resetProductForm(); 
+                    setShowProductForm(true); 
+                    setEditingProduct(null); 
+                  }} 
+                  style={buttonPrimary}
+                >
                   + Add Product
                 </button>
               </div>
@@ -1497,7 +1511,7 @@ export default function AdminPortal() {
                   No products yet. Click "Seed Defaults" to add placeholder products or "Add Product" to create your own.
                 </div>
               )}
-              {allProducts.map((product) => {
+              {allProducts.length > 0 && allProducts.map((product) => {
                 const isActive = product.isActive && !product.isArchived && !product.isUpcoming;
                 const isArchived = product.isArchived;
                 const isUpcoming = product.isUpcoming;
@@ -1517,16 +1531,46 @@ export default function AdminPortal() {
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
-                        <button onClick={() => toggleActive(product.id, isActive)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
+                        <button 
+                          onClick={() => {
+                            if (!password) { alert('Enter admin password first'); return; }
+                            toggleActive(product.id, isActive);
+                          }} 
+                          disabled={productActionLoading} 
+                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}
+                        >
                           {isActive ? 'Hide' : 'Show'}
                         </button>
-                        <button onClick={() => toggleArchive(product.id, isArchived)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
+                        <button 
+                          onClick={() => {
+                            if (!password) { alert('Enter admin password first'); return; }
+                            toggleArchive(product.id, isArchived);
+                          }} 
+                          disabled={productActionLoading} 
+                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}
+                        >
                           {isArchived ? 'Unarchive' : 'Archive'}
                         </button>
-                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
+                        <button 
+                          onClick={() => {
+                            if (!password) { alert('Enter admin password first'); return; }
+                            toggleUpcoming(product.id, isUpcoming);
+                          }} 
+                          disabled={productActionLoading} 
+                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}
+                        >
                           {isUpcoming ? 'Remove from Upcoming' : 'Move to Upcoming'}
                         </button>
-                        <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
+                        <button 
+                          onClick={() => {
+                            if (!password) { alert('Enter admin password first'); return; }
+                            deleteProduct(product.id);
+                          }} 
+                          disabled={productActionLoading} 
+                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </div>
