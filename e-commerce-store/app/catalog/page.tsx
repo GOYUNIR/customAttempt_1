@@ -31,29 +31,41 @@ export default function CatalogPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Clear the static catalog data and load from API
     fetch('/api/catalog/status')
       .then((res) => res.json())
       .then((data) => {
-        // Only show active products that aren't archived
         if (Array.isArray(data.activeDrops)) {
           setActiveDrops(data.activeDrops);
-        } else {
-          setActiveDrops([]);
         }
-        if (Array.isArray(data.upcomingDrops)) {
+        // Load upcoming from Redis or use empty array
+        if (data.upcomingDrops && Array.isArray(data.upcomingDrops)) {
           setUpcomingDrops(data.upcomingDrops);
         } else {
-          setUpcomingDrops([]);
+          // Try to fetch upcoming products directly
+          fetch('/api/admin/products?includeInactive=true')
+            .then((r) => r.json())
+            .then((prodData) => {
+              if (prodData.products) {
+                const upcoming = prodData.products
+                  .filter((p: any) => p.isUpcoming)
+                  .map((p: any) => ({
+                    name: p.name,
+                    status: 'Upcoming',
+                    eta: p.tagline || 'Coming soon',
+                    image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+                    description: p.desc,
+                    slug: p.slug,
+                  }));
+                setUpcomingDrops(upcoming);
+              }
+            })
+            .catch(() => {});
         }
         if (Array.isArray(data.archiveScents)) {
           setArchiveScents(data.archiveScents);
-        } else {
-          setArchiveScents([]);
         }
       })
       .catch(() => {
-        // On error, use empty arrays
         setActiveDrops([]);
         setUpcomingDrops([]);
         setArchiveScents([]);
@@ -207,7 +219,7 @@ export default function CatalogPage() {
         >
           👔 Upcoming Releases
         </h2>
-        {renderGrid(upcomingDrops, 'Nothing announced yet — check back soon.')}
+        {renderGrid(upcomingDrops, isLoading ? 'Loading…' : 'No upcoming releases announced yet.')}
 
         <h2
           style={{

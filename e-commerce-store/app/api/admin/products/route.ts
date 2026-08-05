@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 const PRODUCTS_KEY = 'store:products';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
+const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const IMAGES_KEY = 'store:product_images';
 
 export type StoreProduct = {
@@ -22,7 +23,7 @@ export type StoreProduct = {
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
-  isUpcoming: boolean;  // <-- ADD THIS LINE
+  isUpcoming: boolean;
   notes: { label: string; name: string; text: string }[];
   images: string[];
   totalInventory: number;
@@ -45,22 +46,18 @@ async function loadProducts(redis: any): Promise<Record<string, StoreProduct>> {
 async function saveProduct(redis: any, product: StoreProduct) {
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   
-  // Update active/archived/upcoming indexes
+  // Clear from all indexes first
+  await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
+  await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
+  await redis.hdel(UPCOMING_PRODUCTS_KEY, product.id);
+  
+  // Add to the appropriate index
   if (product.isActive && !product.isArchived && !product.isUpcoming) {
     await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-    await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
   } else if (product.isArchived) {
     await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-    await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
   } else if (product.isUpcoming) {
-    // Upcoming products are stored in a separate upcoming index
-    await redis.hset('store:upcoming_products', { [product.id]: JSON.stringify(product) });
-    await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
-    await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
-  } else {
-    await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
-    await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
-    await redis.hdel('store:upcoming_products', product.id);
+    await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   }
   
   // Save images separately if provided
@@ -70,11 +67,11 @@ async function saveProduct(redis: any, product: StoreProduct) {
   }
 }
 
-
 async function deleteProduct(redis: any, productId: string) {
   await redis.hdel(PRODUCTS_KEY, productId);
   await redis.hdel(ACTIVE_PRODUCTS_KEY, productId);
   await redis.hdel(ARCHIVED_PRODUCTS_KEY, productId);
+  await redis.hdel(UPCOMING_PRODUCTS_KEY, productId);
   await redis.del(`${IMAGES_KEY}:${productId}`);
 }
 
@@ -96,12 +93,14 @@ export async function GET(request: Request) {
       const all = await loadProducts(redis);
       products = Object.values(all);
     } else {
-      const raw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-      if (raw && Object.keys(raw).length > 0) {
-        const parsed = Object.values(raw).map((v) => safeParseRedisItem<StoreProduct>(v));
+      // Get active products
+      const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
+      if (activeRaw && Object.keys(activeRaw).length > 0) {
+        const parsed = Object.values(activeRaw).map((v) => safeParseRedisItem<StoreProduct>(v));
         products = parsed.filter((p): p is StoreProduct => p !== null);
       }
-      // If no active products, return all products (including upcoming)
+      
+      // If no active products, get all non-archived products
       if (products.length === 0) {
         const all = await loadProducts(redis);
         products = Object.values(all).filter(p => !p.isArchived);
@@ -110,7 +109,7 @@ export async function GET(request: Request) {
     
     return NextResponse.json({ products });
   } catch (err: any) {
-    console.error('[Products API] Error:', err);
+    console.error('[Products API] GET Error:', err);
     return NextResponse.json({ error: err.message, products: [] }, { status: 500 });
   }
 }
@@ -144,6 +143,7 @@ export async function POST(request: Request) {
       if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
       product.isArchived = true;
       product.isActive = false;
+      product.isUpcoming = false;
       product.updatedAt = new Date().toISOString();
       await saveProduct(redis, product);
       return NextResponse.json({ success: true, product });
@@ -157,6 +157,7 @@ export async function POST(request: Request) {
       if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
       product.isArchived = false;
       product.isActive = true;
+      product.isUpcoming = false;
       product.updatedAt = new Date().toISOString();
       await saveProduct(redis, product);
       return NextResponse.json({ success: true, product });
@@ -173,7 +174,6 @@ export async function POST(request: Request) {
       await saveProduct(redis, product);
       return NextResponse.json({ success: true, product });
     }
-// Add a new action to the POST handler for moving products to upcoming
 
     if (action === 'moveToUpcoming') {
       const id = String(body?.id || '');
@@ -202,6 +202,7 @@ export async function POST(request: Request) {
       await saveProduct(redis, product);
       return NextResponse.json({ success: true, product });
     }
+
     // upsert - create or update
     const name = String(body?.name || '').trim();
     if (!name) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });
@@ -215,9 +216,9 @@ export async function POST(request: Request) {
     
     const product: StoreProduct = {
       id,
-      name: String(body?.name || existing?.name || 'New Product'),
-      slug: String(body?.slug || existing?.slug || id).toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
-      prefix: String(body?.prefix || existing?.prefix || id),
+      name,
+      slug,
+      prefix,
       tagline: String(body?.tagline || existing?.tagline || 'LIMITED DROP'),
       desc: String(body?.desc || existing?.desc || 'A refined signature profile.'),
       price50ml: Number(body?.price50ml ?? existing?.price50ml ?? 0),
@@ -227,7 +228,7 @@ export async function POST(request: Request) {
       maxRaffleAllocationLimit: Number(body?.maxRaffleAllocationLimit ?? existing?.maxRaffleAllocationLimit ?? 0),
       isActive: body?.isActive !== undefined ? body.isActive : (existing?.isActive ?? true),
       isArchived: body?.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
-      isUpcoming: body?.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),  // <-- ADD THIS LINE
+      isUpcoming: body?.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
       notes: Array.isArray(body?.notes) ? body.notes : (existing?.notes || []),
       images: Array.isArray(body?.images) ? body.images : (existing?.images || []),
       totalInventory: Number(body?.totalInventory ?? existing?.totalInventory ?? 0),
@@ -236,10 +237,10 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString(),
     };
 
-
     await saveProduct(redis, product);
     return NextResponse.json({ success: true, product });
   } catch (err: any) {
+    console.error('[Products API] POST Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

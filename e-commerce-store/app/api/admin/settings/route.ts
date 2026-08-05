@@ -4,17 +4,19 @@ import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 export const dynamic = 'force-dynamic';
 
 const SETTINGS_KEY = 'store:config';
-const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
 
 export async function GET(request: Request) {
-  const redis = createRedisClient();
-  if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
+  try {
+    const redis = createRedisClient();
+    if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
-  const raw = await redis.get(SETTINGS_KEY);
-  const settings = safeParseRedisItem<any>(raw) || {};
-  return NextResponse.json({ settings });
+    const raw = await redis.get(SETTINGS_KEY);
+    const settings = safeParseRedisItem<any>(raw) || {};
+    return NextResponse.json({ settings });
+  } catch (err: any) {
+    console.error('[Settings API] GET Error:', err);
+    return NextResponse.json({ error: err.message, settings: {} }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -56,8 +58,13 @@ export async function POST(request: Request) {
     };
 
     await redis.set(SETTINGS_KEY, JSON.stringify(settings));
+    
+    // Also update the store config for the frontend
+    await redis.set('store:config', JSON.stringify(settings));
+    
     return NextResponse.json({ success: true, settings });
   } catch (err: any) {
+    console.error('[Settings API] POST Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -10,7 +10,6 @@ export async function GET() {
     const redis = createRedisClient();
 
     if (!redis) {
-      // Return empty arrays if Redis is unavailable
       return NextResponse.json({
         activeDrops: [],
         upcomingDrops: [],
@@ -40,7 +39,7 @@ export async function GET() {
       if (isSoldOut) soldOutProductIds.push(r.productId);
     }
 
-    // Get active products from Redis directly
+    // Get active products from Redis
     let activeDrops: any[] = [];
     try {
       const activeRaw = await redis.hgetall('store:active_products');
@@ -48,7 +47,7 @@ export async function GET() {
         for (const [key, value] of Object.entries(activeRaw)) {
           try {
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isActive && !product.isArchived && !archivedProductIds.includes(product.id)) {
+            if (product.isActive && !product.isArchived && !product.isUpcoming && !archivedProductIds.includes(product.id)) {
               activeDrops.push({
                 id: product.id,
                 name: product.name,
@@ -59,12 +58,39 @@ export async function GET() {
               });
             }
           } catch (e) {
-            console.error('[catalog/status] Error parsing product:', e);
+            console.error('[catalog/status] Error parsing active product:', e);
           }
         }
       }
     } catch (e) {
       console.error('[catalog/status] Error fetching active products:', e);
+    }
+
+    // Get upcoming products from Redis
+    let upcomingDrops: any[] = [];
+    try {
+      const upcomingRaw = await redis.hgetall('store:upcoming_products');
+      if (upcomingRaw) {
+        for (const [key, value] of Object.entries(upcomingRaw)) {
+          try {
+            const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            if (product.isUpcoming) {
+              upcomingDrops.push({
+                name: product.name,
+                status: 'Upcoming',
+                eta: product.tagline || 'Coming soon',
+                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
+                description: product.desc || '',
+                slug: product.slug,
+              });
+            }
+          } catch (e) {
+            console.error('[catalog/status] Error parsing upcoming product:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[catalog/status] Error fetching upcoming products:', e);
     }
 
     // Get archived products from Redis
@@ -98,9 +124,6 @@ export async function GET() {
     } catch (e) {
       console.error('[catalog/status] Error fetching archived products:', e);
     }
-
-    // Upcoming drops - empty by default, can be managed via admin
-    const upcomingDrops: any[] = [];
 
     return NextResponse.json({
       activeDrops,
