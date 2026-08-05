@@ -384,11 +384,40 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     return size === '100ml' ? product.price100ml : product.price50ml;
   };
 
-  const effectiveSchedule = {
-    ...config.dropSchedule,
-    ...(globalScheduleOverride || {}),
-    ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
-  };
+  // Find this section (around line 250-280) and replace:
+const effectiveSchedule = {
+  ...config.dropSchedule,
+  ...(globalScheduleOverride || {}),
+  ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
+};
+
+// Make sure the schedule has valid values
+const getValidSchedule = () => {
+  const schedule = effectiveSchedule;
+  // If no schedule or invalid, create a default 24-hour from now
+  if (!schedule || !schedule.mode) {
+    return {
+      mode: 'daily',
+      timezone: 'America/Los_Angeles',
+      targetEndDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      drawDayOfWeek: 6,
+      drawDayOfMonth: 1,
+      drawHour: 21,
+      drawMinute: 0,
+      drawSecond: 0,
+      countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
+      daysLabel: 'd',
+      hoursLabel: 'h',
+      minutesLabel: 'm',
+      secondsLabel: 's',
+      winnersPer50ml: 10,
+      winnersPer100ml: 5,
+    };
+  }
+  return schedule;
+};
+
+const validSchedule = getValidSchedule();
 
   const archiveNote = currentProduct ? archiveNotesMap[currentProduct.id] || '' : '';
   const archiveFrom = currentProduct ? archiveFromMap[currentProduct.id] || '' : '';
@@ -597,13 +626,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     
     const productPrefix = currentProduct.prefix || 'default';
     const images = currentProduct.images || [];
+    const totalFrames = Math.max(images.length, TOTAL_IMAGES);
     const imageUrls = images.length > 0 
       ? images 
-      : Array.from({ length: TOTAL_IMAGES }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
+      : Array.from({ length: totalFrames }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
     
     let loadedCount = 0;
-    const totalImages = Math.min(imageUrls.length, TOTAL_IMAGES);
+    const totalImages = Math.min(imageUrls.length, totalFrames);
     
+    // Preload all images
     for (let i = 0; i < totalImages; i++) {
       const img = new Image();
       const imgUrl = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
@@ -615,6 +646,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }
       };
       img.onerror = () => {
+        loadedCount++;
+        // If first image fails, try fallback
         if (i === 0) {
           const fallbackImg = new Image();
           fallbackImg.src = `/images/${productPrefix}/1.jpeg`;
@@ -627,16 +660,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             drawPlaceholder();
           };
           preloadedImages.push(fallbackImg);
-        } else {
-          loadedCount++;
-          if (loadedCount === totalImages && preloadedImages.length > 0) {
-            drawFrame(preloadedImages[0]);
-          }
+        } else if (loadedCount === totalImages && preloadedImages.length > 0) {
+          drawFrame(preloadedImages[0]);
         }
       };
       preloadedImages.push(img);
     }
     
+    // Subscribe to frame changes
     const unsubscribe = frameIndex.on('change', (value) => {
       const index = Math.min(Math.max(Math.round(value), 1), preloadedImages.length);
       const activeFrameImage = preloadedImages[index - 1];
@@ -644,8 +675,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         drawFrame(activeFrameImage);
       }
     });
+    
     return () => unsubscribe();
-  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images]);
+  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images, currentProduct]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

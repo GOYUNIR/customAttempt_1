@@ -89,7 +89,7 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
-  const [drawsSub, setDrawsSub] = useState<'run' | 'inventory' | 'automation'>('run');
+  const [drawsSub, setDrawsSub] = useState<'run' | 'automation'>('run');
   const [password, setPassword] = useState('');
   const [toast, setToast] = useState('');
   const [status, setStatus] = useState<any>(null);
@@ -318,7 +318,7 @@ export default function AdminPortal() {
       const data = await res.json();
       if (data.products) {
         setAllProducts(data.products);
-        setProducts(data.products.filter((p: any) => !p.isArchived));
+        setProducts(data.products.filter((p: any) => !p.isArchived && !p.isUpcoming));
       }
     } catch (err) {
       console.error('[Products] Fetch error:', err);
@@ -939,7 +939,7 @@ export default function AdminPortal() {
     { id: 'overview', label: 'Overview' },
     { id: 'drops', label: 'Drops' },
     { id: 'ledger', label: 'Ledger' },
-    { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived).length || undefined },
+    { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
     { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
@@ -1056,10 +1056,10 @@ export default function AdminPortal() {
         {tab === 'drops' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(['run', 'inventory', 'automation'] as const).map((s) => (
+              {(['run', 'automation'] as const).map((s) => (
                 <button key={s} onClick={() => { setDrawsSub(s); if (s === 'automation') fetchConfig(); if (s === 'run') fetchDrawHistory(); }}
                   style={{ ...buttonGhost, border: drawsSub === s ? '1px solid #fff' : '1px solid #333', background: drawsSub === s ? '#1c1c1e' : 'transparent', textTransform: 'capitalize' }}>
-                  {s === 'run' ? 'Run Draw' : s === 'automation' ? 'Automation' : s}
+                  {s === 'run' ? 'Run Draw' : 'Automation'}
                 </button>
               ))}
             </div>
@@ -1147,55 +1147,6 @@ export default function AdminPortal() {
                     })}
                   </div>
                 </div>
-              </div>
-            )}
-
-            {drawsSub === 'inventory' && (
-              <div style={cardStyle}>
-                <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Update Inventory</h3>
-                <p style={{ fontSize: 11, color: '#f59e0b', marginTop: 0, marginBottom: 12 }}>
-                  Manage pricing, inventory levels, and winners per draw all in one place. Takes effect immediately — no redeploy.
-                </p>
-                {allProducts.map((p: any) => (
-                  <div key={p.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, marginBottom: 10 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{p.name}</div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <input type="number" value={p.price50ml || 0} placeholder="50ml $"
-                        style={{ ...inputStyle, width: 80, opacity: 0.6 }} disabled />
-                      <input type="number" value={p.price100ml || 0} placeholder="100ml $"
-                        style={{ ...inputStyle, width: 80, opacity: 0.6 }} disabled />
-                      <span style={{ fontSize: 10, color: '#666' }}>Edit in Products tab</span>
-                    </div>
-                    {pools.filter((pool: any) => pool.product === p.name).map((pool: any) => {
-                      const key = `${pool.product}:${pool.size}`;
-                      const currentWinners = Array.isArray(pool.winnersPerDraw)
-                        ? pool.winnersPerDraw[0]
-                        : (pool.winnersPerDraw ?? 0);
-                      return (
-                        <div key={key} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
-                          <div style={{ fontSize: 11, color: '#888', minWidth: 50 }}>{pool.size}</div>
-                          <div style={{ fontSize: 11, minWidth: 80 }}>
-                            <span style={{ color: '#34d399' }}>{pool.subCount ?? 0} entered</span>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Inv left</span>
-                            <input type="number" min={0} value={invEdits[key] ?? ''} placeholder={String(pool.maxLimit ?? 0)}
-                              onChange={(e) => setInvEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                              style={{ ...inputStyle, width: 72 }} />
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <span style={{ fontSize: 9, color: '#666', textTransform: 'uppercase' }}>Winners / draw</span>
-                            <input type="number" min={0} value={winnersEdits[key] ?? ''} placeholder={String(currentWinners)}
-                              onChange={(e) => setWinnersEdits((prev) => ({ ...prev, [key]: e.target.value }))}
-                              style={{ ...inputStyle, width: 72 }} />
-                          </div>
-                          <button onClick={() => saveInventory(pool.product, pool.size, pool.productId)} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Save</button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-                {invMessage && <p style={{ fontSize: 12, color: '#cbd5e1' }}>{invMessage}</p>}
               </div>
             )}
 
@@ -1417,7 +1368,7 @@ export default function AdminPortal() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage all products. Active products appear on the storefront. Archived products go to the catalog archive.
+              Manage all products. Active products appear on the storefront. Archived products go to the catalog archive. Upcoming products appear in the catalog's upcoming section.
               {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
             </p>
             

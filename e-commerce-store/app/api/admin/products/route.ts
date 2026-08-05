@@ -93,18 +93,24 @@ export async function GET(request: Request) {
       const all = await loadProducts(redis);
       products = Object.values(all);
     } else {
-      // Get active products
+      // Get active + upcoming products
       const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-      if (activeRaw && Object.keys(activeRaw).length > 0) {
-        const parsed = Object.values(activeRaw).map((v) => safeParseRedisItem<StoreProduct>(v));
-        products = parsed.filter((p): p is StoreProduct => p !== null);
-      }
+      const upcomingRaw = await redis.hgetall('store:upcoming_products');
+      const allProducts = [];
       
-      // If no active products, get all non-archived products
-      if (products.length === 0) {
-        const all = await loadProducts(redis);
-        products = Object.values(all).filter(p => !p.isArchived);
+      if (activeRaw) {
+        for (const [k, v] of Object.entries(activeRaw)) {
+          const p = safeParseRedisItem<StoreProduct>(v);
+          if (p) allProducts.push(p);
+        }
       }
+      if (upcomingRaw) {
+        for (const [k, v] of Object.entries(upcomingRaw)) {
+          const p = safeParseRedisItem<StoreProduct>(v);
+          if (p) allProducts.push(p);
+        }
+      }
+      products = allProducts;
     }
     
     return NextResponse.json({ products });

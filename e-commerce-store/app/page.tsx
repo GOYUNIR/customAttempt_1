@@ -1,9 +1,39 @@
-import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { createRedisClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  // Simple landing page - redirects are handled by the client via Storefront
+  const redis = createRedisClient();
+  let redirectSlug = null;
+  
+  if (redis) {
+    try {
+      const activeRaw = await redis.hgetall('store:active_products');
+      if (activeRaw) {
+        for (const [key, value] of Object.entries(activeRaw)) {
+          try {
+            const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
+              redirectSlug = product.slug;
+              break;
+            }
+          } catch (e) {
+            console.error('[HomePage] Error parsing product:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[HomePage] Redis error:', error);
+    }
+  }
+  
+  // If we found an active product, redirect to it
+  if (redirectSlug) {
+    redirect(`/${redirectSlug}`);
+  }
+  
+  // No active products - show coming soon page (layout handles top bar)
   return (
     <main style={{ 
       minHeight: 'calc(100vh - 56px)', 
@@ -38,21 +68,6 @@ export default async function HomePage() {
         <p style={{ color: '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
           Our allocation drops are being prepared. Check back soon.
         </p>
-        <Link 
-          href="/catalog" 
-          style={{
-            padding: '12px 28px',
-            borderRadius: '30px',
-            background: '#ffffff',
-            color: '#000000',
-            textDecoration: 'none',
-            fontWeight: '600',
-            fontSize: '14px',
-            display: 'inline-block',
-          }}
-        >
-          View Catalog
-        </Link>
       </div>
     </main>
   );
