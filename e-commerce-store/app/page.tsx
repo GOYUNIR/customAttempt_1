@@ -3,22 +3,28 @@ import Link from 'next/link';
 import { createRedisClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export default async function HomePage() {
+  console.log('[HomePage] Rendering...');
+  
   const redis = createRedisClient();
   let redirectSlug = null;
-  let hasProducts = false;
   
   if (redis) {
     try {
+      // Check active products first
       const activeRaw = await redis.hgetall('store:active_products');
-      if (activeRaw) {
+      console.log('[HomePage] Active products from Redis:', activeRaw);
+      
+      if (activeRaw && Object.keys(activeRaw).length > 0) {
         for (const [key, value] of Object.entries(activeRaw)) {
           try {
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
+            console.log('[HomePage] Found product:', product.name, 'slug:', product.slug);
             if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
-              hasProducts = true;
               redirectSlug = product.slug;
+              console.log('[HomePage] Selected redirect slug:', redirectSlug);
               break;
             }
           } catch (e) {
@@ -26,16 +32,41 @@ export default async function HomePage() {
           }
         }
       }
+      
+      // If no active products, check all products
+      if (!redirectSlug) {
+        const allRaw = await redis.hgetall('store:products');
+        console.log('[HomePage] All products from Redis:', allRaw);
+        if (allRaw) {
+          for (const [key, value] of Object.entries(allRaw)) {
+            try {
+              const product = JSON.parse(typeof value === 'string' ? value : '{}');
+              if (product.isActive && !product.isArchived && product.slug) {
+                redirectSlug = product.slug;
+                console.log('[HomePage] Found active in all products:', redirectSlug);
+                break;
+              }
+            } catch (e) {
+              console.error('[HomePage] Error parsing product:', e);
+            }
+          }
+        }
+      }
     } catch (error) {
       console.error('[HomePage] Redis error:', error);
     }
+  } else {
+    console.log('[HomePage] Redis client not available');
   }
   
-  if (hasProducts && redirectSlug) {
+  // If we found a product, redirect to it
+  if (redirectSlug) {
+    console.log('[HomePage] Redirecting to:', `/${redirectSlug}`);
     redirect(`/${redirectSlug}`);
   }
   
-  // No active products - show coming soon page with catalog link
+  // No products - show coming soon page
+  console.log('[HomePage] No products found, showing Coming Soon');
   return (
     <main style={{ 
       minHeight: 'calc(100vh - 56px)', 

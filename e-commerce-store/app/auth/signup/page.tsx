@@ -19,6 +19,10 @@ export default function SignupPage() {
       setError('Passwords do not match');
       return;
     }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
     setError('');
     setLoading(true);
     try {

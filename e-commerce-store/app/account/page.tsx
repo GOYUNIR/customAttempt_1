@@ -17,16 +17,6 @@ interface EntryRecord {
   expectedAmountCents?: number;
 }
 
-const buttonGhost: React.CSSProperties = {
-  padding: '8px 14px',
-  borderRadius: 8,
-  border: '1px solid #27272a',
-  background: 'transparent',
-  color: '#ccc',
-  fontSize: 11,
-  cursor: 'pointer',
-};
-
 function statusBanner(entry: EntryRecord) {
   if (entry.status === 'WINNER_CHARGED') {
     return {
@@ -66,24 +56,43 @@ export default function AccountPage() {
   const [addressDraft, setAddressDraft] = useState('');
   const [paymentPortalFor, setPaymentPortalFor] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
+  // Check if user is logged in via session
   useEffect(() => {
     fetch('/api/auth/me')
       .then(res => res.json())
       .then(data => {
-        if (data.user) setUser(data.user);
+        if (data.user) {
+          setUser(data.user);
+          setIsLoggedIn(true);
+        }
       })
       .catch(() => {});
   }, []);
 
+  // If logged in, use the user's email for lookup
+  useEffect(() => {
+    if (isLoggedIn && user?.email) {
+      setEmail(user.email);
+    }
+  }, [isLoggedIn, user]);
+
   const lookup = async () => {
+    if (!email) {
+      setMessage('Please enter your email address.');
+      return;
+    }
     setIsBusy(true);
     setMessage('');
     try {
       const res = await fetch('/api/account/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, last4 }),
+        body: JSON.stringify({ 
+          email, 
+          last4: last4 || undefined 
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -92,7 +101,7 @@ export default function AccountPage() {
         );
         if (filteredEntries.length === 0) {
           setEntries([]);
-          setMessage('No active entries found for this email and card.');
+          setMessage('No active entries found for this email.');
         } else {
           setEntries(filteredEntries);
         }
@@ -114,7 +123,12 @@ export default function AccountPage() {
       const res = await fetch('/api/account/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, last4, variant: entry.variant, size: entry.size }),
+        body: JSON.stringify({ 
+          email, 
+          last4: last4 || undefined, 
+          variant: entry.variant, 
+          size: entry.size 
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -136,7 +150,7 @@ export default function AccountPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
-          last4,
+          last4: last4 || undefined,
           variant: entry.variant,
           size: entry.size,
           newAddress: addressDraft,
@@ -162,7 +176,12 @@ export default function AccountPage() {
       const res = await fetch('/api/account/payment-portal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, last4, variant: entry?.variant, size: entry?.size }),
+        body: JSON.stringify({ 
+          email, 
+          last4: last4 || undefined, 
+          variant: entry?.variant, 
+          size: entry?.size 
+        }),
       });
       const data = await res.json();
       if (res.ok && data.url) window.location.assign(data.url);
@@ -175,12 +194,12 @@ export default function AccountPage() {
     }
   };
 
-  const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
-
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/';
   };
+
+  const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
 
   return (
     <main
@@ -213,7 +232,7 @@ export default function AccountPage() {
           >
             ← Back to store
           </Link>
-          {user && (
+          {isLoggedIn && (
             <button
               onClick={handleLogout}
               style={{
@@ -231,7 +250,7 @@ export default function AccountPage() {
           )}
         </div>
 
-        {user && (
+        {isLoggedIn && user && (
           <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 12, padding: 12, marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -244,7 +263,9 @@ export default function AccountPage() {
 
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
-          Verify with the email and last 4 digits of the card used to enter. All your entries across all products will be shown.
+          {isLoggedIn 
+            ? 'Your entries are automatically linked to your account.' 
+            : 'Enter your email and the last 4 digits of the card used to enter.'}
         </p>
 
         <div
@@ -263,38 +284,41 @@ export default function AccountPage() {
             placeholder="Email used at entry"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={isLoggedIn}
             style={{
               width: '100%',
               padding: 14,
               borderRadius: 12,
-              background: '#16161a',
+              background: isLoggedIn ? '#0a0a0a' : '#16161a',
               border: `1px solid ${configPalette.cardBorder}`,
-              color: '#fff',
+              color: isLoggedIn ? '#666' : '#fff',
               fontSize: 13,
               boxSizing: 'border-box',
             }}
           />
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={4}
-            placeholder="Last 4 digits of card"
-            value={last4}
-            onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
-            style={{
-              width: '100%',
-              padding: 14,
-              borderRadius: 12,
-              background: '#16161a',
-              border: `1px solid ${configPalette.cardBorder}`,
-              color: '#fff',
-              fontSize: 13,
-              boxSizing: 'border-box',
-            }}
-          />
+          {!isLoggedIn && (
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="Last 4 digits of card (optional if logged in)"
+              value={last4}
+              onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
+              style={{
+                width: '100%',
+                padding: 14,
+                borderRadius: 12,
+                background: '#16161a',
+                border: `1px solid ${configPalette.cardBorder}`,
+                color: '#fff',
+                fontSize: 13,
+                boxSizing: 'border-box',
+              }}
+            />
+          )}
           <button
             onClick={lookup}
-            disabled={isBusy || !email || last4.length !== 4}
+            disabled={isBusy || !email}
             style={{
               width: '100%',
               minHeight: 48,
@@ -313,6 +337,15 @@ export default function AccountPage() {
 
         {message && (
           <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: '#cbd5e1' }}>{message}</p>
+        )}
+
+        {!isLoggedIn && (
+          <p style={{ marginTop: 16, fontSize: 11, color: configPalette.textMuted, textAlign: 'center' }}>
+            <Link href="/auth/login" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Log in</Link>
+            {' or '}
+            <Link href="/auth/signup" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>create an account</Link>
+            {' to automatically link your entries.'}
+          </p>
         )}
 
         {entries && entries.length > 0 && (
