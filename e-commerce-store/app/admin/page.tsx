@@ -1837,36 +1837,40 @@ export default function AdminPortal() {
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Catalog Management</h2>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
               Manage the "Upcoming Releases" and "Past Archives" sections shown on the catalog page.
+              These appear in addition to products pulled from Redis.
             </p>
 
             {catalogLoading && <p style={{ color: '#888' }}>Loading…</p>}
             {catalogMsg && <p style={{ fontSize: 12, color: catalogMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>{catalogMsg}</p>}
 
-            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Upcoming Drops</h4>
+            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>📅 Upcoming Drops</h4>
+            <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>
+              These appear in the "Upcoming Releases" grid on the catalog page. Fill in name, ETA, and image URL.
+            </p>
             <div style={{ marginBottom: 12 }}>
               {catalogUpcoming.map((item, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6 }}>
+                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6, flexWrap: 'wrap' }}>
                   <input
                     type="text"
                     value={item.name || ''}
-                    placeholder="Name"
+                    placeholder="Name *"
                     onChange={(e) => {
                       const newList = [...catalogUpcoming];
                       newList[idx] = { ...newList[idx], name: e.target.value };
                       setCatalogUpcoming(newList);
                     }}
-                    style={{ ...inputStyle, flex: 1, padding: 4, fontSize: 11 }}
+                    style={{ ...inputStyle, flex: 1, minWidth: 100, padding: 4, fontSize: 11 }}
                   />
                   <input
                     type="text"
                     value={item.eta || ''}
-                    placeholder="ETA"
+                    placeholder="ETA (e.g. 'Summer 2026')"
                     onChange={(e) => {
                       const newList = [...catalogUpcoming];
                       newList[idx] = { ...newList[idx], eta: e.target.value };
                       setCatalogUpcoming(newList);
                     }}
-                    style={{ ...inputStyle, width: 80, padding: 4, fontSize: 11 }}
+                    style={{ ...inputStyle, width: 120, padding: 4, fontSize: 11 }}
                   />
                   <input
                     type="text"
@@ -1877,7 +1881,7 @@ export default function AdminPortal() {
                       newList[idx] = { ...newList[idx], image: e.target.value };
                       setCatalogUpcoming(newList);
                     }}
-                    style={{ ...inputStyle, width: 120, padding: 4, fontSize: 11 }}
+                    style={{ ...inputStyle, width: 150, padding: 4, fontSize: 11 }}
                   />
                   <button
                     onClick={() => setCatalogUpcoming(catalogUpcoming.filter((_, i) => i !== idx))}
@@ -1895,20 +1899,23 @@ export default function AdminPortal() {
               </button>
             </div>
 
-            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Past Archives</h4>
+            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>📦 Past Archives</h4>
+            <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>
+              These appear in the "Past Archives" grid. Provide name, image, and a short description.
+            </p>
             <div style={{ marginBottom: 12 }}>
               {catalogArchive.map((item, idx) => (
-                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6 }}>
+                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6, flexWrap: 'wrap' }}>
                   <input
                     type="text"
                     value={item.name || ''}
-                    placeholder="Name"
+                    placeholder="Name *"
                     onChange={(e) => {
                       const newList = [...catalogArchive];
                       newList[idx] = { ...newList[idx], name: e.target.value };
                       setCatalogArchive(newList);
                     }}
-                    style={{ ...inputStyle, flex: 1, padding: 4, fontSize: 11 }}
+                    style={{ ...inputStyle, flex: 1, minWidth: 100, padding: 4, fontSize: 11 }}
                   />
                   <input
                     type="text"
@@ -1924,13 +1931,13 @@ export default function AdminPortal() {
                   <input
                     type="text"
                     value={item.description || ''}
-                    placeholder="Description"
+                    placeholder="Short description"
                     onChange={(e) => {
                       const newList = [...catalogArchive];
                       newList[idx] = { ...newList[idx], description: e.target.value };
                       setCatalogArchive(newList);
                     }}
-                    style={{ ...inputStyle, width: 150, padding: 4, fontSize: 11 }}
+                    style={{ ...inputStyle, width: 180, padding: 4, fontSize: 11 }}
                   />
                   <button
                     onClick={() => setCatalogArchive(catalogArchive.filter((_, i) => i !== idx))}
@@ -1953,7 +1960,6 @@ export default function AdminPortal() {
             </button>
           </div>
         )}
-
         {/* ============ GROWTH ============ */}
         {tab === 'growth' && (
           <div style={cardStyle}>

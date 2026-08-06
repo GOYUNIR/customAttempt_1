@@ -547,10 +547,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   // ============================================================
-  // ADD TO CART
+  // ADD TO CART (for direct purchase items only)
   // ============================================================
   const handleAddToCart = async () => {
     if (!currentProduct) return;
+    if (currentProduct.isRaffle) {
+      setFeedbackStatus('error');
+      setFeedbackMessage('This is a raffle item. Use the raffle entry button.');
+      return;
+    }
     setIsAddToCart(true);
     try {
       const response = await fetch('/api/checkout/direct', {
@@ -1147,7 +1152,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                     ))}
                   </datalist>
 
-                  {/* ============ BUTTON SECTION ============ */}
+                  // ============ BUTTON SECTION ============
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {/* Raffle Entry Button (if raffle) */}
                     {currentProduct?.isRaffle && (
@@ -1174,25 +1179,27 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                       </button>
                     )}
 
-                    {/* Buy Now / Add to Cart Button - always visible */}
-                    <button
-                      type="button"
-                      onClick={handleAddToCart}
-                      disabled={isAddToCart}
-                      style={{
-                        width: '100%',
-                        padding: 16,
-                        borderRadius: 30,
-                        background: isAddToCart ? '#1f1f23' : 'transparent',
-                        color: isAddToCart ? '#555' : configPalette.textMain,
-                        border: `1px solid ${configPalette.cardBorder}`,
-                        fontWeight: 'bold',
-                        fontSize: 14,
-                        cursor: isAddToCart ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      {isAddToCart ? 'Processing…' : '🛒 Buy Now'}
-                    </button>
+                    {/* Buy Now / Add to Cart Button - only for non-raffle items */}
+                    {!currentProduct?.isRaffle && (
+                      <button
+                        type="button"
+                        onClick={handleAddToCart}
+                        disabled={isAddToCart}
+                        style={{
+                          width: '100%',
+                          padding: 16,
+                          borderRadius: 30,
+                          background: isAddToCart ? '#1f1f23' : 'transparent',
+                          color: isAddToCart ? '#555' : configPalette.textMain,
+                          border: `1px solid ${configPalette.cardBorder}`,
+                          fontWeight: 'bold',
+                          fontSize: 14,
+                          cursor: isAddToCart ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {isAddToCart ? 'Processing…' : '🛒 Add to Cart'}
+                      </button>
+                    )}
                   </div>
                   {/* =========================================== */}
                 </form>
