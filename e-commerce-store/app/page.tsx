@@ -1,74 +1,61 @@
-import { redirect } from 'next/navigation';
-import { createRedisClient } from '@/lib/server-config';
+'use client';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-export default async function HomePage() {
-  console.log('[HomePage] Starting...');
-  
-  const redis = createRedisClient();
-  let redirectSlug = null;
-  
-  if (redis) {
-    try {
-      // First check active products
-      const activeRaw = await redis.hgetall('store:active_products');
-      console.log('[HomePage] Active products:', activeRaw);
-      
-      if (activeRaw && Object.keys(activeRaw).length > 0) {
-        // Find the first active product
-        for (const [key, value] of Object.entries(activeRaw)) {
-          try {
-            const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            console.log('[HomePage] Checking product:', product.name, 'slug:', product.slug, 'active:', product.isActive, 'archived:', product.isArchived);
-            if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
-              redirectSlug = product.slug;
-              console.log('[HomePage] ✅ Found redirect slug:', redirectSlug);
-              break;
-            }
-          } catch (e) {
-            console.error('[HomePage] Error parsing product:', e);
+export default function HomePage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [hasProducts, setHasProducts] = useState(false);
+  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+
+  useEffect(() => {
+    async function checkProducts() {
+      try {
+        const res = await fetch('/api/store/config');
+        const data = await res.json();
+        
+        if (data.activeProducts && data.activeProducts.length > 0) {
+          setHasProducts(true);
+          // Redirect to first active product
+          const firstProduct = data.activeProducts[0];
+          if (firstProduct.slug) {
+            router.push(`/${firstProduct.slug}`);
+            return;
           }
         }
+      } catch (err) {
+        console.error('[HomePage] Error checking products:', err);
       }
-      
-      // If nothing found, check all products as fallback
-      if (!redirectSlug) {
-        const allRaw = await redis.hgetall('store:products');
-        console.log('[HomePage] All products fallback:', allRaw);
-        if (allRaw) {
-          for (const [key, value] of Object.entries(allRaw)) {
-            try {
-              const product = JSON.parse(typeof value === 'string' ? value : '{}');
-              if (product.isActive && !product.isArchived && product.slug) {
-                redirectSlug = product.slug;
-                console.log('[HomePage] ✅ Found in fallback:', redirectSlug);
-                break;
-              }
-            } catch (e) {
-              console.error('[HomePage] Error parsing product:', e);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('[HomePage] Redis error:', error);
+      setLoading(false);
     }
-  } else {
-    console.log('[HomePage] ❌ Redis client is null');
+    
+    checkProducts();
+  }, [router]);
+
+  if (loading) {
+    return (
+      <main style={{ 
+        minHeight: '100vh', 
+        background: '#0a0a0a', 
+        color: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        fontFamily: 'system-ui, sans-serif'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: '#666' }}>Loading</div>
+          <div style={{ marginTop: 12, width: 40, height: 2, background: '#a855f7', margin: '12px auto' }} />
+        </div>
+      </main>
+    );
   }
-  
-  // Force redirect if we found a slug
-  if (redirectSlug) {
-    console.log('[HomePage] 🚀 Redirecting to:', `/${redirectSlug}`);
-    redirect(`/${redirectSlug}`);
-  }
-  
-  // If we get here, no products were found
-  console.log('[HomePage] ❌ No products found, showing Coming Soon');
-  
-  // Show a simple fallback - but this should only happen if Redis is empty
+
   return (
     <main style={{ 
       minHeight: '100vh', 
@@ -91,7 +78,7 @@ export default async function HomePage() {
         <p style={{ color: '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
           Our allocation drops are being prepared. Check back soon.
         </p>
-        <a 
+        <Link 
           href="/catalog" 
           style={{
             padding: '12px 28px',
@@ -105,7 +92,7 @@ export default async function HomePage() {
           }}
         >
           View Catalog
-        </a>
+        </Link>
       </div>
     </main>
   );
