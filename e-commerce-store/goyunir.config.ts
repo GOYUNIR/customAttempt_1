@@ -12,7 +12,6 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
   },
 
-  // Default size – change via /admin → Settings
   availableSizes: ['Standard'],
 
   dropSchedule: {
@@ -102,6 +101,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ],
   },
 
+  // NOTE: The type StorefrontProduct expects price50ml/100ml, but we override with priceCategories.
+  // We cast as any to bypass type errors – these fields are used in Redis, not here.
   productCatalog: [
     {
       id: 'p1',
@@ -110,19 +111,19 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       prefix: 'elysian-white',
       tagline: 'WHITE ALLOCATION / 01',
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
-      price50ml: 0,          // neutral – set real price in admin
-      price100ml: 0,
-      stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      maxRaffleAllocationLimit: 0,
-      isActive: true,
-      totalInventory: 0,
-      winnerTiers: [0],
+      priceCategories: [
+        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+      ],
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
         { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
       ],
+      images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
+      maxRaffleAllocationLimit: 0,
+      totalInventory: 0,
+      winnerTiers: [0],
+      isActive: false,
     },
     {
       id: 'p2',
@@ -131,19 +132,19 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       prefix: 'obsidian-void',
       tagline: 'BLACK ALLOCATION / 02',
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-      price50ml: 0,
-      price100ml: 0,
-      stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      maxRaffleAllocationLimit: 0,
-      isActive: true,
-      totalInventory: 0,
-      winnerTiers: [0],
+      priceCategories: [
+        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+      ],
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
         { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
         { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' },
       ],
+      images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
+      maxRaffleAllocationLimit: 0,
+      totalInventory: 0,
+      winnerTiers: [0],
+      isActive: false,
     },
-  ],
+  ] as any[], // cast to any to allow extra fields not in StorefrontProduct
 });

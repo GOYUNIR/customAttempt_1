@@ -16,10 +16,7 @@ export type StoreProduct = {
   prefix: string;
   tagline: string;
   desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
+  priceCategories: { size: string; price: number; stripeId: string; winnerTiers: string }[];
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
@@ -231,6 +228,12 @@ export async function POST(request: Request) {
     const slug = String(body?.slug || existing?.slug || generateSlug(name));
     const prefix = String(body?.prefix || existing?.prefix || slug);
     
+    // Ensure priceCategories is an array
+    let priceCategories = Array.isArray(body?.priceCategories) ? body.priceCategories : existing?.priceCategories;
+    if (!priceCategories || !Array.isArray(priceCategories) || priceCategories.length === 0) {
+      priceCategories = [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }];
+    }
+
     const product: StoreProduct = {
       id,
       name,
@@ -238,12 +241,9 @@ export async function POST(request: Request) {
       prefix,
       tagline: String(body?.tagline || existing?.tagline || 'LIMITED DROP'),
       desc: String(body?.desc || existing?.desc || 'A refined signature profile.'),
-      price50ml: Number(body?.price50ml ?? existing?.price50ml ?? 0),
-      price100ml: Number(body?.price100ml ?? existing?.price100ml ?? 0),
-      stripeId50ml: String(body?.stripeId50ml || existing?.stripeId50ml || ''),
-      stripeId100ml: String(body?.stripeId100ml || existing?.stripeId100ml || ''),
+      priceCategories,
       maxRaffleAllocationLimit: Number(body?.maxRaffleAllocationLimit ?? existing?.maxRaffleAllocationLimit ?? 0),
-      isActive: body?.isActive !== undefined ? body.isActive : (existing?.isActive ?? false), // Default to hidden
+      isActive: body?.isActive !== undefined ? body.isActive : (existing?.isActive ?? false),
       isArchived: body?.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
       isUpcoming: body?.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
       isRaffle: body?.isRaffle !== undefined ? body.isRaffle : (existing?.isRaffle ?? true),

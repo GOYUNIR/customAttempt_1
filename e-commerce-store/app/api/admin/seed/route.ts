@@ -9,6 +9,7 @@ const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
 const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const CONFIG_KEY = 'store:config';
 
+// Seeded products – now using priceCategories, no price50ml/100ml.
 const DEFAULT_PRODUCTS = [
   {
     id: 'p1',
@@ -17,12 +18,7 @@ const DEFAULT_PRODUCTS = [
     prefix: 'elysian-white',
     tagline: 'WHITE ALLOCATION / 01',
     desc: 'Clean, electric profile variant constructed with premium bergamot.',
-    price50ml: 0,
-    price100ml: 0,
-    stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-    stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-    maxRaffleAllocationLimit: 0,
-    isActive: true,
+    isActive: false,
     isArchived: false,
     isUpcoming: false,
     isRaffle: true,
@@ -33,7 +29,11 @@ const DEFAULT_PRODUCTS = [
       { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
       { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
     ],
+    priceCategories: [
+      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+    ],
     images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
+    maxRaffleAllocationLimit: 0,
     totalInventory: 0,
     winnerTiers: [0],
     createdAt: new Date().toISOString(),
@@ -46,12 +46,7 @@ const DEFAULT_PRODUCTS = [
     prefix: 'obsidian-void',
     tagline: 'BLACK ALLOCATION / 02',
     desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-    price50ml: 0,
-    price100ml: 0,
-    stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-    stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-    maxRaffleAllocationLimit: 0,
-    isActive: true,
+    isActive: false,
     isArchived: false,
     isUpcoming: false,
     isRaffle: true,
@@ -62,7 +57,11 @@ const DEFAULT_PRODUCTS = [
       { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
       { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' },
     ],
+    priceCategories: [
+      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+    ],
     images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
+    maxRaffleAllocationLimit: 0,
     totalInventory: 0,
     winnerTiers: [0],
     createdAt: new Date().toISOString(),

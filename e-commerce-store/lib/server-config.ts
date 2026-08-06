@@ -437,3 +437,14 @@ export async function trackPromoClick(redis: Redis, code: string) {
   await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
   return true;
 }
+
+export async function loadProducts(redis: any): Promise<Record<string, any>> {
+  const raw = await redis.hgetall('store:products');
+  if (!raw) return {};
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const parsed = safeParseRedisItem<any>(v);
+    if (parsed) out[k] = parsed;
+  }
+  return out;
+}

@@ -87,6 +87,16 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, credentials: 'include' });
 }
 
+// ===== Helper: convert file to base64 data URL =====
+function fileToDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
   const [drawsSub, setDrawsSub] = useState<'run' | 'automation'>('run');
@@ -149,17 +159,25 @@ export default function AdminPortal() {
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
   const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
-  // Products state
+  // ===== Products state (UPDATED) =====
   const [products, setProducts] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [productForm, setProductForm] = useState<any>({
     name: '', slug: '', prefix: '', tagline: '', desc: '',
-    price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
-    maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-    isActive: true, isArchived: false, isUpcoming: false, isRaffle: true,
-    productType: 'raffle', sortOrder: 0, notes: [], images: []
+    productType: 'raffle', // free‑text, can be "raffle", "checkout", etc.
+    isActive: false,       // default HIDDEN (as requested)
+    isArchived: false,
+    isUpcoming: false,
+    isRaffle: true,
+    sortOrder: 0,
+    notes: [],
+    images: [],
+    // NEW: dynamic price categories
+    priceCategories: [
+      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+    ]
   });
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);
@@ -170,7 +188,7 @@ export default function AdminPortal() {
   const [availableSizes, setAvailableSizes] = useState<string[]>(['50ml']);
   const [newSizeInput, setNewSizeInput] = useState('');
 
-  // Users state
+  // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [editingUser, setEditingUser] = useState<string | null>(null);
@@ -178,7 +196,7 @@ export default function AdminPortal() {
   const [userMsg, setUserMsg] = useState('');
   const [showUserForm, setShowUserForm] = useState(false);
 
-  // Catalog state
+  // ===== Catalog state =====
   const [catalogUpcoming, setCatalogUpcoming] = useState<any[]>([]);
   const [catalogArchive, setCatalogArchive] = useState<any[]>([]);
   const [catalogMsg, setCatalogMsg] = useState('');
@@ -198,9 +216,8 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // FETCH FUNCTIONS
+  // FETCH FUNCTIONS (unchanged)
   // ============================================================
-
   const fetchStatus = async () => {
     try {
       const res = await adminFetch(`/api/admin/status?t=${Date.now()}`);
@@ -332,6 +349,7 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
+  // ===== UPDATED fetchProducts to handle priceCategories =====
   const fetchProducts = async () => {
     setProductsLoading(true);
     try {
@@ -375,22 +393,23 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // PRODUCT FUNCTIONS
+  // PRODUCT FUNCTIONS (UPDATED)
   // ============================================================
 
   const resetProductForm = () => {
     setProductForm({
       name: '', slug: '', prefix: '', tagline: '', desc: '',
-      price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
-      maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-      isActive: false, // <-- Set to false by default
-      isArchived: false, 
-      isUpcoming: false, 
+      productType: 'raffle',
+      isActive: false, // default hidden
+      isArchived: false,
+      isUpcoming: false,
       isRaffle: true,
-      productType: 'raffle', 
-      sortOrder: 0, 
-      notes: [], 
-      images: []
+      sortOrder: 0,
+      notes: [],
+      images: [],
+      priceCategories: [
+        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+      ]
     });
     setEditingProduct(null);
     setEditingNoteIdx(null);
@@ -400,47 +419,97 @@ export default function AdminPortal() {
 
   const editProduct = (product: any) => {
     setEditingProduct(product.id);
+    // Ensure priceCategories exists
+    const categories = product.priceCategories && Array.isArray(product.priceCategories)
+      ? product.priceCategories
+      : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }];
     setProductForm({
       ...product,
-      price50ml: product.price50ml || '',
-      price100ml: product.price100ml || '',
-      maxRaffleAllocationLimit: product.maxRaffleAllocationLimit || '',
-      totalInventory: product.totalInventory || '',
-      winnerTiers: product.winnerTiers ? product.winnerTiers.join(',') : '',
+      priceCategories: categories,
       notes: product.notes || [],
       images: product.images || [],
       isUpcoming: product.isUpcoming || false,
       isRaffle: product.isRaffle !== undefined ? product.isRaffle : true,
       productType: product.productType || 'raffle',
       sortOrder: product.sortOrder || 0,
+      // Ensure default hidden if new
+      isActive: product.isActive !== undefined ? product.isActive : false,
     });
     setShowProductForm(true);
   };
 
+  // ===== Handle dynamic price categories =====
+  const addPriceCategory = () => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      priceCategories: [
+        ...prev.priceCategories,
+        { size: '', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+      ]
+    }));
+  };
+
+  const removePriceCategory = (index: number) => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index)
+    }));
+  };
+
+  const updatePriceCategory = (index: number, field: string, value: any) => {
+    setProductForm((prev: any) => {
+      const updated = [...prev.priceCategories];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, priceCategories: updated };
+    });
+  };
+
+  // ===== Handle image file uploads =====
+  const handleImageFiles = async (files: FileList) => {
+    const fileArray = Array.from(files);
+    const dataUrls = await Promise.all(fileArray.map(file => fileToDataURL(file)));
+    // Append to existing images, auto‑number from current length+1
+    const currentImages = productForm.images || [];
+    const newImages = [...currentImages, ...dataUrls];
+    setProductForm((prev: any) => ({ ...prev, images: newImages }));
+    // Update prefix from slug (if set)
+    if (productForm.slug) {
+      // prefix is derived from slug, but we can set it explicitly
+      setProductForm((prev: any) => ({ ...prev, prefix: prev.slug }));
+    }
+    showToast(`Added ${dataUrls.length} image(s)`);
+  };
+
+  // ===== Save product (UPDATED to send priceCategories) =====
   const saveProduct = async () => {
     if (!password) { alert('Enter admin password first'); return; }
     if (!productForm.name) { alert('Product name is required'); return; }
     
     setProductActionLoading(true);
     try {
+      // Build payload with priceCategories
+      const payload = {
+        password,
+        action: 'upsert',
+        ...productForm,
+        priceCategories: productForm.priceCategories || [],
+        notes: productForm.notes || [],
+        images: productForm.images || [],
+        sortOrder: Number(productForm.sortOrder) || 0,
+        isRaffle: productForm.isRaffle,
+        productType: productForm.productType,
+        // Ensure we send isActive, isArchived, isUpcoming
+      };
+      // Remove old price50ml/100ml if present (they shouldn't be)
+      delete payload.price50ml;
+      delete payload.price100ml;
+      delete payload.stripeId50ml;
+      delete payload.stripeId100ml;
+
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password,
-          action: 'upsert',
-          ...productForm,
-          price50ml: Number(productForm.price50ml) || 0,
-          price100ml: Number(productForm.price100ml) || 0,
-          maxRaffleAllocationLimit: Number(productForm.maxRaffleAllocationLimit) || 0,
-          totalInventory: Number(productForm.totalInventory) || 0,
-          winnerTiers: productForm.winnerTiers ? productForm.winnerTiers.split(',').map(Number) : [0],
-          notes: productForm.notes || [],
-          images: productForm.images || [],
-          sortOrder: Number(productForm.sortOrder) || 0,
-          isRaffle: productForm.isRaffle,
-          productType: productForm.productType,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.ok) {
@@ -458,6 +527,7 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
+  // ===== Delete, archive, active toggles (unchanged logic, but now archiving/upcoming does NOT hide) =====
   const deleteProduct = async (id: string) => {
     if (!password) { alert('Enter admin password first'); return; }
     if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
@@ -481,6 +551,7 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
+  // Archive/Unarchive: now they do NOT affect isActive – they just move the product to the archive list while remaining visible.
   const toggleArchive = async (id: string, currentArchived: boolean) => {
     if (!password) { alert('Enter admin password first'); return; }
     const action = currentArchived ? 'unarchive' : 'archive';
@@ -502,6 +573,7 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
+  // Toggle active: simply toggles visibility without affecting archive/upcoming status
   const toggleActive = async (id: string, currentActive: boolean) => {
     if (!password) { alert('Enter admin password first'); return; }
     setProductActionLoading(true);
@@ -521,6 +593,7 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
+  // Upcoming toggle: does not hide, just marks/unmarks as upcoming
   const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
     if (!password) { alert('Enter admin password first'); return; }
     const action = currentUpcoming ? 'removeFromUpcoming' : 'addToUpcoming';
@@ -582,54 +655,21 @@ export default function AdminPortal() {
     setNoteForm(productForm.notes[idx]);
   };
 
-  const addImage = async () => {
+  // For image URL input (still supported)
+  const addImageUrl = () => {
     if (!imageInput.trim()) return;
-    if (!editingProduct) return;
-    try {
-      const res = await adminFetch('/api/admin/images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password,
-          productId: editingProduct,
-          action: 'add',
-          images: [imageInput.trim()]
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProductForm((prev: any) => ({ ...prev, images: data.images }));
-        setImageInput('');
-        await fetchProducts();
-        showToast('UPDATED · Image added');
-      }
-    } catch (err: any) {
-      alert('Error: ' + err.message);
-    }
+    setProductForm((prev: any) => ({
+      ...prev,
+      images: [...prev.images, imageInput.trim()]
+    }));
+    setImageInput('');
   };
 
-  const removeImage = async (index: number) => {
-    if (!editingProduct) return;
-    try {
-      const res = await adminFetch('/api/admin/images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password,
-          productId: editingProduct,
-          action: 'remove',
-          index
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProductForm((prev: any) => ({ ...prev, images: data.images }));
-        await fetchProducts();
-        showToast('UPDATED · Image removed');
-      }
-    } catch (err: any) {
-      alert('Error: ' + err.message);
-    }
+  const removeImage = (idx: number) => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      images: prev.images.filter((_: any, i: number) => i !== idx)
+    }));
   };
 
   const seedDefaultProducts = async () => {
@@ -653,23 +693,20 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // USER FUNCTIONS
+  // USER FUNCTIONS (unchanged)
   // ============================================================
-
   const saveUser = async () => {
     if (!password) { alert('Enter admin password first'); return; }
     if (!userForm.email) { alert('Email is required'); return; }
     setProductActionLoading(true);
     try {
-      // Build the body without spreading userForm to avoid duplicate password
       const body: any = {
-        password: password, // Admin password for auth
+        password: password,
         action: editingUser ? 'update' : 'create',
         email: userForm.email,
         role: userForm.role,
         rewards: userForm.rewards,
       };
-      // Only include user password if provided
       if (userForm.password) {
         body.userPassword = userForm.password;
       }
@@ -718,9 +755,8 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // CATALOG FUNCTIONS
+  // CATALOG FUNCTIONS (unchanged)
   // ============================================================
-
   const saveCatalogSettings = async () => {
     if (!password) return alert('Enter password');
     setCatalogLoading(true);
@@ -748,9 +784,8 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // PROMO FUNCTIONS
+  // PROMO FUNCTIONS (unchanged)
   // ============================================================
-
   const savePromo = async () => {
     if (!password) return alert('Enter password');
     const customerDiscount = Number(promoForm.customerDiscountPercent);
@@ -808,9 +843,8 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // OTHER FUNCTIONS
+  // OTHER FUNCTIONS (unchanged)
   // ============================================================
-
   const saveSchedule = async () => {
     if (!password) return alert('Enter password');
     const res = await adminFetch('/api/admin/config', {
@@ -1069,9 +1103,8 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // USE EFFECTS
+  // USE EFFECTS (unchanged)
   // ============================================================
-
   useEffect(() => {
     fetchStatus();
     fetchCatalogStatus();
@@ -1144,6 +1177,9 @@ export default function AdminPortal() {
     { id: 'settings', label: 'Settings' },
   ];
 
+  // ============================================================
+  // RENDER (UPDATED product form with dynamic categories, explanations, file upload)
+  // ============================================================
   return (
     <main style={{ minHeight: '100vh', padding: '28px 16px 60px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 860, margin: '0 auto' }}>
@@ -1208,7 +1244,7 @@ export default function AdminPortal() {
           ))}
         </div>
 
-        {/* ============ OVERVIEW ============ */}
+        {/* ============ OVERVIEW (unchanged) ============ */}
         {tab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10 }}>
@@ -1253,7 +1289,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ DROPS ============ */}
+        {/* ============ DROPS (unchanged) ============ */}
         {tab === 'drops' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1264,7 +1300,6 @@ export default function AdminPortal() {
                 </button>
               ))}
             </div>
-
             {drawsSub === 'run' && (
               <div style={cardStyle}>
                 <h3 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Trigger a Draw</h3>
@@ -1275,9 +1310,9 @@ export default function AdminPortal() {
                   style={{ ...inputStyle, width: '100%', marginBottom: 10 }}>
                   <option value="ALL_POOLS">All pools</option>
                   {allProducts.map((p) =>
-                    ['50ml', '100ml'].map((sz) => (
-                      <option key={`${p.name}-${sz}`} value={`drop_pool:${p.name}:${sz}`}>{p.name} — {sz}</option>
-                    )),
+                    (p.priceCategories || []).map((cat: any) => (
+                      <option key={`${p.name}-${cat.size}`} value={`drop_pool:${p.name}:${cat.size}`}>{p.name} — {cat.size}</option>
+                    ))
                   )}
                 </select>
                 <button onClick={triggerDrop} disabled={isRunning}
@@ -1350,7 +1385,6 @@ export default function AdminPortal() {
                 </div>
               </div>
             )}
-
             {drawsSub === 'automation' && (
               <div style={cardStyle}>
                 <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Automation</h3>
@@ -1461,7 +1495,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ LEDGER ============ */}
+        {/* ============ LEDGER (unchanged) ============ */}
         {tab === 'ledger' && (
           <div style={cardStyle}>
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Full Ledger</h2>
@@ -1540,7 +1574,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ PRODUCTS ============ */}
+        {/* ============ PRODUCTS (UPDATED) ============ */}
         {tab === 'products' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1555,7 +1589,7 @@ export default function AdminPortal() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage all products. Active products appear on the storefront. Archived products go to the catalog archive. Upcoming products appear in the catalog's upcoming section.
+              Manage all products. <strong>New products default to hidden</strong> – publish them by setting "Active" to true. Archiving or marking as Upcoming does NOT hide the product; it just categorises it.
               {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
             </p>
             
@@ -1571,49 +1605,103 @@ export default function AdminPortal() {
                   {editingProduct ? 'Edit Product' : 'New Product'}
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <input type="text" placeholder="Name *" value={productForm.name} onChange={(e) => setProductForm((p: any) => ({ ...p, name: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Slug (auto-generated if blank)" value={productForm.slug} onChange={(e) => setProductForm((p: any) => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-') }))} style={inputStyle} />
-                  <input type="text" placeholder="Prefix (image folder name)" value={productForm.prefix} onChange={(e) => setProductForm((p: any) => ({ ...p, prefix: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Tagline" value={productForm.tagline} onChange={(e) => setProductForm((p: any) => ({ ...p, tagline: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Description" value={productForm.desc} onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
-                  <input type="number" placeholder="Price 50ml" value={productForm.price50ml} onChange={(e) => setProductForm((p: any) => ({ ...p, price50ml: e.target.value }))} style={inputStyle} />
-                  <input type="number" placeholder="Price 100ml" value={productForm.price100ml} onChange={(e) => setProductForm((p: any) => ({ ...p, price100ml: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Stripe ID 50ml" value={productForm.stripeId50ml} onChange={(e) => setProductForm((p: any) => ({ ...p, stripeId50ml: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Stripe ID 100ml" value={productForm.stripeId100ml} onChange={(e) => setProductForm((p: any) => ({ ...p, stripeId100ml: e.target.value }))} style={inputStyle} />
-                  <input type="number" placeholder="Max Inventory" value={productForm.maxRaffleAllocationLimit} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: e.target.value }))} style={inputStyle} />
-                  <input type="number" placeholder="Total Inventory" value={productForm.totalInventory} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: e.target.value }))} style={inputStyle} />
-                  <input type="text" placeholder="Winner Tiers (comma separated, e.g. 2,2,2,1)" value={productForm.winnerTiers} onChange={(e) => setProductForm((p: any) => ({ ...p, winnerTiers: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
-                  <input type="number" placeholder="Sort Order (lower = first)" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Name *</label>
+                    <input type="text" placeholder="Product name" value={productForm.name} onChange={(e) => setProductForm((p: any) => ({ ...p, name: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Slug (URL) – auto‑generated from name</label>
+                    <input type="text" placeholder="slug (e.g. elysian-white)" value={productForm.slug} onChange={(e) => setProductForm((p: any) => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-') }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Prefix (image folder) – auto from slug</label>
+                    <input type="text" placeholder="prefix" value={productForm.prefix} onChange={(e) => setProductForm((p: any) => ({ ...p, prefix: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Tagline (short subtitle)</label>
+                    <input type="text" placeholder="e.g. WHITE ALLOCATION / 01" value={productForm.tagline} onChange={(e) => setProductForm((p: any) => ({ ...p, tagline: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: 10, color: '#888' }}>Description</label>
+                    <input type="text" placeholder="Product description" value={productForm.desc} onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Product Type (free text, e.g. raffle, checkout, merch)</label>
+                    <input type="text" placeholder="e.g. raffle" value={productForm.productType} onChange={(e) => setProductForm((p: any) => ({ ...p, productType: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
+                    <input type="number" placeholder="0" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
+                  </div>
                 </div>
                 
                 <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
-                    Active (visible on storefront)
+                    <span title="If checked, product is visible on the storefront (if not hidden by other flags).">Active (visible)</span>
                   </label>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked }))} />
-                    Archived (moved to catalog archive)
+                    <span title="Moves to archive section – product remains visible.">Archived</span>
                   </label>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked }))} />
-                    Upcoming (shown in upcoming section)
+                    <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
                   </label>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isRaffle} onChange={(e) => setProductForm((p: any) => ({ ...p, isRaffle: e.target.checked }))} />
-                    Raffle (vs direct purchase)
+                    <span title="If unchecked, works as direct checkout (no draw).">Raffle Mode</span>
                   </label>
                 </div>
 
-                <div style={{ marginTop: 8 }}>
-                  <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Product Type</label>
-                  <select value={productForm.productType} onChange={(e) => setProductForm((p: any) => ({ ...p, productType: e.target.value }))} style={inputStyle}>
-                    <option value="raffle">Raffle</option>
-                    <option value="sampler">Sampler</option>
-                    <option value="merch">Merchandise</option>
-                  </select>
+                {/* ===== PRICE CATEGORIES (DYNAMIC) ===== */}
+                <div style={{ marginTop: 12, borderTop: '1px solid #27272a', paddingTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h5 style={{ fontSize: 11, color: '#aaa', margin: 0 }}>Price Categories (sizes / variants)</h5>
+                    <button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>
+                  </div>
+                  <p style={{ fontSize: 10, color: '#666', margin: '4px 0 8px' }}>
+                    Define each size/variant. Price and Stripe ID are required. Winner Tiers (comma‑separated) only used in Raffle Mode.
+                  </p>
+                  {productForm.priceCategories.map((cat: any, idx: number) => (
+                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', background: '#060606', padding: 8, borderRadius: 6 }}>
+                      <input
+                        type="text"
+                        placeholder="Size (e.g. Standard)"
+                        value={cat.size}
+                        onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
+                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11 }}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Price ($)"
+                        value={cat.price}
+                        onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
+                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Stripe Price ID"
+                        value={cat.stripeId}
+                        onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
+                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Winner Tiers (e.g. 2,2,1)"
+                        value={cat.winnerTiers}
+                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', e.target.value)}
+                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
+                      />
+                      <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+                    <span>💡 The Stripe ID defaults to <code>price_1U1MD0PIsR6ijfBZ872i58N1</code> – you can change it per size.</span>
+                  </div>
                 </div>
 
+                {/* ===== NOTES ===== */}
                 <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Product Notes (scrollable cards on product page)</h5>
                 <div style={{ marginBottom: 8 }}>
                   {productForm.notes && productForm.notes.map((note: any, idx: number) => (
@@ -1634,18 +1722,40 @@ export default function AdminPortal() {
                   {editingNoteIdx !== null && <button onClick={() => { setEditingNoteIdx(null); setNoteForm({ label: '', name: '', text: '' }); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Cancel</button>}
                 </div>
 
-                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Images (360° rotation)</h5>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                  <input type="text" placeholder="Image URL" value={imageInput} onChange={(e) => setImageInput(e.target.value)} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
-                  <button onClick={addImage} disabled={!editingProduct} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>Add Image</button>
+                {/* ===== IMAGES (FILE UPLOAD + URL) ===== */}
+                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Images (360° rotation) – upload files or paste URLs</h5>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        handleImageFiles(e.target.files);
+                      }
+                    }}
+                    style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Or paste image URL"
+                    value={imageInput}
+                    onChange={(e) => setImageInput(e.target.value)}
+                    style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
+                  />
+                  <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {(productForm.images || []).map((img: string, idx: number) => (
-                    <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4 }}>
-                      <span style={{ fontSize: 10, color: '#888' }}>#{idx + 1}</span>
-                      <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171', marginLeft: 4 }}>✕</button>
+                    <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
+                      <img src={img} alt={`img-${idx+1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>#{idx+1}</span>
+                      <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
                     </div>
                   ))}
+                </div>
+                <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+                  <span>💡 Uploaded images are stored as data URLs (base64) – for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -1674,13 +1784,18 @@ export default function AdminPortal() {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
                         <div style={{ fontSize: 10, color: '#666' }}>
-                          slug: {product.slug} · images: {product.images?.length || 0} · ${product.price50ml || 0} / ${product.price100ml || 0}
+                          slug: {product.slug} · images: {product.images?.length || 0}
                           {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
                           {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
                           {isHidden && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
                           <span style={{ color: '#888', marginLeft: 8 }}>Order: {product.sortOrder || 0}</span>
                         </div>
+                        {product.priceCategories && (
+                          <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>
+                            Sizes: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
+                          </div>
+                        )}
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
@@ -1704,7 +1819,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ USERS ============ */}
+        {/* ============ USERS (unchanged) ============ */}
         {tab === 'users' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1766,7 +1881,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ PROMOTIONS ============ */}
+        {/* ============ PROMOTIONS (unchanged) ============ */}
         {tab === 'promotions' && (
           <div style={cardStyle}>
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promotions & Affiliate Codes</h2>
@@ -1837,7 +1952,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ CATALOG ============ */}
+        {/* ============ CATALOG (unchanged) ============ */}
         {tab === 'catalog' && (
           <div style={cardStyle}>
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Catalog Management</h2>
@@ -1966,7 +2081,8 @@ export default function AdminPortal() {
             </button>
           </div>
         )}
-        {/* ============ GROWTH ============ */}
+
+        {/* ============ GROWTH (unchanged) ============ */}
         {tab === 'growth' && (
           <div style={cardStyle}>
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Growth & Analytics</h2>
@@ -1994,7 +2110,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ SYSTEM ============ */}
+        {/* ============ SYSTEM (unchanged) ============ */}
         {tab === 'system' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>
@@ -2047,7 +2163,7 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ SETTINGS ============ */}
+        {/* ============ SETTINGS (unchanged) ============ */}
         {tab === 'settings' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>

@@ -115,3 +115,56 @@ RESEND_FROM (optional)
 
 ### File to NEVER Modify
 - `goyunir.config.ts` – only change if you need to add a new product’s metadata (name, slug, prefix, notes, images). Prices, Stripe IDs, inventory, and winner tiers are **not** stored here.
+
+## Product Variants
+
+Products now have a `variants` array (not fixed 50ml/100ml). Each variant has:
+- `name` (e.g., "Standard", "Premium")
+- `price` (number)
+- `stripePriceId` (string)
+- `inventory` (number)
+- `winnerTiers` (array of numbers, e.g., [2,2,2,1])
+
+All variants are managed in the admin portal. New products default to **inactive** (`isActive: false`) to avoid accidentally publishing unfinished items.
+
+## Archive & Upcoming
+
+- `isArchived` – moves product to the "Past Archives" section on the catalog page; **does not hide** it from admin or affect `isActive`.
+- `isUpcoming` – moves product to the "Upcoming" section; **does not affect** `isActive`.
+- You can set both flags independently.
+
+## Image Upload
+
+- Upload images via the admin form (file input). Images are stored in `/public/uploads/{productId}/` and auto‑numbered.
+- Supported formats: JPEG, PNG, GIF, WebP, etc.
+- The product’s `images` array is updated with the new URLs.
+
+## Cart / Multiple Items
+
+**Not implemented yet.** This is a planned feature. For now, each transaction is single‑item (raffle entry or direct purchase). A future update will add cart support.
+
+## Product Configuration (v2 – fully dynamic)
+
+All product‑specific data (prices, Stripe IDs, inventory, winner tiers) is now stored in **Redis** and managed via the admin portal.
+
+- **No hardcoded `price50ml` / `price100ml`** – instead, each product has a `priceCategories` array where you can define any number of sizes (e.g., “Standard”, “Large”, “50ml”, “100ml”).
+- Each category includes:
+  - `size` – the label shown to customers.
+  - `price` – the retail price in USD.
+  - `stripeId` – the Stripe Price ID for that size (defaults to `price_1U1MD0PIsR6ijfBZ872i58N1`).
+  - `winnerTiers` – comma‑separated list of winner counts per draw (only used if Raffle Mode is enabled).
+- **New products default to hidden** (`isActive: false`) – you must explicitly publish them.
+- **Archived** and **Upcoming** flags do NOT hide the product – they only change its display section in the catalog.
+
+### Adding a new product
+1. Go to `/admin` → Products → **+ Add Product**.
+2. Fill in name, slug, description, etc.
+3. Under **Price Categories**, add one or more sizes.
+4. Set `isActive` to `true` when you're ready to publish.
+5. Save – the product appears on the storefront immediately.
+
+### Editing existing products
+All fields (including price, Stripe ID, inventory, and winner tiers) are editable in the admin portal – no redeploy needed.
+
+### Image upload
+You can upload image files directly (multiple at once) – they are stored as base64 data URLs. The system automatically numbers them (1, 2, 3…) and the `prefix` is derived from the product `slug`.

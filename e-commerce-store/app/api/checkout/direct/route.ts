@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 import {
   createRedisClient,
   createStripeClient,
-  getProductOverride,
   getLiveProductState,
   saveLiveState,
   archiveEntry,
   ArchiveRecord,
+  loadProducts, // new helper to fetch product from Redis
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getAvailableSizes } from '@/lib/storefront-config';
@@ -29,42 +29,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.id === productId);
-    if (!productDefinition) {
+    // Fetch the product from Redis – this gives us the live priceCategories.
+    const allProducts = await loadProducts(redis);
+    const product = allProducts[productId];
+    if (!product) {
       return NextResponse.json({ error: 'Product not found.' }, { status: 404 });
     }
 
     const availableSizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
-    if (!availableSizes.includes(size)) {
-      return NextResponse.json({ error: 'Invalid size.' }, { status: 400 });
+    // Also check if the size exists in the product's priceCategories
+    const priceCategories = product.priceCategories || [];
+    const category = priceCategories.find((cat: any) => cat.size === size);
+    if (!category) {
+      return NextResponse.json({ error: `Size "${size}" not configured for this product.` }, { status: 400 });
     }
 
-    // Get live state (inventory, etc.)
-    const live = await getLiveProductState(redis, productDefinition, size);
+    // Price and Stripe ID come directly from the priceCategories (no separate overrides needed)
+    const basePrice = category.price;
+    if (!basePrice || basePrice <= 0) {
+      return NextResponse.json({ error: `Price not set for size "${size}". Set it in admin.` }, { status: 400 });
+    }
+    const priceCents = Math.round(basePrice * 100);
+
+    const stripeId = category.stripeId;
+    if (!stripeId || stripeId === 'price_placeholder' || stripeId === '') {
+      return NextResponse.json({ error: `Stripe price ID not set for size "${size}". Set it in admin.` }, { status: 400 });
+    }
+
+    // Get live inventory state
+    const live = await getLiveProductState(redis, product, size);
     if (!live || live.inventoryRemaining <= 0) {
       return NextResponse.json({ error: 'Sold out.' }, { status: 400 });
     }
-
-    // Get the Stripe price ID from the product definition (these are set in admin via overrides)
-    // We also allow a fallback to the config value, but config should be 0 if not set.
-    const stripePriceId = size === '100ml' ? productDefinition.stripeId100ml : productDefinition.stripeId50ml;
-    if (!stripePriceId || stripePriceId === 'price_placeholder_50' || stripePriceId === 'price_placeholder_100') {
-      return NextResponse.json({
-        error: 'Stripe price ID not configured for this product/size. Please set it in the admin portal.'
-      }, { status: 400 });
-    }
-
-    // Get price – use override if exists, otherwise fallback to product definition (should be 0)
-    const override = await getProductOverride(redis, productDefinition.id);
-    const basePrice = size === '100ml'
-      ? (override?.price100ml ?? productDefinition.price100ml)
-      : (override?.price50ml ?? productDefinition.price50ml);
-    if (!basePrice || basePrice <= 0) {
-      return NextResponse.json({
-        error: 'Price not configured for this product/size. Set it in admin.'
-      }, { status: 400 });
-    }
-    const priceCents = Math.round(basePrice * 100);
 
     // Create or use existing Stripe customer
     let stripeCustomerId = customerId;
@@ -76,7 +72,7 @@ export async function POST(request: Request) {
       stripeCustomerId = customer.id;
     }
 
-    // Create PaymentIntent
+    // Create PaymentIntent using the actual Stripe Price ID from the category
     const paymentIntent = await stripe.paymentIntents.create({
       amount: priceCents,
       currency: 'usd',
@@ -85,7 +81,7 @@ export async function POST(request: Request) {
       off_session: false,
       confirm: true,
       receipt_email: email,
-      description: `GOYUNIR direct: ${productDefinition.name} (${size})`,
+      description: `GOYUNIR direct: ${product.name} (${size})`,
     });
 
     if (paymentIntent.status !== 'succeeded') {
@@ -104,7 +100,7 @@ export async function POST(request: Request) {
 
     const archiveRecord: ArchiveRecord = {
       email,
-      variant: productDefinition.name,
+      variant: product.name,
       size,
       shippingAddress,
       id: customerIdForArchive,
