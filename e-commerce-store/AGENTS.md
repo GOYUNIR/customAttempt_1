@@ -100,3 +100,18 @@ RESEND_FROM (optional)
 - ✅ No further code changes required for normal store operation – everything is portal‑driven.
 - 🔄 Future improvements: Consider adding direct product import/export CSV in admin.
 
+## CRITICAL RULES FOR AI AGENTS
+
+### Product Configuration
+- **All product details** (prices, Stripe IDs, inventory, winner tiers) are now **exclusively managed via the admin portal** (`/admin` → Products).
+- The config file (`goyunir.config.ts`) contains **no size‑specific prices or Stripe IDs** – only metadata like name, slug, description, notes, and images.
+- `maxRaffleAllocationLimit`, `totalInventory`, and `winnerTiers` default to `0` in the seed – set them in the admin.
+- **Stripe price IDs** for each size are set per product in the admin portal – there is no universal default; if you see a `price_placeholder_*` error, it means you haven't set the ID in admin.
+
+### Common Issues
+- **"Price not configured" or "Stripe price ID not configured"** – go to `/admin` → Products, edit the product, fill in the price and Stripe ID for each size.
+- **"Sold out"** – adjust inventory in the admin portal.
+- **"Invalid size"** – check the `availableSizes` in `/admin` → Settings.
+
+### File to NEVER Modify
+- `goyunir.config.ts` – only change if you need to add a new product’s metadata (name, slug, prefix, notes, images). Prices, Stripe IDs, inventory, and winner tiers are **not** stored here.

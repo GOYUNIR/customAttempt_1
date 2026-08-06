@@ -12,7 +12,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
   },
 
-  // Default size – you can change this to any label via /admin → Settings.
+  // Default size – change via /admin → Settings
   availableSizes: ['Standard'],
 
   dropSchedule: {
@@ -110,14 +110,14 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       prefix: 'elysian-white',
       tagline: 'WHITE ALLOCATION / 01',
       desc: 'Clean, electric profile variant constructed with premium bergamot.',
-      price50ml: 85,
-      price100ml: 85,
+      price50ml: 0,          // neutral – set real price in admin
+      price100ml: 0,
       stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
       stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      maxRaffleAllocationLimit: 10,
+      maxRaffleAllocationLimit: 0,
       isActive: true,
-      totalInventory: 9,
-      winnerTiers: [2, 2, 2, 2, 1],
+      totalInventory: 0,
+      winnerTiers: [0],
       notes: [
         { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
         { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
@@ -131,14 +131,14 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       prefix: 'obsidian-void',
       tagline: 'BLACK ALLOCATION / 02',
       desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
-      price50ml: 85,
-      price100ml: 85,
+      price50ml: 0,
+      price100ml: 0,
       stripeId50ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
       stripeId100ml: 'price_1U1MD0PIsR6ijfBZ872i58N1',
-      maxRaffleAllocationLimit: 5,
+      maxRaffleAllocationLimit: 0,
       isActive: true,
-      totalInventory: 5,
-      winnerTiers: [1],
+      totalInventory: 0,
+      winnerTiers: [0],
       notes: [
         { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
         { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },

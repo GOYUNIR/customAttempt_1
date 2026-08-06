@@ -9,7 +9,7 @@ import {
   ArchiveRecord,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice, getAvailableSizes } from '@/lib/storefront-config';
+import { getAvailableSizes } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { productId, size, email, shippingAddress, paymentMethodId, promoCode } = body;
+    const { productId, size, email, shippingAddress, paymentMethodId, promoCode, customerId } = body;
 
     if (!productId || !size || !email || !shippingAddress || !paymentMethodId) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
@@ -45,26 +45,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Sold out.' }, { status: 400 });
     }
 
-    // Get the Stripe price ID directly from the product definition
+    // Get the Stripe price ID from the product definition (these are set in admin via overrides)
+    // We also allow a fallback to the config value, but config should be 0 if not set.
     const stripePriceId = size === '100ml' ? productDefinition.stripeId100ml : productDefinition.stripeId50ml;
-    if (!stripePriceId) {
-      return NextResponse.json({ error: 'Stripe price ID not configured for this size.' }, { status: 400 });
+    if (!stripePriceId || stripePriceId === 'price_placeholder_50' || stripePriceId === 'price_placeholder_100') {
+      return NextResponse.json({
+        error: 'Stripe price ID not configured for this product/size. Please set it in the admin portal.'
+      }, { status: 400 });
     }
 
-    // Get price (with override if any)
+    // Get price – use override if exists, otherwise fallback to product definition (should be 0)
     const override = await getProductOverride(redis, productDefinition.id);
-    const basePrice = size === '100ml' ? (override?.price100ml ?? productDefinition.price100ml) : (override?.price50ml ?? productDefinition.price50ml);
+    const basePrice = size === '100ml'
+      ? (override?.price100ml ?? productDefinition.price100ml)
+      : (override?.price50ml ?? productDefinition.price50ml);
+    if (!basePrice || basePrice <= 0) {
+      return NextResponse.json({
+        error: 'Price not configured for this product/size. Set it in admin.'
+      }, { status: 400 });
+    }
     const priceCents = Math.round(basePrice * 100);
 
-    // Apply promo discount if provided
-    let finalPriceCents = priceCents;
-    // (promo handling omitted for brevity – you can add it back if needed)
+    // Create or use existing Stripe customer
+    let stripeCustomerId = customerId;
+    if (!stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email,
+        metadata: { initialShippingAddress: shippingAddress },
+      });
+      stripeCustomerId = customer.id;
+    }
 
-    // Create a Stripe PaymentIntent
+    // Create PaymentIntent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: finalPriceCents,
+      amount: priceCents,
       currency: 'usd',
-      customer: body.customerId || undefined,
+      customer: stripeCustomerId,
       payment_method: paymentMethodId,
       off_session: false,
       confirm: true,
@@ -81,27 +97,21 @@ export async function POST(request: Request) {
     live.salesCompleted = (live.salesCompleted || 0) + 1;
     await saveLiveState(redis, live);
 
-    // Extract customer ID safely
-    let customerId: string;
-    if (typeof paymentIntent.customer === 'string') {
-      customerId = paymentIntent.customer;
-    } else if (paymentIntent.customer && typeof paymentIntent.customer === 'object' && 'id' in paymentIntent.customer) {
-      customerId = paymentIntent.customer.id;
-    } else {
-      customerId = 'n/a';
-    }
-
     // Archive the sale
+    const customerIdForArchive = typeof paymentIntent.customer === 'string'
+      ? paymentIntent.customer
+      : (paymentIntent.customer?.id ?? 'n/a');
+
     const archiveRecord: ArchiveRecord = {
       email,
       variant: productDefinition.name,
       size,
       shippingAddress,
-      id: customerId,
+      id: customerIdForArchive,
       registeredAt: new Date().toISOString(),
       type: 'WINNER_CHARGED',
       shippingStatus: 'PENDING_FULFILLMENT',
-      amountCents: finalPriceCents,
+      amountCents: priceCents,
       orderRef: `DIRECT-${Date.now().toString(36)}`,
       promoCode: promoCode || undefined,
     };
@@ -110,7 +120,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       paymentIntentId: paymentIntent.id,
-      amount: finalPriceCents / 100,
+      amount: priceCents / 100,
     });
   } catch (err: any) {
     console.error('[direct/route] Error:', err);
