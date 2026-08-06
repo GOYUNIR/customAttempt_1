@@ -1,11 +1,21 @@
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import Link from 'next/link';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export default function StoryPage() {
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
   return (
-    <main style={{ maxWidth: 560, margin: '0 auto', padding: '48px 20px 80px', color: '#e5e5e5', background: '#0a0a0a', minHeight: '100vh', fontFamily: 'system-ui,sans-serif', lineHeight: 1.7, fontSize: 15 }}>
+    <main style={{ 
+      maxWidth: 560, 
+      margin: '0 auto', 
+      padding: '80px 20px 60px', 
+      color: '#e5e5e5', 
+      background: '#0a0a0a', 
+      minHeight: 'calc(100vh - 56px)', 
+      fontFamily: 'system-ui,sans-serif', 
+      lineHeight: 1.7, 
+      fontSize: 15 
+    }}>
       <Link
         href="/"
         style={{
@@ -27,7 +37,7 @@ export default function StoryPage() {
         ← Back to store
       </Link>
       <div style={{ display: 'flex', gap: 16, marginBottom: 32, fontSize: 12, letterSpacing: 2 }}>
-        <a href="/catalog" style={{ color: '#888', textDecoration: 'none' }}>CATALOG</a>
+        <Link href="/catalog" style={{ color: '#888', textDecoration: 'none' }}>CATALOG</Link>
         <span style={{ color: '#fff' }}>STORY</span>
       </div>
       <h1 style={{ fontFamily: 'serif', fontSize: 32, margin: '0 0 16px' }}>Our scent identity</h1>

@@ -11,8 +11,12 @@ export type PromoRecord = {
   promoterEmail: string;
   customerDiscountPercent: number;
   promoterPayoutPercent: number;
-  /** Max times one email can use this code (default 1). 0 = unlimited */
   maxUsesPerEmail: number;
+  maxUsesTotal: number;
+  timeLimited: boolean;
+  startAt: string | null;
+  endAt: string | null;
+  firstXWinnersDiscount: number;
   active: boolean;
   uses: number;
   clicks: number;
@@ -32,12 +36,7 @@ async function loadPromos(redis: any): Promise<Record<string, PromoRecord>> {
   const out: Record<string, PromoRecord> = {};
   for (const [k, v] of Object.entries(raw)) {
     const p = safeParseRedisItem<PromoRecord>(v);
-    if (p) {
-      out[k] = {
-        ...p,
-        maxUsesPerEmail: typeof p.maxUsesPerEmail === 'number' ? p.maxUsesPerEmail : 1,
-      };
-    }
+    if (p) out[k] = p;
   }
   return out;
 }
@@ -90,47 +89,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, promo: existing });
   }
 
-  // Clear one email's usage of this code so they can use it again
-  if (action === 'resetEmail') {
-    const email = String(body?.email || '')
-      .trim()
-      .toLowerCase();
-    if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 });
-    await redis.srem(usedEmailsKey(code), email);
-    return NextResponse.json({ success: true, reset: email, code });
-  }
-
-  // Clear ALL per-email usage for this code
-  if (action === 'resetAllEmails') {
-    await redis.del(usedEmailsKey(code));
-    return NextResponse.json({ success: true, code });
-  }
-
   // upsert = create or edit in place
   if (code.length < 3) {
     return NextResponse.json({ error: 'Code must be 3+ letters/numbers' }, { status: 400 });
   }
 
-  const maxUsesPerEmail = Math.max(
-    0,
-    Number(body?.maxUsesPerEmail ?? existing?.maxUsesPerEmail ?? 1),
-  );
+  const maxUsesPerEmail = Math.max(0, Number(body?.maxUsesPerEmail ?? existing?.maxUsesPerEmail ?? 1));
+  const maxUsesTotal = Math.max(0, Number(body?.maxUsesTotal ?? existing?.maxUsesTotal ?? 0));
 
   const record: PromoRecord = {
     code,
     promoterName: String(body?.promoterName ?? existing?.promoterName ?? code),
-    promoterEmail: String(body?.promoterEmail ?? existing?.promoterEmail ?? '')
-      .trim()
-      .toLowerCase(),
-    customerDiscountPercent: Math.min(
-      50,
-      Math.max(0, Number(body?.customerDiscountPercent ?? existing?.customerDiscountPercent ?? 0)),
-    ),
-    promoterPayoutPercent: Math.min(
-      50,
-      Math.max(0, Number(body?.promoterPayoutPercent ?? existing?.promoterPayoutPercent ?? 10)),
-    ),
+    promoterEmail: String(body?.promoterEmail ?? existing?.promoterEmail ?? '').trim().toLowerCase(),
+    customerDiscountPercent: Math.min(50, Math.max(0, Number(body?.customerDiscountPercent ?? existing?.customerDiscountPercent ?? 0))),
+    promoterPayoutPercent: Math.min(50, Math.max(0, Number(body?.promoterPayoutPercent ?? existing?.promoterPayoutPercent ?? 10))),
     maxUsesPerEmail,
+    maxUsesTotal,
+    timeLimited: body?.timeLimited ?? existing?.timeLimited ?? false,
+    startAt: body?.startAt || existing?.startAt || null,
+    endAt: body?.endAt || existing?.endAt || null,
+    firstXWinnersDiscount: Math.min(50, Math.max(0, Number(body?.firstXWinnersDiscount ?? existing?.firstXWinnersDiscount ?? 0))),
     active: body?.active ?? existing?.active ?? true,
     uses: existing?.uses ?? 0,
     clicks: existing?.clicks ?? 0,

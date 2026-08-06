@@ -11,12 +11,14 @@ export default async function HomePage() {
   
   if (redis) {
     try {
-      const activeRaw = await redis.hgetall('store:active_products');
-      if (activeRaw) {
-        for (const [key, value] of Object.entries(activeRaw)) {
+      // Get ALL products, not just active_products
+      const allRaw = await redis.hgetall('store:products');
+      if (allRaw) {
+        for (const [key, value] of Object.entries(allRaw)) {
           try {
             const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isActive && !product.isArchived && !product.isUpcoming && product.slug) {
+            // Show if active AND not archived (include upcoming)
+            if ((product.isActive || product.isUpcoming) && !product.isArchived && product.slug) {
               hasProducts = true;
               redirectSlug = product.slug;
               break;
@@ -31,12 +33,12 @@ export default async function HomePage() {
     }
   }
   
-  // If we found an active product, redirect to it
+  // If we found a product, redirect to it
   if (hasProducts && redirectSlug) {
     redirect(`/${redirectSlug}`);
   }
   
-  // No active products - show coming soon page with catalog link
+  // No products - show coming soon page with catalog link
   return (
     <main style={{ 
       minHeight: 'calc(100vh - 56px)', 

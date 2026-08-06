@@ -25,6 +25,9 @@ const DEFAULT_PRODUCTS = [
     isActive: true,
     isArchived: false,
     isUpcoming: false,
+    isRaffle: true,
+    productType: 'raffle',
+    sortOrder: 0,
     notes: [
       { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
       { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
@@ -51,6 +54,9 @@ const DEFAULT_PRODUCTS = [
     isActive: true,
     isArchived: false,
     isUpcoming: false,
+    isRaffle: true,
+    productType: 'raffle',
+    sortOrder: 1,
     notes: [
       { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
       { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
@@ -153,7 +159,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
     }
 
-    // Check if products already exist
     const existing = await redis.hgetall(PRODUCTS_KEY);
     if (existing && Object.keys(existing).length > 0) {
       return NextResponse.json({ 
@@ -163,7 +168,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // Seed products
     let seeded = 0;
     for (const product of DEFAULT_PRODUCTS) {
       await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
@@ -177,10 +181,8 @@ export async function GET(request: Request) {
       seeded++;
     }
 
-    // Save config
     await redis.set(CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
 
-    // Verify seeding worked
     const verify = await redis.hgetall(PRODUCTS_KEY);
     const verifyCount = verify ? Object.keys(verify).length : 0;
 

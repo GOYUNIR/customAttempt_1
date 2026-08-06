@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, getCatalogArchiveRecords } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getVisibleProducts } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,114 +23,66 @@ export async function GET() {
     const archived = await getCatalogArchiveRecords(redis);
     const archivedProductIds = archived.map((r) => r.productId);
 
-    const notesByProductId: Record<string, string> = {};
-    const availableFromByProductId: Record<string, string> = {};
-    const soldOutProductIds: string[] = [];
-
-    for (const r of archived) {
-      if (r.notes) notesByProductId[r.productId] = r.notes;
-      if (r.availableFrom) availableFromByProductId[r.productId] = r.availableFrom;
-      const isSoldOut =
-        r.soldOut === true ||
-        String(r.availableFrom || '').toLowerCase() === 'sold out' ||
-        /sold\s*out/i.test(String(r.notes || ''));
-      if (isSoldOut) soldOutProductIds.push(r.productId);
-    }
-
-    // Get active products from Redis
-    let activeDrops: any[] = [];
-    try {
-      const activeRaw = await redis.hgetall('store:active_products');
-      if (activeRaw) {
-        for (const [key, value] of Object.entries(activeRaw)) {
-          try {
-            const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isActive && !product.isArchived && !product.isUpcoming && !archivedProductIds.includes(product.id)) {
-              activeDrops.push({
-                id: product.id,
-                name: product.name,
-                tagline: product.tagline || 'LIMITED DROP',
-                desc: product.desc || '',
-                slug: product.slug,
-                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
-              });
-            }
-          } catch (e) {
-            console.error('[catalog/status] Error parsing active product:', e);
-          }
+    // Get ALL products from Redis
+    const allRaw = await redis.hgetall('store:products');
+    const allProducts: any[] = [];
+    if (allRaw) {
+      for (const [key, value] of Object.entries(allRaw)) {
+        try {
+          const product = JSON.parse(typeof value === 'string' ? value : '{}');
+          allProducts.push(product);
+        } catch (e) {
+          console.error('[catalog/status] Error parsing product:', e);
         }
       }
-    } catch (e) {
-      console.error('[catalog/status] Error fetching active products:', e);
     }
 
-    // Get upcoming products from Redis
-    let upcomingDrops: any[] = [];
-    try {
-      const upcomingRaw = await redis.hgetall('store:upcoming_products');
-      if (upcomingRaw) {
-        for (const [key, value] of Object.entries(upcomingRaw)) {
-          try {
-            const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isUpcoming) {
-              upcomingDrops.push({
-                name: product.name,
-                status: 'Upcoming',
-                eta: product.tagline || 'Coming soon',
-                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
-                description: product.desc || '',
-                slug: product.slug,
-              });
-            }
-          } catch (e) {
-            console.error('[catalog/status] Error parsing upcoming product:', e);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[catalog/status] Error fetching upcoming products:', e);
-    }
+    // Separate into categories - sort by sortOrder
+    const sortedProducts = [...allProducts].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-    // Get archived products from Redis
-    let archiveScents: any[] = [];
-    try {
-      const archivedRaw = await redis.hgetall('store:archived_products');
-      if (archivedRaw) {
-        for (const [key, value] of Object.entries(archivedRaw)) {
-          try {
-            const product = JSON.parse(typeof value === 'string' ? value : '{}');
-            if (product.isArchived) {
-              const isSoldOut =
-                product.totalInventory === 0 ||
-                String(product.availableFrom || '').toLowerCase() === 'sold out';
-              archiveScents.push({
-                name: product.name,
-                status: isSoldOut ? 'Sold Out' : 'Archived',
-                image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
-                description: product.desc || product.notes?.[0]?.text || '',
-                availableFrom: product.availableFrom || 'Previously available',
-                slug: product.slug,
-                productId: product.id,
-                soldOut: isSoldOut,
-              });
-            }
-          } catch (e) {
-            console.error('[catalog/status] Error parsing archived product:', e);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[catalog/status] Error fetching archived products:', e);
-    }
+    const activeDrops = sortedProducts
+      .filter(p => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        tagline: p.tagline || 'LIMITED DROP',
+        desc: p.desc || '',
+        slug: p.slug,
+        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+      }));
+
+    const upcomingDrops = sortedProducts
+      .filter(p => p.isUpcoming && !p.isArchived)
+      .map(p => ({
+        name: p.name,
+        status: 'Upcoming',
+        eta: p.tagline || 'Coming soon',
+        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+        description: p.desc || '',
+        slug: p.slug,
+      }));
+
+    const archiveScents = sortedProducts
+      .filter(p => p.isArchived || archivedProductIds.includes(p.id))
+      .map(p => ({
+        name: p.name,
+        status: 'Archived',
+        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+        description: p.desc || p.notes?.[0]?.text || '',
+        availableFrom: p.availableFrom || 'Previously available',
+        slug: p.slug,
+        productId: p.id,
+        soldOut: p.totalInventory === 0,
+      }));
 
     return NextResponse.json({
       activeDrops,
       upcomingDrops,
       archiveScents,
       archivedProductIds,
-      soldOutProductIds,
-      notesByProductId,
-      availableFromByProductId,
+      soldOutProductIds: [],
+      notesByProductId: {},
+      availableFromByProductId: {},
       records: archived,
     });
   } catch (err: any) {

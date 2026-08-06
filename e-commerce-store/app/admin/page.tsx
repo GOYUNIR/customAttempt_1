@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -131,6 +131,7 @@ export default function AdminPortal() {
   const [promos, setPromos] = useState<any[]>([]);
   const [promoForm, setPromoForm] = useState({
     code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '',
+    timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', firstXWinnersDiscount: '',
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
@@ -157,7 +158,8 @@ export default function AdminPortal() {
     name: '', slug: '', prefix: '', tagline: '', desc: '',
     price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
     maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-    isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
+    isActive: true, isArchived: false, isUpcoming: false, isRaffle: true,
+    productType: 'raffle', sortOrder: 0, notes: [], images: []
   });
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);
@@ -165,6 +167,22 @@ export default function AdminPortal() {
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
   const [productActionLoading, setProductActionLoading] = useState(false);
+  const [availableSizes, setAvailableSizes] = useState<string[]>(['50ml']);
+  const [newSizeInput, setNewSizeInput] = useState('');
+
+  // Users state
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [userForm, setUserForm] = useState({ email: '', password: '', role: 'customer', rewards: 0 });
+  const [userMsg, setUserMsg] = useState('');
+  const [showUserForm, setShowUserForm] = useState(false);
+
+  // Catalog state
+  const [catalogUpcoming, setCatalogUpcoming] = useState<any[]>([]);
+  const [catalogArchive, setCatalogArchive] = useState<any[]>([]);
+  const [catalogMsg, setCatalogMsg] = useState('');
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
@@ -211,6 +229,8 @@ export default function AdminPortal() {
       fetchDrawHistory(),
       fetchSettings(),
       fetchProducts(),
+      fetchUsers(),
+      fetchCatalogSettings(),
     ]);
     setIsRefreshing(false);
     showToast('🔄 All data refreshed');
@@ -303,6 +323,7 @@ export default function AdminPortal() {
         if (data.settings.form) setFormSettings(data.settings.form);
         if (data.settings.footer) setFooterSettings(data.settings.footer);
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
+        if (data.settings.availableSizes) setAvailableSizes(data.settings.availableSizes);
       }
       setSettingsMsg('');
     } catch (err: any) {
@@ -318,12 +339,39 @@ export default function AdminPortal() {
       const data = await res.json();
       if (data.products) {
         setAllProducts(data.products);
-        setProducts(data.products.filter((p: any) => !p.isArchived && !p.isUpcoming));
+        const sorted = [...data.products].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        setProducts(sorted.filter((p: any) => !p.isArchived && !p.isUpcoming));
       }
     } catch (err) {
       console.error('[Products] Fetch error:', err);
     }
     setProductsLoading(false);
+  };
+
+  const fetchUsers = async () => {
+    if (!password) return;
+    setUsersLoading(true);
+    try {
+      const res = await adminFetch(`/api/admin/users?password=${encodeURIComponent(password)}`);
+      const data = await res.json();
+      setUsers(Array.isArray(data.users) ? data.users : []);
+    } catch (err) {
+      console.error('[Users] Fetch error:', err);
+    }
+    setUsersLoading(false);
+  };
+
+  const fetchCatalogSettings = async () => {
+    setCatalogLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/catalog-settings');
+      const data = await res.json();
+      if (data.upcomingDrops) setCatalogUpcoming(data.upcomingDrops);
+      if (data.archiveScents) setCatalogArchive(data.archiveScents);
+    } catch (err) {
+      console.error('Failed to load catalog settings:', err);
+    }
+    setCatalogLoading(false);
   };
 
   // ============================================================
@@ -335,7 +383,8 @@ export default function AdminPortal() {
       name: '', slug: '', prefix: '', tagline: '', desc: '',
       price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
       maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-      isActive: true, isArchived: false, isUpcoming: false, notes: [], images: []
+      isActive: true, isArchived: false, isUpcoming: false, isRaffle: true,
+      productType: 'raffle', sortOrder: 0, notes: [], images: []
     });
     setEditingProduct(null);
     setEditingNoteIdx(null);
@@ -355,6 +404,9 @@ export default function AdminPortal() {
       notes: product.notes || [],
       images: product.images || [],
       isUpcoming: product.isUpcoming || false,
+      isRaffle: product.isRaffle !== undefined ? product.isRaffle : true,
+      productType: product.productType || 'raffle',
+      sortOrder: product.sortOrder || 0,
     });
     setShowProductForm(true);
   };
@@ -379,6 +431,9 @@ export default function AdminPortal() {
           winnerTiers: productForm.winnerTiers ? productForm.winnerTiers.split(',').map(Number) : [0],
           notes: productForm.notes || [],
           images: productForm.images || [],
+          sortOrder: Number(productForm.sortOrder) || 0,
+          isRaffle: productForm.isRaffle,
+          productType: productForm.productType,
         }),
       });
       const data = await res.json();
@@ -480,6 +535,25 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
+  const reorderProducts = async (productId: string, newOrder: number) => {
+    if (!password) { alert('Enter admin password first'); return; }
+    setProductActionLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'reorder', id: productId, sortOrder: newOrder }),
+      });
+      if (res.ok) {
+        showToast('UPDATED · Reordered');
+        await fetchProducts();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+    setProductActionLoading(false);
+  };
+
   const addNote = () => {
     if (!noteForm.label || !noteForm.name) return;
     setProductForm((prev: any) => ({
@@ -570,6 +644,161 @@ export default function AdminPortal() {
       setProductMsg('❌ Error: ' + err.message);
     }
     setProductActionLoading(false);
+  };
+
+  // ============================================================
+  // USER FUNCTIONS
+  // ============================================================
+
+  const saveUser = async () => {
+    if (!password) { alert('Enter admin password first'); return; }
+    if (!userForm.email) { alert('Email is required'); return; }
+    setProductActionLoading(true);
+    try {
+      // Build the body without spreading userForm to avoid duplicate password
+      const body: any = {
+        password: password, // Admin password for auth
+        action: editingUser ? 'update' : 'create',
+        email: userForm.email,
+        role: userForm.role,
+        rewards: userForm.rewards,
+      };
+      // Only include user password if provided
+      if (userForm.password) {
+        body.userPassword = userForm.password;
+      }
+      if (editingUser) {
+        body.id = editingUser;
+      }
+
+      const res = await adminFetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUserMsg('✅ User saved successfully!');
+        showToast('UPDATED · User');
+        await fetchUsers();
+        setShowUserForm(false);
+        setUserForm({ email: '', password: '', role: 'customer', rewards: 0 });
+        setEditingUser(null);
+      } else {
+        setUserMsg('❌ Error: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      setUserMsg('❌ Error: ' + err.message);
+    }
+    setProductActionLoading(false);
+  };
+
+  const deleteUser = async (id: string) => {
+    if (!password) { alert('Enter admin password first'); return; }
+    if (!confirm('Delete this user?')) return;
+    try {
+      const res = await adminFetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'delete', id }),
+      });
+      if (res.ok) {
+        showToast('DELETED · User');
+        await fetchUsers();
+      }
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    }
+  };
+
+  // ============================================================
+  // CATALOG FUNCTIONS
+  // ============================================================
+
+  const saveCatalogSettings = async () => {
+    if (!password) return alert('Enter password');
+    setCatalogLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/catalog-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          upcomingDrops: catalogUpcoming,
+          archiveScents: catalogArchive,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCatalogMsg('Catalog settings saved!');
+        showToast('UPDATED · Catalog');
+      } else {
+        setCatalogMsg('Error: ' + (data.error || 'Unknown'));
+      }
+    } catch (err: any) {
+      setCatalogMsg('Error: ' + err.message);
+    }
+    setCatalogLoading(false);
+  };
+
+  // ============================================================
+  // PROMO FUNCTIONS
+  // ============================================================
+
+  const savePromo = async () => {
+    if (!password) return alert('Enter password');
+    const customerDiscount = Number(promoForm.customerDiscountPercent);
+    const promoterPayout = Number(promoForm.promoterPayoutPercent);
+    const maxUses = Number(promoForm.maxUsesPerEmail);
+    const maxUsesTotal = Number(promoForm.maxUsesTotal) || 0;
+    
+    if (isNaN(customerDiscount) || customerDiscount < 0 || customerDiscount > 50) {
+      return alert('Customer discount must be between 0 and 50');
+    }
+    if (isNaN(promoterPayout) || promoterPayout < 0 || promoterPayout > 50) {
+      return alert('Promoter payout must be between 0 and 50');
+    }
+    if (isNaN(maxUses) || maxUses < 0) {
+      return alert('Max uses must be 0 or more');
+    }
+    
+    try {
+      const res = await adminFetch('/api/admin/promos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          action: 'upsert',
+          code: promoForm.code,
+          promoterName: promoForm.promoterName,
+          promoterEmail: promoForm.promoterEmail,
+          customerDiscountPercent: customerDiscount,
+          promoterPayoutPercent: promoterPayout,
+          maxUsesPerEmail: maxUses,
+          maxUsesTotal: maxUsesTotal,
+          timeLimited: promoForm.timeLimited,
+          startAt: promoForm.startAt || null,
+          endAt: promoForm.endAt || null,
+          firstXWinnersDiscount: Number(promoForm.firstXWinnersDiscount) || 0,
+          active: true,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
+        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '', timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', firstXWinnersDiscount: '' });
+        await fetchPromos();
+      } else setPromoMsg(data.error || 'Failed');
+    } catch {
+      setPromoMsg('Failed');
+    }
+  };
+
+  const deletePromo = async (code: string) => {
+    if (!password) return alert('Enter password');
+    if (!confirm(`Delete promo code ${code}?`)) return;
+    await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
+    await fetchPromos();
   };
 
   // ============================================================
@@ -790,48 +1019,6 @@ export default function AdminPortal() {
     }
   };
 
-  const savePromo = async () => {
-    if (!password) return alert('Enter password');
-    const customerDiscount = Number(promoForm.customerDiscountPercent);
-    const promoterPayout = Number(promoForm.promoterPayoutPercent);
-    const maxUses = Number(promoForm.maxUsesPerEmail);
-    
-    if (isNaN(customerDiscount) || customerDiscount < 0 || customerDiscount > 50) {
-      return alert('Customer discount must be between 0 and 50');
-    }
-    if (isNaN(promoterPayout) || promoterPayout < 0 || promoterPayout > 50) {
-      return alert('Promoter payout must be between 0 and 50');
-    }
-    if (isNaN(maxUses) || maxUses < 0) {
-      return alert('Max uses must be 0 or more');
-    }
-    
-    try {
-      const res = await adminFetch('/api/admin/promos', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password, action: 'upsert', code: promoForm.code, promoterName: promoForm.promoterName, promoterEmail: promoForm.promoterEmail,
-          customerDiscountPercent: customerDiscount, promoterPayoutPercent: promoterPayout, maxUsesPerEmail: maxUses, active: true,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
-        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '' });
-        await fetchPromos();
-      } else setPromoMsg(data.error || 'Failed');
-    } catch {
-      setPromoMsg('Failed');
-    }
-  };
-
-  const deletePromo = async (code: string) => {
-    if (!password) return alert('Enter password');
-    if (!confirm(`Delete promo code ${code}? This cannot be undone.`)) return;
-    await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
-    await fetchPromos();
-  };
-
   const cancelOrder = async (entry: any) => {
     if (!password) return alert('Enter password');
     const reason = prompt(`Cancel ${entry.email}'s entry for ${entry.variant} (${entry.size})? Optional reason:`);
@@ -861,6 +1048,7 @@ export default function AdminPortal() {
           form: formSettings,
           footer: footerSettings,
           productNotes,
+          availableSizes,
         }),
       });
       const data = await res.json();
@@ -884,6 +1072,8 @@ export default function AdminPortal() {
     fetchRecovery();
     fetchPromos();
     fetchProducts();
+    fetchUsers();
+    fetchCatalogSettings();
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
     const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
@@ -940,6 +1130,9 @@ export default function AdminPortal() {
     { id: 'drops', label: 'Drops' },
     { id: 'ledger', label: 'Ledger' },
     { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
+    { id: 'users', label: 'Users', badge: users.length || undefined },
+    { id: 'promotions', label: 'Promotions' },
+    { id: 'catalog', label: 'Catalog' },
     { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
@@ -991,6 +1184,8 @@ export default function AdminPortal() {
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                 if (t.id === 'settings') fetchSettings();
                 if (t.id === 'products') fetchProducts();
+                if (t.id === 'users') fetchUsers();
+                if (t.id === 'catalog') fetchCatalogSettings();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -1345,24 +1540,10 @@ export default function AdminPortal() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Product Management</h2>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button 
-                  onClick={() => {
-                    if (!password) { alert('Enter admin password first'); return; }
-                    seedDefaultProducts();
-                  }} 
-                  disabled={productActionLoading} 
-                  style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}
-                >
+                <button onClick={seedDefaultProducts} disabled={productActionLoading} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
                   {productActionLoading ? 'Loading…' : 'Seed Defaults'}
                 </button>
-                <button 
-                  onClick={() => { 
-                    resetProductForm(); 
-                    setShowProductForm(true); 
-                    setEditingProduct(null); 
-                  }} 
-                  style={buttonPrimary}
-                >
+                <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); }} style={buttonPrimary}>
                   + Add Product
                 </button>
               </div>
@@ -1396,6 +1577,7 @@ export default function AdminPortal() {
                   <input type="number" placeholder="Max Inventory" value={productForm.maxRaffleAllocationLimit} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: e.target.value }))} style={inputStyle} />
                   <input type="number" placeholder="Total Inventory" value={productForm.totalInventory} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: e.target.value }))} style={inputStyle} />
                   <input type="text" placeholder="Winner Tiers (comma separated, e.g. 2,2,2,1)" value={productForm.winnerTiers} onChange={(e) => setProductForm((p: any) => ({ ...p, winnerTiers: e.target.value }))} style={{ ...inputStyle, gridColumn: '1 / -1' }} />
+                  <input type="number" placeholder="Sort Order (lower = first)" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
                 </div>
                 
                 <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -1411,6 +1593,19 @@ export default function AdminPortal() {
                     <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked }))} />
                     Upcoming (shown in upcoming section)
                   </label>
+                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="checkbox" checked={productForm.isRaffle} onChange={(e) => setProductForm((p: any) => ({ ...p, isRaffle: e.target.checked }))} />
+                    Raffle (vs direct purchase)
+                  </label>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>Product Type</label>
+                  <select value={productForm.productType} onChange={(e) => setProductForm((p: any) => ({ ...p, productType: e.target.value }))} style={inputStyle}>
+                    <option value="raffle">Raffle</option>
+                    <option value="sampler">Sampler</option>
+                    <option value="merch">Merchandise</option>
+                  </select>
                 </div>
 
                 <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Product Notes (scrollable cards on product page)</h5>
@@ -1478,50 +1673,22 @@ export default function AdminPortal() {
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
                           {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
                           {isHidden && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
+                          <span style={{ color: '#888', marginLeft: 8 }}>Order: {product.sortOrder || 0}</span>
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
-                        <button 
-                          onClick={() => {
-                            if (!password) { alert('Enter admin password first'); return; }
-                            toggleActive(product.id, isActive);
-                          }} 
-                          disabled={productActionLoading} 
-                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}
-                        >
+                        <button onClick={() => { const newOrder = prompt('New sort order (lower = first):', String(product.sortOrder || 0)); if (newOrder !== null) reorderProducts(product.id, Number(newOrder)); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Reorder</button>
+                        <button onClick={() => toggleActive(product.id, isActive)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
                           {isActive ? 'Hide' : 'Show'}
                         </button>
-                        <button 
-                          onClick={() => {
-                            if (!password) { alert('Enter admin password first'); return; }
-                            toggleArchive(product.id, isArchived);
-                          }} 
-                          disabled={productActionLoading} 
-                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}
-                        >
+                        <button onClick={() => toggleArchive(product.id, isArchived)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
                           {isArchived ? 'Unarchive' : 'Archive'}
                         </button>
-                        <button 
-                          onClick={() => {
-                            if (!password) { alert('Enter admin password first'); return; }
-                            toggleUpcoming(product.id, isUpcoming);
-                          }} 
-                          disabled={productActionLoading} 
-                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}
-                        >
+                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
                           {isUpcoming ? 'Remove from Upcoming' : 'Move to Upcoming'}
                         </button>
-                        <button 
-                          onClick={() => {
-                            if (!password) { alert('Enter admin password first'); return; }
-                            deleteProduct(product.id);
-                          }} 
-                          disabled={productActionLoading} 
-                          style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}
-                        >
-                          Delete
-                        </button>
+                        <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>
                     </div>
                   </div>
@@ -1531,71 +1698,287 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ GROWTH ============ */}
-        {tab === 'growth' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promoter / Affiliate Codes</h2>
-              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Share <code style={{ color: '#aaa' }}>/product-slug?ref=CODE</code>. Applies automatically for the customer's session, blocks self-use by the promoter's own email, and emails the promoter an invoice the moment their code produces a paid winner. Payouts are tracked here — actually sending the money still happens outside this system (Venmo/PayPal/bank), then mark it paid below.
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                <input placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} style={inputStyle} />
-                <input placeholder="Promoter Name" value={promoForm.promoterName} onChange={(e) => setPromoForm((f) => ({ ...f, promoterName: e.target.value }))} style={inputStyle} />
-                <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
-                <input type="number" min="0" max="50" placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} 
-                  onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
-                <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} 
-                  onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
-                <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} 
-                  onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
-              </div>
-              <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
-              {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
+        {/* ============ USERS ============ */}
+        {tab === 'users' && (
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>User Accounts</h2>
+              <button onClick={() => { setShowUserForm(true); setEditingUser(null); setUserForm({ email: '', password: '', role: 'customer', rewards: 0 }); }} style={buttonPrimary}>
+                + Add User
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              Manage user accounts. Users can log in to track entries, manage payment methods, and earn rewards.
+            </p>
+            
+            {userMsg && (
+              <p style={{ fontSize: 12, color: userMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>{userMsg}</p>
+            )}
 
-              <div style={{ marginTop: 16 }}>
-                {promos.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No promo codes yet.</p>}
-                {promos.map((p) => (
-                  <div key={p.code} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontWeight: 700 }}>{p.code} {!p.active && <span style={{ color: '#f87171' }}>(disabled)</span>}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => setPromoForm({
-                          code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
-                          customerDiscountPercent: String(p.customerDiscountPercent || ''), 
-                          promoterPayoutPercent: String(p.promoterPayoutPercent || ''), 
-                          maxUsesPerEmail: String(p.maxUsesPerEmail ?? ''),
-                        })} style={buttonGhost}>Edit</button>
-                        <button onClick={async () => {
-                          if (!password) return alert('Enter password');
-                          await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'toggle', code: p.code }) });
-                          await fetchPromos();
-                        }} style={{ ...buttonGhost, border: `1px solid ${p.active ? '#f87171' : '#34d399'}`, color: p.active ? '#f87171' : '#34d399' }}>
-                          {p.active ? 'Disable' : 'Enable'}
-                        </button>
+            {showUserForm && (
+              <div style={{ background: '#09090b', padding: 16, borderRadius: 12, marginBottom: 16 }}>
+                <h4 style={{ margin: '0 0 8px', fontSize: 12, color: '#aaa' }}>{editingUser ? 'Edit User' : 'New User'}</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <input type="email" placeholder="Email *" value={userForm.email} onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))} style={inputStyle} />
+                  <input type="password" placeholder="Password (leave blank to keep current)" value={userForm.password} onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))} style={inputStyle} />
+                  <select value={userForm.role} onChange={(e) => setUserForm((f) => ({ ...f, role: e.target.value }))} style={inputStyle}>
+                    <option value="customer">Customer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <input type="number" placeholder="Rewards Points" value={userForm.rewards} onChange={(e) => setUserForm((f) => ({ ...f, rewards: Number(e.target.value) }))} style={inputStyle} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button onClick={saveUser} disabled={productActionLoading} style={buttonPrimary}>{productActionLoading ? 'Saving…' : 'Save User'}</button>
+                  <button onClick={() => { setShowUserForm(false); setEditingUser(null); }} style={buttonGhost}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {users.length === 0 && !usersLoading && (
+                <div style={{ textAlign: 'center', padding: 30, color: '#555', border: '1px dashed #333', borderRadius: 12 }}>
+                  No users yet. Create your first user account.
+                </div>
+              )}
+              {users.map((user) => (
+                <div key={user.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: '1px solid #1c1c1e' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{user.email}</div>
+                      <div style={{ fontSize: 10, color: '#666' }}>
+                        Role: {user.role} · Rewards: {user.rewards || 0}
                       </div>
                     </div>
-                    <div style={{ color: '#888' }}>{p.promoterName} · {p.promoterEmail || 'no email on file'}</div>
-                    <div style={{ color: '#aaa', marginTop: 4 }}>
-                      {p.clicks || 0} link opens · {p.uses || 0} entries · ${Number(p.revenueAttributed || 0).toFixed(0)} attributed revenue · owed ${((p.payoutOwedCents || 0) / 100).toFixed(2)} · {p.promoterPayoutPercent}% payout · {p.customerDiscountPercent}% discount
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      {p.payoutOwedCents > 0 && (
-                        <button onClick={async () => {
-                          if (!password) return alert('Enter password');
-                          if (!confirm(`Mark $${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid to ${p.promoterName}? Only do this after you've actually sent the money.`)) return;
-                          await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
-                          await fetchPromos();
-                        }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                          Mark ${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid
-                        </button>
-                      )}
-                      <button onClick={() => deletePromo(p.code)} style={{ fontSize: 11, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}>Delete</button>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => { setEditingUser(user.id); setUserForm({ email: user.email, password: '', role: user.role, rewards: user.rewards || 0 }); setShowUserForm(true); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
+                      <button onClick={() => deleteUser(user.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
+          </div>
+        )}
+
+        {/* ============ PROMOTIONS ============ */}
+        {tab === 'promotions' && (
+          <div style={cardStyle}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promotions & Affiliate Codes</h2>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              Create promo codes with time limits, max uses, and special discounts for the first X winners.
+            </p>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <input placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} style={inputStyle} />
+              <input placeholder="Promoter Name" value={promoForm.promoterName} onChange={(e) => setPromoForm((f) => ({ ...f, promoterName: e.target.value }))} style={inputStyle} />
+              <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" max="50" placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" placeholder="Total max uses (0=unlimited)" value={promoForm.maxUsesTotal} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesTotal: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" placeholder="First X Winners Discount %" value={promoForm.firstXWinnersDiscount} onChange={(e) => setPromoForm((f) => ({ ...f, firstXWinnersDiscount: e.target.value }))} style={inputStyle} />
+            </div>
+            
+            <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={promoForm.timeLimited} onChange={(e) => setPromoForm((f) => ({ ...f, timeLimited: e.target.checked }))} />
+                Time Limited
+              </label>
+              {promoForm.timeLimited && (
+                <>
+                  <label style={{ fontSize: 11 }}>Start Date
+                    <input type="datetime-local" value={promoForm.startAt} onChange={(e) => setPromoForm((f) => ({ ...f, startAt: e.target.value }))} style={inputStyle} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>End Date
+                    <input type="datetime-local" value={promoForm.endAt} onChange={(e) => setPromoForm((f) => ({ ...f, endAt: e.target.value }))} style={inputStyle} />
+                  </label>
+                </>
+              )}
+            </div>
+            
+            <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
+            {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
+
+            <div style={{ marginTop: 16 }}>
+              {promos.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No promo codes yet.</p>}
+              {promos.map((p) => (
+                <div key={p.code} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: 700 }}>{p.code} {!p.active && <span style={{ color: '#f87171' }}>(disabled)</span>}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => setPromoForm({
+                        code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
+                        customerDiscountPercent: String(p.customerDiscountPercent || ''), 
+                        promoterPayoutPercent: String(p.promoterPayoutPercent || ''), 
+                        maxUsesPerEmail: String(p.maxUsesPerEmail ?? ''),
+                        timeLimited: p.timeLimited || false,
+                        startAt: p.startAt || '',
+                        endAt: p.endAt || '',
+                        maxUsesTotal: String(p.maxUsesTotal || ''),
+                        firstXWinnersDiscount: String(p.firstXWinnersDiscount || ''),
+                      })} style={buttonGhost}>Edit</button>
+                      <button onClick={() => deletePromo(p.code)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
+                    </div>
+                  </div>
+                  <div style={{ color: '#888', fontSize: 10 }}>
+                    Uses: {p.uses || 0} · Revenue: ${Number(p.revenueAttributed || 0).toFixed(2)}
+                    {p.firstXWinnersDiscount > 0 && ` · First ${p.maxUsesTotal || 'X'} winners: ${p.firstXWinnersDiscount}% extra`}
+                    {p.timeLimited && p.startAt && p.endAt && ` · Valid: ${new Date(p.startAt).toLocaleDateString()} - ${new Date(p.endAt).toLocaleDateString()}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============ CATALOG ============ */}
+        {tab === 'catalog' && (
+          <div style={cardStyle}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Catalog Management</h2>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              Manage the "Upcoming Releases" and "Past Archives" sections shown on the catalog page.
+            </p>
+
+            {catalogLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {catalogMsg && <p style={{ fontSize: 12, color: catalogMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>{catalogMsg}</p>}
+
+            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Upcoming Drops</h4>
+            <div style={{ marginBottom: 12 }}>
+              {catalogUpcoming.map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6 }}>
+                  <input
+                    type="text"
+                    value={item.name || ''}
+                    placeholder="Name"
+                    onChange={(e) => {
+                      const newList = [...catalogUpcoming];
+                      newList[idx] = { ...newList[idx], name: e.target.value };
+                      setCatalogUpcoming(newList);
+                    }}
+                    style={{ ...inputStyle, flex: 1, padding: 4, fontSize: 11 }}
+                  />
+                  <input
+                    type="text"
+                    value={item.eta || ''}
+                    placeholder="ETA"
+                    onChange={(e) => {
+                      const newList = [...catalogUpcoming];
+                      newList[idx] = { ...newList[idx], eta: e.target.value };
+                      setCatalogUpcoming(newList);
+                    }}
+                    style={{ ...inputStyle, width: 80, padding: 4, fontSize: 11 }}
+                  />
+                  <input
+                    type="text"
+                    value={item.image || ''}
+                    placeholder="Image URL"
+                    onChange={(e) => {
+                      const newList = [...catalogUpcoming];
+                      newList[idx] = { ...newList[idx], image: e.target.value };
+                      setCatalogUpcoming(newList);
+                    }}
+                    style={{ ...inputStyle, width: 120, padding: 4, fontSize: 11 }}
+                  />
+                  <button
+                    onClick={() => setCatalogUpcoming(catalogUpcoming.filter((_, i) => i !== idx))}
+                    style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => setCatalogUpcoming([...catalogUpcoming, { name: '', status: 'Upcoming', eta: '', image: '' }])}
+                style={{ ...buttonGhost, padding: '4px 10px', fontSize: 11 }}
+              >
+                + Add Upcoming
+              </button>
+            </div>
+
+            <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>Past Archives</h4>
+            <div style={{ marginBottom: 12 }}>
+              {catalogArchive.map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#09090b', padding: 6, borderRadius: 6 }}>
+                  <input
+                    type="text"
+                    value={item.name || ''}
+                    placeholder="Name"
+                    onChange={(e) => {
+                      const newList = [...catalogArchive];
+                      newList[idx] = { ...newList[idx], name: e.target.value };
+                      setCatalogArchive(newList);
+                    }}
+                    style={{ ...inputStyle, flex: 1, padding: 4, fontSize: 11 }}
+                  />
+                  <input
+                    type="text"
+                    value={item.image || ''}
+                    placeholder="Image URL"
+                    onChange={(e) => {
+                      const newList = [...catalogArchive];
+                      newList[idx] = { ...newList[idx], image: e.target.value };
+                      setCatalogArchive(newList);
+                    }}
+                    style={{ ...inputStyle, width: 120, padding: 4, fontSize: 11 }}
+                  />
+                  <input
+                    type="text"
+                    value={item.description || ''}
+                    placeholder="Description"
+                    onChange={(e) => {
+                      const newList = [...catalogArchive];
+                      newList[idx] = { ...newList[idx], description: e.target.value };
+                      setCatalogArchive(newList);
+                    }}
+                    style={{ ...inputStyle, width: 150, padding: 4, fontSize: 11 }}
+                  />
+                  <button
+                    onClick={() => setCatalogArchive(catalogArchive.filter((_, i) => i !== idx))}
+                    style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => setCatalogArchive([...catalogArchive, { name: '', status: 'Archived', image: '', description: '' }])}
+                style={{ ...buttonGhost, padding: '4px 10px', fontSize: 11 }}
+              >
+                + Add Archive
+              </button>
+            </div>
+
+            <button onClick={saveCatalogSettings} disabled={catalogLoading} style={buttonPrimary}>
+              {catalogLoading ? 'Saving…' : 'Save Catalog Settings'}
+            </button>
+          </div>
+        )}
+
+        {/* ============ GROWTH ============ */}
+        {tab === 'growth' && (
+          <div style={cardStyle}>
+            <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Growth & Analytics</h2>
+            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+              Track affiliate payouts and promoter performance.
+            </p>
+            {promos.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No promoter data yet.</p>}
+            {promos.map((p) => (
+              <div key={p.code} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
+                <div style={{ fontWeight: 700 }}>{p.code} - {p.promoterName}</div>
+                <div style={{ color: '#888' }}>
+                  Revenue: ${Number(p.revenueAttributed || 0).toFixed(2)} · Owed: ${((p.payoutOwedCents || 0) / 100).toFixed(2)}
+                </div>
+                {p.payoutOwedCents > 0 && (
+                  <button onClick={async () => {
+                    if (!password) return alert('Enter password');
+                    await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
+                    await fetchPromos();
+                  }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                    Mark ${((p.payoutOwedCents || 0) / 100).toFixed(2)} as paid
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
@@ -1716,6 +2099,19 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                 ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Available Sizes</h4>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {availableSizes.map((size, idx) => (
+                  <div key={idx} style={{ background: '#09090b', padding: '4px 8px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 4 }}>                    <span style={{ fontSize: 11 }}>{size}</span>
+                    <button onClick={() => { const newSizes = availableSizes.filter((_, i) => i !== idx); setAvailableSizes(newSizes); }} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 11 }}>✕</button>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <input type="text" placeholder="New size (e.g. 100ml)" value={newSizeInput} onChange={(e) => setNewSizeInput(e.target.value)} style={{ ...inputStyle, padding: 6, fontSize: 11, width: 100 }} />
+                  <button onClick={() => { if (newSizeInput.trim() && !availableSizes.includes(newSizeInput.trim())) { setAvailableSizes([...availableSizes, newSizeInput.trim()]); setNewSizeInput(''); } }} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Add</button>
+                </div>
               </div>
 
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>

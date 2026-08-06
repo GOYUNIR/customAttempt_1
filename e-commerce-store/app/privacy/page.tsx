@@ -5,7 +5,17 @@ export default function PrivacyPage() {
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   
   return (
-    <main style={{ maxWidth: 640, margin: '0 auto', padding: '48px 20px 80px', color: '#e5e5e5', background: '#0a0a0a', minHeight: '100vh', fontFamily: 'system-ui,sans-serif', lineHeight: 1.6, fontSize: 14 }}>
+    <main style={{ 
+      maxWidth: 640, 
+      margin: '0 auto', 
+      padding: '80px 20px 60px', 
+      color: '#e5e5e5', 
+      background: '#0a0a0a', 
+      minHeight: 'calc(100vh - 56px)', 
+      fontFamily: 'system-ui,sans-serif', 
+      lineHeight: 1.6, 
+      fontSize: 14 
+    }}>
       <Link
         href="/"
         style={{

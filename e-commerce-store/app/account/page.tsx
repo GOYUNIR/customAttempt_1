@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -16,6 +16,16 @@ interface EntryRecord {
   listPrice?: number;
   expectedAmountCents?: number;
 }
+
+const buttonGhost: React.CSSProperties = {
+  padding: '8px 14px',
+  borderRadius: 8,
+  border: '1px solid #27272a',
+  background: 'transparent',
+  color: '#ccc',
+  fontSize: 11,
+  cursor: 'pointer',
+};
 
 function statusBanner(entry: EntryRecord) {
   if (entry.status === 'WINNER_CHARGED') {
@@ -55,6 +65,16 @@ export default function AccountPage() {
   const [editingAddressFor, setEditingAddressFor] = useState<string | null>(null);
   const [addressDraft, setAddressDraft] = useState('');
   const [paymentPortalFor, setPaymentPortalFor] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data.user) setUser(data.user);
+      })
+      .catch(() => {});
+  }, []);
 
   const lookup = async () => {
     setIsBusy(true);
@@ -157,6 +177,11 @@ export default function AccountPage() {
 
   const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
 
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/';
+  };
+
   return (
     <main
       style={{
@@ -168,6 +193,55 @@ export default function AccountPage() {
       }}
     >
       <div style={{ maxWidth: 420, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Link
+            href="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 44,
+              padding: '0 18px',
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 600,
+              color: configPalette.textMain,
+              textDecoration: 'none',
+              background: 'rgba(255,255,255,0.06)',
+              border: `1px solid ${configPalette.cardBorder}`,
+            }}
+          >
+            ← Back to store
+          </Link>
+          {user && (
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                border: '1px solid #f87171',
+                background: 'transparent',
+                color: '#f87171',
+                fontSize: 11,
+                cursor: 'pointer',
+              }}
+            >
+              Logout
+            </button>
+          )}
+        </div>
+
+        {user && (
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 12, padding: 12, marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 'bold' }}>{user.email}</div>
+                <div style={{ fontSize: 11, color: configPalette.textMuted }}>Rewards: {user.rewards || 0} points</div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
           Verify with the email and last 4 digits of the card used to enter. All your entries across all products will be shown.
