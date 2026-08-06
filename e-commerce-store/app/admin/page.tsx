@@ -383,8 +383,14 @@ export default function AdminPortal() {
       name: '', slug: '', prefix: '', tagline: '', desc: '',
       price50ml: '', price100ml: '', stripeId50ml: '', stripeId100ml: '',
       maxRaffleAllocationLimit: '', totalInventory: '', winnerTiers: '',
-      isActive: true, isArchived: false, isUpcoming: false, isRaffle: true,
-      productType: 'raffle', sortOrder: 0, notes: [], images: []
+      isActive: false, // <-- Set to false by default
+      isArchived: false, 
+      isUpcoming: false, 
+      isRaffle: true,
+      productType: 'raffle', 
+      sortOrder: 0, 
+      notes: [], 
+      images: []
     });
     setEditingProduct(null);
     setEditingNoteIdx(null);

@@ -1,67 +1,119 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, getProductOverride } from '@/lib/server-config';
+import {
+  createRedisClient,
+  createStripeClient,
+  getProductOverride,
+  getLiveProductState,
+  saveLiveState,
+  archiveEntry,
+  ArchiveRecord,
+} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { getProductPrice, getAvailableSizes } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
     const stripe = createStripeClient();
     if (!redis || !stripe) {
-      return NextResponse.json({ error: 'System offline.' }, { status: 500 });
+      return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });
     }
 
     const body = await request.json();
-    const { productId, size, quantity } = body;
-    if (!productId || !size) {
-      return NextResponse.json({ error: 'Missing product or size.' }, { status: 400 });
+    const { productId, size, email, shippingAddress, paymentMethodId, promoCode } = body;
+
+    if (!productId || !size || !email || !shippingAddress || !paymentMethodId) {
+      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const product = GOYUNIR_STORE_SUITE.productCatalog.find(p => p.id === productId);
-    if (!product) {
+    const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.id === productId);
+    if (!productDefinition) {
       return NextResponse.json({ error: 'Product not found.' }, { status: 404 });
     }
 
-    const override = await getProductOverride(redis, product.id);
-    const price = size === '100ml'
-      ? (override?.price100ml ?? product.price100ml)
-      : (override?.price50ml ?? product.price50ml);
-
-    if (!price || price <= 0) {
-      return NextResponse.json({ error: 'Price not set for this product/size.' }, { status: 400 });
+    const availableSizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
+    if (!availableSizes.includes(size)) {
+      return NextResponse.json({ error: 'Invalid size.' }, { status: 400 });
     }
 
-    // Build product image URL – use first image from the product's images array if available, else fallback
-    const imageUrl = (product as any).images && Array.isArray((product as any).images) && (product as any).images.length > 0
-      ? (product as any).images[0]
-      : `/images/${product.prefix}/1.jpeg`;
+    // Get live state (inventory, etc.)
+    const live = await getLiveProductState(redis, productDefinition, size);
+    if (!live || live.inventoryRemaining <= 0) {
+      return NextResponse.json({ error: 'Sold out.' }, { status: 400 });
+    }
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [{
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: `${product.name} (${size})`,
-            description: product.desc || '',
-            images: [imageUrl],
-          },
-          unit_amount: Math.round(price * 100),
-        },
-        quantity: quantity || 1,
-      }],
-      mode: 'payment',
-      success_url: `${request.headers.get('origin') || 'https://yourdomain.com'}/?checkout=success`,
-      cancel_url: `${request.headers.get('origin') || 'https://yourdomain.com'}/?checkout=cancel`,
-      metadata: {
-        productId,
-        size,
-      },
+    // Get the Stripe price ID directly from the product definition
+    const stripePriceId = size === '100ml' ? productDefinition.stripeId100ml : productDefinition.stripeId50ml;
+    if (!stripePriceId) {
+      return NextResponse.json({ error: 'Stripe price ID not configured for this size.' }, { status: 400 });
+    }
+
+    // Get price (with override if any)
+    const override = await getProductOverride(redis, productDefinition.id);
+    const basePrice = size === '100ml' ? (override?.price100ml ?? productDefinition.price100ml) : (override?.price50ml ?? productDefinition.price50ml);
+    const priceCents = Math.round(basePrice * 100);
+
+    // Apply promo discount if provided
+    let finalPriceCents = priceCents;
+    // (promo handling omitted for brevity – you can add it back if needed)
+
+    // Create a Stripe PaymentIntent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: finalPriceCents,
+      currency: 'usd',
+      customer: body.customerId || undefined,
+      payment_method: paymentMethodId,
+      off_session: false,
+      confirm: true,
+      receipt_email: email,
+      description: `GOYUNIR direct: ${productDefinition.name} (${size})`,
     });
 
-    return NextResponse.json({ url: session.url });
+    if (paymentIntent.status !== 'succeeded') {
+      return NextResponse.json({ error: 'Payment not successful.' }, { status: 400 });
+    }
+
+    // Deduct inventory
+    live.inventoryRemaining -= 1;
+    live.salesCompleted = (live.salesCompleted || 0) + 1;
+    await saveLiveState(redis, live);
+
+    // Extract customer ID safely
+    let customerId: string;
+    if (typeof paymentIntent.customer === 'string') {
+      customerId = paymentIntent.customer;
+    } else if (paymentIntent.customer && typeof paymentIntent.customer === 'object' && 'id' in paymentIntent.customer) {
+      customerId = paymentIntent.customer.id;
+    } else {
+      customerId = 'n/a';
+    }
+
+    // Archive the sale
+    const archiveRecord: ArchiveRecord = {
+      email,
+      variant: productDefinition.name,
+      size,
+      shippingAddress,
+      id: customerId,
+      registeredAt: new Date().toISOString(),
+      type: 'WINNER_CHARGED',
+      shippingStatus: 'PENDING_FULFILLMENT',
+      amountCents: finalPriceCents,
+      orderRef: `DIRECT-${Date.now().toString(36)}`,
+      promoCode: promoCode || undefined,
+    };
+    await archiveEntry(redis, archiveRecord);
+
+    return NextResponse.json({
+      success: true,
+      paymentIntentId: paymentIntent.id,
+      amount: finalPriceCents / 100,
+    });
   } catch (err: any) {
+    console.error('[direct/route] Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

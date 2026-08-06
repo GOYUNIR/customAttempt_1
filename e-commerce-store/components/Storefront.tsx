@@ -319,7 +319,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!key || typeof window === 'undefined') return;
-    const existing = document.querySelector('script[data-goyunir-places]');
+    const existingScript = document.querySelector('script[data-goyunir-places]');
     const boot = () => {
       try {
         const input = document.getElementById('goyunir-shipping-address') as HTMLInputElement | null;
@@ -337,7 +337,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         });
       } catch {}
     };
-    if (existing) {
+    if (existingScript) {
       boot();
       return;
     }
@@ -547,7 +547,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   // ============================================================
-  // ADD TO CART (for direct purchase items only)
+  // ADD TO CART
   // ============================================================
   const handleAddToCart = async () => {
     if (!currentProduct) return;
