@@ -478,6 +478,8 @@ function normalizeFallbackProduct(product: any, index: number) {
     isActive: true,
     isArchived: Boolean(product?.isArchived),
     isUpcoming: Boolean(product?.isUpcoming),
+    isRaffle: product?.isRaffle !== false,
+    productType: String(product?.productType || 'raffle'),
     totalInventory: Number(product?.totalInventory ?? 0) || 0,
     winnerTiers: Array.isArray(product?.winnerTiers) ? product.winnerTiers : (typeof product?.winnerTiers === 'number' ? [product.winnerTiers] : [0]),
   };

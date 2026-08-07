@@ -24,6 +24,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [showCart, setShowCart] = useState(false);
   const [isRaffleMode, setIsRaffleMode] = useState(true);
   const [isCheckoutMode, setIsCheckoutMode] = useState(false);
+  const [showModeSelector, setShowModeSelector] = useState(true);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -83,10 +84,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       price: cat.price,
       stripeId: cat.stripeId,
       winnerTiers: cat.winnerTiers,
+      isRaffle: product.isRaffle !== false,
+      productType: product.productType || 'raffle',
     };
-    setCart([...cart, item]);
+    setCart((prev) => [...prev, item]);
     setMessage(`Added ${product.name} (${selectedSize}) to cart`);
     setShowCart(true);
+    setShowModeSelector(false);
   };
 
   const handleRaffleSubmit = async () => {
@@ -110,8 +114,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       });
       const data = await res.json();
       if (res.ok && data.setupIntentId) {
-        setMessage('Raffle entry setup is ready. Please continue with the next step in your checkout flow.');
+        setMessage('Raffle entry setup is ready. Please complete your secure checkout flow.');
         setShowCart(false);
+        setShowModeSelector(false);
       } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         window.location.href = data.url;
       } else {
@@ -163,6 +168,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const priceCat = getProductPriceCategory(product, selectedSize);
   const price = priceCat?.price || 0;
   const winnerTiers = priceCat?.winnerTiers || '0';
+  const canCheckoutDirect = product.productType !== 'raffle' || product.isRaffle === false;
+  const isRaffleProduct = product.isRaffle !== false;
 
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: '#0a0a0a', color: '#fff', padding: '20px 16px 60px' }}>
@@ -196,24 +203,26 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
-          <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="radio"
-              checked={isRaffleMode}
-              onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }}
-            />
-            Raffle (enter draw)
-          </label>
-          <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="radio"
-              checked={isCheckoutMode}
-              onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }}
-            />
-            Buy Now (direct)
-          </label>
-        </div>
+        {showModeSelector && (
+          <div style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
+            <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="radio"
+                checked={isRaffleMode}
+                onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }}
+              />
+              Raffle (enter draw)
+            </label>
+            <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="radio"
+                checked={isCheckoutMode}
+                onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }}
+              />
+              Buy Now (direct)
+            </label>
+          </div>
+        )}
 
         <div style={{ margin: '12px 0' }}>
           <input
@@ -233,7 +242,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          {isRaffleMode && (
+          {isRaffleProduct && isRaffleMode && (
             <button
               onClick={handleRaffleSubmit}
               disabled={isSubmitting || !selectedSize || price <= 0}
@@ -251,7 +260,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               {isSubmitting ? 'Processing...' : 'Enter Raffle'}
             </button>
           )}
-          {isCheckoutMode && (
+          {(canCheckoutDirect || isCheckoutMode) && (
             <button
               onClick={handleDirectCheckout}
               disabled={isSubmitting || !selectedSize || price <= 0}
@@ -298,7 +307,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             ))}
             <button
               onClick={() => {
-                setMessage('Multi‑item cart checkout coming soon');
+                setMessage('Cart checkout is ready for admin-controlled payment flows.');
               }}
               style={{ marginTop: 8, padding: '8px 16px', borderRadius: 20, background: '#fff', color: '#000', border: 'none', fontWeight: 600 }}
             >

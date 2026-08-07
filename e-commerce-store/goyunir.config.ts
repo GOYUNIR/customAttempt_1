@@ -106,45 +106,45 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   productCatalog: [
     {
       id: 'p1',
-      name: 'Elysian White',
-      slug: 'elysian-white',
-      prefix: 'elysian-white',
-      tagline: 'WHITE ALLOCATION / 01',
-      desc: 'Clean, electric profile variant constructed with premium bergamot.',
+      name: 'Drop 01 — Raffle Access',
+      slug: 'drop-01-raffle-access',
+      prefix: 'drop-01',
+      tagline: 'LIMITED Raffle / 01',
+      desc: 'A premium release designed for raffle entry and controlled allocation.',
       priceCategories: [
-        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+        { size: 'Standard', price: 95, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2,1' }
       ],
       notes: [
-        { label: 'TOP PROFILE', name: 'White Bergamot', text: 'Crisp Sicilian bergamot crushed with volcanic pink pepper.' },
-        { label: 'HEART PROFILE', name: 'Citrus Flash', text: 'Fresh, electric burst optimized to capture immediate attention.' },
-        { label: 'BASE PROFILE', name: 'Clean Musk', text: 'A smooth velvet finish that lingers delicately on fabrics.' },
+        { label: 'DROP', name: 'Raffle Access', text: 'Entry is limited and managed through the admin-controlled draw system.' },
       ],
-      images: Array.from({ length: 29 }, (_, i) => `/images/elysian-white/${i + 1}.jpeg`),
-      maxRaffleAllocationLimit: 0,
-      totalInventory: 0,
-      winnerTiers: [0],
-      isActive: false,
+      images: ['/images/baseItem1/1.jpeg'],
+      maxRaffleAllocationLimit: 100,
+      totalInventory: 100,
+      winnerTiers: [2, 2, 1],
+      isActive: true,
+      isRaffle: true,
+      productType: 'raffle',
     },
     {
       id: 'p2',
-      name: 'Obsidian Void',
-      slug: 'obsidian-void',
-      prefix: 'obsidian-void',
-      tagline: 'BLACK ALLOCATION / 02',
-      desc: 'Deep, smoke-infused wood profile variant designed for lasting depth.',
+      name: 'Drop 02 — Direct Buy',
+      slug: 'drop-02-direct-buy',
+      prefix: 'drop-02',
+      tagline: 'DIRECT BUY / 02',
+      desc: 'A ready-to-purchase release for immediate checkout and cart fulfillment.',
       priceCategories: [
-        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+        { size: 'Standard', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
       ],
       notes: [
-        { label: 'TOP PROFILE', name: 'Midnight Spice', text: 'A dark sensory introduction of clove and rare cardamom.' },
-        { label: 'HEART PROFILE', name: 'Obsidian Amber', text: 'Midnight jasmine absolute bleeding into raw vetiver roots.' },
-        { label: 'BASE PROFILE', name: 'Earthy Timber', text: 'A rich cedarwood base that deepens as the hours develop.' },
+        { label: 'BUY NOW', name: 'Instant Checkout', text: 'This item can be purchased immediately and added to cart.' },
       ],
-      images: Array.from({ length: 29 }, (_, i) => `/images/obsidian-void/${i + 1}.jpeg`),
+      images: ['/images/baseItem2/1.jpeg'],
       maxRaffleAllocationLimit: 0,
-      totalInventory: 0,
+      totalInventory: 120,
       winnerTiers: [0],
-      isActive: false,
+      isActive: true,
+      isRaffle: false,
+      productType: 'checkout',
     },
   ] as any[], // cast to any to allow extra fields not in StorefrontProduct
 });

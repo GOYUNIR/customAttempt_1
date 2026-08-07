@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       theme, hero, form, footer, 
       productNotes, availableSizes, 
       animationMechanics, dropSchedule,
-      socialProof, homeRedirectSlug
+      socialProof, homeRedirectSlug, catalogPreview
     } = body;
     
     // Get current config to merge
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
       dropSchedule: dropSchedule || current.dropSchedule || {},
       socialProof: socialProof || current.socialProof || {},
       homeRedirectSlug: homeRedirectSlug || current.homeRedirectSlug || undefined,
+      catalogPreview: catalogPreview || current.catalogPreview || { upcomingDrops: [], archiveScents: [] },
       updatedAt: new Date().toISOString(),
     };
 

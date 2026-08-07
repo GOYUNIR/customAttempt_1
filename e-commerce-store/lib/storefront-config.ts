@@ -34,14 +34,20 @@ export interface StorefrontProduct {
   prefix: string;
   tagline: string;
   desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
+  price50ml?: number;
+  price100ml?: number;
+  stripeId50ml?: string;
+  stripeId100ml?: string;
+  priceCategories?: Array<{ size: string; price: number; stripeId?: string; winnerTiers?: string | number[] }>;
   maxRaffleAllocationLimit: number;
   isActive?: boolean;
+  isArchived?: boolean;
+  isUpcoming?: boolean;
+  isRaffle?: boolean;
+  productType?: string;
   accent?: string;
   notes: StorefrontNote[];
+  images?: string[];
   customDropSchedule?: Partial<DropScheduleConfig>;
   scheduledArchiveAt?: string;
   scheduledUnarchiveAt?: string;
@@ -215,27 +221,43 @@ function normalizeCatalogItems(items: unknown): CatalogPreviewItem[] {
 }
 
 function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string }, index: number): StorefrontProduct {
-  const fallbackName = `Perfume ${index + 1}`;
+  const fallbackName = `Drop ${index + 1}`;
   const fallbackSlug = `${product.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const fallbackSize = 'Standard';
+  const normalizedPriceCategories = Array.isArray(product.priceCategories) && product.priceCategories.length > 0
+    ? product.priceCategories.map((category: any) => ({
+        size: normalizeText(category?.size, fallbackSize),
+        price: normalizeNumber(category?.price, 0),
+        stripeId: normalizeText(category?.stripeId, ''),
+        winnerTiers: typeof category?.winnerTiers === 'string' ? category.winnerTiers : (Array.isArray(category?.winnerTiers) ? category.winnerTiers.join(',') : '0'),
+      }))
+    : [{ size: fallbackSize, price: 0, stripeId: '', winnerTiers: '0' }];
+
   return {
     id: normalizeText(product.id, `p${index + 1}`),
     name: normalizeText(product.name, fallbackName),
     slug: normalizeText(product.slug, fallbackSlug),
-    prefix: normalizeText(product.prefix, `obsidian-void'/'${index + 1}`),
+    prefix: normalizeText(product.prefix, fallbackSlug),
     tagline: normalizeText(product.tagline, 'LIMITED DROP'),
     desc: normalizeText(product.desc, 'A refined signature profile for the next allocation window.'),
-    price50ml: normalizeNumber(product.price50ml, 999999999),
-    price100ml: normalizeNumber(product.price100ml, 999999999),
-    stripeId50ml: normalizeText(product.stripeId50ml, 'price_placeholder_50'),
-    stripeId100ml: normalizeText(product.stripeId100ml, 'price_placeholder_100'),
+    price50ml: normalizeNumber(product.price50ml, 0),
+    price100ml: normalizeNumber(product.price100ml, 0),
+    stripeId50ml: normalizeText(product.stripeId50ml, ''),
+    stripeId100ml: normalizeText(product.stripeId100ml, ''),
+    priceCategories: normalizedPriceCategories,
     maxRaffleAllocationLimit: normalizeNumber(product.maxRaffleAllocationLimit, 0),
     isActive: product.isActive ?? true,
+    isArchived: Boolean(product.isArchived),
+    isUpcoming: Boolean(product.isUpcoming),
+    isRaffle: product.isRaffle !== false,
+    productType: normalizeText(product.productType, 'raffle'),
     accent: normalizeText(product.accent, ''),
     notes: (product.notes ?? []).map((note) => ({
       label: normalizeText(note?.label, 'PROFILE'),
       name: normalizeText(note?.name, 'Signature Note'),
       text: normalizeText(note?.text, 'A polished profile note designed for instant recognition.'),
     })),
+    images: Array.isArray(product.images) ? product.images : [],
     customDropSchedule: product.customDropSchedule,
     scheduledArchiveAt: product.scheduledArchiveAt,
     scheduledUnarchiveAt: product.scheduledUnarchiveAt,
@@ -280,12 +302,14 @@ export function getProductBySlug(config: StorefrontConfig, slug: string): Storef
 }
 export function getProductPrice(product: StorefrontProduct, size: string): number {
   const price = size === '100ml' ? product.price100ml : product.price50ml;
+  const numericPrice = typeof price === 'number' ? price : 0;
   // If price is unreasonably high (placeholder), return 0 to indicate not set
-  if (price > 999999) return 0;
-  return price;
+  if (numericPrice > 999999) return 0;
+  return numericPrice;
 }
 export function getProductStripeId(product: StorefrontProduct, size: string): string {
-  return size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
+  const stripeId = size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
+  return typeof stripeId === 'string' ? stripeId : '';
 }
 export function getWinnerCount(config: StorefrontConfig, size: string): number {
   const count = size === '100ml' ? config.dropSchedule.winnersPer100ml : config.dropSchedule.winnersPer50ml;

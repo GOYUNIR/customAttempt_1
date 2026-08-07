@@ -41,8 +41,8 @@ const DEFAULT_CONFIG = {
     textMuted: '#888888',
     checkoutCtaButton: '#635bff',
   },
-  availableSizes: ['50ml'],
-  homeRedirectSlug: undefined,
+  availableSizes: ['Standard'],
+  homeRedirectSlug: 'drop-01-raffle-access',
   dropSchedule: {
     mode: 'daily',
     timezone: 'America/Los_Angeles',
@@ -120,9 +120,19 @@ export async function GET(request: NextRequest) {
       ? fallbackAllProducts.find((product) => product.slug === requestedSlug) || null
       : null;
 
+    const configRaw = redis ? await redis.get(CONFIG_KEY) : null;
+    const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
+    const effectiveConfig = {
+      ...DEFAULT_CONFIG,
+      ...config,
+      themeColors: { ...DEFAULT_CONFIG.themeColors, ...(config?.themeColors || {}) },
+      availableSizes: Array.isArray(config?.availableSizes) && config.availableSizes.length > 0 ? config.availableSizes : DEFAULT_CONFIG.availableSizes,
+      homeRedirectSlug: typeof config?.homeRedirectSlug === 'string' && config.homeRedirectSlug.trim() && !['elysian-white','obsidian-void'].includes(config.homeRedirectSlug) ? config.homeRedirectSlug : DEFAULT_CONFIG.homeRedirectSlug,
+    };
+
     if (!redis) {
       return NextResponse.json({
-        config: DEFAULT_CONFIG,
+        config: effectiveConfig,
         activeProducts: fallbackActiveProducts,
         archivedProducts: fallbackArchivedProducts,
         upcomingProducts: fallbackUpcomingProducts,
@@ -135,10 +145,6 @@ export async function GET(request: NextRequest) {
         note: 'Redis unavailable'
       });
     }
-
-    // Get store config
-    const configRaw = await redis.get(CONFIG_KEY);
-    const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
 
     let activeProducts: StoreProduct[] = [];
     let archivedProducts: StoreProduct[] = [];
@@ -226,7 +232,7 @@ export async function GET(request: NextRequest) {
     const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
     return NextResponse.json({
-      config,
+      config: effectiveConfig,
       activeProducts,
       archivedProducts,
       upcomingProducts,
