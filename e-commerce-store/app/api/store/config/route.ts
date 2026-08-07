@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from '@/lib/server-config';
+import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +92,7 @@ const DEFAULT_CONFIG = {
     autoIncrementAmount: 1,
     autoIncrementMaxPerDay: 4,
     autoIncrementMinHourGap: 3,
+    autoIncrementMaxHourGap: 8,
   },
   brandFooterData: {
     instagramLink: 'https://instagram.com/goyunir',
@@ -107,6 +109,15 @@ const DEFAULT_CONFIG = {
 
 export async function GET(request: NextRequest) {
   try {
+    const sessionUser = await getSessionUser(request);
+    const authHeader = request.headers.get('authorization') || '';
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const adminPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    const isAuthorized = Boolean((sessionUser && sessionUser.role === 'admin') || (adminPassword && bearer === adminPassword));
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const requestedSlug = searchParams.get('slug');
 

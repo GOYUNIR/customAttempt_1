@@ -51,6 +51,7 @@ export async function GET(request: Request) {
   const now = Date.now();
   const last = Number((await redis.get(LAST_TICK_KEY)) ?? 0);
   const minGapMs = (cfg.autoIncrementMinHourGap ?? 3) * 60 * 60 * 1000;
+  const maxGapMs = Math.max(minGapMs, (cfg.autoIncrementMaxHourGap ?? 8) * 60 * 60 * 1000);
   if (last && now - last < minGapMs) {
     return NextResponse.json({
       skipped: true,
@@ -59,7 +60,8 @@ export async function GET(request: Request) {
     });
   }
 
-  if (Math.random() > (cfg.autoIncrementChancePerHeartbeat ?? 0.15)) {
+  const forceDueToMaxGap = last > 0 && now - last >= maxGapMs;
+  if (!forceDueToMaxGap && Math.random() > (cfg.autoIncrementChancePerHeartbeat ?? 0.15)) {
     return NextResponse.json({ skipped: true, reason: 'chance roll missed' });
   }
 

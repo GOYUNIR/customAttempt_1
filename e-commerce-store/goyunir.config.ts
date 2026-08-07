@@ -64,6 +64,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     autoIncrementAmount: 1,
     autoIncrementMaxPerDay: 4,
     autoIncrementMinHourGap: 3,
+    autoIncrementMaxHourGap: 8,
   },
 
   brandFooterData: {

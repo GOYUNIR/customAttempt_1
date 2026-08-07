@@ -5,6 +5,7 @@ import {
   findPoolEntriesByEmail,
   loadProducts,
 } from '@/lib/server-config';
+import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,11 @@ async function getOrCreatePortalConfigId(stripe: any, redis: any) {
 
 export async function POST(request: Request) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Login required.' }, { status: 401 });
+    }
+
     const redis = createRedisClient();
     const stripe = createStripeClient();
     if (!redis || !stripe) {
@@ -49,15 +55,13 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const email = String(body?.email || '')
-      .trim()
-      .toLowerCase();
+    const email = sessionUser.email;
     const last4 = String(body?.last4 || '').trim();
     const variant = String(body?.variant || '').trim();
     const size = String(body?.size || '').trim();
 
-    if (!email || last4.length !== 4) {
-      return NextResponse.json({ error: 'Enter your email and card digits first.' }, { status: 400 });
+    if (!email) {
+      return NextResponse.json({ error: 'Missing account email.' }, { status: 400 });
     }
 
     const liveProducts = await loadProducts(redis);
@@ -70,8 +74,10 @@ export async function POST(request: Request) {
       targetMatches = matches.filter((m) => m.variant === variant && m.size === size);
     }
     
-    const target = targetMatches.find((m) => String(m.parsed.cardLast4 || '') === last4) || 
-                   matches.find((m) => String(m.parsed.cardLast4 || '') === last4);
+    const target = last4
+      ? targetMatches.find((m) => String(m.parsed.cardLast4 || '') === last4) ||
+        matches.find((m) => String(m.parsed.cardLast4 || '') === last4)
+      : targetMatches[0] || matches[0];
 
     let customerId = target?.parsed?.customerId || target?.parsed?.stripeCustomerId || '';
 
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
       const list = await stripe.customers.list({ email, limit: 5 });
       for (const c of list.data) {
         const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
-        if (pms.data.some((pm: any) => pm.card?.last4 === last4)) {
+        if (!last4 || pms.data.some((pm: any) => pm.card?.last4 === last4)) {
           customerId = c.id;
           break;
         }

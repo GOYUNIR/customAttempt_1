@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord, loadProducts } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
+import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,19 +13,26 @@ function usedEmailsKey(code: string) {
 
 export async function POST(request: Request) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });
+
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'Database offline.' }, { status: 500 });
     const body = await request.json();
-    const email = String(body?.email || '').trim().toLowerCase();
+    const email = sessionUser.email;
     const last4 = String(body?.last4 || '').trim();
     const variant = String(body?.variant || '').trim();
     const size = String(body?.size || '').trim();
-    if (!email || last4.length !== 4 || !variant || !size) return NextResponse.json({ error: 'Missing verification details.' }, { status: 400 });
+    if (!variant || !size) return NextResponse.json({ error: 'Missing verification details.' }, { status: 400 });
 
     const liveProducts = await loadProducts(redis);
     const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const matches = await findPoolEntriesByEmail(redis, productNames, email);
-    const target = matches.find((m) => m.variant === variant && m.size === size && String(m.parsed.cardLast4 || '') === last4);
+    const target = matches.find((m) => {
+      if (!(m.variant === variant && m.size === size)) return false;
+      if (!last4) return true;
+      return String(m.parsed.cardLast4 || '') === last4;
+    });
     if (!target) return NextResponse.json({ error: 'No matching entry found to cancel.' }, { status: 404 });
 
     // Get the promo code before removing

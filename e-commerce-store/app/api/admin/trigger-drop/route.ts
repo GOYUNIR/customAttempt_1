@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     for (const poolKey of poolKeys) {
       const parts = poolKey.split(':');
       const productName = parts[1];
-      const size = parts[2];
+      const size = parts.slice(2).join(':') || 'Standard';
 
       const product = Object.values(allProducts).find((p: any) => p.name === productName);
       if (!product) continue;
@@ -50,13 +50,13 @@ export async function POST(request: Request) {
       const live = await getLiveProductState(redis, product, size);
       if (!live || live.inventoryRemaining <= 0) continue;
 
-      // Determine winner count from winnerTiers (first number or 1)
-      const winnerTiers = priceCat.winnerTiers ? priceCat.winnerTiers.split(',').map(Number) : [1];
-      const winnerCount = Math.min(winnerTiers[0] || 1, live.inventoryRemaining);
+      const liveWinnerCount = Math.max(1, Number(live.winnersPerDraw || 1));
+      const winnerCount = Math.min(liveWinnerCount, live.inventoryRemaining, shuffled.length);
       const winners = shuffled.slice(0, winnerCount);
 
       for (const winnerStr of winners) {
-        const entry = JSON.parse(winnerStr);
+        const entry = safeParseRedisItem<any>(winnerStr);
+        if (!entry) continue;
         const customerId = entry.customerId || entry.stripeCustomerId;
         const paymentMethodId = entry.paymentMethodId;
 
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
           totalCharged++;
           totalRevenueCents += priceCents;
 
-          const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+          const orderRef = String(entry.orderRef || `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
           await archiveEntry(redis, {
             ...entry,
             type: 'WINNER_CHARGED',

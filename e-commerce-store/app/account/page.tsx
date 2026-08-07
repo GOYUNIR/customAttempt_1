@@ -263,12 +263,24 @@ export default function AccountPage() {
 
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
-          {isLoggedIn 
-            ? 'Your entries are automatically linked to your account.' 
-            : 'Enter your email and the last 4 digits of the card used to enter.'}
+          {isLoggedIn
+            ? 'Your entries are linked to your account for secure management.'
+            : 'Sign in to securely view and manage your entries.'}
         </p>
 
-        <div
+        {!isLoggedIn && (
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 16, padding: 16, marginBottom: 18 }}>
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: '#cbd5e1' }}>
+              Account login is required to prevent address/entry access by guessing card digits.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link href="/auth/login" style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
+              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
+            </div>
+          </div>
+        )}
+
+        {isLoggedIn && <div
           style={{
             background: configPalette.cardBackground,
             border: `1px solid ${configPalette.cardBorder}`,
@@ -296,26 +308,24 @@ export default function AccountPage() {
               boxSizing: 'border-box',
             }}
           />
-          {!isLoggedIn && (
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="Last 4 digits of card (optional if logged in)"
-              value={last4}
-              onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
-              style={{
-                width: '100%',
-                padding: 14,
-                borderRadius: 12,
-                background: '#16161a',
-                border: `1px solid ${configPalette.cardBorder}`,
-                color: '#fff',
-                fontSize: 13,
-                boxSizing: 'border-box',
-              }}
-            />
-          )}
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={4}
+            placeholder="Card last 4 (optional extra verification)"
+            value={last4}
+            onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
+            style={{
+              width: '100%',
+              padding: 14,
+              borderRadius: 12,
+              background: '#16161a',
+              border: `1px solid ${configPalette.cardBorder}`,
+              color: '#fff',
+              fontSize: 13,
+              boxSizing: 'border-box',
+            }}
+          />
           <button
             onClick={lookup}
             disabled={isBusy || !email}
@@ -333,20 +343,13 @@ export default function AccountPage() {
           >
             {isBusy ? 'Checking…' : 'Find My Entries'}
           </button>
-        </div>
+        </div>}
 
         {message && (
           <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: '#cbd5e1' }}>{message}</p>
         )}
 
-        {!isLoggedIn && (
-          <p style={{ marginTop: 16, fontSize: 11, color: configPalette.textMuted, textAlign: 'center' }}>
-            <Link href="/auth/login" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Log in</Link>
-            {' or '}
-            <Link href="/auth/signup" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>create an account</Link>
-            {' to automatically link your entries.'}
-          </p>
-        )}
+        {!isLoggedIn && null}
 
         {entries && entries.length > 0 && (
           <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -117,6 +117,8 @@ export async function POST(request: Request) {
       const shippingAddress = String(meta.address || '').trim();
       const customerId = typeof session.customer === 'string' ? session.customer : '';
       const rawPromo = String(meta.promoCode || meta.ref || '');
+      const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
+      const orderRef = String(meta.orderRef || `GOY-${session.id}`).slice(0, 64);
 
       if (email && variant) {
         let paymentMethodId = '';
@@ -138,8 +140,18 @@ export async function POST(request: Request) {
           }
         } catch {}
 
+        const poolKey = `drop_pool:${variant}:${size}`;
+        const existingEntries = await redis.lrange(poolKey, 0, -1);
+        const activeCountForEmail = existingEntries.reduce((count: number, row: any) => {
+          const parsed = safeParseRedisItem<any>(row);
+          if (String(parsed?.email || '').toLowerCase() === email) return count + 1;
+          return count;
+        }, 0);
+
         const emailBlocked = await redis.sismember(emailBlockKey(variant, size), email);
-        if (emailBlocked !== 1) {
+        const blockedByLegacyOneEntryRule = emailBlocked === 1 && maxPerEmail <= 1;
+        const blockedByLimit = activeCountForEmail >= maxPerEmail;
+        if (!blockedByLegacyOneEntryRule && !blockedByLimit) {
           const { appliedPromo, discountPercent } = await resolvePromo(redis, rawPromo, email);
 
           const entry = {
@@ -158,6 +170,7 @@ export async function POST(request: Request) {
             discountPercent: appliedPromo && discountPercent > 0 ? discountPercent : undefined,
             registeredAt: new Date().toISOString(),
             type: 'ENTERED',
+            orderRef,
           };
 
           await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
@@ -174,6 +187,7 @@ export async function POST(request: Request) {
             id: customerId || 'n/a',
             registeredAt: entry.registeredAt,
             type: 'ENTERED',
+            orderRef,
             ...(appliedPromo
               ? { promoCode: appliedPromo, discountPercent: discountPercent || undefined }
               : {}),
@@ -223,6 +237,18 @@ export async function POST(request: Request) {
             discountPercent: discountPercent || 0,
           });
         }
+        if (blockedByLimit) {
+          await archiveEntry(redis, {
+            email,
+            variant,
+            size,
+            shippingAddress,
+            id: customerId || 'n/a',
+            registeredAt: new Date().toISOString(),
+            type: 'ADMIN_NOTE',
+            orderRef,
+          } as any);
+        }
 
         await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
       }
@@ -235,29 +261,63 @@ export async function POST(request: Request) {
       const variant = String(meta.variant || '').trim();
       const size = String(meta.size || 'Standard').trim();
       const shippingAddress = String(meta.address || '').trim();
+      const checkoutType = String(meta.checkoutType || 'single');
 
       const allProducts = await loadProducts(redis);
-      const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
-      if (product && email) {
-        const live = await getLiveProductState(redis, product, size);
-        if (live.inventoryRemaining > 0) {
-          live.inventoryRemaining -= 1;
-        }
-        live.salesCompleted = (live.salesCompleted || 0) + 1;
-        await saveLiveState(redis, live);
+      if (checkoutType === 'cart') {
+        let cartItems: any[] = [];
+        try {
+          cartItems = JSON.parse(String(meta.cartItems || '[]'));
+        } catch {}
+        for (const item of cartItems) {
+          const thisProduct = allProducts[String(item.productId || '')] as any;
+          if (!thisProduct) continue;
+          const thisSize = String(item.size || 'Standard');
+          const qty = Math.max(1, Number(item.quantity || 1));
+          const priceCents = Math.max(0, Number(item.priceCents || 0));
+          const live = await getLiveProductState(redis, thisProduct, thisSize);
+          live.inventoryRemaining = Math.max(0, Number(live.inventoryRemaining || 0) - qty);
+          live.salesCompleted = (live.salesCompleted || 0) + qty;
+          await saveLiveState(redis, live);
 
-        await archiveEntry(redis, {
-          email,
-          variant: product.name,
-          size,
-          shippingAddress,
-          id: typeof session.customer === 'string' ? session.customer : 'n/a',
-          registeredAt: new Date().toISOString(),
-          type: 'WINNER_CHARGED',
-          shippingStatus: 'PENDING_FULFILLMENT',
-          amountCents: Number(session.amount_total || 0),
-          orderRef: `DIRECT-${session.id}`,
-        } as any);
+          for (let i = 0; i < qty; i += 1) {
+            await archiveEntry(redis, {
+              email,
+              variant: thisProduct.name,
+              size: thisSize,
+              shippingAddress,
+              id: typeof session.customer === 'string' ? session.customer : 'n/a',
+              registeredAt: new Date().toISOString(),
+              type: 'WINNER_CHARGED',
+              shippingStatus: 'PENDING_FULFILLMENT',
+              amountCents: priceCents,
+              orderRef: `DIRECT-${session.id}-${i + 1}`,
+            } as any);
+          }
+        }
+      } else {
+        const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
+        if (product && email) {
+          const live = await getLiveProductState(redis, product, size);
+          if (live.inventoryRemaining > 0) {
+            live.inventoryRemaining -= 1;
+          }
+          live.salesCompleted = (live.salesCompleted || 0) + 1;
+          await saveLiveState(redis, live);
+
+          await archiveEntry(redis, {
+            email,
+            variant: product.name,
+            size,
+            shippingAddress,
+            id: typeof session.customer === 'string' ? session.customer : 'n/a',
+            registeredAt: new Date().toISOString(),
+            type: 'WINNER_CHARGED',
+            shippingStatus: 'PENDING_FULFILLMENT',
+            amountCents: Number(session.amount_total || 0),
+            orderRef: `DIRECT-${session.id}`,
+          } as any);
+        }
       }
 
       await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);

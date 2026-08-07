@@ -8,6 +8,8 @@ type CartItem = {
   name: string;
   size: string;
   price: number;
+  productType?: string;
+  checkoutMode?: 'RAFFLE' | 'FCFS';
 };
 
 const CART_KEY = 'goyunir-cart';
@@ -31,19 +33,87 @@ function writeCart(items: CartItem[]) {
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutEmail, setCheckoutEmail] = useState('');
+  const [checkoutAddress, setCheckoutAddress] = useState('');
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [cartMsg, setCartMsg] = useState('');
+  const [scrollY, setScrollY] = useState(0);
+  const [pointerX, setPointerX] = useState(0.5);
+  const [theme, setTheme] = useState<any>(null);
 
   useEffect(() => {
     const sync = () => setCart(readCart());
     sync();
+    const open = () => setCartOpen(true);
+    const onScroll = () => setScrollY(window.scrollY || 0);
+    const onPointer = (event: PointerEvent) => {
+      const width = window.innerWidth || 1;
+      setPointerX(Math.max(0, Math.min(1, event.clientX / width)));
+    };
+
+    fetch('/api/store')
+      .then((res) => res.json())
+      .then((data) => setTheme(data?.config?.themeColors || null))
+      .catch(() => {});
+
+    window.addEventListener('goyunir-open-cart', open as EventListener);
     window.addEventListener('goyunir-cart-updated', sync as EventListener);
     window.addEventListener('storage', sync);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('pointermove', onPointer, { passive: true });
     return () => {
+      window.removeEventListener('goyunir-open-cart', open as EventListener);
       window.removeEventListener('goyunir-cart-updated', sync as EventListener);
       window.removeEventListener('storage', sync);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pointermove', onPointer);
     };
   }, []);
 
   const total = cart.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+  const hasItems = cart.length > 0;
+  const cartIsFcfsOnly = cart.every((item) => (item.checkoutMode || '').toUpperCase() !== 'RAFFLE' && String(item.productType || '').toLowerCase() !== 'raffle');
+
+  const checkoutCart = async () => {
+    if (!hasItems) return;
+    if (!cartIsFcfsOnly) {
+      setCartMsg('Raffle items cannot be purchased in cart. Enter raffle from the product page.');
+      return;
+    }
+    if (!checkoutEmail || !checkoutAddress) {
+      setCartMsg('Enter your email and shipping address to continue.');
+      return;
+    }
+    setCheckoutBusy(true);
+    setCartMsg('');
+    try {
+      const payload = {
+        email: checkoutEmail.trim().toLowerCase(),
+        address: checkoutAddress.trim(),
+        items: cart.map((item) => ({ productId: item.productId, size: item.size, quantity: 1 })),
+      };
+      const res = await fetch('/api/checkout/cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.assign(data.url);
+        return;
+      }
+      setCartMsg(data.error || 'Unable to start checkout.');
+    } catch {
+      setCartMsg('Unable to start checkout.');
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
+
+  const headerAccent = theme?.accentBlue || '#7dd3fc';
+  const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.82)';
+  const glowX = 15 + pointerX * 70;
+  const blurBoost = Math.min(10, Math.floor(scrollY / 60));
 
   return (
     <>
@@ -53,19 +123,22 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           top: 0,
           left: 0,
           width: '100%',
-          height: '60px',
+          minHeight: '60px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
-          background: 'rgba(8,8,10,0.82)',
-          backdropFilter: 'blur(18px)',
+          background: `${headerBg}`,
+          backdropFilter: `blur(${18 + blurBoost}px)`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 16px',
+          padding: '8px 12px',
           zIndex: 100,
           boxSizing: 'border-box',
+          transform: `translateY(${Math.min(8, scrollY * 0.02)}px)`,
+          transition: 'transform 160ms ease, backdrop-filter 220ms ease',
+          backgroundImage: `radial-gradient(circle at ${glowX}% -20%, ${headerAccent}33, transparent 35%)`,
         }}
       >
-        <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 700 }}>
+        <div style={{ display: 'flex', gap: 10, fontSize: 10, letterSpacing: 1.4, fontWeight: 700, flexWrap: 'wrap', maxWidth: '34%' }}>
           <Link href="/catalog" style={{ color: '#d4d4d8', textDecoration: 'none' }}>CATALOG</Link>
           <Link href="/story" style={{ color: '#71717a', textDecoration: 'none' }}>STORY</Link>
         </div>
@@ -77,24 +150,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             left: '50%',
             transform: 'translateX(-50%)',
             fontWeight: 800,
-            letterSpacing: '5px',
-            fontSize: '12px',
+            letterSpacing: '3.5px',
+            fontSize: '11px',
             textTransform: 'uppercase',
             color: '#ffffff',
             textDecoration: 'none',
+            maxWidth: '38%',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
           }}
         >
           GOYUNIR
         </Link>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', maxWidth: '34%' }}>
+          <Link href="/account" style={{ color: '#a1a1aa', textDecoration: 'none', fontSize: 10, letterSpacing: 1.6, fontWeight: 700 }}>ACCOUNT</Link>
+          <span style={{ color: '#4b5563', userSelect: 'none' }}>|</span>
           <button
             onClick={() => setCartOpen(true)}
-            style={{ border: '1px solid rgba(255,255,255,0.1)', background: cart.length > 0 ? '#f3f4f6' : 'transparent', color: cart.length > 0 ? '#09090b' : '#d4d4d8', borderRadius: 999, padding: '8px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer', letterSpacing: 1 }}
+            style={{ border: '1px solid rgba(255,255,255,0.1)', background: hasItems ? '#f3f4f6' : 'transparent', color: hasItems ? '#09090b' : '#d4d4d8', borderRadius: 999, padding: '7px 11px', fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 1 }}
           >
             CART {cart.length > 0 ? `(${cart.length})` : ''}
           </button>
-          <Link href="/account" style={{ color: '#71717a', textDecoration: 'none', fontSize: 11, letterSpacing: 2, fontWeight: 700 }}>ACCOUNT</Link>
         </div>
       </header>
 
@@ -167,10 +245,31 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 <span>Total</span>
                 <strong>${total.toFixed(2)}</strong>
               </div>
+              {hasItems && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                  <input
+                    type="email"
+                    value={checkoutEmail}
+                    onChange={(e) => setCheckoutEmail(e.target.value)}
+                    placeholder="Email"
+                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                  />
+                  <input
+                    type="text"
+                    value={checkoutAddress}
+                    onChange={(e) => setCheckoutAddress(e.target.value)}
+                    placeholder="Shipping address"
+                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                  />
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <Link href="/catalog" onClick={() => setCartOpen(false)} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Browse catalog</Link>
+                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems ? 'not-allowed' : 'pointer' }}>
+                  {checkoutBusy ? 'Starting…' : 'Checkout now'}
+                </button>
                 <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#d4d4d8', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
               </div>
+              {cartMsg && <div style={{ marginTop: 8, color: '#fca5a5', fontSize: 12 }}>{cartMsg}</div>}
             </div>
           </div>
         </div>

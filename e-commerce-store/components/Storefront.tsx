@@ -14,8 +14,7 @@ function getProductPriceCategory(product: any, size: string) {
 function getFallbackImage(product: any) {
   const images = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
   if (images.length > 0) return images[0];
-  if (String(product?.slug || '').includes('direct')) return '/images/baseItem2/EXAMPLEPICV2_1.jpg';
-  return '/images/baseItem1/EXAMPLEPICV1_1.jpg';
+  return '';
 }
 
 function readStoredCart() {
@@ -48,19 +47,21 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [message, setMessage] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [showCart, setShowCart] = useState(false);
-  const [isRaffleMode, setIsRaffleMode] = useState(true);
-  const [isCheckoutMode, setIsCheckoutMode] = useState(false);
-  const [showModeSelector, setShowModeSelector] = useState(true);
+  const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
+  const [countdownLabel, setCountdownLabel] = useState('');
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
   const fetchProduct = useCallback(async (slug: string) => {
     try {
-      const res = await fetch(`/api/store/config?slug=${slug}`);
+      const res = await fetch(`/api/store?slug=${slug}`);
       const data = await res.json();
       if (data.product) {
         setProduct(data.product);
+        const drawAnchor = data?.config?.dropSchedule?.targetEndDateTime;
+        const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
+        setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
         const cats = data.product.priceCategories || [];
         if (cats.length > 0) setSelectedSize(cats[0].size);
         setSelectedImageIndex(0);
@@ -76,7 +77,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const fetchAllProducts = useCallback(async () => {
     try {
-      const res = await fetch('/api/store/config');
+      const res = await fetch('/api/store');
       const data = await res.json();
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
@@ -169,18 +170,44 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       name: product.name,
       size: selectedSize,
       price: cat.price,
-      stripeId: cat.stripeId,
-      winnerTiers: cat.winnerTiers,
-      isRaffle: product.isRaffle !== false,
-      productType: product.productType || 'raffle',
+      checkoutMode: checkoutMode,
+      productType: checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
     };
+    const maxPerCart = Math.max(1, Number(product.maxPerCart || product.maxPerEmail || 1));
+    const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
+    if (inCartCount >= maxPerCart) {
+      setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
+      return;
+    }
     const next = [...cart, item];
     setCart(next);
     writeStoredCart(next);
     setMessage(`Added ${product.name} (${selectedSize}) to cart`);
     setShowCart(true);
-    setShowModeSelector(false);
   };
+
+  useEffect(() => {
+    if (!raffleEndsAt) {
+      setCountdownLabel('');
+      return;
+    }
+    const update = () => {
+      const diff = raffleEndsAt - Date.now();
+      if (diff <= 0) {
+        setCountdownLabel('Raffle closed');
+        return;
+      }
+      const total = Math.floor(diff / 1000);
+      const days = Math.floor(total / 86400);
+      const hours = Math.floor((total % 86400) / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const seconds = total % 60;
+      setCountdownLabel(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [raffleEndsAt]);
 
   const handleRaffleSubmit = async () => {
     if (!email || !address || !selectedSize) {
@@ -239,9 +266,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const priceCat = getProductPriceCategory(product, selectedSize);
   const price = priceCat?.price || 0;
-  const canCheckoutDirect = product.productType !== 'raffle' || product.isRaffle === false;
-  const isRaffleProduct = product.isRaffle !== false;
-  const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : [getFallbackImage(product)];
+  const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
+  const canCheckoutDirect = checkoutMode === 'FCFS';
+  const isRaffleProduct = checkoutMode === 'RAFFLE';
+  const fallbackImage = getFallbackImage(product);
+  const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
   const activeProductLabel = product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now');
 
   return (
@@ -252,7 +281,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{activeProductLabel}</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{product.productType || 'raffle'}</div>
+              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{checkoutMode}</div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0 }}>{product.name}</h1>
             <p style={{ margin: 0, color: '#c9c9d3', fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
@@ -276,16 +305,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
 
-          {showModeSelector && (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input type="radio" checked={isRaffleMode} onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }} />
-                Raffle entry
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input type="radio" checked={isCheckoutMode} onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }} />
-                Direct buy
-              </label>
+          {isRaffleProduct && countdownLabel && (
+            <div style={{ marginBottom: 10, fontSize: 12, color: '#c9c9d3' }}>
+              Raffle ends in: <strong>{countdownLabel}</strong>
             </div>
           )}
 
@@ -295,17 +317,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {isRaffleProduct && isRaffleMode && (
+            {isRaffleProduct && (
               <button onClick={handleRaffleSubmit} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
                 {isSubmitting ? 'Processing...' : 'Enter raffle'}
               </button>
             )}
-            {(canCheckoutDirect || isCheckoutMode) && (
+            {canCheckoutDirect && (
               <button onClick={handleDirectCheckout} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#34c759', color: '#000', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
                 {isSubmitting ? 'Processing...' : `Buy now $${price.toFixed(2)}`}
               </button>
             )}
-            <button onClick={addToCart} disabled={!selectedSize || price <= 0} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer' }}>Add to cart</button>
+            {canCheckoutDirect && <button onClick={addToCart} disabled={!selectedSize || price <= 0} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer' }}>Add to cart</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
@@ -333,7 +355,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <span>${item.price.toFixed(2)}</span>
               </div>
             ))}
-            <button onClick={() => setMessage('Use the product checkout controls for final payment. The top-right cart stays available across the site.')} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Review in header cart</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Open header cart</button>
           </section>
         )}
       </div>

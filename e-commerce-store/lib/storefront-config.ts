@@ -112,6 +112,7 @@ export interface StorefrontConfig {
     // "x times a day, x hour threshold" controls for the /api/analytics/social-tick cron:
     autoIncrementMaxPerDay: number;   // hard cap on how many times/day it can tick up
     autoIncrementMinHourGap: number;  // minimum hours between ticks
+    autoIncrementMaxHourGap: number;  // force a tick when stale beyond this threshold
   };
   brandFooterData: {
     instagramLink: string;
@@ -189,6 +190,7 @@ const defaultSocialProof = {
   autoIncrementAmount: 1,
   autoIncrementMaxPerDay: 4,
   autoIncrementMinHourGap: 3,
+  autoIncrementMaxHourGap: 8,
 };
 
 const defaultFooter = {

@@ -3,9 +3,10 @@ import {
   createRedisClient,
   getOrSeedLiveState,
   saveLiveState,
+  loadProducts,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getWinnerCount } from '@/lib/storefront-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     }
 
     const productName = String(body?.productName || '');
-    const size = String(body?.size || '50ml');
+    const size = String(body?.size || 'Standard');
     const inventoryRemaining =
       body?.inventoryRemaining !== undefined && body?.inventoryRemaining !== null
         ? Number(body.inventoryRemaining)
@@ -40,7 +41,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'productName required.' }, { status: 400 });
     }
 
-    const product = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
+    const allProducts = await loadProducts(redis);
+    const product = Object.values(allProducts).find((p: any) => p.name === productName || p.id === productName) as any;
     if (!product) return NextResponse.json({ error: 'Unknown product.' }, { status: 404 });
 
     const defaultWinners = getWinnerCount(GOYUNIR_STORE_SUITE, size);

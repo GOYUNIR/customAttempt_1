@@ -110,9 +110,9 @@ export async function getOrSeedLiveState(
     slug: product.slug,
     size,
     isActive: true,
-    totalInventory: 0,
-    inventoryRemaining: 0,
-    winnersPerDraw: 0,
+    totalInventory: Math.max(0, Number(product.maxRaffleAllocationLimit) || 0),
+    inventoryRemaining: Math.max(0, Number(product.maxRaffleAllocationLimit) || 0),
+    winnersPerDraw: normalizeWinners(winnersPerDraw, 1),
     drawsCompleted: 0,
     salesCompleted: 0,
   };

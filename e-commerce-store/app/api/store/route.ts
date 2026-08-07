@@ -4,47 +4,98 @@ import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from 
 export const dynamic = 'force-dynamic';
 
 const CONFIG_KEY = 'store:config';
-const PRODUCTS_KEY = 'store:products';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const IMAGES_KEY = 'store:product_images';
+const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 
-type StoreProduct = {
+type PublicPriceCategory = {
+  size: string;
+  price: number;
+};
+
+type PublicStoreProduct = {
   id: string;
   name: string;
   slug: string;
   prefix: string;
   tagline: string;
   desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
-  maxRaffleAllocationLimit: number;
+  sortOrder: number;
+  productType: string;
+  checkoutMode: 'RAFFLE' | 'FCFS';
+  maxPerEmail: number;
+  maxPerCart: number;
   isActive: boolean;
   isArchived: boolean;
+  isUpcoming: boolean;
   notes: { label: string; name: string; text: string }[];
   images: string[];
-  totalInventory: number;
-  winnerTiers: number[];
-  createdAt: string;
-  updatedAt: string;
+  priceCategories: PublicPriceCategory[];
 };
 
-export async function GET() {
+function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
+  const mode = String(product?.checkoutMode || '').toUpperCase();
+  if (mode === 'FCFS') return 'FCFS';
+  if (mode === 'RAFFLE') return 'RAFFLE';
+  if (product?.isRaffle === false) return 'FCFS';
+  return 'RAFFLE';
+}
+
+function sanitizeProduct(raw: any): PublicStoreProduct {
+  const checkoutMode = normalizeCheckoutMode(raw);
+  const categories = Array.isArray(raw?.priceCategories) ? raw.priceCategories : [];
+  return {
+    id: String(raw?.id || ''),
+    name: String(raw?.name || ''),
+    slug: String(raw?.slug || ''),
+    prefix: String(raw?.prefix || ''),
+    tagline: String(raw?.tagline || ''),
+    desc: String(raw?.desc || ''),
+    sortOrder: Number(raw?.sortOrder || 0),
+    productType: checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
+    checkoutMode,
+    maxPerEmail: Math.max(1, Number(raw?.maxPerEmail || 1)),
+    maxPerCart: Math.max(1, Number(raw?.maxPerCart || raw?.maxPerEmail || 1)),
+    isActive: raw?.isActive === true,
+    isArchived: raw?.isArchived === true,
+    isUpcoming: raw?.isUpcoming === true,
+    notes: Array.isArray(raw?.notes) ? raw.notes : [],
+    images: Array.isArray(raw?.images) ? raw.images.filter(Boolean) : [],
+    priceCategories: categories.map((category: any) => ({
+      size: String(category?.size || 'Standard'),
+      price: Math.max(0, Number(category?.price || 0)),
+    })),
+  };
+}
+
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const requestedSlug = String(url.searchParams.get('slug') || '').trim();
+
     const redis = createRedisClient();
-    const fallbackProducts = Object.values(getFallbackStoreProducts()) as StoreProduct[];
-    const fallbackActiveProducts = fallbackProducts.filter((product) => product.isActive !== false).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackArchivedProducts = fallbackProducts.filter((product) => product.isArchived).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackAllProducts = fallbackProducts.map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackProducts = Object.values(getFallbackStoreProducts()).map((product: any) => sanitizeProduct(product));
+    const sortProducts = (items: PublicStoreProduct[]) =>
+      [...items].sort(
+        (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
+      );
+
+    const fallbackActiveProducts = sortProducts(
+      fallbackProducts.filter((product) => product.isActive && !product.isArchived && !product.isUpcoming),
+    );
+    const fallbackArchivedProducts = sortProducts(fallbackProducts.filter((product) => product.isArchived));
+    const fallbackUpcomingProducts = sortProducts(fallbackProducts.filter((product) => product.isUpcoming));
+    const fallbackAllProducts = sortProducts(fallbackProducts);
 
     if (!redis) {
+      const product = requestedSlug ? fallbackAllProducts.find((item) => item.slug === requestedSlug) || null : null;
       return NextResponse.json({
         config: {},
         activeProducts: fallbackActiveProducts,
         archivedProducts: fallbackArchivedProducts,
-        allProducts: fallbackAllProducts,
+        upcomingProducts: fallbackUpcomingProducts,
+        allProducts: [],
+        product,
         scheduleOverride: {},
         socialOverride: {},
         timestamp: Date.now(),
@@ -55,58 +106,66 @@ export async function GET() {
     const configRaw = await redis.get(CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || {};
 
-    let activeProducts: StoreProduct[] = [];
-    let archivedProducts: StoreProduct[] = [];
-    let allProducts: StoreProduct[] = [];
+    let activeProducts: PublicStoreProduct[] = [];
+    let archivedProducts: PublicStoreProduct[] = [];
+    let upcomingProducts: PublicStoreProduct[] = [];
+    let allProducts: PublicStoreProduct[] = [];
 
     // Get all active products
     const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
     if (activeRaw) {
-      for (const [k, v] of Object.entries(activeRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || [];
-          activeProducts.push({ ...p, images });
-        }
+      for (const value of Object.values(activeRaw)) {
+        const p = safeParseRedisItem<any>(value);
+        if (p) activeProducts.push(sanitizeProduct(p));
       }
     }
 
     // Get archived products (for catalog page)
     const archivedRaw = await redis.hgetall(ARCHIVED_PRODUCTS_KEY);
     if (archivedRaw) {
-      for (const [k, v] of Object.entries(archivedRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || [];
-          archivedProducts.push({ ...p, images });
-        }
+      for (const value of Object.values(archivedRaw)) {
+        const p = safeParseRedisItem<any>(value);
+        if (p) archivedProducts.push(sanitizeProduct(p));
+      }
+    }
+
+    const upcomingRaw = await redis.hgetall(UPCOMING_PRODUCTS_KEY);
+    if (upcomingRaw) {
+      for (const value of Object.values(upcomingRaw)) {
+        const p = safeParseRedisItem<any>(value);
+        if (p) upcomingProducts.push(sanitizeProduct(p));
       }
     }
 
     // Get all products (for admin)
-    const allRaw = await redis.hgetall(PRODUCTS_KEY);
+    const allRaw = await redis.hgetall('store:products');
     if (allRaw) {
-      for (const [k, v] of Object.entries(allRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || [];
-          allProducts.push({ ...p, images });
-        }
+      for (const value of Object.values(allRaw)) {
+        const p = safeParseRedisItem<any>(value);
+        if (p) allProducts.push(sanitizeProduct(p));
       }
     }
 
-    const hasRedisProducts = activeProducts.length > 0 || archivedProducts.length > 0 || allProducts.length > 0;
+    const hasRedisProducts =
+      activeProducts.length > 0 || archivedProducts.length > 0 || upcomingProducts.length > 0 || allProducts.length > 0;
     if (!hasRedisProducts) {
       activeProducts = fallbackActiveProducts;
       archivedProducts = fallbackArchivedProducts;
+      upcomingProducts = fallbackUpcomingProducts;
       allProducts = fallbackAllProducts;
+    } else {
+      activeProducts = sortProducts(activeProducts);
+      archivedProducts = sortProducts(archivedProducts);
+      upcomingProducts = sortProducts(upcomingProducts);
+      allProducts = sortProducts(allProducts);
     }
+
+    const product = requestedSlug
+      ? activeProducts.find((item) => item.slug === requestedSlug)
+          || archivedProducts.find((item) => item.slug === requestedSlug)
+          || upcomingProducts.find((item) => item.slug === requestedSlug)
+          || null
+      : null;
 
     // Get global schedule override
     const scheduleRaw = await redis.get('config:drop_schedule');
@@ -120,7 +179,9 @@ export async function GET() {
       config,
       activeProducts,
       archivedProducts,
-      allProducts,
+      upcomingProducts,
+      allProducts: [],
+      product,
       scheduleOverride,
       socialOverride,
       timestamp: Date.now(),

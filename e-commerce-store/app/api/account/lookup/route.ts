@@ -7,6 +7,7 @@ import {
   safeParseRedisItem,
   loadProducts,
 } from '@/lib/server-config';
+import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,16 +15,18 @@ const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CA
 
 export async function POST(request: Request) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Login required.' }, { status: 401 });
+    }
+
     const redis = createRedisClient();
     const stripe = createStripeClient();
     if (!redis) return NextResponse.json({ error: 'Database offline.' }, { status: 500 });
 
     const body = await request.json();
-    const email = String(body?.email || '').trim().toLowerCase();
+    const email = sessionUser.email;
     const last4 = String(body?.last4 || '').trim();
-    if (!email || last4.length !== 4) {
-      return NextResponse.json({ error: 'Email and last 4 required.' }, { status: 400 });
-    }
 
     const liveProducts = await loadProducts(redis);
     const allProducts = Object.values(liveProducts) as any[];
@@ -72,7 +75,7 @@ export async function POST(request: Request) {
     // Add active pool entries
     for (const m of poolMatches) {
       const cardLast4 = String(m.parsed.cardLast4 || '');
-      if (cardLast4 && cardLast4 !== last4) continue;
+      if (last4 && cardLast4 && cardLast4 !== last4) continue;
       const key = `${m.variant}|${m.size}`;
       const settled = statusByKey[key];
       const product = allProducts.find((p) => p.name === m.variant || p.id === m.variant);
@@ -141,7 +144,7 @@ export async function POST(request: Request) {
     }
 
     // Also check Stripe for saved cards without entries - but only show if there's actual data
-    if (stripe) {
+    if (stripe && last4.length === 4) {
       try {
         const customers = await stripe.customers.list({ email, limit: 5 });
         for (const c of customers.data) {

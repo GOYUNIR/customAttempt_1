@@ -1,7 +1,43 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+
+function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
+  const mode = String(product?.checkoutMode || '').toUpperCase();
+  if (mode === 'FCFS') return 'FCFS';
+  if (mode === 'RAFFLE') return 'RAFFLE';
+  if (product?.isRaffle === false) return 'FCFS';
+  return 'RAFFLE';
+}
+
+async function countChargedByEmail(redis: any, email: string, variant: string, size: string) {
+  const rows = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
+  let count = 0;
+  for (const row of rows) {
+    try {
+      const parsed = typeof row === 'string' ? JSON.parse(row) : row;
+      if (!parsed) continue;
+      if (String(parsed.type || '') !== 'WINNER_CHARGED') continue;
+      if (String(parsed.email || '').toLowerCase() !== email) continue;
+      if (String(parsed.variant || '') !== variant) continue;
+      if (String(parsed.size || '') !== size) continue;
+      count += 1;
+    } catch {}
+  }
+  return count;
+}
+
+function buildRef(email: string, productId: string, size: string) {
+  const seed = `${email}|${productId}|${size}|${Date.now()}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const token = Math.abs(hash >>> 0).toString(36).toUpperCase();
+  return `GOY-${token.slice(0, 6)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -12,7 +48,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { productId, size, email, address, mode } = body;
+    const { productId, size, email, address } = body;
 
     if (!productId || !size || !email || !address) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
@@ -28,6 +64,33 @@ export async function POST(request: Request) {
     }
     const priceCents = Math.round(priceCat.price * 100);
     const productSlug = String(product.slug || product.id);
+    const variant = String(product.name || product.id);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const checkoutMode = getCheckoutMode(product);
+    const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
+    const orderRef = buildRef(normalizedEmail, String(productId), String(size));
+
+    if (checkoutMode === 'FCFS') {
+      const live = await getLiveProductState(redis, product, String(size));
+      if (!live || live.inventoryRemaining <= 0) {
+        return NextResponse.json({ error: 'Sold out for this size.' }, { status: 409 });
+      }
+      const chargedCount = await countChargedByEmail(redis, normalizedEmail, variant, String(size));
+      if (chargedCount >= maxPerEmail) {
+        return NextResponse.json({ error: `Purchase limit reached (${maxPerEmail} per email).` }, { status: 409 });
+      }
+    }
+
+    await archiveEntry(redis, {
+      email: normalizedEmail,
+      variant,
+      size: String(size),
+      shippingAddress: String(address || '').trim(),
+      id: 'intent',
+      registeredAt: new Date().toISOString(),
+      type: 'INTENT_STARTED',
+      orderRef,
+    } as any);
 
     const origin = (() => {
       const forwardedProto = request.headers.get('x-forwarded-proto');
@@ -49,7 +112,7 @@ export async function POST(request: Request) {
       });
     }
 
-    if (mode === 'raffle') {
+    if (checkoutMode === 'RAFFLE') {
       const session = await stripe.checkout.sessions.create({
         mode: 'setup',
         customer: customer.id,
@@ -61,8 +124,10 @@ export async function POST(request: Request) {
           productSlug,
           variant: String(product.name || ''),
           size: String(size),
-          email: String(email),
+          email: normalizedEmail,
           address: String(address),
+          maxPerEmail: String(maxPerEmail),
+          orderRef,
         },
       });
       return NextResponse.json({ url: session.url, sessionId: session.id });
@@ -92,8 +157,10 @@ export async function POST(request: Request) {
           productSlug,
           variant: String(product.name || ''),
           size: String(size),
-          email: String(email),
+          email: normalizedEmail,
           address: String(address),
+          maxPerEmail: String(maxPerEmail),
+          orderRef,
         },
         payment_intent_data: {
           receipt_email: email,
@@ -102,8 +169,10 @@ export async function POST(request: Request) {
             productSlug,
             variant: String(product.name || ''),
             size: String(size),
-            email: String(email),
+            email: normalizedEmail,
             address: String(address),
+            maxPerEmail: String(maxPerEmail),
+            orderRef,
           },
         },
       });

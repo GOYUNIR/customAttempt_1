@@ -36,6 +36,15 @@ function typeLabel(type: string | undefined) {
   return map[type || ''] || type || 'Unknown';
 }
 
+function stableOrderRef(entry: any, index: number) {
+  const seed = `${entry?.email || 'anon'}|${entry?.variant || 'product'}|${entry?.size || 'size'}|${entry?.registeredAt || index}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return `GOY-${hash.toString(36).toUpperCase().padStart(6, '0').slice(0, 6)}`;
+}
+
 function Bar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max <= 0 ? 0 : Math.round((value / max) * 100);
   return (
@@ -145,7 +154,7 @@ export default function AdminPortal() {
   const [selectedAlertProductId, setSelectedAlertProductId] = useState('');
   const [promoForm, setPromoForm] = useState({
     code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '',
-    timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', firstXWinnersDiscount: '',
+    timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '',
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
@@ -168,17 +177,19 @@ export default function AdminPortal() {
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [productForm, setProductForm] = useState<any>({
     name: '', slug: '', prefix: '', tagline: '', desc: '',
-    productType: 'raffle', // free‑text, can be "raffle", "checkout", etc.
+    checkoutMode: 'RAFFLE',
+    productType: 'raffle',
+    maxPerEmail: 1,
+    maxPerCart: 1,
     isActive: false,       // default HIDDEN (as requested)
     isArchived: false,
     isUpcoming: false,
-    isRaffle: true,
     sortOrder: 0,
     notes: [],
     images: [],
     // NEW: dynamic price categories
     priceCategories: [
-      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
     ]
   });
   const [productMsg, setProductMsg] = useState('');
@@ -187,9 +198,6 @@ export default function AdminPortal() {
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
   const [productActionLoading, setProductActionLoading] = useState(false);
-  const [availableSizes, setAvailableSizes] = useState<string[]>(['Standard']);
-  const [newSizeInput, setNewSizeInput] = useState('');
-
   // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -352,7 +360,6 @@ export default function AdminPortal() {
         if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
-        if (data.settings.availableSizes) setAvailableSizes(data.settings.availableSizes);
       }
       setSettingsMsg('');
     } catch (err: any) {
@@ -411,16 +418,18 @@ export default function AdminPortal() {
   const resetProductForm = () => {
     setProductForm({
       name: '', slug: '', prefix: '', tagline: '', desc: '',
+      checkoutMode: 'RAFFLE',
       productType: 'raffle',
+      maxPerEmail: 1,
+      maxPerCart: 1,
       isActive: false, // default hidden
       isArchived: false,
       isUpcoming: false,
-      isRaffle: true,
       sortOrder: 0,
       notes: [],
       images: [],
       priceCategories: [
-        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
       ]
     });
     setEditingProduct(null);
@@ -434,15 +443,17 @@ export default function AdminPortal() {
     // Ensure priceCategories exists
     const categories = product.priceCategories && Array.isArray(product.priceCategories)
       ? product.priceCategories
-      : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }];
+      : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }];
     setProductForm({
       ...product,
       priceCategories: categories,
       notes: product.notes || [],
       images: product.images || [],
       isUpcoming: product.isUpcoming || false,
-      isRaffle: product.isRaffle !== undefined ? product.isRaffle : true,
-      productType: product.productType || 'raffle',
+      checkoutMode: String(product.checkoutMode || '').toUpperCase() === 'FCFS' || product.isRaffle === false ? 'FCFS' : 'RAFFLE',
+      productType: product.productType || (product.isRaffle === false ? 'fcfs' : 'raffle'),
+      maxPerEmail: Number(product.maxPerEmail || 1),
+      maxPerCart: Number(product.maxPerCart || product.maxPerEmail || 1),
       sortOrder: product.sortOrder || 0,
       // Ensure default hidden if new
       isActive: product.isActive !== undefined ? product.isActive : false,
@@ -456,7 +467,7 @@ export default function AdminPortal() {
       ...prev,
       priceCategories: [
         ...prev.priceCategories,
-        { size: '', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+        { size: '', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
       ]
     }));
   };
@@ -479,6 +490,11 @@ export default function AdminPortal() {
   // ===== Handle image file uploads =====
   const handleImageFiles = async (files: FileList) => {
     const fileArray = Array.from(files);
+    const tooLarge = fileArray.find((file) => file.size > 2 * 1024 * 1024);
+    if (tooLarge) {
+      setProductMsg(`❌ ${tooLarge.name} is larger than 2MB. Please compress before upload.`);
+      return;
+    }
     const dataUrls = await Promise.all(fileArray.map(file => fileToDataURL(file)));
     // Append to existing images, auto‑number from current length+1
     const currentImages = productForm.images || [];
@@ -508,8 +524,11 @@ export default function AdminPortal() {
         notes: productForm.notes || [],
         images: productForm.images || [],
         sortOrder: Number(productForm.sortOrder) || 0,
-        isRaffle: productForm.isRaffle,
-        productType: productForm.productType,
+        checkoutMode: productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE',
+        isRaffle: productForm.checkoutMode !== 'FCFS',
+        productType: productForm.checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
+        maxPerEmail: Math.max(1, Number(productForm.maxPerEmail) || 1),
+        maxPerCart: Math.max(1, Number(productForm.maxPerCart) || Number(productForm.maxPerEmail) || 1),
         // Ensure we send isActive, isArchived, isUpcoming
       };
       // Remove old price50ml/100ml if present (they shouldn't be)
@@ -523,15 +542,21 @@ export default function AdminPortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || 'Non-JSON response from server' };
+      }
       if (res.ok) {
-        setProductMsg(`✅ Product "${data.product.name}" saved successfully!`);
+        setProductMsg(`✅ Product "${data?.product?.name || productForm.name}" saved successfully!`);
         showToast('UPDATED · Product');
         await fetchProducts();
         setShowProductForm(false);
         resetProductForm();
       } else {
-        setProductMsg('❌ Error: ' + (data.error || 'Unknown error'));
+        setProductMsg('❌ Error: ' + (data.error || `HTTP ${res.status}`));
       }
     } catch (err: any) {
       setProductMsg('❌ Error: ' + err.message);
@@ -834,14 +859,13 @@ export default function AdminPortal() {
           timeLimited: promoForm.timeLimited,
           startAt: promoForm.startAt || null,
           endAt: promoForm.endAt || null,
-          firstXWinnersDiscount: Number(promoForm.firstXWinnersDiscount) || 0,
           active: true,
         }),
       });
       const data = await res.json();
       if (res.ok) {
         setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
-        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '', timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', firstXWinnersDiscount: '' });
+        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '', timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '' });
         await fetchPromos();
       } else setPromoMsg(data.error || 'Failed');
     } catch {
@@ -1092,7 +1116,6 @@ export default function AdminPortal() {
           form: formSettings,
           footer: footerSettings,
           productNotes,
-          availableSizes,
         }),
       });
       const data = await res.json();
@@ -1207,7 +1230,6 @@ export default function AdminPortal() {
     { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
     { id: 'users', label: 'Users', badge: users.length || undefined },
     { id: 'promotions', label: 'Promotions' },
-    { id: 'catalog', label: 'Catalog' },
     { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
@@ -1263,7 +1285,6 @@ export default function AdminPortal() {
                 if (t.id === 'settings') fetchSettings();
                 if (t.id === 'products') fetchProducts();
                 if (t.id === 'users') fetchUsers();
-                if (t.id === 'catalog') fetchCatalogSettings();
               }}
               style={{
                 padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
@@ -1507,6 +1528,10 @@ export default function AdminPortal() {
                     <input type="number" value={socialForm.autoIncrementMinHourGap ?? 3} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
+                  <label style={{ fontSize: 11 }}>Max hours between ticks
+                    <input type="number" value={socialForm.autoIncrementMaxHourGap ?? 8} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxHourGap: Number(e.target.value) }))}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
                 </div>
                 <button onClick={saveSocial} style={buttonPrimary}>Save Social Proof</button>
 
@@ -1569,7 +1594,7 @@ export default function AdminPortal() {
               {currentEntries.map((e: any, i: number) => {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
                 const isEditingAddress = editingAddressEntry === entryKey;
-                const orderRef = e.orderRef || `GOY-${new Date(e.registeredAt || 0).getTime().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+                const orderRef = e.orderRef || stableOrderRef(e, i);
                 const displayPrice = e.amountCents ? (e.amountCents / 100).toFixed(2) : (e.listPrice || 0).toFixed(2);
                 
                 return (
@@ -1672,12 +1697,23 @@ export default function AdminPortal() {
                     <input type="text" placeholder="Product description" value={productForm.desc} onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))} style={inputStyle} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Product Type (free text, e.g. raffle, checkout, merch)</label>
-                    <input type="text" placeholder="e.g. raffle" value={productForm.productType} onChange={(e) => setProductForm((p: any) => ({ ...p, productType: e.target.value }))} style={inputStyle} />
+                    <label style={{ fontSize: 10, color: '#888' }}>Checkout Mode</label>
+                    <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => ({ ...p, checkoutMode: e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE' }))} style={inputStyle}>
+                      <option value="RAFFLE">RAFFLE</option>
+                      <option value="FCFS">FCFS</option>
+                    </select>
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
                     <input type="number" placeholder="0" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)</label>
+                    <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email</label>
+                    <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
                   </div>
                 </div>
                 
@@ -1694,10 +1730,6 @@ export default function AdminPortal() {
                     <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked }))} />
                     <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
                   </label>
-                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isRaffle} onChange={(e) => setProductForm((p: any) => ({ ...p, isRaffle: e.target.checked }))} />
-                    <span title="If unchecked, works as direct checkout (no draw).">Raffle Mode</span>
-                  </label>
                 </div>
 
                 {/* ===== PRICE CATEGORIES (DYNAMIC) ===== */}
@@ -1707,7 +1739,7 @@ export default function AdminPortal() {
                     <button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>
                   </div>
                   <p style={{ fontSize: 10, color: '#666', margin: '4px 0 8px' }}>
-                    Define each size/variant. Price and Stripe ID are required. Winner Tiers (comma‑separated) only used in Raffle Mode.
+                    Define each size/variant. Price and Stripe ID are required. Winners per draw controls raffle quantity.
                   </p>
                   {productForm.priceCategories.map((cat: any, idx: number) => (
                     <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', background: '#060606', padding: 8, borderRadius: 6 }}>
@@ -1733,10 +1765,11 @@ export default function AdminPortal() {
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
                       <input
-                        type="text"
-                        placeholder="Winner Tiers (e.g. 2,2,1)"
+                        type="number"
+                        min={1}
+                        placeholder="Winners / draw"
                         value={cat.winnerTiers}
-                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', e.target.value)}
+                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', String(Math.max(1, Number(e.target.value) || 1)))}
                         style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
                       />
                       <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
@@ -1855,7 +1888,7 @@ export default function AdminPortal() {
                           {isArchived ? 'Unarchive' : 'Archive'}
                         </button>
                         <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
-                          {isUpcoming ? 'Remove from Upcoming' : 'Move to Upcoming'}
+                          {isUpcoming ? 'Remove Upcoming' : 'Upcoming'}
                         </button>
                         <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>
@@ -1945,7 +1978,6 @@ export default function AdminPortal() {
               <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Total max uses (0=unlimited)" value={promoForm.maxUsesTotal} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesTotal: e.target.value }))} style={inputStyle} />
-              <input type="number" min="0" placeholder="First X Winners Discount %" value={promoForm.firstXWinnersDiscount} onChange={(e) => setPromoForm((f) => ({ ...f, firstXWinnersDiscount: e.target.value }))} style={inputStyle} />
             </div>
             
             <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -1984,14 +2016,12 @@ export default function AdminPortal() {
                         startAt: p.startAt || '',
                         endAt: p.endAt || '',
                         maxUsesTotal: String(p.maxUsesTotal || ''),
-                        firstXWinnersDiscount: String(p.firstXWinnersDiscount || ''),
                       })} style={buttonGhost}>Edit</button>
                       <button onClick={() => deletePromo(p.code)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                     </div>
                   </div>
                   <div style={{ color: '#888', fontSize: 10 }}>
                     Uses: {p.uses || 0} · Revenue: ${Number(p.revenueAttributed || 0).toFixed(2)}
-                    {p.firstXWinnersDiscount > 0 && ` · First ${p.maxUsesTotal || 'X'} winners: ${p.firstXWinnersDiscount}% extra`}
                     {p.timeLimited && p.startAt && p.endAt && ` · Valid: ${new Date(p.startAt).toLocaleDateString()} - ${new Date(p.endAt).toLocaleDateString()}`}
                   </div>
                 </div>
@@ -2309,19 +2339,6 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                 ))}
-              </div>
-
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Available Sizes</h4>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                {availableSizes.map((size, idx) => (
-                  <div key={idx} style={{ background: '#09090b', padding: '4px 8px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 4 }}>                    <span style={{ fontSize: 11 }}>{size}</span>
-                    <button onClick={() => { const newSizes = availableSizes.filter((_, i) => i !== idx); setAvailableSizes(newSizes); }} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 11 }}>✕</button>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input type="text" placeholder="New size (e.g. 100ml)" value={newSizeInput} onChange={(e) => setNewSizeInput(e.target.value)} style={{ ...inputStyle, padding: 6, fontSize: 11, width: 100 }} />
-                  <button onClick={() => { if (newSizeInput.trim() && !availableSizes.includes(newSizeInput.trim())) { setAvailableSizes([...availableSizes, newSizeInput.trim()]); setNewSizeInput(''); } }} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Add</button>
-                </div>
               </div>
 
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>

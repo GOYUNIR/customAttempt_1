@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress, loadProducts } from '@/lib/server-config';
+import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });
+
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();
-    const email = String(body?.email || '').trim().toLowerCase();
+    const email = sessionUser.email;
     const last4 = String(body?.last4 || '').trim();
     const variant = String(body?.variant || '').trim();
     const size = String(body?.size || '').trim();

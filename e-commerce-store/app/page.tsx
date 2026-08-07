@@ -8,12 +8,13 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
+  const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
   useEffect(() => {
     async function checkProducts() {
       try {
-        const res = await fetch('/api/store/config');
+        const res = await fetch('/api/store');
         const data = await res.json();
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
@@ -27,6 +28,17 @@ export default function HomePage() {
     }
 
     checkProducts();
+
+    const visitorId = typeof window !== 'undefined'
+      ? (window.localStorage.getItem('goyunir-visitor-id') || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
+      : '';
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('goyunir-visitor-id', visitorId);
+      fetch(`/api/analytics/heartbeat?visitorId=${encodeURIComponent(visitorId)}`)
+        .then((res) => res.json())
+        .then((data) => setSocialProofDisplay(Number(data?.socialProofDisplay || 0)))
+        .catch(() => {});
+    }
   }, []);
 
   if (loading) {
@@ -55,6 +67,9 @@ export default function HomePage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Browse catalog</Link>
             {primaryProduct?.slug ? <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Open live drop</Link> : null}
+          </div>
+          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
+            Live raffle entries signal: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
         </section>
 

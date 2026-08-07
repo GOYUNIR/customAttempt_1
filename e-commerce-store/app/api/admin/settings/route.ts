@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
     const { 
       theme, hero, form, footer, 
-      productNotes, availableSizes, 
+      productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview
     } = body;
@@ -49,7 +49,6 @@ export async function POST(request: Request) {
       raffleRegistrationForm: form || current.raffleRegistrationForm || {},
       brandFooterData: footer || current.brandFooterData || {},
       productNotes: productNotes || current.productNotes || {},
-      availableSizes: availableSizes || current.availableSizes || ['Standard'],
       animationMechanics: animationMechanics || current.animationMechanics || {},
       dropSchedule: dropSchedule || current.dropSchedule || {},
       socialProof: socialProof || current.socialProof || {},

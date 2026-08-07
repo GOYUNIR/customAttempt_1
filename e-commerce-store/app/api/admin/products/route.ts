@@ -15,11 +15,13 @@ async function saveProduct(redis: any, product: any) {
   await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
   await redis.hdel(UPCOMING_PRODUCTS_KEY, product.id);
 
-  if (product.isActive && !product.isArchived && !product.isUpcoming) {
+  if (product.isActive) {
     await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  } else if (product.isArchived) {
+  }
+  if (product.isArchived) {
     await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  } else if (product.isUpcoming) {
+  }
+  if (product.isUpcoming) {
     await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   }
   if (product.images && product.images.length > 0) {
@@ -141,7 +143,15 @@ export async function POST(request: Request) {
     isArchived: body.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
     isUpcoming: body.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
     isRaffle: body.isRaffle !== undefined ? body.isRaffle : (existing?.isRaffle ?? true),
+    checkoutMode: (() => {
+      const raw = has('checkoutMode') ? String(body.checkoutMode || '').toUpperCase() : String(existing?.checkoutMode || '').toUpperCase();
+      if (raw === 'FCFS') return 'FCFS';
+      if (raw === 'RAFFLE') return 'RAFFLE';
+      return body.isRaffle === false || existing?.isRaffle === false ? 'FCFS' : 'RAFFLE';
+    })(),
     productType: has('productType') ? String(body.productType || '') : (existing?.productType || 'raffle'),
+    maxPerEmail: has('maxPerEmail') ? Math.max(1, numberOr(body.maxPerEmail, existing?.maxPerEmail || 1)) : Math.max(1, Number(existing?.maxPerEmail || 1)),
+    maxPerCart: has('maxPerCart') ? Math.max(1, numberOr(body.maxPerCart, existing?.maxPerCart || existing?.maxPerEmail || 1)) : Math.max(1, Number(existing?.maxPerCart || existing?.maxPerEmail || 1)),
     sortOrder: has('sortOrder') ? numberOr(body.sortOrder, existing?.sortOrder || 0) : (existing?.sortOrder || 0),
     notes: Array.isArray(body.notes) ? body.notes : (existing?.notes || []),
     images: Array.isArray(body.images) ? body.images : (existing?.images || []),
