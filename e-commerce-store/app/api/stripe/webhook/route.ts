@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic';
 
 const PROMOS_KEY = 'config:promos';
 const ENTRY_EMAIL_SENT_KEY = 'email:entry_confirmed';
+const PRODUCTS_KEY = 'store:products';
 
 function usedEmailsKey(code: string) {
   return `promo:used_emails:${code}`;
@@ -279,6 +280,10 @@ export async function POST(request: Request) {
           live.inventoryRemaining = Math.max(0, Number(live.inventoryRemaining || 0) - qty);
           live.salesCompleted = (live.salesCompleted || 0) + qty;
           await saveLiveState(redis, live);
+          if (live.inventoryRemaining <= 0) {
+            thisProduct.soldOutAt = thisProduct.soldOutAt || new Date().toISOString();
+            await redis.hset(PRODUCTS_KEY, { [thisProduct.id]: JSON.stringify(thisProduct) });
+          }
 
           for (let i = 0; i < qty; i += 1) {
             await archiveEntry(redis, {
@@ -304,6 +309,10 @@ export async function POST(request: Request) {
           }
           live.salesCompleted = (live.salesCompleted || 0) + 1;
           await saveLiveState(redis, live);
+          if (live.inventoryRemaining <= 0) {
+            product.soldOutAt = product.soldOutAt || new Date().toISOString();
+            await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+          }
 
           await archiveEntry(redis, {
             email,

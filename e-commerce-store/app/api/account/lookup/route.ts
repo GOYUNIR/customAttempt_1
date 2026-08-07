@@ -26,8 +26,6 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const email = sessionUser.email;
-    const last4 = String(body?.last4 || '').trim();
-
     const liveProducts = await loadProducts(redis);
     const allProducts = Object.values(liveProducts) as any[];
     const productNames = allProducts.map((p) => p.name);
@@ -74,8 +72,6 @@ export async function POST(request: Request) {
 
     // Add active pool entries
     for (const m of poolMatches) {
-      const cardLast4 = String(m.parsed.cardLast4 || '');
-      if (last4 && cardLast4 && cardLast4 !== last4) continue;
       const key = `${m.variant}|${m.size}`;
       const settled = statusByKey[key];
       const product = allProducts.find((p) => p.name === m.variant || p.id === m.variant);
@@ -104,7 +100,6 @@ export async function POST(request: Request) {
         shippingAddress: m.parsed.shippingAddress || m.parsed.address || '',
         registeredAt: m.parsed.registeredAt || settled?.registeredAt || new Date().toISOString(),
         source: 'active_pool',
-        cardLast4: cardLast4 || last4,
         status,
         shippingStatus: settled?.shippingStatus,
         amountCents: settled?.amountCents,
@@ -131,7 +126,6 @@ export async function POST(request: Request) {
         shippingAddress: s.shippingAddress || '',
         registeredAt: s.registeredAt,
         source: 'ledger',
-        cardLast4: last4,
         status: s.type,
         shippingStatus: s.shippingStatus,
         amountCents: s.amountCents,
@@ -141,35 +135,6 @@ export async function POST(request: Request) {
         expectedAmountCents: s.amountCents,
         orderRef: s.orderRef,
       });
-    }
-
-    // Also check Stripe for saved cards without entries - but only show if there's actual data
-    if (stripe && last4.length === 4) {
-      try {
-        const customers = await stripe.customers.list({ email, limit: 5 });
-        for (const c of customers.data) {
-          const pms = await stripe.paymentMethods.list({ customer: c.id, type: 'card' });
-          const matchPm = pms.data.find((pm) => pm.card?.last4 === last4);
-          if (matchPm) {
-            // Check if this customer has any actual entries
-            const hasRealEntry = entries.some((e) => e.source === 'active_pool' || e.source === 'ledger');
-            if (!hasRealEntry) {
-              // Only show if they have a saved card but no entries - helps them know they need to enter
-              entries.push({
-                variant: '💳 Saved Card',
-                size: '—',
-                shippingAddress: c.metadata?.initialShippingAddress || c.address?.line1 || '',
-                registeredAt: new Date(c.created * 1000).toISOString(),
-                source: 'stripe_only',
-                cardLast4: last4,
-                status: 'NO_ACTIVE_ENTRY',
-                listPrice: undefined,
-                expectedAmountCents: undefined,
-              });
-            }
-          }
-        }
-      } catch {}
     }
 
     // Sort entries by registeredAt (newest first)

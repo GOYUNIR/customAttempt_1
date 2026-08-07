@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 const CART_KEY = 'goyunir-cart';
+const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 
 function getProductPriceCategory(product: any, size: string) {
   const cats = product.priceCategories || [];
@@ -34,6 +35,25 @@ function writeStoredCart(items: any[]) {
   window.dispatchEvent(new CustomEvent('goyunir-cart-updated'));
 }
 
+function readCheckoutDetails() {
+  if (typeof window === 'undefined') return { email: '', address: '' };
+  try {
+    const raw = window.localStorage.getItem(CHECKOUT_DETAILS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      email: typeof parsed?.email === 'string' ? parsed.email : '',
+      address: typeof parsed?.address === 'string' ? parsed.address : '',
+    };
+  } catch {
+    return { email: '', address: '' };
+  }
+}
+
+function writeCheckoutDetails(email: string, address: string) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CHECKOUT_DETAILS_KEY, JSON.stringify({ email, address }));
+}
+
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
@@ -54,6 +74,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [promoMsg, setPromoMsg] = useState('');
   const [promoValid, setPromoValid] = useState<boolean | null>(null);
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
+  const [showPromoField, setShowPromoField] = useState(false);
+  const [countdownPulse, setCountdownPulse] = useState(false);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -63,7 +85,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (data.product) {
         setProduct(data.product);
-        const drawAnchor = data?.config?.dropSchedule?.targetEndDateTime;
+        const drawAnchor = data.product.isUpcoming ? (data.product.goLiveAt || data.product.releaseEndsAt) : (data.product.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime);
         const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
         setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
         const cats = data.product.priceCategories || [];
@@ -120,10 +142,26 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   useEffect(() => {
     setCart(readStoredCart());
     if (typeof window !== 'undefined') {
+      const draft = readCheckoutDetails();
+      if (draft.email) setEmail(draft.email);
+      if (draft.address) setAddress(draft.address);
       const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
-      if (storedPromo) setPromoCode(storedPromo);
+      if (storedPromo) {
+        setPromoCode(storedPromo);
+        setShowPromoField(true);
+      }
     }
   }, []);
+
+  useEffect(() => {
+    writeCheckoutDetails(email, address);
+  }, [email, address]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const code = promoCode.trim().toUpperCase();
+    if (code) window.localStorage.setItem('goyunir-promo-code', code);
+  }, [promoCode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -132,6 +170,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (incomingPromo) {
       window.localStorage.setItem('goyunir-promo-code', incomingPromo);
       setPromoCode(incomingPromo);
+      setShowPromoField(true);
+      fetch('/api/promo/validate/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: incomingPromo }),
+      }).catch(() => {});
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
@@ -223,6 +267,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const minutes = Math.floor((total % 3600) / 60);
       const seconds = total % 60;
       setCountdownLabel(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+      setCountdownPulse((prev) => !prev);
     };
     update();
     const timer = window.setInterval(update, 1000);
@@ -322,7 +367,25 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isRaffleProduct = checkoutMode === 'RAFFLE';
   const fallbackImage = getFallbackImage(product);
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
-  const activeProductLabel = product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now');
+  const inventoryRemaining = Number(product.inventoryRemaining ?? product.totalInventory ?? 0);
+  const totalInventory = Number(product.totalInventory ?? inventoryRemaining ?? 0);
+  const soldOut = product.soldOut === true || (Number.isFinite(inventoryRemaining) && inventoryRemaining <= 0 && totalInventory >= 0);
+  const activeProductLabel = soldOut ? 'Sold out' : (product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now'));
+  const urgencyLabel = soldOut
+    ? 'This release is fully spoken for.'
+    : inventoryRemaining > 0 && inventoryRemaining <= 12
+      ? `Only ${inventoryRemaining} allocations left.`
+      : inventoryRemaining > 0 && inventoryRemaining <= 30
+        ? `${inventoryRemaining} units remain across this release.`
+        : 'Handmade allocation. Low supply by design.';
+  const statusStory = product.isUpcoming
+    ? 'Collectors can still queue interest before the release opens publicly.'
+    : product.isArchived && isRaffleProduct
+      ? 'Archive placement keeps the story visible, and raffle entry can still be reopened for private audiences.'
+      : product.isArchived
+        ? 'Archive placement preserves the release as proof of demand and collectability.'
+        : 'Reserved for collectors moving early, before the allocation tightens further.';
+  const checkoutDisabled = soldOut || !selectedSize || price <= 0;
 
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
@@ -331,11 +394,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ height: 280, background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover` }} />
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{activeProductLabel}</div>
+              <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: soldOut ? '#fbbf24' : configPalette.accentBlue }}>{activeProductLabel}</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>{checkoutMode}</div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0 }}>{product.name}</h1>
             <p style={{ margin: 0, color: '#c9c9d3', fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 16, background: 'rgba(255,255,255,0.02)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.06)'}` }}>
+              <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : '#e5e7eb' }}>{urgencyLabel}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.5 }}>{statusStory}</div>
+            </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {galleryImages.map((image: string, index: number) => (
                 <button key={`${image}-${index}`} onClick={() => setSelectedImageIndex(index)} style={{ width: 54, height: 54, borderRadius: 10, border: selectedImageIndex === index ? `1px solid ${configPalette.accentPurple}` : `1px solid ${configPalette.cardBorder}`, background: `url(${image}) center/cover`, cursor: 'pointer' }} />
@@ -357,8 +424,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
 
           {isRaffleProduct && countdownLabel && (
-            <div style={{ marginBottom: 10, fontSize: 12, color: '#c9c9d3' }}>
-              Raffle ends in: <strong>{countdownLabel}</strong>
+            <div style={{ marginBottom: 10, fontSize: 12, color: '#c9c9d3', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: countdownPulse ? '#facc15' : '#fef08a', boxShadow: countdownPulse ? '0 0 0 4px rgba(250,204,21,0.15)' : '0 0 0 1px rgba(254,240,138,0.08)', transition: 'all 180ms ease' }} />
+              <span>{product.isUpcoming ? 'Release opens in' : 'Raffle ends in'}: <strong>{countdownLabel}</strong></span>
             </div>
           )}
 
@@ -367,9 +435,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-            <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: '#fff' }} />
-            <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: '#17171b', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+          <div style={{ marginBottom: 8 }}>
+            {!showPromoField ? (
+              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: '#fff' }} />
+                <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: '#17171b', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+              </div>
+            )}
           </div>
           {promoMsg && <div style={{ marginBottom: 8, fontSize: 11, color: promoValid === false ? '#fca5a5' : '#86efac' }}>{promoMsg}</div>}
           <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
@@ -379,16 +453,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
-              <button onClick={handleRaffleSubmit} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
-                {isSubmitting ? 'Processing...' : 'Enter raffle'}
+              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : 'Enter allocation'}
               </button>
             )}
             {canCheckoutDirect && (
-              <button onClick={handleDirectCheckout} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#34c759', color: '#000', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
-                {isSubmitting ? 'Processing...' : `Buy now $${price.toFixed(2)}`}
+              <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#d6c29c', color: '#09090b', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
               </button>
             )}
-            {canCheckoutDirect && <button onClick={addToCart} disabled={!selectedSize || price <= 0} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer' }}>Add to cart</button>}
+            {canCheckoutDirect && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to private bag</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
@@ -416,7 +490,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <span>${item.price.toFixed(2)}</span>
               </div>
             ))}
-            <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Open header cart</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Review prepared bag</button>
           </section>
         )}
       </div>

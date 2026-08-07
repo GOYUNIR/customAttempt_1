@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type CartItem = {
   productId: string;
@@ -13,6 +13,7 @@ type CartItem = {
 };
 
 const CART_KEY = 'goyunir-cart';
+const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 
 function readCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
@@ -30,6 +31,25 @@ function writeCart(items: CartItem[]) {
   window.dispatchEvent(new CustomEvent('goyunir-cart-updated'));
 }
 
+function readCheckoutDetails() {
+  if (typeof window === 'undefined') return { email: '', address: '' };
+  try {
+    const raw = window.localStorage.getItem(CHECKOUT_DETAILS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return {
+      email: typeof parsed?.email === 'string' ? parsed.email : '',
+      address: typeof parsed?.address === 'string' ? parsed.address : '',
+    };
+  } catch {
+    return { email: '', address: '' };
+  }
+}
+
+function writeCheckoutDetails(email: string, address: string) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CHECKOUT_DETAILS_KEY, JSON.stringify({ email, address }));
+}
+
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -45,17 +65,28 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
+  const [showPromoField, setShowPromoField] = useState(false);
+  const targetXRef = useRef(0.5);
+  const targetYRef = useRef(0.35);
+  const velocityXRef = useRef(0);
+  const velocityYRef = useRef(0);
+  const lastScrollYRef = useRef(0);
+  const lastScrollAtRef = useRef(0);
 
   useEffect(() => {
     const sync = () => setCart(readCart());
     sync();
+    const draft = readCheckoutDetails();
+    if (draft.email) setCheckoutEmail(draft.email);
+    if (draft.address) setCheckoutAddress(draft.address);
     const open = () => setCartOpen(true);
     const onScroll = () => setScrollY(window.scrollY || 0);
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
     const onPointer = (event: PointerEvent) => {
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
-      setPointerX(Math.max(0, Math.min(1, event.clientX / width)));
-      setPointerY(Math.max(0, Math.min(1, event.clientY / height)));
+      targetXRef.current = clamp(event.clientX / width, 0.04, 0.96);
+      targetYRef.current = clamp(event.clientY / height, 0.06, 0.94);
       lastInteraction = Date.now();
     };
     const onTouchMove = (event: TouchEvent) => {
@@ -63,8 +94,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (!touch) return;
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
-      setPointerX(Math.max(0, Math.min(1, touch.clientX / width)));
-      setPointerY(Math.max(0, Math.min(1, touch.clientY / height)));
+      targetXRef.current = clamp(touch.clientX / width, 0.04, 0.96);
+      targetYRef.current = clamp(touch.clientY / height, 0.06, 0.94);
       lastInteraction = Date.now();
     };
 
@@ -74,34 +105,45 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     let idleTargetY = 0.42;
     let nextIdleRetargetAt = Date.now() + 2300;
     const animateIdle = () => {
-      const idleFor = Date.now() - lastInteraction;
-      if (idleFor > 1800) {
-        const now = Date.now();
+      const now = Date.now();
+      const idleFor = now - lastInteraction;
+      const scrollMomentumAge = now - lastScrollAtRef.current;
+      if (scrollMomentumAge < 1400) {
+        targetXRef.current = clamp(targetXRef.current + velocityXRef.current, 0.05, 0.95);
+        targetYRef.current = clamp(targetYRef.current + velocityYRef.current, 0.08, 0.92);
+        velocityXRef.current *= 0.93;
+        velocityYRef.current *= 0.93;
+      }
+      if (idleFor > 950) {
         if (now >= nextIdleRetargetAt) {
           idleTargetX = 0.18 + Math.random() * 0.64;
           idleTargetY = 0.14 + Math.random() * 0.68;
           nextIdleRetargetAt = now + 1600 + Math.random() * 2600;
         }
         const t = now / 1000;
-        const microDriftX = Math.sin(t * 1.3) * 0.018 + Math.sin(t * 2.6) * 0.007;
-        const microDriftY = Math.cos(t * 1.15) * 0.016 + Math.cos(t * 2.2) * 0.006;
-        setPointerX((prev) => {
-          const eased = prev + (idleTargetX - prev) * 0.028 + microDriftX;
-          return Math.max(0.05, Math.min(0.95, eased));
-        });
-        setPointerY((prev) => {
-          const eased = prev + (idleTargetY - prev) * 0.028 + microDriftY;
-          return Math.max(0.08, Math.min(0.92, eased));
-        });
+        const microDriftX = Math.sin(t * 1.1) * 0.014 + Math.sin(t * 2.1) * 0.005;
+        const microDriftY = Math.cos(t * 1.05) * 0.013 + Math.cos(t * 1.8) * 0.005;
+        targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.02 + microDriftX, 0.05, 0.95);
+        targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.02 + microDriftY, 0.08, 0.92);
       }
+      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.065, 0.05, 0.95));
+      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.065, 0.08, 0.92));
       rafId = window.requestAnimationFrame(animateIdle);
     };
 
     const onScrollMotion = () => {
       const maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
       const progress = (window.scrollY || 0) / maxScroll;
-      setPointerY(Math.max(0.1, Math.min(0.9, 0.15 + progress * 0.7)));
-      setPointerX((prev) => Math.max(0.08, Math.min(0.92, prev + (Math.sin(progress * Math.PI * 8) * 0.018))));
+      const now = Date.now();
+      const deltaY = window.scrollY - lastScrollYRef.current;
+      const deltaT = Math.max(16, now - lastScrollAtRef.current || 16);
+      const scrollVelocity = deltaY / deltaT;
+      velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.22, -0.05, 0.05);
+      velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.012 + scrollVelocity * 0.03, -0.03, 0.03);
+      targetYRef.current = clamp(0.15 + progress * 0.7, 0.1, 0.9);
+      targetXRef.current = clamp(0.5 + Math.sin(progress * Math.PI * 4) * 0.12, 0.08, 0.92);
+      lastScrollYRef.current = window.scrollY || 0;
+      lastScrollAtRef.current = now;
       lastInteraction = Date.now();
     };
 
@@ -110,11 +152,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     if (incomingPromo) {
       window.localStorage.setItem('goyunir-promo-code', incomingPromo);
       setPromoCode(incomingPromo);
-      setBannerMessage(`Promo ${incomingPromo} applied from your link.`);
+      setShowPromoField(true);
+      setBannerMessage(`Promoter credit ${incomingPromo} is locked for this session.`);
+      fetch('/api/promo/validate/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: incomingPromo }),
+      }).catch(() => {});
       window.history.replaceState({}, '', window.location.pathname);
     } else {
       const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
-      if (storedPromo) setPromoCode(storedPromo);
+      if (storedPromo) {
+        setPromoCode(storedPromo);
+        setShowPromoField(true);
+      }
     }
 
     fetch('/api/store')
@@ -144,6 +195,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       window.cancelAnimationFrame(rafId);
     };
   }, []);
+
+  useEffect(() => {
+    writeCheckoutDetails(checkoutEmail, checkoutAddress);
+  }, [checkoutEmail, checkoutAddress]);
 
   const total = cart.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
   const hasItems = cart.length > 0;
@@ -349,22 +404,26 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     placeholder="Email"
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
                   />
-                  <input
-                    type="text"
-                    value={promoCode}
-                    onChange={(e) => {
-                      const next = e.target.value.toUpperCase().trim();
-                      setPromoCode(next);
-                      window.localStorage.setItem('goyunir-promo-code', next);
-                    }}
-                    placeholder="Promo code (optional)"
-                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
-                  />
+                  {!showPromoField ? (
+                    <button onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+                  ) : (
+                    <input
+                      type="text"
+                      value={promoCode}
+                      onChange={(e) => {
+                        const next = e.target.value.toUpperCase().trim();
+                        setPromoCode(next);
+                        window.localStorage.setItem('goyunir-promo-code', next);
+                      }}
+                      placeholder="Promo code (optional)"
+                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                    />
+                  )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: encryptionHealthy ? '#22c55e' : '#ef4444', boxShadow: `0 0 0 2px ${encryptionHealthy ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)'}` }} />
                     {encryptionHealthy ? 'Encrypted checkout' : 'Encryption check failed'}
                   </div>
-                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>Use browser autofill or paste the full shipping address.</div>
+                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>These details stay remembered across product and cart checkout so collectors do not need to repeat themselves.</div>
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

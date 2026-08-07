@@ -11,6 +11,7 @@ export default function HomePage() {
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
   const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
   const [raffleCountdown, setRaffleCountdown] = useState('');
+  const [countdownPulse, setCountdownPulse] = useState(false);
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
   useEffect(() => {
@@ -22,7 +23,8 @@ export default function HomePage() {
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
         setActiveProducts(sorted);
-        const drawAnchor = data?.config?.dropSchedule?.targetEndDateTime;
+        const firstRaffle = sorted.find((product: any) => String(product.checkoutMode || '').toUpperCase() === 'RAFFLE');
+        const drawAnchor = firstRaffle?.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime;
         const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
         setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
       } catch (err) {
@@ -63,6 +65,7 @@ export default function HomePage() {
       const minutes = Math.floor((total % 3600) / 60);
       const seconds = total % 60;
       setRaffleCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+      setCountdownPulse((prev) => !prev);
     };
     update();
     const timer = window.setInterval(update, 1000);
@@ -89,20 +92,21 @@ export default function HomePage() {
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
-          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02 }}>Luxury drops engineered for fast taps, fast trust, and zero friction.</h1>
+          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02 }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
           <p style={{ color: '#c8c8cf', fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
-            Built for raffle launches, premium FCFS releases, and mobile-first social traffic that decides in seconds.
+            Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
           </p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Browse catalog</Link>
-            {primaryProduct?.slug ? <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Open live drop</Link> : null}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {primaryProduct?.slug ? <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Enter the active release</Link> : <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>View the release ledger</Link>}
+            <span style={{ fontSize: 11, color: '#9ca3af' }}>Low supply. Fast conversion. Quiet exclusivity.</span>
           </div>
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
             Live raffle entries signal: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
           {hasRaffleProduct && raffleCountdown && (
-            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.015)', fontSize: 12, color: '#d4d4d8' }}>
-              Raffle countdown: <strong>{raffleCountdown}</strong>
+            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.015)', fontSize: 12, color: '#d4d4d8', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: countdownPulse ? '#facc15' : '#fef08a', boxShadow: countdownPulse ? '0 0 0 4px rgba(250,204,21,0.15)' : '0 0 0 1px rgba(254,240,138,0.08)', transition: 'all 180ms ease' }} />
+              <span>Raffle ends in: <strong>{raffleCountdown}</strong></span>
             </div>
           )}
         </section>
@@ -122,6 +126,7 @@ export default function HomePage() {
                       <div style={{ fontSize: 12, color: configPalette.accentPurple, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '2px' }}>Primary release</div>
                       <div style={{ fontSize: 18, fontFamily: 'serif', marginBottom: 4 }}>{primaryProduct.name}</div>
                       <div style={{ fontSize: 12, color: '#b8b8c0', lineHeight: 1.5 }}>{primaryProduct.tagline || primaryProduct.desc}</div>
+                      <div style={{ fontSize: 11, color: '#d6c29c', marginTop: 8 }}>Low allocation. Handmade supply. High intent traffic.</div>
                     </div>
                   </div>
                 </Link>
@@ -135,7 +140,7 @@ export default function HomePage() {
                           <div style={{ fontSize: 13, fontWeight: 700 }}>{product.name}</div>
                           <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 2 }}>{product.tagline || product.desc}</div>
                         </div>
-                        <div style={{ fontSize: 12, color: configPalette.accentBlue }}>Open →</div>
+                        <div style={{ fontSize: 12, color: configPalette.accentBlue }}>Enter →</div>
                       </div>
                     </Link>
                   ))}
@@ -146,9 +151,9 @@ export default function HomePage() {
         ) : (
           <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '20px 18px', background: '#0e0e10' }}>
             <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue, marginBottom: 8 }}>Release feed</div>
-            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px' }}>The next drop is not live yet.</h2>
-            <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>This space fills automatically when a raffle or direct release is published from the admin portal.</p>
-            <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>View catalog</Link>
+            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px' }}>No live release this second.</h2>
+            <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Upcoming and archived pieces still carry the release story, countdowns, and collector context while the next allocation warms up.</p>
+            <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>See upcoming and archive</Link>
           </section>
         )}
 

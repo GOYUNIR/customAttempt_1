@@ -10,6 +10,8 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
+const PRODUCTS_KEY = 'store:products';
+
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -96,6 +98,15 @@ export async function POST(request: Request) {
     }
 
     await saveLiveState(redis, live);
+
+    if (product && product.id) {
+      if (live.inventoryRemaining <= 0) {
+        product.soldOutAt = product.soldOutAt || new Date().toISOString();
+      } else if (product.soldOutAt) {
+        product.soldOutAt = '';
+      }
+      await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+    }
 
     return NextResponse.json({
       success: true,

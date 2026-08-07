@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createRedisClient, listLiveStates, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,20 @@ type PublicStoreProduct = {
   notes: { label: string; name: string; text: string }[];
   images: string[];
   priceCategories: PublicPriceCategory[];
+  totalInventory?: number;
+  inventoryRemaining?: number;
+  soldOut?: boolean;
+  goLiveAt?: string;
+  releaseEndsAt?: string;
+  soldOutBehavior?: string;
+  soldOutArchiveDelayHours?: number;
+  soldOutAt?: string;
 };
+
+function toMs(value: unknown) {
+  const parsed = typeof value === 'string' && value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
   const mode = String(product?.checkoutMode || '').toUpperCase();
@@ -60,6 +73,14 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
       size: String(category?.size || 'Standard'),
       price: Math.max(0, Number(category?.price || 0)),
     })),
+    totalInventory: Math.max(0, Number(raw?.totalInventory || 0)),
+    inventoryRemaining: undefined,
+    soldOut: false,
+    goLiveAt: String(raw?.goLiveAt || ''),
+    releaseEndsAt: String(raw?.releaseEndsAt || ''),
+    soldOutBehavior: String(raw?.soldOutBehavior || 'stay_visible'),
+    soldOutArchiveDelayHours: Math.max(0, Number(raw?.soldOutArchiveDelayHours || 0)),
+    soldOutAt: String(raw?.soldOutAt || ''),
   };
 }
 
@@ -91,6 +112,15 @@ export async function GET(request: Request) {
     // Get store config
     const configRaw = await redis.get(STORE_CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || {};
+    const liveStates = await listLiveStates(redis);
+    const liveStatesByProduct = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
+    for (const state of liveStates) {
+      const existing = liveStatesByProduct.get(state.productId) || { inventoryRemaining: 0, totalInventory: 0 };
+      liveStatesByProduct.set(state.productId, {
+        inventoryRemaining: existing.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
+        totalInventory: existing.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
+      });
+    }
 
     let allProducts: PublicStoreProduct[] = [];
     const allRaw = await redis.hgetall('store:products');
@@ -102,12 +132,33 @@ export async function GET(request: Request) {
     }
 
     allProducts = sortProducts(allProducts);
-    const activeProducts = allProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
-    const archivedProducts = allProducts.filter((item) => item.isArchived);
-    const upcomingProducts = allProducts.filter((item) => item.isUpcoming && !item.isArchived);
+    const now = Date.now();
+    const lifecycleProducts = allProducts.map((item) => {
+      const inventory = liveStatesByProduct.get(item.id);
+      const inventoryRemaining = inventory ? inventory.inventoryRemaining : Math.max(0, Number(item.totalInventory || 0));
+      const totalInventory = inventory ? inventory.totalInventory : Math.max(0, Number(item.totalInventory || 0));
+      const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
+      const goLiveAtMs = toMs(item.goLiveAt);
+      const soldOutAtMs = toMs(item.soldOutAt);
+      const shouldGoLive = item.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;
+      const shouldArchiveFromSoldOut = soldOut && item.soldOutBehavior === 'archive_now';
+      const shouldArchiveAfterDelay = soldOut && item.soldOutBehavior === 'archive_after_delay' && soldOutAtMs !== null && now >= soldOutAtMs + (Math.max(0, Number(item.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000);
+      return {
+        ...item,
+        inventoryRemaining,
+        totalInventory,
+        soldOut,
+        isUpcoming: shouldGoLive ? false : item.isUpcoming,
+        isArchived: shouldArchiveFromSoldOut || shouldArchiveAfterDelay ? true : item.isArchived,
+        isActive: shouldGoLive ? true : item.isActive,
+      };
+    });
+    const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
+    const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
+    const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
 
     const product = requestedSlug
-      ? allProducts.find((item) => item.slug === requestedSlug)
+      ? lifecycleProducts.find((item) => item.slug === requestedSlug)
           || null
       : null;
 

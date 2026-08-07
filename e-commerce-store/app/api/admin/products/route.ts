@@ -79,6 +79,8 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
   product.isActive = toBool(product.isActive, false);
   product.isArchived = toBool(product.isArchived, false);
   product.isUpcoming = toBool(product.isUpcoming, false);
+  if (product.isArchived) product.isUpcoming = false;
+  if (product.isUpcoming) product.isArchived = false;
 
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
@@ -156,6 +158,7 @@ export async function POST(request: Request) {
     const product = allProducts[body.id];
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     product.isArchived = true;
+    product.isUpcoming = false;
     // DO NOT change isActive – archiving should not hide the product
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
@@ -181,6 +184,7 @@ export async function POST(request: Request) {
     const product = allProducts[body.id];
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     product.isUpcoming = true;
+    product.isArchived = false;
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
     return NextResponse.json({ success: true, product });
@@ -242,6 +246,11 @@ export async function POST(request: Request) {
     maxRaffleAllocationLimit: has('maxRaffleAllocationLimit') ? numberOr(body.maxRaffleAllocationLimit, existing?.maxRaffleAllocationLimit || 0) : (existing?.maxRaffleAllocationLimit || 0),
     totalInventory: has('totalInventory') ? numberOr(body.totalInventory, existing?.totalInventory || 0) : (existing?.totalInventory || 0),
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
+    goLiveAt: has('goLiveAt') ? String(body.goLiveAt || '') : (existing?.goLiveAt || ''),
+    releaseEndsAt: has('releaseEndsAt') ? String(body.releaseEndsAt || '') : (existing?.releaseEndsAt || ''),
+    soldOutBehavior: has('soldOutBehavior') ? String(body.soldOutBehavior || '') : (existing?.soldOutBehavior || 'stay_visible'),
+    soldOutArchiveDelayHours: has('soldOutArchiveDelayHours') ? Math.max(0, numberOr(body.soldOutArchiveDelayHours, existing?.soldOutArchiveDelayHours || 0)) : Math.max(0, Number(existing?.soldOutArchiveDelayHours || 0)),
+    soldOutAt: has('soldOutAt') ? String(body.soldOutAt || '') : (existing?.soldOutAt || ''),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

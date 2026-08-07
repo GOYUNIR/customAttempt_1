@@ -9,6 +9,7 @@ interface CatalogItem {
   name: string;
   status: string;
   eta?: string;
+  goLiveAt?: string;
   image?: string;
   description?: string;
   availableFrom?: string;
@@ -30,6 +31,25 @@ export default function CatalogPage() {
   const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
   const [archiveScents, setArchiveScents] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [clock, setClock] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const formatCountdown = (value?: string) => {
+    const target = value ? new Date(value).getTime() : NaN;
+    if (!Number.isFinite(target)) return null;
+    const diff = target - clock;
+    if (diff <= 0) return 'Live now';
+    const total = Math.floor(diff / 1000);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  };
 
   useEffect(() => {
     fetch('/api/catalog/status')
@@ -107,7 +127,7 @@ export default function CatalogPage() {
             <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.textMain }}>{item.name}</div>
             <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>
               {item.status}
-              {item.eta ? ` · ${item.eta}` : ''}
+              {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
             </div>
           </div>
         </button>
@@ -126,10 +146,20 @@ export default function CatalogPage() {
       }}
     >
       <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '22px', fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
-        <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
-          Built for attention-scarce traffic: live now, what is next, and what already moved.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div>
+            <h1 style={{ fontSize: '22px', fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
+            <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: 0 }}>
+              Built for attention-scarce traffic: live now, what is next, and what already moved.
+            </p>
+          </div>
+          <Link href="/" style={{ padding: '10px 14px', borderRadius: 999, background: '#f3efe6', color: '#09090b', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+            View what's active
+          </Link>
+        </div>
+        <div style={{ marginBottom: 24, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8', lineHeight: 1.6 }}>
+          Upcoming and archived raffle pages can still carry countdown context, collector narrative, and private-entry energy when a brand wants the release story to stay alive.
+        </div>
 
         {activeDrops.length > 0 && (
           <>
@@ -161,6 +191,7 @@ export default function CatalogPage() {
                   >
                     <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{drop.name}</div>
                     <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>{drop.tagline}</div>
+                    <div style={{ fontSize: '10px', color: '#d6c29c', marginTop: 6 }}>Limited handmade supply. Open while allocation remains.</div>
                   </div>
                 </Link>
               ))}

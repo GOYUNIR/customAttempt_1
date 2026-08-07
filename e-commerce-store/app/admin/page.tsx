@@ -213,6 +213,10 @@ export default function AdminPortal() {
     isActive: false,       // default HIDDEN (as requested)
     isArchived: false,
     isUpcoming: false,
+    goLiveAt: '',
+    releaseEndsAt: '',
+    soldOutBehavior: 'stay_visible',
+    soldOutArchiveDelayHours: 24,
     sortOrder: 0,
     notes: [],
     images: [],
@@ -466,6 +470,10 @@ export default function AdminPortal() {
       isActive: false, // default hidden
       isArchived: false,
       isUpcoming: false,
+      goLiveAt: '',
+      releaseEndsAt: '',
+      soldOutBehavior: 'stay_visible',
+      soldOutArchiveDelayHours: 24,
       sortOrder: 0,
       notes: [],
       images: [],
@@ -1521,6 +1529,7 @@ export default function AdminPortal() {
               <div style={cardStyle}>
                 <h3 style={{ margin: '0 0 8px', fontSize: 13, textTransform: 'uppercase' }}>Automation</h3>
                 <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>Schedule and social proof settings — overrides goyunir.config.ts live, no redeploy needed.</p>
+                <p style={{ fontSize: 11, color: '#b8b8c0', marginTop: 0, marginBottom: 12 }}>Global schedule is now just the fallback. Each product can also carry its own go-live time, countdown end, and sold-out handling rules from Product Management.</p>
                 
                 <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Drop Schedule</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -1735,7 +1744,7 @@ export default function AdminPortal() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage all products. <strong>New products default to hidden</strong> – publish them by setting "Active" to true. Archiving or marking as Upcoming does NOT hide the product; it just categorises it.
+              Manage all products. <strong>New products default to hidden</strong> – publish them by setting "Active" to true. Archived and Upcoming are now mutually exclusive, each product can carry its own go-live/countdown timing, and sold-out handling can either stay visible as proof of demand or auto-archive later.
               {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
             </p>
             
@@ -1790,6 +1799,26 @@ export default function AdminPortal() {
                     <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email</label>
                     <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
                   </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Go live at (upcoming auto-activates)</label>
+                    <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at</label>
+                    <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Sold-out behavior</label>
+                    <select value={productForm.soldOutBehavior || 'stay_visible'} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutBehavior: e.target.value }))} style={inputStyle}>
+                      <option value="stay_visible">Stay visible as social proof</option>
+                      <option value="archive_now">Archive immediately</option>
+                      <option value="archive_after_delay">Archive after delay</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#888' }}>Archive delay after sold out (hours)</label>
+                    <input type="number" min={0} value={productForm.soldOutArchiveDelayHours ?? 24} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutArchiveDelayHours: Number(e.target.value) }))} style={inputStyle} />
+                  </div>
                 </div>
                 
                 <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -1798,13 +1827,17 @@ export default function AdminPortal() {
                     <span title="If checked, product is visible on the storefront (if not hidden by other flags).">Active (visible)</span>
                   </label>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked }))} />
+                    <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked, isUpcoming: e.target.checked ? false : p.isUpcoming }))} />
                     <span title="Moves to archive section – product remains visible.">Archived</span>
                   </label>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked }))} />
+                    <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked, isArchived: e.target.checked ? false : p.isArchived }))} />
                     <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
                   </label>
+                </div>
+
+                <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: '#060606', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.6 }}>
+                  RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Sold-out hold keeps proof of demand visible before archiving.
                 </div>
 
                 {/* ===== PRICE CATEGORIES (DYNAMIC) ===== */}
@@ -1944,12 +1977,18 @@ export default function AdminPortal() {
                           {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
                           {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
+                          {product.soldOutBehavior === 'archive_after_delay' && <span style={{ color: '#d6c29c', marginLeft: 8 }}>● Delayed archive</span>}
                           {isHidden && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
                           <span style={{ color: '#888', marginLeft: 8 }}>Order: {product.sortOrder || 0}</span>
                         </div>
                         {product.priceCategories && (
                           <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>
                             Sizes: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
+                          </div>
+                        )}
+                        {(product.goLiveAt || product.releaseEndsAt) && (
+                          <div style={{ fontSize: 9, color: '#7c8596', marginTop: 4 }}>
+                            {product.goLiveAt ? `Live at ${product.goLiveAt}` : ''}{product.goLiveAt && product.releaseEndsAt ? ' · ' : ''}{product.releaseEndsAt ? `Ends ${product.releaseEndsAt}` : ''}
                           </div>
                         )}
                       </div>
