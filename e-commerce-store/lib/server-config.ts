@@ -438,6 +438,7 @@ export async function trackPromoClick(redis: Redis, code: string) {
   return true;
 }
 
+// Add this function to your existing server-config.ts
 export async function loadProducts(redis: any): Promise<Record<string, any>> {
   const raw = await redis.hgetall('store:products');
   if (!raw) return {};

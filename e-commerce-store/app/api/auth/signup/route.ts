@@ -8,63 +8,27 @@ function hashPassword(password: string, salt: string): string {
 
 export async function POST(request: Request) {
   const { email, password } = await request.json();
-  if (!email || !password || password.length < 6) {
-    return NextResponse.json({ error: 'Email and password (min 6 chars) required' }, { status: 400 });
+  if (!email || !password) {
+    return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
   }
-
   const redis = createRedisClient();
-  if (!redis) {
-    return NextResponse.json({ error: 'System error' }, { status: 500 });
-  }
+  if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
-  // Check if user exists
+  // check if user exists
   const raw = await redis.hgetall('store:users');
+  let existing = false;
   if (raw) {
-    for (const [key, value] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(value);
-      if (u && u.email === email) {
-        return NextResponse.json({ error: 'Email already registered' }, { status: 400 });
-      }
+    for (const [k, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && u.email === email) { existing = true; break; }
     }
   }
+  if (existing) return NextResponse.json({ error: 'User already exists' }, { status: 400 });
 
-  // Create user
-  const userId = `user_${Date.now().toString(36)}`;
   const salt = randomBytes(16).toString('hex');
   const hashed = hashPassword(password, salt);
-  const user = {
-    id: userId,
-    email,
-    password: `${salt}:${hashed}`,
-    role: 'customer',
-    rewards: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  await redis.hset('store:users', { [userId]: JSON.stringify(user) });
-
-  // Create session and log them in automatically
-  const token = randomBytes(32).toString('hex');
-  const sessionKey = `session:${token}`;
-  const SESSION_DURATION = 7 * 24 * 60 * 60;
-  const expiresAt = Date.now() + SESSION_DURATION * 1000;
-  await redis.setex(sessionKey, SESSION_DURATION, JSON.stringify({
-    userId: user.id,
-    email: user.email,
-    role: user.role,
-    rewards: user.rewards || 0,
-    expiresAt,
-  }));
-
-  const response = NextResponse.json({ success: true, user: { id: user.id, email: user.email, role: user.role, rewards: user.rewards || 0 } });
-  response.cookies.set('goyunir_session', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: SESSION_DURATION,
-    path: '/',
-  });
-
-  return response;
+  const id = `usr_${Date.now().toString(36)}`;
+  const user = { id, email, password: `${salt}:${hashed}`, role: 'customer', rewards: 0, createdAt: new Date().toISOString() };
+  await redis.hset('store:users', { [id]: JSON.stringify(user) });
+  return NextResponse.json({ success: true, user: { id, email, role: 'customer' } });
 }

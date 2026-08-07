@@ -1,1247 +1,309 @@
 'use client';
 
-import Link from 'next/link';
-import { useRef, useEffect, useState, useMemo } from 'react';
-import { useScroll, useTransform, motion, AnimatePresence } from 'framer-motion';
-import { useSearchParams } from 'next/navigation';
-import { EntryFormState, isValidEmail, normalizeEntryForm } from '@/lib/validation';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
-interface TimeLeftState {
-  d: number;
-  h: number;
-  m: number;
-  s: number;
-  expired: boolean;
+function getProductPriceCategory(product: any, size: string) {
+  const cats = product.priceCategories || [];
+  return cats.find((c: any) => c.size === size) || null;
 }
-
-interface StoreProduct {
-  id: string;
-  name: string;
-  slug: string;
-  prefix: string;
-  tagline: string;
-  desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
-  maxRaffleAllocationLimit: number;
-  isActive: boolean;
-  isArchived: boolean;
-  isUpcoming: boolean;
-  isRaffle: boolean;
-  productType: string;
-  sortOrder: number;
-  notes: { label: string; name: string; text: string }[];
-  images: string[];
-  totalInventory: number;
-  winnerTiers: number[];
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-interface StoreConfig {
-  themeColors: {
-    primaryBackground: string;
-    cardBackground: string;
-    cardBorder: string;
-    accentPurple: string;
-    accentBlue: string;
-    textMain: string;
-    textMuted: string;
-    checkoutCtaButton: string;
-  };
-  availableSizes: string[];
-  homeRedirectSlug?: string;
-  dropSchedule: {
-    mode: 'fixed' | 'daily' | 'weekly' | 'monthly';
-    timezone: string;
-    targetEndDateTime: string;
-    drawDayOfWeek: number;
-    drawDayOfMonth: number;
-    drawHour: number;
-    drawMinute: number;
-    drawSecond?: number;
-    countdownExpiredText: string;
-    daysLabel: string;
-    hoursLabel: string;
-    minutesLabel: string;
-    secondsLabel: string;
-    winnersPer50ml: number;
-    winnersPer100ml: number;
-  };
-  animationMechanics: {
-    totalFramesToLoad: number;
-    maxRotationDegrees: number;
-    spinReverseOnAlternatingProgress: boolean;
-    spinCyclesTopToCheckout: number;
-  };
-  raffleRegistrationForm: {
-    titleHeader: string;
-    emailLabel: string;
-    emailPlaceholder: string;
-    addressLabel: string;
-    addressPlaceholder: string;
-    submitButtonText: string;
-    submitButtonLoadingText: string;
-  };
-  heroContent: {
-    eyebrow: string;
-    headline: string;
-    body: string;
-    ctaLabel: string;
-  };
-  socialProof: {
-    label: string;
-    baseCount: number;
-    caption: string;
-    autoIncrementEnabled: boolean;
-    autoIncrementChancePerHeartbeat: number;
-    autoIncrementAmount: number;
-    autoIncrementMaxPerDay: number;
-    autoIncrementMinHourGap: number;
-  };
-  brandFooterData: {
-    instagramLink: string;
-    tiktokLink: string;
-    supportEmail: string;
-    shippingReturnPolicyText: string;
-    corporateEntityCopyright: string;
-  };
-  catalogPreview: {
-    upcomingDrops: any[];
-    archiveScents: any[];
-  };
-  productCatalog: StoreProduct[];
-}
-
-const DEFAULT_CONFIG: StoreConfig = {
-  themeColors: {
-    primaryBackground: '#0a0a0a',
-    cardBackground: '#111111',
-    cardBorder: '#222222',
-    accentPurple: '#a855f7',
-    accentBlue: '#3b82f6',
-    textMain: '#ffffff',
-    textMuted: '#888888',
-    checkoutCtaButton: '#635bff',
-  },
-  availableSizes: ['50ml'],
-  homeRedirectSlug: 'elysian-white',
-  dropSchedule: {
-    mode: 'daily',
-    timezone: 'America/Los_Angeles',
-    targetEndDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', 'T') + ':00',
-    drawDayOfWeek: 6,
-    drawDayOfMonth: 1,
-    drawHour: 21,
-    drawMinute: 0,
-    drawSecond: 0,
-    countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
-    daysLabel: 'd',
-    hoursLabel: 'h',
-    minutesLabel: 'm',
-    secondsLabel: 's',
-    winnersPer50ml: 10,
-    winnersPer100ml: 5,
-  },
-  animationMechanics: {
-    totalFramesToLoad: 29,
-    maxRotationDegrees: 360,
-    spinReverseOnAlternatingProgress: false,
-    spinCyclesTopToCheckout: 1,
-  },
-  raffleRegistrationForm: {
-    titleHeader: 'Join The Allocation Draw',
-    emailLabel: 'Contact Email Address',
-    emailPlaceholder: 'name@domain.com',
-    addressLabel: 'Full Shipping Destination',
-    addressPlaceholder: '123 Luxury Dr, New York, NY',
-    submitButtonText: '🏆 Secure Entry Allocation Ticket',
-    submitButtonLoadingText: 'Encrypting Entry Base...',
-  },
-  heroContent: {
-    eyebrow: 'The Architecture of Scent',
-    headline: 'A drop that moves faster than attention itself.',
-    body: 'We design fragrances that move faster than time itself.',
-    ctaLabel: '↓ Scroll To Explore',
-  },
-  socialProof: {
-    label: 'Limited drop access',
-    baseCount: 0,
-    caption: 'Hype is compounding fast—reserve now before inventory closes.',
-    autoIncrementEnabled: true,
-    autoIncrementChancePerHeartbeat: 0.15,
-    autoIncrementAmount: 1,
-    autoIncrementMaxPerDay: 4,
-    autoIncrementMinHourGap: 3,
-  },
-  brandFooterData: {
-    instagramLink: 'https://instagram.com/goyunir',
-    tiktokLink: 'https://tiktok.com/goyunir',
-    supportEmail: 'goyunir.support@gmail.com',
-    shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
-  },
-  catalogPreview: {
-    upcomingDrops: [],
-    archiveScents: [],
-  },
-  productCatalog: [],
-};
-
-const PREFILL_KEY = 'goyunir_entry_prefill';
-
-const paperTexture: React.CSSProperties = {
-  backgroundColor: '#0d0d0f',
-  backgroundImage: `
-    radial-gradient(circle at 20% 30%, rgba(255,255,255,0.025) 0%, transparent 40%),
-    radial-gradient(circle at 80% 15%, rgba(255,255,255,0.02) 0%, transparent 35%),
-    radial-gradient(circle at 60% 75%, rgba(255,255,255,0.03) 0%, transparent 45%),
-    radial-gradient(circle at 10% 85%, rgba(255,255,255,0.018) 0%, transparent 40%),
-    linear-gradient(135deg, rgba(255,255,255,0.015) 0%, transparent 50%, rgba(0,0,0,0.15) 100%)
-  `,
-};
 
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
-  const searchParams = useSearchParams();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
+  const router = useRouter();
+  const [product, setProduct] = useState<any>(null);
+  const [allProducts, setAllProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
-  const [allProducts, setAllProducts] = useState<StoreProduct[]>([]);
-  const [activeProducts, setActiveProducts] = useState<StoreProduct[]>([]);
-  const [archivedProducts, setArchivedProducts] = useState<StoreProduct[]>([]);
-  const [archivedIds, setArchivedIds] = useState<string[]>([]);
-  const [archiveNotesMap, setArchiveNotesMap] = useState<Record<string, string>>({});
-  const [archiveFromMap, setArchiveFromMap] = useState<Record<string, string>>({});
-  const [productOverrides, setProductOverrides] = useState<Record<string, any>>({});
-  const [globalScheduleOverride, setGlobalScheduleOverride] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string>('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
+  const [cart, setCart] = useState<any[]>([]);
+  const [showCart, setShowCart] = useState(false);
+  const [isRaffleMode, setIsRaffleMode] = useState(true);
+  const [isCheckoutMode, setIsCheckoutMode] = useState(false);
 
-  const [targetDrawTime, setTargetDrawTime] = useState<number | null>(null);
+  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
-  const sizes = config.availableSizes || ['50ml'];
-  const defaultSize = sizes.includes('100ml') && searchParams?.get('size') === '100ml' ? '100ml' : sizes[0] || '50ml';
-
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const res = await fetch('/api/store/config');
-        const data = await res.json();
-        if (data.config) {
-          setConfig({
-            ...DEFAULT_CONFIG,
-            ...data.config,
-            themeColors: { ...DEFAULT_CONFIG.themeColors, ...data.config.themeColors },
-            dropSchedule: { ...DEFAULT_CONFIG.dropSchedule, ...data.config.dropSchedule, ...data.scheduleOverride },
-            socialProof: { ...DEFAULT_CONFIG.socialProof, ...data.config.socialProof, ...data.socialOverride },
-          });
-        }
-        if (data.activeProducts && data.activeProducts.length > 0) {
-          setActiveProducts(data.activeProducts);
-          setAllProducts(data.allProducts || data.activeProducts);
-          setArchivedProducts(data.archivedProducts || []);
-          const ids = (data.archivedProducts || []).map((p: any) => p.id);
-          setArchivedIds(ids);
-        } else {
-          setActiveProducts([]);
-          setAllProducts([]);
-          setArchivedProducts([]);
-          setArchivedIds([]);
-        }
-        if (data.scheduleOverride) setGlobalScheduleOverride(data.scheduleOverride);
-      } catch (err) {
-        console.error('[Storefront] Failed to load store config:', err);
-        setActiveProducts([]);
-        setAllProducts([]);
-        setArchivedProducts([]);
-        setArchivedIds([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadConfig();
-  }, []);
-
-  useEffect(() => {
-    const ids = archivedProducts.map(p => p.id);
-    setArchivedIds(ids);
-  }, [archivedProducts]);
-
-  const allVisible = useMemo(() => {
-    return activeProducts.filter((p) => {
-      if (p.isUpcoming) return true;
-      return p.isActive !== false && !p.isArchived;
-    }).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-  }, [activeProducts]);
-
-  const requestedProduct = initialSlug 
-    ? allProducts.find((p) => p.slug === initialSlug) || activeProducts.find((p) => p.slug === initialSlug)
-    : undefined;
-  const requestedIsArchived = requestedProduct ? archivedIds.includes(requestedProduct.id) : false;
-
-  const [activeProductIndex, setActiveProductIndex] = useState(() => {
-    if (requestedProduct && !requestedIsArchived) {
-      const idx = allVisible.findIndex((p) => p.id === requestedProduct.id);
-      if (idx >= 0) return idx;
-    }
-    return 0;
-  });
-
-  const [selectedSize, setSelectedSize] = useState(defaultSize);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isAddToCart, setIsAddToCart] = useState(false);
-  const [form, setForm] = useState<EntryFormState>({ email: '', shippingAddress: '', quantity: 1 });
-  const [feedbackMessage, setFeedbackMessage] = useState('');
-  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'loading' | 'success' | 'notice' | 'error'>('idle');
-  const [timeLeft, setTimeLeft] = useState<TimeLeftState>({ d: 0, h: 0, m: 0, s: 0, expired: false });
-  const [socialProofDisplay, setSocialProofDisplay] = useState(config.socialProof?.baseCount || 0);
-
-  const [promoCode, setPromoCode] = useState<string | null>(null);
-  const [promoDiscount, setPromoDiscount] = useState<number>(0);
-  const [manualPromoInput, setManualPromoInput] = useState('');
-  const [showManualPromo, setShowManualPromo] = useState(false);
-  const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
-  const [promoValidated, setPromoValidated] = useState<boolean>(false);
-  const [promoErrorMessage, setPromoErrorMessage] = useState('');
-
-  useEffect(() => {
+  const fetchProduct = useCallback(async (slug: string) => {
     try {
-      const hist = localStorage.getItem('goyunir_address_history');
-      if (hist) {
-        const arr = JSON.parse(hist);
-        if (Array.isArray(arr)) setSavedAddresses(arr.filter(Boolean).slice(0, 8));
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!key || typeof window === 'undefined') return;
-    const existingScript = document.querySelector('script[data-goyunir-places]');
-    const boot = () => {
-      try {
-        const input = document.getElementById('goyunir-shipping-address') as HTMLInputElement | null;
-        if (!input || !(window as any).google?.maps?.places) return;
-        const ac = new (window as any).google.maps.places.Autocomplete(input, {
-          fields: ['formatted_address', 'address_components'],
-          types: ['address'],
-        });
-        ac.addListener('place_changed', () => {
-          const place = ac.getPlace();
-          const formatted = place?.formatted_address;
-          if (formatted) {
-            setForm((prev) => ({ ...prev, shippingAddress: formatted }));
-          }
-        });
-      } catch {}
-    };
-    if (existingScript) {
-      boot();
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
-    s.async = true;
-    s.dataset.goyunirPlaces = '1';
-    s.onload = () => boot();
-    document.head.appendChild(s);
-  }, []);
-
-  const getCurrentProduct = (): StoreProduct | null => {
-    if (allVisible.length > 0) {
-      const active = allVisible[activeProductIndex] || allVisible[0];
-      if (active) return active;
-    }
-    if (initialSlug) {
-      const found = allProducts.find(p => p.slug === initialSlug);
-      if (found) return found;
-      const archived = archivedProducts.find(p => p.slug === initialSlug);
-      if (archived) return archived;
-    }
-    return null;
-  };
-
-  const currentProduct = getCurrentProduct();
-  const isCurrentArchived = currentProduct ? archivedIds.includes(currentProduct.id) : false;
-
-  const priceFor = (product: StoreProduct | null, size: string) => {
-    if (!product) return 0;
-    const ov = productOverrides[product.id];
-    if (size === '100ml' && typeof ov?.price100ml === 'number') return ov.price100ml;
-    if (size !== '100ml' && typeof ov?.price50ml === 'number') return ov.price50ml;
-    return size === '100ml' ? product.price100ml : product.price50ml;
-  };
-
-  const effectiveSchedule = {
-    ...config.dropSchedule,
-    ...(globalScheduleOverride || {}),
-    ...(currentProduct ? productOverrides[currentProduct.id]?.customDropSchedule || {} : {}),
-  };
-
-  useEffect(() => {
-    const getValidSchedule = () => {
-      const schedule = effectiveSchedule;
-      if (!schedule || !schedule.mode) {
-        return {
-          mode: 'daily',
-          timezone: 'America/Los_Angeles',
-          targetEndDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          drawDayOfWeek: 6,
-          drawDayOfMonth: 1,
-          drawHour: 21,
-          drawMinute: 0,
-          drawSecond: 0,
-          countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
-          daysLabel: 'd',
-          hoursLabel: 'h',
-          minutesLabel: 'm',
-          secondsLabel: 's',
-          winnersPer50ml: 10,
-          winnersPer100ml: 5,
-        };
-      }
-      return schedule;
-    };
-    const schedule = getValidSchedule();
-    const time = getNextDrawTimestampForSchedule(schedule);
-    setTargetDrawTime(time);
-  }, [effectiveSchedule.mode, effectiveSchedule.targetEndDateTime, effectiveSchedule.drawDayOfWeek, effectiveSchedule.drawDayOfMonth, effectiveSchedule.drawHour, effectiveSchedule.drawMinute, effectiveSchedule.timezone, currentProduct?.id]);
-
-  useEffect(() => {
-    if (!targetDrawTime) return;
-    const timerLoop = window.setInterval(() => {
-      const now = Date.now();
-      const delta = targetDrawTime - now;
-      if (delta <= 0 || isCurrentArchived) {
-        setTimeLeft({ d: 0, h: 0, m: 0, s: 0, expired: true });
-        window.clearInterval(timerLoop);
-        if (delta <= 0 && !isCurrentArchived) {
-          try {
-            const k = 'goyunir_draw_ping_' + (currentProduct?.slug || 'x');
-            if (!sessionStorage.getItem(k)) {
-              sessionStorage.setItem(k, '1');
-              setFeedbackStatus('notice');
-              setFeedbackMessage('Allocation window closed. If you entered, watch your email — selected entries are charged when the draw processes.');
-              fetch('/api/cron/auto-draw?ping=1').catch(() => {});
-            }
-          } catch {}
-        }
-        return;
-      }
-      setTimeLeft({
-        d: Math.floor(delta / 86400000),
-        h: Math.floor((delta % 86400000) / 3600000),
-        m: Math.floor((delta % 3600000) / 60000),
-        s: Math.floor((delta % 60000) / 1000),
-        expired: false,
-      });
-    }, 1000);
-    return () => window.clearInterval(timerLoop);
-  }, [targetDrawTime, isCurrentArchived]);
-
-  // ============================================================
-  // APPLY MANUAL PROMO
-  // ============================================================
-  const applyManualPromo = () => {
-    const code = manualPromoInput.trim().toUpperCase();
-    if (!code) return;
-    
-    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(form.email || '')}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.valid) {
-          window.sessionStorage.setItem('goyunir_promo_ref', code);
-          setPromoCode(data.code);
-          setPromoDiscount(data.customerDiscountPercent || 0);
-          setPromoValidated(true);
-          setPromoErrorMessage('');
-          setManualPromoInput('');
-          setShowManualPromo(false);
-          setFeedbackStatus('success');
-          setFeedbackMessage(`✅ Promo ${data.code} applied! ${data.customerDiscountPercent > 0 ? `${data.customerDiscountPercent}% off if selected.` : ''}`);
-        } else {
-          setFeedbackStatus('error');
-          setFeedbackMessage(data.alreadyUsed ? `❌ This code has already been used with this email address.` : "That code isn't valid or is no longer active.");
-          window.sessionStorage.removeItem('goyunir_promo_ref');
-          setPromoValidated(false);
-          setPromoErrorMessage(data.error || 'Invalid promo code');
-        }
-      })
-      .catch(() => {});
-  };
-
-  // ============================================================
-  // CLEAR PROMO
-  // ============================================================
-  const clearPromo = () => {
-    setPromoCode(null);
-    setPromoDiscount(0);
-    setPromoValidated(false);
-    window.sessionStorage.removeItem('goyunir_promo_ref');
-    setManualPromoInput('');
-    setShowManualPromo(false);
-    setFeedbackStatus('notice');
-    setFeedbackMessage('Promo code removed.');
-  };
-
-  // ============================================================
-  // SUBMIT RAFFLE ENTRY
-  // ============================================================
-  const submitRaffleEntry = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (isProcessing) return;
-    const normalizedForm = normalizeEntryForm(form);
-    if (!isValidEmail(normalizedForm.email) || !normalizedForm.shippingAddress) {
-      setFeedbackStatus('error');
-      setFeedbackMessage('Add a valid email and shipping address.');
-      return;
-    }
-    setIsProcessing(true);
-    setFeedbackStatus('loading');
-    setFeedbackMessage('Securing your entry…');
-    try {
-      const ref = promoCode || searchParams?.get('ref') || '';
-      const response = await fetch('/api/checkout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          variant: currentProduct?.name || 'Product',
-          size: selectedSize,
-          email: normalizedForm.email,
-          shippingAddress: normalizedForm.shippingAddress,
-          quantityChosen: normalizedForm.quantity,
-          promoCode: ref || undefined,
-          ref: ref || undefined,
-        }),
-      });
-      const data = await response.json();
-      if (data.alreadyEntered) {
-        setFeedbackStatus('notice');
-        setFeedbackMessage(data.error || 'Already entered for this scent.');
-        try {
-          localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: normalizedForm.email, shippingAddress: normalizedForm.shippingAddress }));
-        } catch {}
-        return;
-      }
-      if (response.ok) {
-        try {
-          localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: normalizedForm.email, shippingAddress: normalizedForm.shippingAddress }));
-        } catch {}
-        if (data.sessionUrl) {
-          window.location.assign(data.sessionUrl);
-          return;
-        }
-        setFeedbackStatus('success');
-        setFeedbackMessage(data.message || 'Entry secured.');
+      const res = await fetch(`/api/store/config?slug=${slug}`);
+      const data = await res.json();
+      if (data.product) {
+        setProduct(data.product);
+        const cats = data.product.priceCategories || [];
+        if (cats.length > 0) setSelectedSize(cats[0].size);
       } else {
-        setFeedbackStatus('error');
-        setFeedbackMessage(data.error || data.message || 'Registration failed.');
+        setError('Product not found');
       }
-    } catch (error) {
-      setFeedbackStatus('error');
-      setFeedbackMessage(error instanceof Error ? error.message : 'Connection timeout.');
+    } catch (e) {
+      setError('Failed to load product');
     } finally {
-      setIsProcessing(false);
+      setLoading(false);
     }
-  };
+  }, []);
 
-  // ============================================================
-  // ADD TO CART
-  // ============================================================
-  const handleAddToCart = async () => {
-    if (!currentProduct) return;
-    if (currentProduct.isRaffle) {
-      setFeedbackStatus('error');
-      setFeedbackMessage('This is a raffle item. Use the raffle entry button.');
+  const fetchAllProducts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/store/config');
+      const data = await res.json();
+      if (data.activeProducts) setAllProducts(data.activeProducts);
+    } catch (e) { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    if (initialSlug) {
+      fetchProduct(initialSlug);
+    } else {
+      fetchAllProducts().then(() => {
+        if (allProducts.length > 0) {
+          router.push(`/${allProducts[0].slug}`);
+        } else {
+          setLoading(false);
+          setError('No products available');
+        }
+      });
+    }
+    fetchAllProducts();
+  }, [initialSlug, fetchProduct, fetchAllProducts, router, allProducts.length]);
+
+  const addToCart = () => {
+    if (!product) return;
+    const cat = getProductPriceCategory(product, selectedSize);
+    if (!cat || cat.price <= 0) {
+      setMessage('Price not set for this size. Please set in admin.');
       return;
     }
-    setIsAddToCart(true);
+    const item = {
+      productId: product.id,
+      name: product.name,
+      size: selectedSize,
+      price: cat.price,
+      stripeId: cat.stripeId,
+      winnerTiers: cat.winnerTiers,
+    };
+    setCart([...cart, item]);
+    setMessage(`Added ${product.name} (${selectedSize}) to cart`);
+    setShowCart(true);
+  };
+
+  const handleRaffleSubmit = async () => {
+    if (!email || !address || !selectedSize) {
+      setMessage('Please fill in all fields and select a size.');
+      return;
+    }
+    setIsSubmitting(true);
+    setMessage('');
     try {
-      const response = await fetch('/api/checkout/direct', {
+      const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          productId: currentProduct.id,
+          productId: product.id,
           size: selectedSize,
-          quantity: 1,
+          email,
+          address,
+          mode: 'raffle',
         }),
       });
-      const data = await response.json();
-      if (data.url) {
-        window.location.assign(data.url);
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
       } else {
-        setFeedbackStatus('error');
-        setFeedbackMessage('Could not initiate checkout.');
+        setMessage(data.error || 'Failed to start checkout');
       }
-    } catch (error) {
-      setFeedbackStatus('error');
-      setFeedbackMessage('Checkout failed. Please try again.');
+    } catch (e) {
+      setMessage('Connection error');
     } finally {
-      setIsAddToCart(false);
+      setIsSubmitting(false);
     }
   };
 
-  // ============================================================
-  // USE EFFECTS FOR ANALYTICS, SETUP CONFIRMATION, ETC.
-  // ============================================================
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    let tabTokenId = window.sessionStorage.getItem('goyunir_device_fingerprint');
-    if (!tabTokenId) {
-      tabTokenId = 'usr_' + Math.random().toString(36).substring(2, 9);
-      window.sessionStorage.setItem('goyunir_device_fingerprint', tabTokenId);
-    }
-    const syncLiveAnalytics = () => {
-      fetch(`/api/analytics/heartbeat?visitorId=${tabTokenId}`)
-        .then((res) => res.json())
-        .then((data) => { if (typeof data.socialProofDisplay === 'number') setSocialProofDisplay(data.socialProofDisplay); })
-        .catch(() => {});
-    };
-    let liveTelemetryTimer: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!liveTelemetryTimer) { syncLiveAnalytics(); liveTelemetryTimer = setInterval(syncLiveAnalytics, 60000); } };
-    const stop = () => { if (liveTelemetryTimer) { clearInterval(liveTelemetryTimer); liveTelemetryTimer = null; } };
-    const handleVisibility = () => { if (document.visibilityState === 'visible') start(); else stop(); };
-    start();
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => { stop(); document.removeEventListener('visibilitychange', handleVisibility); };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const sp = new URLSearchParams(window.location.search);
-      const isSuccess = sp.get('setup') === 'success';
-      const isCancel = sp.get('setup') === 'cancel';
-      const sessionId = sp.get('session_id');
-      if (isSuccess && sessionId) {
-        setFeedbackStatus('loading');
-        setFeedbackMessage('Confirming your entry…');
-        fetch('/api/checkout/confirm-setup', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }),
-        })
-          .then(async (res) => {
-            const data = await res.json();
-            if (res.ok && data.success) {
-              setFeedbackStatus('success');
-              setFeedbackMessage(data.message || '🎉 You\'re in! Your entry is locked. Good luck!');
-              if (data.promoCode) {
-                setPromoCode(data.promoCode);
-                setPromoDiscount(data.discountPercent || 0);
-                setPromoValidated(true);
-              } else {
-                setPromoCode(null);
-                setPromoDiscount(0);
-                setPromoValidated(false);
-                try { window.sessionStorage.removeItem('goyunir_promo_ref'); } catch {}
-              }
-              try {
-                localStorage.setItem(PREFILL_KEY, JSON.stringify({ email: form.email || data.email, shippingAddress: form.shippingAddress || data.address }));
-              } catch {}
-              window.history.replaceState({}, document.title, window.location.pathname);
-            } else {
-              setFeedbackStatus('error');
-              setFeedbackMessage(data.error || 'Could not confirm payment details.');
-            }
-          })
-          .catch(() => { setFeedbackStatus('error'); setFeedbackMessage('Unable to reach verification servers.'); });
-      }
-      if (isCancel) {
-        setFeedbackStatus('notice');
-        setFeedbackMessage("Setup canceled — finish checkout when you're ready to enter.");
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const urlRef = searchParams?.get('ref');
-    const stored = window.sessionStorage.getItem('goyunir_promo_ref');
-    const code = (urlRef || stored || '').toUpperCase();
-    if (!code) return;
-
-    if (urlRef) window.sessionStorage.setItem('goyunir_promo_ref', urlRef.toUpperCase());
-
-    fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(form.email || '')}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.valid) {
-          setPromoCode(data.code);
-          setPromoDiscount(data.customerDiscountPercent || 0);
-          setPromoValidated(true);
-          setPromoErrorMessage('');
-        } else {
-          window.sessionStorage.removeItem('goyunir_promo_ref');
-          setPromoValidated(false);
-          setPromoErrorMessage(data.error || 'Invalid promo code');
-          if (data.alreadyUsed) {
-            setFeedbackStatus('error');
-            setFeedbackMessage(`❌ Promo code ${code} has already been used with this email address.`);
-          }
-        }
-      })
-      .catch(() => {});
-  }, [searchParams, form.email]);
-
-  const { scrollYProgress } = useScroll({ target: containerRef, offset: ['start start', 'end end'] });
-  const TOTAL_IMAGES = config.animationMechanics?.totalFramesToLoad || 29;
-  const cycles = Math.max(1, config.animationMechanics?.spinCyclesTopToCheckout || 1);
-  const spinRange = 0.85;
-  const framePositions: number[] = [0];
-  const frameValues: number[] = [1];
-  for (let i = 1; i <= cycles * 2; i++) {
-    framePositions.push((spinRange / (cycles * 2)) * i);
-    frameValues.push(i % 2 === 1 ? TOTAL_IMAGES : 1);
-  }
-  const frameIndex = useTransform(scrollYProgress, framePositions, frameValues);
-  const bottleOpacity = useTransform(scrollYProgress, [0.72, 0.92], [1, 0]);
-  const bottleScale = useTransform(scrollYProgress, [0, 0.25, 0.55, 0.75], [1, 1.28, 1.58, 1.72]);
-  const scrollIndicatorOpacity = useTransform(scrollYProgress, [0, 0.05], [1, 0]);
-
-  useEffect(() => {
-    const context = canvasRef.current?.getContext('2d');
-    if (!context || !canvasRef.current) return;
-    if (!currentProduct) {
-      context.fillStyle = '#1a1a1a';
-      context.fillRect(0, 0, 600, 600);
-      context.fillStyle = '#444';
-      context.font = '24px system-ui';
-      context.textAlign = 'center';
-      context.fillText('No Product', 300, 300);
+  const handleDirectCheckout = async () => {
+    if (!email || !address || !selectedSize) {
+      setMessage('Please fill in all fields and select a size.');
       return;
     }
-    const preloadedImages: HTMLImageElement[] = [];
-    canvasRef.current.width = 600;
-    canvasRef.current.height = 600;
-    const drawFrame = (img: HTMLImageElement) => {
-      if (img.complete && img.naturalWidth > 0) {
-        context.clearRect(0, 0, 600, 600);
-        context.drawImage(img, 0, 0, 600, 600);
-      }
-    };
-    const drawPlaceholder = () => {
-      context.fillStyle = '#1a1a1a';
-      context.fillRect(0, 0, 600, 600);
-      context.fillStyle = '#444';
-      context.font = '24px system-ui';
-      context.textAlign = 'center';
-      context.fillText('Loading Image', 300, 300);
-    };
-    const productPrefix = currentProduct.prefix || 'default';
-    const images = currentProduct.images || [];
-    const totalFrames = Math.max(images.length, TOTAL_IMAGES);
-    const imageUrls = images.length > 0 
-      ? images 
-      : Array.from({ length: totalFrames }, (_, i) => `/images/${productPrefix}/${i + 1}.jpeg`);
-    let loadedCount = 0;
-    const totalImages = Math.min(imageUrls.length, totalFrames);
-    for (let i = 0; i < totalImages; i++) {
-      const img = new Image();
-      const imgUrl = imageUrls[i] || `/images/${productPrefix}/${i + 1}.jpeg`;
-      img.src = imgUrl;
-      img.onload = () => {
-        loadedCount++;
-        if (loadedCount === 1) {
-          drawFrame(img);
-        }
-      };
-      img.onerror = () => {
-        loadedCount++;
-        if (i === 0) {
-          const fallbackImg = new Image();
-          fallbackImg.src = `/images/${productPrefix}/1.jpeg`;
-          fallbackImg.onload = () => {
-            loadedCount++;
-            drawFrame(fallbackImg);
-          };
-          fallbackImg.onerror = () => {
-            loadedCount++;
-            drawPlaceholder();
-          };
-          preloadedImages.push(fallbackImg);
-        } else if (loadedCount === totalImages && preloadedImages.length > 0) {
-          drawFrame(preloadedImages[0]);
-        }
-      };
-      preloadedImages.push(img);
-    }
-    const unsubscribe = frameIndex.on('change', (value) => {
-      const index = Math.min(Math.max(Math.round(value), 1), preloadedImages.length);
-      const activeFrameImage = preloadedImages[index - 1];
-      if (activeFrameImage && activeFrameImage.complete && activeFrameImage.naturalWidth > 0) {
-        drawFrame(activeFrameImage);
-      }
-    });
-    return () => unsubscribe();
-  }, [frameIndex, activeProductIndex, TOTAL_IMAGES, currentProduct?.prefix, currentProduct?.id, currentProduct?.images, currentProduct]);
-
-  useEffect(() => {
+    setIsSubmitting(true);
+    setMessage('');
     try {
-      const raw = localStorage.getItem(PREFILL_KEY);
-      if (raw) {
-        const p = JSON.parse(raw);
-        if (p.email || p.shippingAddress) {
-          setForm((prev) => ({ ...prev, email: p.email || prev.email, shippingAddress: p.shippingAddress || prev.shippingAddress }));
-        }
+      const res = await fetch('/api/checkout/direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          size: selectedSize,
+          email,
+          address,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.paymentIntentId) {
+        setMessage('Payment successful! Order placed.');
+        setCart([]);
+        setShowCart(false);
+      } else {
+        setMessage(data.error || 'Checkout failed');
       }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (!initialSlug) return;
-    const idx = allVisible.findIndex((p) => p.slug === initialSlug);
-    if (idx >= 0 && idx !== activeProductIndex) setActiveProductIndex(idx);
-  }, [initialSlug, archivedIds.join(',')]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !currentProduct?.slug) return;
-    const path = `/${currentProduct.slug}`;
-    if (window.location.pathname !== path) {
-      window.history.replaceState({}, '', path + window.location.search);
+    } catch (e) {
+      setMessage('Connection error');
+    } finally {
+      setIsSubmitting(false);
     }
-  }, [currentProduct?.slug]);
+  };
 
-  useEffect(() => {
-    const handleNavigationFix = () => setIsProcessing(false);
-    window.addEventListener('popstate', handleNavigationFix);
-    return () => window.removeEventListener('popstate', handleNavigationFix);
-  }, []);
+  if (loading) return <div style={{ padding: 40, color: '#888' }}>Loading...</div>;
+  if (error || !product) return <div style={{ padding: 40, color: '#f87171' }}>{error || 'Product not found'}</div>;
 
-  useEffect(() => {
-    if (!feedbackMessage) return;
-    if (feedbackStatus === 'loading') {
-      const stallTimer = setTimeout(() => {
-        setFeedbackStatus('error');
-        setFeedbackMessage('Taking longer than expected. Check your connection and try again.');
-      }, 12000);
-      return () => clearTimeout(stallTimer);
-    }
-    const dismissTimer = setTimeout(() => setFeedbackMessage(''), 9000);
-    return () => clearTimeout(dismissTimer);
-  }, [feedbackMessage, feedbackStatus]);
-
-  const configPalette = config.themeColors || DEFAULT_CONFIG.themeColors;
-  const heroContent = config.heroContent || DEFAULT_CONFIG.heroContent;
-
-  if (loading) {
-    return (
-      <div style={{ 
-        minHeight: '100vh', 
-        background: configPalette?.primaryBackground || '#0a0a0a',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 14, letterSpacing: 4, textTransform: 'uppercase', color: '#666' }}>Loading</div>
-          <div style={{ marginTop: 12, width: 40, height: 2, background: '#a855f7', margin: '12px auto' }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentProduct) {
-    return (
-      <div style={{ 
-        minHeight: '100vh', 
-        background: configPalette?.primaryBackground || '#0a0a0a',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'column',
-        color: '#fff',
-        gap: 16,
-        padding: '20px'
-      }}>
-        <div style={{ fontSize: 20, color: '#666' }}>No products available</div>
-        <Link href="/catalog" style={{ color: '#a855f7', textDecoration: 'none' }}>View Catalog →</Link>
-      </div>
-    );
-  }
+  const priceCat = getProductPriceCategory(product, selectedSize);
+  const price = priceCat?.price || 0;
+  const winnerTiers = priceCat?.winnerTiers || '0';
 
   return (
-    <div ref={containerRef} style={{ background: configPalette.primaryBackground, color: configPalette.textMain, position: 'relative', width: '100%', minHeight: '450vh' }}>
-      <header
-        style={{
-          position: 'fixed', 
-          top: 0, 
-          left: 0, 
-          width: '100%', 
-          height: '56px', 
-          borderBottom: `1px solid ${configPalette.cardBorder}`,
-          background: 'rgba(10,10,10,0.88)', 
-          backdropFilter: 'blur(15px)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          padding: '0 16px', 
-          zIndex: 100, 
-          boxSizing: 'border-box',
-        }}
-      >
-        <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
-          <Link href="/catalog" style={{ color: '#ccc', textDecoration: 'none' }}>CATALOG</Link>
-          <Link href="/story" style={{ color: '#666', textDecoration: 'none' }}>STORY</Link>
+    <main style={{ minHeight: 'calc(100vh - 56px)', background: '#0a0a0a', color: '#fff', padding: '20px 16px 60px' }}>
+      <div style={{ maxWidth: 480, margin: '0 auto' }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontFamily: 'serif', marginBottom: 4 }}>{product.name}</h1>
+          <p style={{ color: '#888', fontSize: 13 }}>{product.tagline}</p>
+          <p style={{ color: '#aaa', fontSize: 14, margin: '8px 0' }}>{product.desc}</p>
         </div>
 
-        <Link
-          href="/"
-          style={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontWeight: 'bold',
-            letterSpacing: '4px',
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            color: configPalette.textMain,
-            textDecoration: 'none',
-          }}
-        >
-          GOYUNIR
-        </Link>
-        
-        <div style={{ display: 'flex', gap: 14, fontSize: 11, letterSpacing: 2, fontWeight: 600 }}>
-          <Link href="/account" style={{ color: '#666', textDecoration: 'none' }}>ACCOUNT</Link>
-        </div>
-      </header>
-
-      <AnimatePresence>
-        {feedbackMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -10, x: '-50%' }} animate={{ opacity: 1, y: 0, x: '-50%' }} exit={{ opacity: 0, y: -10, x: '-50%' }}
-            style={{
-              position: 'fixed', top: '66px', left: '50%', zIndex: 99, fontSize: '11px', fontWeight: 600, letterSpacing: '0.3px',
-              background: 'rgba(0,0,0,0.9)', padding: '10px 16px', borderRadius: '16px', maxWidth: '92vw',
-              color: feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'notice' ? '#edb210' : feedbackStatus === 'error' ? '#ff6b5a' : '#9ca3af',
-              border: `1px solid ${feedbackStatus === 'success' ? '#34c759' : feedbackStatus === 'notice' ? '#edb210' : feedbackStatus === 'error' ? '#ff6b5a' : '#9ca3af'}`,
-              textAlign: 'center',
-            }}
-          >
-            {feedbackMessage}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <motion.div
-        style={{ position: 'fixed', top: '48vh', left: 0, width: '100%', height: '35vh', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none', opacity: bottleOpacity, scale: bottleScale }}
-      >
-        <canvas ref={canvasRef} style={{ width: '90vw', maxWidth: '300px', height: 'auto', aspectRatio: '1/1' }} />
-      </motion.div>
-
-      <motion.div
-        style={{ position: 'fixed', bottom: '8vh', left: 0, width: '100%', display: 'flex', justifyContent: 'center', zIndex: 15, pointerEvents: 'none', opacity: scrollIndicatorOpacity }}
-      >
-        <motion.span
-          animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-          style={{ textTransform: 'uppercase', letterSpacing: '3px', fontSize: '9px', color: configPalette.textMuted, fontWeight: 'bold' }}
-        >
-          {heroContent.ctaLabel}
-        </motion.span>
-      </motion.div>
-
-      <div style={{ position: 'relative', zIndex: 2, width: '100%' }}>
-        <section style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center', padding: '120px 20px 20px', textAlign: 'center', boxSizing: 'border-box' }}>
-          <motion.div initial={{ opacity: 0, y: 15 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-            <span style={{ textTransform: 'uppercase', letterSpacing: '6px', fontSize: '9px', color: '#555', fontWeight: 'bold' }}>{heroContent.eyebrow}</span>
-            <h1 style={{ fontSize: '36px', margin: '10px 0', fontFamily: 'serif', letterSpacing: '1px' }}>{currentProduct?.name || 'Product'}</h1>
-            {isCurrentArchived && (
-              <div style={{ display: 'inline-block', marginBottom: 12, padding: '6px 14px', borderRadius: 20, border: '1px solid #f59e0b', color: '#f59e0b', fontSize: 11, fontWeight: 'bold' }}>
-                Archived — stay entered for the return
-              </div>
-            )}
-            {(archiveNotesMap[currentProduct?.id] || archiveFromMap[currentProduct?.id]) && isCurrentArchived && (
-              <p style={{ maxWidth: 320, margin: '0 auto 12px', fontSize: 12, color: '#999' }}>
-                {archiveFromMap[currentProduct?.id] ? `Expected: ${archiveFromMap[currentProduct.id]}. ` : ''}{archiveNotesMap[currentProduct.id] || ''}
-              </p>
-            )}
-            <p style={{ maxWidth: 300, color: configPalette.textMuted, lineHeight: 1.7, fontSize: 13, margin: '0 auto 24px' }}>{heroContent.body}</p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-              {allVisible.map((prod, idx) => {
-                const isSelected = !isCurrentArchived && (prod.slug === currentProduct?.slug || activeProductIndex === idx);
-                return (
-                  <button key={prod.id} onClick={() => { if (typeof window !== 'undefined') window.location.href = `/${prod.slug}`; }}
-                    style={{
-                      padding: '8px 18px', borderRadius: 20,
-                      border: isSelected ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`,
-                      background: isSelected ? configPalette.textMain : 'transparent',
-                      color: isSelected ? configPalette.primaryBackground : configPalette.textMuted,
-                      fontSize: 11, fontWeight: 'bold', cursor: 'pointer',
-                    }}>
-                    {prod.name}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
-        </section>
-
-        <div style={{ position: 'relative', width: '100%', paddingBottom: '15vh' }}>
-          {currentProduct && currentProduct.notes && currentProduct.notes.length > 0 && currentProduct.notes.map((note, idx) => {
-            const isLeft = idx % 2 === 0;
-            const topOffset = 100 + idx * 90;
-            const activeColor = idx % 2 === 0 ? configPalette.accentPurple : configPalette.accentBlue;
-            return (
-              <div key={idx} style={{ position: 'sticky', top: `${topOffset}px`, width: '100%', display: 'flex', justifyContent: isLeft ? 'flex-start' : 'flex-end', padding: '15px 20px', boxSizing: 'border-box' }}>
-                <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
-                  style={{ maxWidth: 170, background: 'rgba(15,15,15,0.92)', padding: 12, borderRadius: 12, border: `1px solid ${activeColor}` }}>
-                  <span style={{ fontSize: 8, color: activeColor, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>{note.label} / 0{idx + 1}</span>
-                  <h4 style={{ fontSize: 14, margin: '4px 0', fontWeight: 'bold' }}>{note.name}</h4>
-                  <p style={{ color: '#ccc', fontSize: 11, margin: 0, lineHeight: 1.4 }}>{note.text}</p>
-                </motion.div>
-              </div>
-            );
-          })}
+        <div style={{ margin: '16px 0' }}>
+          <label style={{ fontSize: 12, color: '#888' }}>Select Size</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+            {(product.priceCategories || []).map((cat: any) => (
+              <button
+                key={cat.size}
+                onClick={() => setSelectedSize(cat.size)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 20,
+                  border: selectedSize === cat.size ? '1px solid #fff' : '1px solid #333',
+                  background: selectedSize === cat.size ? '#fff' : 'transparent',
+                  color: selectedSize === cat.size ? '#000' : '#aaa',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                }}
+              >
+                {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <section style={{ 
-          minHeight: '130vh', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          padding: '100px 15px 40px', 
-          background: 'rgba(10,10,10,0.88)', 
-          backdropFilter: 'blur(15px)', 
-          WebkitBackdropFilter: 'blur(15px)',
-          position: 'relative', 
-          zIndex: 10, 
-          boxSizing: 'border-box' 
-        }}>
-          <div style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 24, marginBottom: 80 }}>
-            <div style={{ background: 'rgba(20,20,22,0.8)', backdropFilter: 'blur(10px)', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
-              {timeLeft.expired || isCurrentArchived ? (
-                <div>
-                  <span style={{ fontSize: 11, color: '#edb210', fontWeight: 'bold', letterSpacing: 1 }}>
-                    {isCurrentArchived ? 'Archived — still in for the return' : 'Between draws'}
-                  </span>
-                  <p style={{ margin: '8px 0 0', fontSize: 10, color: '#666' }}>Check email if selected. Card charged only if selected.</p>
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: 12, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' }}>
-                    <span>{timeLeft.d}{effectiveSchedule.daysLabel}</span>
-                    <span>{timeLeft.h}{effectiveSchedule.hoursLabel}</span>
-                    <span>{timeLeft.m}{effectiveSchedule.minutesLabel}</span>
-                    <span>{timeLeft.s}{effectiveSchedule.secondsLabel}</span>
-                  </div>
-                  <p style={{ margin: '8px 0 0', fontSize: 10, color: '#666' }}>After each draw, check email if selected.</p>
-                </>
-              )}
-            </div>
+        <div style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
+          <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="radio"
+              checked={isRaffleMode}
+              onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }}
+            />
+            Raffle (enter draw)
+          </label>
+          <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="radio"
+              checked={isCheckoutMode}
+              onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }}
+            />
+            Buy Now (direct)
+          </label>
+        </div>
 
-            <div style={{ background: 'rgba(20,20,22,0.8)', backdropFilter: 'blur(10px)', padding: 14, borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, textAlign: 'center' }}>
-              <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: configPalette.accentPurple, fontWeight: 'bold', marginBottom: 6 }}>
-                {config.socialProof?.label || 'Limited drop access'}
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 'bold', fontFamily: 'monospace' }}>{socialProofDisplay.toLocaleString()}</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{config.socialProof?.caption || ''}</div>
-            </div>
+        <div style={{ margin: '12px 0' }}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ width: '100%', padding: 10, borderRadius: 8, background: '#16161a', border: '1px solid #222', color: '#fff', marginBottom: 8 }}
+          />
+          <input
+            type="text"
+            placeholder="Shipping Address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            style={{ width: '100%', padding: 10, borderRadius: 8, background: '#16161a', border: '1px solid #222', color: '#fff' }}
+          />
+        </div>
 
-            <h2 style={{ fontSize: 24, textAlign: 'center', fontFamily: 'serif', margin: 0 }}>{config.raffleRegistrationForm?.titleHeader || 'Join The Allocation Draw'}</h2>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {isRaffleMode && (
+            <button
+              onClick={handleRaffleSubmit}
+              disabled={isSubmitting || !selectedSize || price <= 0}
               style={{
-                position: 'relative',
-                padding: '24px 20px',
-                borderRadius: 24,
-                border: `1px solid ${configPalette.cardBorder}`,
-                overflow: 'hidden',
-                boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                background: 'rgba(17,17,17,0.85)',
+                flex: 1,
+                padding: 12,
+                borderRadius: 30,
+                background: configPalette.checkoutCtaButton,
+                color: '#fff',
+                border: 'none',
+                fontWeight: 700,
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
               }}
             >
-              <div style={{ position: 'absolute', inset: 0, ...paperTexture, opacity: 0.5 }} />
+              {isSubmitting ? 'Processing...' : 'Enter Raffle'}
+            </button>
+          )}
+          {isCheckoutMode && (
+            <button
+              onClick={handleDirectCheckout}
+              disabled={isSubmitting || !selectedSize || price <= 0}
+              style={{
+                flex: 1,
+                padding: 12,
+                borderRadius: 30,
+                background: '#34c759',
+                color: '#000',
+                border: 'none',
+                fontWeight: 700,
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isSubmitting ? 'Processing...' : `Buy Now $${price.toFixed(2)}`}
+            </button>
+          )}
+          <button
+            onClick={addToCart}
+            disabled={!selectedSize || price <= 0}
+            style={{
+              padding: '12px 20px',
+              borderRadius: 30,
+              background: '#333',
+              color: '#fff',
+              border: 'none',
+              cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Add to Cart
+          </button>
+        </div>
 
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <h3 style={{ fontSize: 20, margin: '0 0 4px', fontFamily: 'serif', textAlign: 'center' }}>{currentProduct?.name || 'Product'}</h3>
-                <p style={{ color: configPalette.textMuted, fontSize: 12, margin: '0 0 20px', textAlign: 'center' }}>{currentProduct?.desc || ''}</p>
+        {message && <p style={{ marginTop: 12, fontSize: 12, color: '#edb210' }}>{message}</p>}
 
-                <form onSubmit={submitRaffleEntry} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {sizes.length > 1 ? (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {sizes.map((sz) => {
-                        const isSelected = selectedSize === sz;
-                        const price = priceFor(currentProduct, sz);
-                        const discountedPrice = promoDiscount > 0 && promoValidated ? Math.max(1, Math.round(price * (1 - promoDiscount / 100))) : price;
-                        return (
-                          <button key={sz} type="button" onClick={() => setSelectedSize(sz)}
-                            style={{
-                              flex: 1, padding: 12, borderRadius: 12,
-                              border: isSelected ? '2px solid #fff' : `1px solid ${configPalette.cardBorder}`,
-                              background: isSelected ? '#fff' : 'rgba(22,22,26,0.5)',
-                              color: isSelected ? '#000' : configPalette.textMain, fontSize: 13, fontWeight: 'bold', cursor: 'pointer',
-                            }}>
-                            {sz} — {promoDiscount > 0 && promoValidated && isSelected ? (
-                              <>
-                                <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 4 }}>${price}</span>
-                                <span style={{ color: '#edb210' }}>${discountedPrice}</span>
-                              </>
-                            ) : (
-                              `$${price}`
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 'bold' }}>
-                      {sizes[0]} —{' '}
-                      {promoDiscount > 0 && promoValidated ? (
-                        <>
-                          <span style={{ textDecoration: 'line-through', color: '#666', marginRight: 6 }}>${priceFor(currentProduct, sizes[0])}</span>
-                          <span style={{ color: '#edb210' }}>${Math.max(1, Math.round(priceFor(currentProduct, sizes[0]) * (1 - promoDiscount / 100)))}</span>
-                          {promoCode && <span style={{ fontSize: 10, color: '#34c759', marginLeft: 6 }}>({promoCode})</span>}
-                        </>
-                      ) : (
-                        <>${priceFor(currentProduct, sizes[0])}</>
-                      )}
-                    </div>
-                  )}
-                  <input required type="email" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                    placeholder={config.raffleRegistrationForm?.emailPlaceholder || 'name@domain.com'} autoComplete="email"
-                    style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
-                  <input required type="text" value={form.shippingAddress} onChange={(e) => setForm((prev) => ({ ...prev, shippingAddress: e.target.value }))}
-                    id="goyunir-shipping-address" list="goyunir-address-suggestions" placeholder={config.raffleRegistrationForm?.addressPlaceholder || '123 Luxury Dr, New York, NY'} autoComplete="shipping street-address" name="shipping-address"
-                    style={{ width: '100%', padding: 14, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 13, boxSizing: 'border-box' }} />
-                  {promoCode && promoValidated ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(52,199,89,0.12)', border: '1px solid rgba(52,199,89,0.4)', borderRadius: 10, padding: '8px 12px', fontSize: 11 }}>
-                      <span style={{ color: '#34c759', fontWeight: 600 }}>
-                        🏷 {promoCode} applied{promoDiscount > 0 ? ` — ${promoDiscount}% off if selected` : ''}
-                      </span>
-                      <button type="button" onClick={clearPromo} style={{ background: 'none', border: 'none', color: '#ff6b5a', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      {!showManualPromo ? (
-                        <button type="button" onClick={() => setShowManualPromo(true)}
-                          style={{ background: 'none', border: 'none', color: '#666', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
-                          Have a promo code?
-                        </button>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <input
-                            type="text"
-                            value={manualPromoInput}
-                            onChange={(e) => setManualPromoInput(e.target.value.toUpperCase())}
-                            placeholder="Promo code"
-                            style={{ flex: 1, padding: 12, borderRadius: 12, background: 'rgba(22,22,26,0.7)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.textMain, fontSize: 12, boxSizing: 'border-box' }}
-                          />
-                          <button type="button" onClick={applyManualPromo}
-                            style={{ padding: '0 14px', borderRadius: 12, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: '#ccc', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                            Apply
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <p style={{ margin: 0, fontSize: 11, color: configPalette.textMuted, textAlign: 'center' }}>
-                    Card saved — charged only if selected. One entry per email.
-                  </p>
-                  <datalist id="goyunir-address-suggestions">
-                    {savedAddresses.map((a) => (
-                      <option key={a} value={a} />
-                    ))}
-                  </datalist>
-
-                  {/* ============ BUTTON SECTION ============ */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {/* Raffle Entry Button (if raffle) */}
-                    {currentProduct?.isRaffle && (
-                      <button
-                        type="submit"
-                        disabled={isProcessing}
-                        style={{
-                          width: '100%',
-                          padding: 16,
-                          borderRadius: 30,
-                          background: isProcessing ? '#1f1f23' : timeLeft.expired || isCurrentArchived ? '#edb210' : configPalette.checkoutCtaButton,
-                          color: isProcessing ? '#555' : timeLeft.expired || isCurrentArchived ? '#09090b' : configPalette.textMain,
-                          border: 'none',
-                          fontWeight: 'bold',
-                          fontSize: 14,
-                          cursor: isProcessing ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {isProcessing
-                          ? config.raffleRegistrationForm?.submitButtonLoadingText || 'Encrypting Entry Base...'
-                          : timeLeft.expired || isCurrentArchived
-                            ? 'Stay entered for the return'
-                            : config.raffleRegistrationForm?.submitButtonText || '🏆 Secure Entry Allocation Ticket'}
-                      </button>
-                    )}
-
-                    {/* Buy Now / Add to Cart Button - only for non-raffle items */}
-                    {!currentProduct?.isRaffle && (
-                      <button
-                        type="button"
-                        onClick={handleAddToCart}
-                        disabled={isAddToCart}
-                        style={{
-                          width: '100%',
-                          padding: 16,
-                          borderRadius: 30,
-                          background: isAddToCart ? '#1f1f23' : 'transparent',
-                          color: isAddToCart ? '#555' : configPalette.textMain,
-                          border: `1px solid ${configPalette.cardBorder}`,
-                          fontWeight: 'bold',
-                          fontSize: 14,
-                          cursor: isAddToCart ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {isAddToCart ? 'Processing…' : '🛒 Add to Cart'}
-                      </button>
-                    )}
-                  </div>
-                  {/* =========================================== */}
-                </form>
+        {showCart && cart.length > 0 && (
+          <div style={{ marginTop: 20, borderTop: '1px solid #222', paddingTop: 16 }}>
+            <h3 style={{ fontSize: 14 }}>Cart ({cart.length})</h3>
+            {cart.map((item, idx) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                <span>{item.name} ({item.size})</span>
+                <span>${item.price.toFixed(2)}</span>
               </div>
-            </motion.div>
+            ))}
+            <button
+              onClick={() => {
+                setMessage('Multi‑item cart checkout coming soon');
+              }}
+              style={{ marginTop: 8, padding: '8px 16px', borderRadius: 20, background: '#fff', color: '#000', border: 'none', fontWeight: 600 }}
+            >
+              Checkout Cart (${cart.reduce((sum, i) => sum + i.price, 0).toFixed(2)})
+            </button>
           </div>
-
-          <footer style={{ width: '100%', maxWidth: 380, borderTop: `1px solid ${configPalette.cardBorder}`, paddingTop: 40, color: configPalette.textMuted, fontSize: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div>
-                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>CONNECT</p>
-                <a href={config.brandFooterData?.instagramLink || '#'} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none', marginBottom: 6 }}>Instagram</a>
-                <a href={config.brandFooterData?.tiktokLink || '#'} target="_blank" rel="noreferrer" style={{ color: '#888', display: 'block', textDecoration: 'none' }}>TikTok</a>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <p style={{ color: configPalette.textMain, fontWeight: 'bold', margin: '0 0 8px' }}>SUPPORT</p>
-                <span style={{ color: '#888', display: 'block', marginBottom: 6 }}>{config.brandFooterData?.supportEmail || 'goyunir.support@gmail.com'}</span>
-                <a href="/account" style={{ color: '#888', display: 'block', marginBottom: 6 }}>Manage My Entry</a>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', fontSize: 10 }}>
-              <a href="/terms" style={{ color: '#555' }}>Terms</a>
-              <a href="/privacy" style={{ color: '#555' }}>Privacy</a>
-              <a href="/shipping" style={{ color: '#555' }}>Shipping</a>
-            </div>
-            <div style={{ textAlign: 'center', color: '#333', fontSize: 10, marginTop: 24 }}>
-              © {new Date().getFullYear()} {config.brandFooterData?.corporateEntityCopyright || 'GOYUNIR ALL RIGHTS RESERVED.'}
-            </div>
-          </footer>
-        </section>
+        )}
       </div>
-    </div>
+    </main>
   );
-}
-
-function getNextDrawTimestampForSchedule(schedule: any): number {
-  if (!schedule) return Date.now() + 24 * 60 * 60 * 1000;
-  if (schedule.mode === 'fixed') {
-    try {
-      const date = new Date(schedule.targetEndDateTime);
-      if (!isNaN(date.getTime())) return date.getTime();
-    } catch {}
-  }
-  return Date.now() + 24 * 60 * 60 * 1000;
 }

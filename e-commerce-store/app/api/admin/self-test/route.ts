@@ -1,21 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, getCatalogArchiveRecords, getProductOverride } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import {
-  getNextDrawTimestampForSchedule,
-  resolveProductSchedule,
-  getProductPrice,
-  getWinnerCount,
-  getAvailableSizes,
-} from '@/lib/storefront-config';
+import { createRedisClient, createStripeClient, loadProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-interface TestResult {
-  name: string;
-  pass: boolean;
-  detail: string;
-}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -25,18 +11,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 
-  const results: TestResult[] = [];
+  const results: any[] = [];
   const push = (name: string, pass: boolean, detail: string) => results.push({ name, pass, detail });
 
-  for (const key of [
-    'STRIPE_SECRET_KEY',
-    'STRIPE_WEBHOOK_SECRET',
-    'UPSTASH_REDIS_REST_URL',
-    'UPSTASH_REDIS_REST_TOKEN',
-    'ADMIN_BASIC_AUTH_USERNAME',
-    'ADMIN_BASIC_AUTH_PASSWORD',
-    'CRON_SECRET',
-  ]) {
+  // Environment variables
+  const envVars = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'ADMIN_BASIC_AUTH_USERNAME', 'ADMIN_BASIC_AUTH_PASSWORD', 'CRON_SECRET'];
+  for (const key of envVars) {
     push(`Env: ${key}`, Boolean(process.env[key]), process.env[key] ? 'set' : 'MISSING');
   }
   push('Env: RESEND_API_KEY', Boolean(process.env.RESEND_API_KEY), process.env.RESEND_API_KEY ? 'set' : 'optional');
@@ -51,54 +31,31 @@ export async function GET(request: Request) {
     try {
       await redis.ping();
       push('Redis ping', true, 'pong');
-    } catch (e: any) {
-      push('Redis ping', false, e.message);
-    }
+    } catch (e: any) { push('Redis ping', false, e.message); }
   }
   if (stripe) {
     try {
       await stripe.balance.retrieve();
       push('Stripe API', true, 'ok');
-    } catch (e: any) {
-      push('Stripe API', false, e.message);
-    }
+    } catch (e: any) { push('Stripe API', false, e.message); }
   }
 
-  for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-    try {
-      const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
-      const ts = getNextDrawTimestampForSchedule(schedule);
-      push(`${product.name}: schedule`, Number.isFinite(ts) && ts > 0, new Date(ts).toISOString());
-    } catch (e: any) {
-      push(`${product.name}: schedule`, false, e.message);
-    }
-    for (const size of getAvailableSizes(GOYUNIR_STORE_SUITE)) {
-      // Get the actual current price (with override)
-      let price = getProductPrice(product, size);
-      if (redis) {
-        try {
-          const override = await getProductOverride(redis, product.id);
-          if (size === '100ml' && typeof override?.price100ml === 'number') {
-            price = override.price100ml;
-          } else if (size !== '100ml' && typeof override?.price50ml === 'number') {
-            price = override.price50ml;
-          }
-        } catch {}
-      }
-      push(`${product.name} ${size}: price`, price > 0, `$${price}`);
-    }
-  }
-
+  // Check products from Redis with priceCategories
   if (redis) {
-    try {
-      const records = await getCatalogArchiveRecords(redis);
-      push('Catalog archive', true, `${records.length} archived`);
-    } catch (e: any) {
-      push('Catalog archive', false, e.message);
+    const allProducts = await loadProducts(redis);
+    const productList = Object.values(allProducts);
+    for (const product of productList) {
+      const cats = product.priceCategories || [];
+      for (const cat of cats) {
+        const price = cat.price || 0;
+        const stripeId = cat.stripeId || '';
+        push(`${product.name} ${cat.size}: price`, price > 0, `$${price}`);
+        push(`${product.name} ${cat.size}: Stripe ID`, Boolean(stripeId), stripeId || 'MISSING');
+      }
     }
   }
 
-  const passCount = results.filter((r) => r.pass).length;
+  const passCount = results.filter(r => r.pass).length;
   return NextResponse.json({
     summary: `${passCount}/${results.length} checks passed`,
     allPassed: passCount === results.length,

@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server';
-import {
-  createRedisClient,
-  findAllOpenOrders,
-  adminUpdateOrderAddress,
-} from '@/lib/server-config';
+import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,31 +25,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p: any) => p.name);
     const orders = await findAllOpenOrders(redis, productNames);
     const target = orders.find(
-      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,
+      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email
     );
-
     if (!target) {
       return NextResponse.json({ error: 'Entry not found.' }, { status: 404 });
     }
 
     await adminUpdateOrderAddress(redis, target, newAddress);
-
-    // Send confirmation email
-    try {
-      await sendAccountUpdateEmail({
-        to: email,
-        product: variant,
-        size: size,
-        changeType: 'address',
-        newAddress: newAddress,
-      });
-    } catch (e) {
-      console.error('[update-address] email failed', e);
-    }
-
     return NextResponse.json({ success: true, message: 'Address updated.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

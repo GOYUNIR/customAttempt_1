@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  createRedisClient,
-  findAllOpenOrders,
-  adminUpdateOrderAddress,
-} from '@/lib/server-config';
+import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -14,33 +10,31 @@ export async function POST(request: Request) {
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();
-    const password = String(body?.password || '');
-    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
-    if (!master || password !== master) {
-      return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
-    }
-
-    const variant = String(body?.variant || '');
-    const size = String(body?.size || '');
     const email = String(body?.email || '').trim().toLowerCase();
+    const last4 = String(body?.last4 || '').trim();
+    const variant = String(body?.variant || '').trim();
+    const size = String(body?.size || '').trim();
     const newAddress = String(body?.newAddress || '').trim();
 
-    if (!variant || !size || !email || !newAddress) {
+    if (!email || !variant || !size || !newAddress) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p: any) => p.name);
     const orders = await findAllOpenOrders(redis, productNames);
     const target = orders.find(
-      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,
+      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email
     );
-
     if (!target) {
       return NextResponse.json({ error: 'Entry not found.' }, { status: 404 });
     }
 
-    await adminUpdateOrderAddress(redis, target, newAddress);
+    // Also verify last4 if provided (optional)
+    if (last4 && String(target.parsed.cardLast4 || '') !== last4) {
+      return NextResponse.json({ error: 'Card last4 does not match.' }, { status: 403 });
+    }
 
+    await adminUpdateOrderAddress(redis, target, newAddress);
     return NextResponse.json({ success: true, message: 'Address updated.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
