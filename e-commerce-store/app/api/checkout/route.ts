@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
-const PROMO_PENDING_TTL_SECONDS = 30 * 60;
+const PROMO_PENDING_TTL_SECONDS = 10 * 60;
 
 function usedEmailsKey(code: string) {
   return `promo:used_emails:${code}`;
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
 
     if (normalizedPromo && checkoutMode === 'FCFS') {
       const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
-      const promo = typeof rawPromo === 'string' ? JSON.parse(rawPromo) : rawPromo;
+      const promo = safeParseRedisItem<any>(rawPromo);
       if (!promo || promo.active === false) {
         return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
       }
@@ -129,7 +129,7 @@ export async function POST(request: Request) {
       }
     } else if (normalizedPromo && checkoutMode === 'RAFFLE') {
       const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
-      const promo = typeof rawPromo === 'string' ? JSON.parse(rawPromo) : rawPromo;
+      const promo = safeParseRedisItem<any>(rawPromo);
       if (promo) {
         const hasRestrictedCredit = Number(promo.fixedDiscountCents || 0) > 0
           || Number(promo.minimumOrderSubtotalCents || 0) > 0
