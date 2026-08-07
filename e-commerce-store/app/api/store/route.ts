@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts, STORE_CONFIG_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
-const CONFIG_KEY = 'store:config';
 const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
 const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
@@ -103,7 +102,7 @@ export async function GET(request: Request) {
     }
 
     // Get store config
-    const configRaw = await redis.get(CONFIG_KEY);
+    const configRaw = await redis.get(STORE_CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || {};
 
     let activeProducts: PublicStoreProduct[] = [];

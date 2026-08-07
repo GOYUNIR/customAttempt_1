@@ -111,9 +111,9 @@ export default function HomePage() {
           </section>
         ) : (
           <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '20px 18px', background: '#0e0e10' }}>
-            <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue, marginBottom: 8 }}>No active drops</div>
-            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px' }}>Nothing is live right now.</h2>
-            <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Admins can launch a new raffle or direct-buy drop from the portal and it will appear here automatically.</p>
+            <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue, marginBottom: 8 }}>Release feed</div>
+            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px' }}>The next drop is not live yet.</h2>
+            <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>This space fills automatically when a raffle or direct release is published from the admin portal.</p>
             <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>View catalog</Link>
           </section>
         )}
@@ -121,8 +121,8 @@ export default function HomePage() {
         {activeProducts.length === 0 && (
           <ReleaseWaitlist
             source="home"
-            headline="Join the private alert list before the next release opens."
-            body="If nothing is visible right now, this is the fastest path back in. The brand can trigger release alerts directly from the admin portal without touching code."
+            headline="Get notified the moment the next release goes live."
+            body="Join the alert list and we will send the drop as soon as it opens."
           />
         )}
       </div>

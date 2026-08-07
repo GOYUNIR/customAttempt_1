@@ -50,6 +50,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
   const [countdownLabel, setCountdownLabel] = useState('');
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [promoCode, setPromoCode] = useState('');
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -115,6 +116,21 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   useEffect(() => {
     setCart(readStoredCart());
+    if (typeof window !== 'undefined') {
+      const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
+      if (storedPromo) setPromoCode(storedPromo);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const incomingPromo = String(params.get('ref') || params.get('promo') || '').trim().toUpperCase();
+    if (incomingPromo) {
+      window.localStorage.setItem('goyunir-promo-code', incomingPromo);
+      setPromoCode(incomingPromo);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   useEffect(() => {
@@ -165,6 +181,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setMessage('Price not set for this size. Please set in admin.');
       return;
     }
+    const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
     const item = {
       productId: product.id,
       name: product.name,
@@ -220,7 +237,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle' }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle', promoCode }),
       });
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
@@ -246,7 +263,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'direct' }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'direct', promoCode }),
       });
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {

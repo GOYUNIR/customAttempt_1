@@ -39,7 +39,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [cartMsg, setCartMsg] = useState('');
   const [scrollY, setScrollY] = useState(0);
   const [pointerX, setPointerX] = useState(0.5);
+  const [pointerY, setPointerY] = useState(0.35);
   const [theme, setTheme] = useState<any>(null);
+  const [branding, setBranding] = useState<any>(null);
+  const [promoCode, setPromoCode] = useState('');
+  const [bannerMessage, setBannerMessage] = useState('');
 
   useEffect(() => {
     const sync = () => setCart(readCart());
@@ -48,12 +52,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     const onScroll = () => setScrollY(window.scrollY || 0);
     const onPointer = (event: PointerEvent) => {
       const width = window.innerWidth || 1;
+      const height = window.innerHeight || 1;
       setPointerX(Math.max(0, Math.min(1, event.clientX / width)));
+      setPointerY(Math.max(0, Math.min(1, event.clientY / height)));
     };
+
+    const params = new URLSearchParams(window.location.search);
+    const incomingPromo = String(params.get('ref') || params.get('promo') || '').trim().toUpperCase();
+    if (incomingPromo) {
+      window.localStorage.setItem('goyunir-promo-code', incomingPromo);
+      setPromoCode(incomingPromo);
+      setBannerMessage(`Promo ${incomingPromo} applied from your link.`);
+      window.history.replaceState({}, '', window.location.pathname);
+    } else {
+      const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
+      if (storedPromo) setPromoCode(storedPromo);
+    }
 
     fetch('/api/store')
       .then((res) => res.json())
-      .then((data) => setTheme(data?.config?.themeColors || null))
+      .then((data) => {
+        setTheme(data?.config?.themeColors || null);
+        setBranding(data?.config?.branding || null);
+      })
       .catch(() => {});
 
     window.addEventListener('goyunir-open-cart', open as EventListener);
@@ -90,6 +111,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const payload = {
         email: checkoutEmail.trim().toLowerCase(),
         address: checkoutAddress.trim(),
+        promoCode: String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase(),
         items: cart.map((item) => ({ productId: item.productId, size: item.size, quantity: 1 })),
       };
       const res = await fetch('/api/checkout/cart', {
@@ -113,10 +135,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const headerAccent = theme?.accentBlue || '#7dd3fc';
   const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.82)';
   const glowX = 15 + pointerX * 70;
+  const glowY = 8 + pointerY * 55;
   const blurBoost = Math.min(10, Math.floor(scrollY / 60));
 
   return (
     <>
+      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, background: `radial-gradient(circle at ${glowX}% ${glowY}%, ${headerAccent}18, transparent 24%), radial-gradient(circle at ${100 - glowX}% ${100 - glowY}%, rgba(168,85,247,0.14), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.02), transparent 26%)`, transition: 'background 120ms linear' }} />
+      {bannerMessage && (
+        <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
+          {bannerMessage}{promoCode ? ` · ${promoCode}` : ''}
+        </div>
+      )}
       <header
         style={{
           position: 'fixed',
@@ -138,8 +167,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           backgroundImage: `radial-gradient(circle at ${glowX}% -20%, ${headerAccent}33, transparent 35%)`,
         }}
       >
-        <div style={{ display: 'flex', gap: 10, fontSize: 10, letterSpacing: 1.4, fontWeight: 700, flexWrap: 'wrap', maxWidth: '34%' }}>
+        <div style={{ display: 'flex', gap: 10, fontSize: 10, letterSpacing: 1.4, fontWeight: 700, flexWrap: 'wrap', maxWidth: '34%', alignItems: 'center' }}>
           <Link href="/catalog" style={{ color: '#d4d4d8', textDecoration: 'none' }}>CATALOG</Link>
+          <span style={{ color: '#4b5563', userSelect: 'none' }}>|</span>
           <Link href="/story" style={{ color: '#71717a', textDecoration: 'none' }}>STORY</Link>
         </div>
 
@@ -159,13 +189,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
           }}
         >
-          GOYUNIR
+          {branding?.logoUrl ? (
+            <img src={branding.logoUrl} alt={branding?.shareTitle || 'GOYUNIR'} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
+          ) : null}
+          <span>{branding?.shareTitle || 'GOYUNIR'}</span>
         </Link>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', maxWidth: '34%' }}>
           <Link href="/account" style={{ color: '#a1a1aa', textDecoration: 'none', fontSize: 10, letterSpacing: 1.6, fontWeight: 700 }}>ACCOUNT</Link>
+          {promoCode && <span style={{ color: '#6b7280', fontSize: 9, letterSpacing: 1, maxWidth: 62, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{promoCode}</span>}
           <span style={{ color: '#4b5563', userSelect: 'none' }}>|</span>
           <button
             onClick={() => setCartOpen(true)}
@@ -247,6 +284,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
               </div>
               {hasItems && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
                   <input
                     type="email"
                     value={checkoutEmail}
@@ -254,13 +292,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     placeholder="Email"
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
                   />
-                  <input
-                    type="text"
-                    value={checkoutAddress}
-                    onChange={(e) => setCheckoutAddress(e.target.value)}
-                    placeholder="Shipping address"
-                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
-                  />
+                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>Use browser autofill or paste the full shipping address.</div>
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

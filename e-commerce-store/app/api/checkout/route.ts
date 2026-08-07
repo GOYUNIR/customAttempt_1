@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { productId, size, email, address } = body;
+    const { productId, size, email, address, promoCode, ref } = body;
 
     if (!productId || !size || !email || !address) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
@@ -128,6 +128,8 @@ export async function POST(request: Request) {
           address: String(address),
           maxPerEmail: String(maxPerEmail),
           orderRef,
+          promoCode: String(promoCode || ref || '').trim().toUpperCase(),
+          ref: String(ref || promoCode || '').trim().toUpperCase(),
         },
       });
       return NextResponse.json({ url: session.url, sessionId: session.id });
@@ -173,6 +175,8 @@ export async function POST(request: Request) {
             address: String(address),
             maxPerEmail: String(maxPerEmail),
             orderRef,
+            promoCode: String(promoCode || ref || '').trim().toUpperCase(),
+            ref: String(ref || promoCode || '').trim().toUpperCase(),
           },
         },
       });

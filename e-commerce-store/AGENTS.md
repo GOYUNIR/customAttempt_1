@@ -133,6 +133,17 @@ All variants are managed in the admin portal. New products default to **inactive
 - `isUpcoming` – moves product to the "Upcoming" section; **does not affect** `isActive`.
 - You can set both flags independently.
 
+## Account Recovery
+
+- Signup should create a session immediately so new users land in `/account` already logged in.
+- Password reset uses `/auth/reset-password` and tokenized links from the forgot-password flow.
+
+## Branding & Share Cards
+
+- Site logo, browser tab icon, and social share image styling are controlled from `/admin` → Settings.
+- The configured branding should be reflected in the header logo, the favicon route, and the Open Graph preview image.
+- Keep share colors and copy aligned with the admin settings instead of hardcoding them in the layout.
+
 ## Image Upload
 
 - Upload images via the admin form (file input). Images are stored in `/public/uploads/{productId}/` and auto‑numbered.
@@ -141,7 +152,7 @@ All variants are managed in the admin portal. New products default to **inactive
 
 ## Cart / Multiple Items
 
-**Not implemented yet.** This is a planned feature. For now, each transaction is single‑item (raffle entry or direct purchase). A future update will add cart support.
+Cart checkout is implemented for FCFS/direct items. Raffle entries still use the product-page setup flow, and referral codes can arrive through `?ref=` or `?promo=` links and should be preserved through checkout metadata.
 
 ## Product Configuration (v2 – fully dynamic)
 

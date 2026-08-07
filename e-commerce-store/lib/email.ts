@@ -265,6 +265,35 @@ export async function sendEntryRecoveryEmail(opts: {
   }
 }
 
+export async function sendPasswordResetEmail(opts: {
+  to: string;
+  resetUrl: string;
+}) {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true };
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: 'Reset your GOYUNIR password',
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">Reset your password</h1>
+          <p style="margin:0 0 14px;color:#4b5563">Use the link below to set a new password for your account.</p>
+          <p style="margin:0 0 20px"><a href="${opts.resetUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">Reset password</a></p>
+          <p style="color:#6b7280;font-size:13px;margin:0">If you did not request this, you can ignore this message.</p>
+        </div>
+      `,
+    });
+    if (error) return { ok: false, error };
+    return { ok: true, id: data?.id };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
 export async function sendWaitlistConfirmationEmail(opts: { to: string }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };

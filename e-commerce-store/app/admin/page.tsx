@@ -216,6 +216,16 @@ export default function AdminPortal() {
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
   const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
+  const [brandingSettings, setBrandingSettings] = useState({
+    logoUrl: '',
+    shareTitle: 'Luxury drops built for fast taps.',
+    shareDescription: 'Raffle entries, direct releases, alerts, and clean checkout flows for mobile-first traffic.',
+    shareBackground: '#050505',
+    shareAccent: '#3b82f6',
+    shareText: '#ffffff',
+    iconBackground: '#111111',
+    iconText: '#ffffff',
+  });
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [settingsMsg, setSettingsMsg] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -359,6 +369,7 @@ export default function AdminPortal() {
         if (data.settings.heroContent) setHeroSettings(data.settings.heroContent);
         if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
+        if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
       }
       setSettingsMsg('');
@@ -1115,6 +1126,7 @@ export default function AdminPortal() {
           hero: heroSettings,
           form: formSettings,
           footer: footerSettings,
+          branding: brandingSettings,
           productNotes,
         }),
       });
@@ -2339,6 +2351,61 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                 ))}
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  Logo Upload or URL
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const dataUrl = await fileToDataURL(file);
+                      setBrandingSettings((prev) => ({ ...prev, logoUrl: dataUrl }));
+                    }}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 6, height: 40 }}
+                  />
+                  <input
+                    type="text"
+                    value={brandingSettings.logoUrl || ''}
+                    onChange={(e) => setBrandingSettings((prev) => ({ ...prev, logoUrl: e.target.value }))}
+                    placeholder="Or paste a logo URL"
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  />
+                </label>
+                {Object.entries({
+                  shareTitle: brandingSettings.shareTitle,
+                  shareDescription: brandingSettings.shareDescription,
+                  shareBackground: brandingSettings.shareBackground,
+                  shareAccent: brandingSettings.shareAccent,
+                  shareText: brandingSettings.shareText,
+                  iconBackground: brandingSettings.iconBackground,
+                  iconText: brandingSettings.iconText,
+                }).map(([key, value]) => (
+                  <label key={key} style={{ fontSize: 11 }}>
+                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    <input
+                      type={key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 'color' : 'text'}
+                      value={String(value || '')}
+                      onChange={(e) => setBrandingSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 4 : 10, height: key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 40 : undefined }}
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 14, padding: 14, marginBottom: 10, background: brandingSettings.shareBackground || '#050505', color: brandingSettings.shareText || '#ffffff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  {brandingSettings.logoUrl ? <img src={brandingSettings.logoUrl} alt="Brand preview" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover' }} /> : <div style={{ width: 40, height: 40, borderRadius: 10, background: brandingSettings.shareAccent || '#3b82f6' }} />}
+                  <div>
+                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>Share Preview</div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{brandingSettings.shareTitle}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'rgba(255,255,255,0.82)' }}>{brandingSettings.shareDescription}</div>
               </div>
 
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
-const SETTINGS_KEY = 'store:config';
+const SETTINGS_KEY = STORE_CONFIG_KEY;
 
 export async function GET(request: Request) {
   try {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     const { 
-      theme, hero, form, footer, 
+      theme, hero, form, footer, branding,
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       heroContent: hero || current.heroContent || {},
       raffleRegistrationForm: form || current.raffleRegistrationForm || {},
       brandFooterData: footer || current.brandFooterData || {},
+      branding: branding || current.branding || {},
       productNotes: productNotes || current.productNotes || {},
       animationMechanics: animationMechanics || current.animationMechanics || {},
       dropSchedule: dropSchedule || current.dropSchedule || {},

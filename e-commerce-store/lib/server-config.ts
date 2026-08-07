@@ -2,6 +2,19 @@ import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
+export const STORE_CONFIG_KEY = 'store:config';
+
+export type StoreBrandingConfig = {
+  logoUrl?: string;
+  shareTitle?: string;
+  shareDescription?: string;
+  shareBackground?: string;
+  shareAccent?: string;
+  shareText?: string;
+  iconBackground?: string;
+  iconText?: string;
+};
+
 export function safeParseRedisItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
   if (typeof item === 'object') return item as T;
@@ -40,6 +53,15 @@ export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
   try {
     await redis.rpush(ARCHIVE_LEDGER_KEY, JSON.stringify(record));
   } catch {}
+}
+
+export async function loadStoreConfig(redis: Redis | null | undefined): Promise<Record<string, any>> {
+  if (!redis) return {};
+  try {
+    return safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
+  } catch {
+    return {};
+  }
 }
 
 export const POOL_STATS_KEY = 'stats:pools';
