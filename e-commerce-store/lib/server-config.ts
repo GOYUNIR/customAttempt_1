@@ -225,12 +225,22 @@ export interface FoundPoolEntry {
   poolKey: string; variant: string; size: string; index: number; parsed: any;
 }
 
+async function listPoolKeysForProduct(redis: Redis, prefix: 'drop_pool' | 'intent_pool', productName: string): Promise<string[]> {
+  try {
+    const keys = await redis.keys(`${prefix}:${productName}:*`);
+    return Array.isArray(keys) ? keys : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function findPoolEntriesByEmail(redis: Redis, productNames: string[], email: string): Promise<FoundPoolEntry[]> {
   const normalizedEmail = email.trim().toLowerCase();
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
-    for (const size of ['50ml', '100ml']) {
-      const poolKey = `drop_pool:${productName}:${size}`;
+    const poolKeys = await listPoolKeysForProduct(redis, 'drop_pool', productName);
+    for (const poolKey of poolKeys) {
+      const size = String(poolKey.split(':').slice(2).join(':') || 'Standard');
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
         const parsed = safeParseRedisItem<any>(raw);
@@ -253,8 +263,9 @@ export async function findPoolEntriesByEmail(redis: Redis, productNames: string[
 export async function findAllOpenOrders(redis: Redis, productNames: string[]): Promise<FoundPoolEntry[]> {
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
-    for (const size of ['50ml', '100ml']) {
-      const poolKey = `drop_pool:${productName}:${size}`;
+    const poolKeys = await listPoolKeysForProduct(redis, 'drop_pool', productName);
+    for (const poolKey of poolKeys) {
+      const size = String(poolKey.split(':').slice(2).join(':') || 'Standard');
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
         const parsed = safeParseRedisItem<any>(raw);

@@ -9,6 +9,7 @@ import {
   resolveCustomerId,
   resetPoolAndBlocks,
   LAST_DRAW_KEY,
+  loadProducts,
 } from '@/lib/server-config';
 import { getProductPrice, getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
 
@@ -30,8 +31,12 @@ export async function runDropDraw(request: Request | NextRequest) {
     return { success: true, processedWinners: [], message: 'Redis is not configured. No draw was processed.' };
   }
 
-  for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-    for (const size of ['50ml', '100ml']) {
+  const products = Object.values(await loadProducts(redis));
+
+  for (const product of products as any[]) {
+    const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+    for (const category of priceCategories) {
+      const size = String(category?.size || 'Standard');
       const poolKey = `drop_pool:${product.name}:${size}`;
       const totalEntries = await redis.llen(poolKey);
       if (totalEntries === 0) continue;
@@ -46,7 +51,11 @@ export async function runDropDraw(request: Request | NextRequest) {
         [parsedPool[index], parsedPool[j]] = [parsedPool[j], parsedPool[index]];
       }
 
-      const targetLimit = getWinnerCount(GOYUNIR_STORE_SUITE, size);
+      const parsedWinnerTiers = String(category?.winnerTiers || '0')
+        .split(',')
+        .map((item) => Number(item.trim()))
+        .filter((item) => Number.isFinite(item) && item >= 0);
+      const targetLimit = Math.max(0, parsedWinnerTiers[0] ?? getWinnerCount(GOYUNIR_STORE_SUITE, size));
       let successCount = 0;
 
       for (const entry of parsedPool) {

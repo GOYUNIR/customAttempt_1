@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
@@ -56,8 +56,12 @@ export async function GET(request: Request) {
     let sentPre = 0;
     const now = Date.now();
 
-    for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-      for (const size of ['50ml', '100ml']) {
+    const allProducts = Object.values(await loadProducts(redis));
+
+    for (const product of allProducts as any[]) {
+      const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+      for (const category of priceCategories) {
+        const size = String(category?.size || 'Standard');
         const intentKey = `intent_pool:${product.name}:${size}`;
         let items: string[] = [];
         try {
@@ -67,7 +71,7 @@ export async function GET(request: Request) {
         }
         if (!items.length) continue;
 
-        const schedule = resolveProductSchedule(GOYUNIR_STORE_SUITE, product);
+      const schedule = resolveProductSchedule({ ...GOYUNIR_STORE_SUITE, productCatalog: allProducts as any[] }, product as any);
         const drawAt = getNextDrawTimestampForSchedule(schedule);
         const hoursToDraw = (drawAt - now) / (1000 * 60 * 60);
 

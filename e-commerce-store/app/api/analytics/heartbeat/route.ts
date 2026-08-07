@@ -8,10 +8,9 @@ async function sumAllSubs(redis: any): Promise<number> {
   const stats = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
   if (!stats) return 0;
   let total = 0;
-  for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
-    for (const size of ['50ml', '100ml']) {
-      total += Number(stats[`sub:${product.name}:${size}`] ?? 0);
-    }
+  for (const [field, value] of Object.entries(stats)) {
+    if (!field.startsWith('sub:')) continue;
+    total += Number(value ?? 0);
   }
   return Math.max(0, total);
 }
