@@ -9,6 +9,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
+  const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
+  const [raffleCountdown, setRaffleCountdown] = useState('');
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
   useEffect(() => {
@@ -20,6 +22,9 @@ export default function HomePage() {
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
         setActiveProducts(sorted);
+        const drawAnchor = data?.config?.dropSchedule?.targetEndDateTime;
+        const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
+        setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
       } catch (err) {
         console.error('[HomePage] Error checking products:', err);
       } finally {
@@ -41,6 +46,29 @@ export default function HomePage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!raffleEndsAt) {
+      setRaffleCountdown('');
+      return;
+    }
+    const update = () => {
+      const diff = raffleEndsAt - Date.now();
+      if (diff <= 0) {
+        setRaffleCountdown('Raffle window closed');
+        return;
+      }
+      const total = Math.floor(diff / 1000);
+      const days = Math.floor(total / 86400);
+      const hours = Math.floor((total % 86400) / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const seconds = total % 60;
+      setRaffleCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [raffleEndsAt]);
+
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: '#0a0a0a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
@@ -54,6 +82,7 @@ export default function HomePage() {
 
   const primaryProduct = activeProducts[0];
   const secondaryProducts = activeProducts.slice(1);
+  const hasRaffleProduct = activeProducts.some((product) => String(product.checkoutMode || '').toUpperCase() === 'RAFFLE');
 
   return (
     <main style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, rgba(59,130,246,0.14), transparent 36%), radial-gradient(circle at 20% 20%, rgba(168,85,247,0.16), transparent 28%), #07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
@@ -71,6 +100,11 @@ export default function HomePage() {
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
             Live raffle entries signal: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
+          {hasRaffleProduct && raffleCountdown && (
+            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.015)', fontSize: 12, color: '#d4d4d8' }}>
+              Raffle countdown: <strong>{raffleCountdown}</strong>
+            </div>
+          )}
         </section>
 
         {activeProducts.length > 0 ? (

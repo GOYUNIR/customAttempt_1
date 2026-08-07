@@ -51,6 +51,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [countdownLabel, setCountdownLabel] = useState('');
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [promoCode, setPromoCode] = useState('');
+  const [promoMsg, setPromoMsg] = useState('');
+  const [promoValid, setPromoValid] = useState<boolean | null>(null);
+  const [encryptionHealthy, setEncryptionHealthy] = useState(true);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -241,11 +244,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       });
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+        setEncryptionHealthy(true);
         window.location.href = data.url;
       } else {
+        setEncryptionHealthy(false);
         setMessage(data.error || 'Failed to start checkout');
       }
     } catch (e) {
+      setEncryptionHealthy(false);
       setMessage('Connection error');
     } finally {
       setIsSubmitting(false);
@@ -267,14 +273,42 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       });
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+        setEncryptionHealthy(true);
         window.location.href = data.url;
       } else {
+        setEncryptionHealthy(false);
         setMessage(data.error || 'Checkout failed');
       }
     } catch (e) {
+      setEncryptionHealthy(false);
       setMessage('Connection error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const applyPromo = async () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) {
+      setPromoMsg('Enter a promo code first.');
+      setPromoValid(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(email || '')}`);
+      const data = await res.json();
+      if (data.valid) {
+        window.localStorage.setItem('goyunir-promo-code', code);
+        setPromoCode(code);
+        setPromoValid(true);
+        setPromoMsg(`Promo ${code} applied${data.customerDiscountPercent ? ` · ${data.customerDiscountPercent}% off` : ''}.`);
+        return;
+      }
+      setPromoValid(false);
+      setPromoMsg(data.error || 'Promo is invalid.');
+    } catch {
+      setPromoValid(false);
+      setPromoMsg('Could not validate promo right now.');
     }
   };
 
@@ -331,6 +365,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
             <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: '#fff' }} />
+            <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: '#17171b', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+          </div>
+          {promoMsg && <div style={{ marginBottom: 8, fontSize: 11, color: promoValid === false ? '#fca5a5' : '#86efac' }}>{promoMsg}</div>}
+          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: encryptionHealthy ? '#22c55e' : '#ef4444', boxShadow: `0 0 0 2px ${encryptionHealthy ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)'}` }} />
+            {encryptionHealthy ? 'Encrypted payment setup' : 'Encryption check failed'}
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

@@ -106,6 +106,34 @@ function fileToDataURL(file: File): Promise<string> {
   });
 }
 
+async function compressImageFile(file: File, maxSize = 1440, quality = 0.82): Promise<File> {
+  if (typeof window === 'undefined' || !file.type.startsWith('image/')) return file;
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = imageUrl;
+    });
+    const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(image, 0, 0, width, height);
+    const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b || file), 'image/jpeg', quality));
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
   const [drawsSub, setDrawsSub] = useState<'run' | 'automation'>('run');
@@ -165,6 +193,7 @@ export default function AdminPortal() {
 
   const [selftestResults, setSelftestResults] = useState<any>(null);
   const [selftestRunning, setSelftestRunning] = useState(false);
+  const [organizeMsg, setOrganizeMsg] = useState('');
   
   const [drawHistory, setDrawHistory] = useState<any[]>([]);
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
@@ -218,7 +247,8 @@ export default function AdminPortal() {
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
   const [brandingSettings, setBrandingSettings] = useState({
     logoUrl: '',
-    shareTitle: 'Luxury drops built for fast taps.',
+    shareImageUrl: '',
+    shareTitle: 'GOYUNIR',
     shareDescription: 'Raffle entries, direct releases, alerts, and clean checkout flows for mobile-first traffic.',
     shareBackground: '#050505',
     shareAccent: '#3b82f6',
@@ -500,23 +530,33 @@ export default function AdminPortal() {
 
   // ===== Handle image file uploads =====
   const handleImageFiles = async (files: FileList) => {
-    const fileArray = Array.from(files);
-    const tooLarge = fileArray.find((file) => file.size > 2 * 1024 * 1024);
-    if (tooLarge) {
-      setProductMsg(`❌ ${tooLarge.name} is larger than 2MB. Please compress before upload.`);
+    if (!password) {
+      setProductMsg('❌ Enter admin password first.');
       return;
     }
-    const dataUrls = await Promise.all(fileArray.map(file => fileToDataURL(file)));
-    // Append to existing images, auto‑number from current length+1
-    const currentImages = productForm.images || [];
-    const newImages = [...currentImages, ...dataUrls];
-    setProductForm((prev: any) => ({ ...prev, images: newImages }));
-    // Update prefix from slug (if set)
-    if (productForm.slug) {
-      // prefix is derived from slug, but we can set it explicitly
-      setProductForm((prev: any) => ({ ...prev, prefix: prev.slug }));
+    if (!editingProduct) {
+      setProductMsg('❌ Save the product first, then upload images.');
+      return;
     }
-    showToast(`Added ${dataUrls.length} image(s)`);
+    const fileArray = Array.from(files);
+    let uploaded = 0;
+    for (const file of fileArray) {
+      const compressed = await compressImageFile(file);
+      const uploadData = new FormData();
+      uploadData.append('productId', editingProduct);
+      uploadData.append('password', password);
+      uploadData.append('file', compressed);
+      const res = await adminFetch('/api/admin/upload', { method: 'POST', body: uploadData });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setProductMsg(`❌ Upload failed: ${data.error || file.name}`);
+        return;
+      }
+      uploaded += 1;
+    }
+    await fetchProducts();
+    setProductMsg(`✅ Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}.`);
+    showToast(`Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}`);
   };
 
   // ===== Save product (UPDATED to send priceCategories) =====
@@ -1111,6 +1151,29 @@ export default function AdminPortal() {
       if (res.ok) { setShipMsg('Entry cancelled.'); await fetchStatus(); } else setShipMsg(data.error || 'Failed.');
     } catch {
       setShipMsg('Connection failed.');
+    }
+  };
+
+  const organizeRedis = async () => {
+    if (!password) return alert('Enter password');
+    setOrganizeMsg('Organizing Redis keys...');
+    try {
+      const res = await adminFetch('/api/admin/organize-redis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOrganizeMsg(`Organized: ${data.products} products, ${data.upcoming} upcoming, ${data.archived} archived.`);
+        showToast('UPDATED · Redis organized');
+        await fetchProducts();
+        await fetchCatalogSettings();
+      } else {
+        setOrganizeMsg(data.error || 'Failed to organize Redis.');
+      }
+    } catch (err: any) {
+      setOrganizeMsg(err.message || 'Failed to organize Redis.');
     }
   };
 
@@ -2284,6 +2347,15 @@ export default function AdminPortal() {
                 {audit.map((a, i) => <div key={i} style={{ marginBottom: 6 }}>{a.at} — {a.action} {a.detail || ''}</div>)}
               </div>
             </div>
+
+            <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Redis Organization</h2>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
+                Rebuilds active, upcoming, and archive indexes from canonical product records and syncs catalog groupings.
+              </p>
+              <button onClick={organizeRedis} style={buttonGhost}>Normalize Redis Keys</button>
+              {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
+            </div>
           </div>
         )}
 
@@ -2379,6 +2451,7 @@ export default function AdminPortal() {
                 {Object.entries({
                   shareTitle: brandingSettings.shareTitle,
                   shareDescription: brandingSettings.shareDescription,
+                  shareImageUrl: brandingSettings.shareImageUrl,
                   shareBackground: brandingSettings.shareBackground,
                   shareAccent: brandingSettings.shareAccent,
                   shareText: brandingSettings.shareText,
@@ -2397,11 +2470,11 @@ export default function AdminPortal() {
                 ))}
               </div>
 
-              <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 14, padding: 14, marginBottom: 10, background: brandingSettings.shareBackground || '#050505', color: brandingSettings.shareText || '#ffffff' }}>
+              <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 14, padding: 14, marginBottom: 10, background: brandingSettings.shareImageUrl ? `linear-gradient(180deg, rgba(0,0,0,0.58), rgba(0,0,0,0.64)), url(${brandingSettings.shareImageUrl}) center/cover, ${brandingSettings.shareBackground || '#050505'}` : (brandingSettings.shareBackground || '#050505'), color: brandingSettings.shareText || '#ffffff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   {brandingSettings.logoUrl ? <img src={brandingSettings.logoUrl} alt="Brand preview" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover' }} /> : <div style={{ width: 40, height: 40, borderRadius: 10, background: brandingSettings.shareAccent || '#3b82f6' }} />}
                   <div>
-                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>Share Preview</div>
+                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>GOYUNIR</div>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{brandingSettings.shareTitle}</div>
                   </div>
                 </div>

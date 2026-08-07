@@ -44,6 +44,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [branding, setBranding] = useState<any>(null);
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
+  const [encryptionHealthy, setEncryptionHealthy] = useState(true);
 
   useEffect(() => {
     const sync = () => setCart(readCart());
@@ -55,6 +56,53 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const height = window.innerHeight || 1;
       setPointerX(Math.max(0, Math.min(1, event.clientX / width)));
       setPointerY(Math.max(0, Math.min(1, event.clientY / height)));
+      lastInteraction = Date.now();
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      const width = window.innerWidth || 1;
+      const height = window.innerHeight || 1;
+      setPointerX(Math.max(0, Math.min(1, touch.clientX / width)));
+      setPointerY(Math.max(0, Math.min(1, touch.clientY / height)));
+      lastInteraction = Date.now();
+    };
+
+    let rafId = 0;
+    let lastInteraction = Date.now();
+    let idleTargetX = 0.52;
+    let idleTargetY = 0.42;
+    let nextIdleRetargetAt = Date.now() + 2300;
+    const animateIdle = () => {
+      const idleFor = Date.now() - lastInteraction;
+      if (idleFor > 1800) {
+        const now = Date.now();
+        if (now >= nextIdleRetargetAt) {
+          idleTargetX = 0.18 + Math.random() * 0.64;
+          idleTargetY = 0.14 + Math.random() * 0.68;
+          nextIdleRetargetAt = now + 1600 + Math.random() * 2600;
+        }
+        const t = now / 1000;
+        const microDriftX = Math.sin(t * 1.3) * 0.018 + Math.sin(t * 2.6) * 0.007;
+        const microDriftY = Math.cos(t * 1.15) * 0.016 + Math.cos(t * 2.2) * 0.006;
+        setPointerX((prev) => {
+          const eased = prev + (idleTargetX - prev) * 0.028 + microDriftX;
+          return Math.max(0.05, Math.min(0.95, eased));
+        });
+        setPointerY((prev) => {
+          const eased = prev + (idleTargetY - prev) * 0.028 + microDriftY;
+          return Math.max(0.08, Math.min(0.92, eased));
+        });
+      }
+      rafId = window.requestAnimationFrame(animateIdle);
+    };
+
+    const onScrollMotion = () => {
+      const maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
+      const progress = (window.scrollY || 0) / maxScroll;
+      setPointerY(Math.max(0.1, Math.min(0.9, 0.15 + progress * 0.7)));
+      setPointerX((prev) => Math.max(0.08, Math.min(0.92, prev + (Math.sin(progress * Math.PI * 8) * 0.018))));
+      lastInteraction = Date.now();
     };
 
     const params = new URLSearchParams(window.location.search);
@@ -81,13 +129,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('goyunir-cart-updated', sync as EventListener);
     window.addEventListener('storage', sync);
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScrollMotion, { passive: true });
     window.addEventListener('pointermove', onPointer, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    rafId = window.requestAnimationFrame(animateIdle);
     return () => {
       window.removeEventListener('goyunir-open-cart', open as EventListener);
       window.removeEventListener('goyunir-cart-updated', sync as EventListener);
       window.removeEventListener('storage', sync);
       window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScrollMotion);
       window.removeEventListener('pointermove', onPointer);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.cancelAnimationFrame(rafId);
     };
   }, []);
 
@@ -121,11 +175,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       });
       const data = await res.json();
       if (res.ok && data.url) {
+        setEncryptionHealthy(true);
         window.location.assign(data.url);
         return;
       }
+      setEncryptionHealthy(false);
       setCartMsg(data.error || 'Unable to start checkout.');
     } catch {
+      setEncryptionHealthy(false);
       setCartMsg('Unable to start checkout.');
     } finally {
       setCheckoutBusy(false);
@@ -197,7 +254,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           {branding?.logoUrl ? (
             <img src={branding.logoUrl} alt={branding?.shareTitle || 'GOYUNIR'} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
           ) : null}
-          <span>{branding?.shareTitle || 'GOYUNIR'}</span>
+          <span>GOYUNIR</span>
         </Link>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', maxWidth: '34%' }}>
@@ -292,6 +349,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     placeholder="Email"
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
                   />
+                  <input
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => {
+                      const next = e.target.value.toUpperCase().trim();
+                      setPromoCode(next);
+                      window.localStorage.setItem('goyunir-promo-code', next);
+                    }}
+                    placeholder="Promo code (optional)"
+                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 999, background: encryptionHealthy ? '#22c55e' : '#ef4444', boxShadow: `0 0 0 2px ${encryptionHealthy ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)'}` }} />
+                    {encryptionHealthy ? 'Encrypted checkout' : 'Encryption check failed'}
+                  </div>
                   <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>Use browser autofill or paste the full shipping address.</div>
                 </div>
               )}

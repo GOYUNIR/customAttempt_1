@@ -6,6 +6,7 @@ export const STORE_CONFIG_KEY = 'store:config';
 
 export type StoreBrandingConfig = {
   logoUrl?: string;
+  shareImageUrl?: string;
   shareTitle?: string;
   shareDescription?: string;
   shareBackground?: string;
@@ -528,10 +529,10 @@ export function getFallbackStoreProducts(): Record<string, any> {
 }
 
 export async function loadProducts(redis: any): Promise<Record<string, any>> {
-  if (!redis) return getFallbackStoreProducts();
+  if (!redis) return {};
 
   const raw = await redis.hgetall('store:products');
-  if (!raw || Object.keys(raw).length === 0) return getFallbackStoreProducts();
+  if (!raw || Object.keys(raw).length === 0) return {};
 
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -547,5 +548,5 @@ export async function loadProducts(redis: any): Promise<Record<string, any>> {
     }
   }
 
-  return Object.keys(out).length > 0 ? out : getFallbackStoreProducts();
+  return out;
 }

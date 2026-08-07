@@ -312,7 +312,7 @@ export default function AccountPage() {
             type="text"
             inputMode="numeric"
             maxLength={4}
-            placeholder="Card last 4 (optional extra verification)"
+            placeholder="Last 4 digits of the entry card (optional)"
             value={last4}
             onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
             style={{
@@ -326,6 +326,9 @@ export default function AccountPage() {
               boxSizing: 'border-box',
             }}
           />
+          <div style={{ marginTop: -4, fontSize: 11, color: configPalette.textMuted }}>
+            This is only for extra verification. Enter the last 4 numbers from the card used when entering.
+          </div>
           <button
             onClick={lookup}
             disabled={isBusy || !email}

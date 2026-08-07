@@ -9,15 +9,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const redis = createRedisClient();
   const config = await loadStoreConfig(redis);
   const branding = config.branding || {};
-  const shareTitle = String(branding.shareTitle || 'GOYUNIR');
   const shareDescription = String(branding.shareDescription || 'Luxury raffle drops and direct releases built for high-intent mobile traffic.');
   const themeColor = String(branding.shareAccent || config.themeColors?.accentBlue || '#3b82f6');
 
   return {
     metadataBase: new URL('https://goyunir.com'),
     title: {
-      default: shareTitle,
-      template: `%s | ${shareTitle}`,
+      default: 'GOYUNIR',
+      template: '%s | GOYUNIR',
     },
     description: shareDescription,
     alternates: {
@@ -29,16 +28,16 @@ export async function generateMetadata(): Promise<Metadata> {
       apple: '/icon',
     },
     openGraph: {
-      title: shareTitle,
+      title: 'GOYUNIR',
       description: shareDescription,
       url: 'https://goyunir.com',
-      siteName: shareTitle,
+      siteName: 'GOYUNIR',
       images: ['/opengraph-image'],
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
-      title: shareTitle,
+      title: 'GOYUNIR',
       description: shareDescription,
       images: ['/opengraph-image'],
     },

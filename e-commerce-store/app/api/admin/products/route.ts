@@ -8,8 +8,78 @@ const ACTIVE_PRODUCTS_KEY = 'store:active_products';
 const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
 const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const IMAGES_KEY = 'store:product_images';
+const CATALOG_CONFIG_KEY = 'store:catalog_config';
 
-async function saveProduct(redis: any, product: any) {
+function toBool(value: any, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return fallback;
+}
+
+async function syncCatalogConfigForProduct(
+  redis: any,
+  product: any,
+  options?: { previousSlug?: string; previousName?: string },
+) {
+  const raw = await redis.get(CATALOG_CONFIG_KEY);
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+  const upcomingDrops = Array.isArray(parsed?.upcomingDrops) ? parsed.upcomingDrops : [];
+  const archiveScents = Array.isArray(parsed?.archiveScents) ? parsed.archiveScents : [];
+
+  const upcomingEntry = {
+    name: product.name,
+    status: 'Upcoming',
+    eta: product.tagline || 'Coming soon',
+    image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
+    description: product.desc || '',
+    slug: product.slug,
+  };
+  const archiveEntry = {
+    name: product.name,
+    status: 'Archived',
+    image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
+    description: product.desc || '',
+    slug: product.slug,
+  };
+
+  const identityKeys = new Set(
+    [
+      product.slug,
+      product.name,
+      options?.previousSlug,
+      options?.previousName,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  );
+
+  const shouldKeep = (entry: any) => {
+    const key = String(entry?.slug || entry?.name || '').trim();
+    return key ? !identityKeys.has(key) : true;
+  };
+
+  const nextUpcoming = upcomingDrops.filter(shouldKeep);
+  const nextArchive = archiveScents.filter(shouldKeep);
+
+  if (product.isUpcoming && !product.isArchived) {
+    nextUpcoming.push(upcomingEntry);
+  }
+  if (product.isArchived) {
+    nextArchive.push(archiveEntry);
+  }
+
+  await redis.set(CATALOG_CONFIG_KEY, JSON.stringify({ upcomingDrops: nextUpcoming, archiveScents: nextArchive }));
+}
+
+async function saveProduct(redis: any, product: any, options?: { previousSlug?: string; previousName?: string }) {
+  product.isActive = toBool(product.isActive, false);
+  product.isArchived = toBool(product.isArchived, false);
+  product.isUpcoming = toBool(product.isUpcoming, false);
+
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
   await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
   await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
@@ -27,14 +97,28 @@ async function saveProduct(redis: any, product: any) {
   if (product.images && product.images.length > 0) {
     await redis.set(`${IMAGES_KEY}:${product.id}`, JSON.stringify(product.images));
   }
+
+  await syncCatalogConfigForProduct(redis, product, options);
 }
 
 async function deleteProduct(redis: any, id: string) {
+  const rawProduct = await redis.hget(PRODUCTS_KEY, id);
+  let deletedProduct: any = null;
+  if (typeof rawProduct === 'string') {
+    try {
+      deletedProduct = JSON.parse(rawProduct);
+    } catch {
+      deletedProduct = null;
+    }
+  }
   await redis.hdel(PRODUCTS_KEY, id);
   await redis.hdel(ACTIVE_PRODUCTS_KEY, id);
   await redis.hdel(ARCHIVED_PRODUCTS_KEY, id);
   await redis.hdel(UPCOMING_PRODUCTS_KEY, id);
   await redis.del(`${IMAGES_KEY}:${id}`);
+  if (deletedProduct) {
+    await syncCatalogConfigForProduct(redis, { ...deletedProduct, isUpcoming: false, isArchived: false });
+  }
 }
 
 export async function GET(request: Request) {
@@ -139,10 +223,10 @@ export async function POST(request: Request) {
     tagline: has('tagline') ? String(body.tagline || '') : (existing?.tagline || ''),
     desc: has('desc') ? String(body.desc || '') : (existing?.desc || ''),
     priceCategories: Array.isArray(body.priceCategories) ? body.priceCategories : (existing?.priceCategories || [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }]),
-    isActive: body.isActive !== undefined ? body.isActive : (existing?.isActive ?? false),
-    isArchived: body.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
-    isUpcoming: body.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
-    isRaffle: body.isRaffle !== undefined ? body.isRaffle : (existing?.isRaffle ?? true),
+    isActive: body.isActive !== undefined ? toBool(body.isActive, existing?.isActive ?? false) : (existing?.isActive ?? false),
+    isArchived: body.isArchived !== undefined ? toBool(body.isArchived, existing?.isArchived ?? false) : (existing?.isArchived ?? false),
+    isUpcoming: body.isUpcoming !== undefined ? toBool(body.isUpcoming, existing?.isUpcoming ?? false) : (existing?.isUpcoming ?? false),
+    isRaffle: body.isRaffle !== undefined ? toBool(body.isRaffle, existing?.isRaffle ?? true) : (existing?.isRaffle ?? true),
     checkoutMode: (() => {
       const raw = has('checkoutMode') ? String(body.checkoutMode || '').toUpperCase() : String(existing?.checkoutMode || '').toUpperCase();
       if (raw === 'FCFS') return 'FCFS';
@@ -162,6 +246,9 @@ export async function POST(request: Request) {
     updatedAt: new Date().toISOString(),
   };
 
-  await saveProduct(redis, product);
+  await saveProduct(redis, product, {
+    previousSlug: existing?.slug,
+    previousName: existing?.name,
+  });
   return NextResponse.json({ success: true, product });
 }

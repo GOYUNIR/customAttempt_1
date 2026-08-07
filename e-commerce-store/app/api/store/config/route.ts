@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +44,7 @@ const DEFAULT_CONFIG = {
     checkoutCtaButton: '#635bff',
   },
   availableSizes: ['Standard'],
-  homeRedirectSlug: 'drop-01-raffle-access',
+  homeRedirectSlug: 'elysian-white-launch-draw',
   dropSchedule: {
     mode: 'daily',
     timezone: 'America/Los_Angeles',
@@ -122,16 +122,7 @@ export async function GET(request: NextRequest) {
     const requestedSlug = searchParams.get('slug');
 
     const redis = createRedisClient();
-    const fallbackProducts = Object.values(getFallbackStoreProducts()) as StoreProduct[];
     const sortProducts = (items: StoreProduct[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
-    const fallbackActiveProducts = sortProducts(fallbackProducts.filter((product) => product.isActive !== false)).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackArchivedProducts = sortProducts(fallbackProducts.filter((product) => product.isArchived)).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackUpcomingProducts = sortProducts(fallbackProducts.filter((product) => product.isUpcoming)).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackAllProducts = sortProducts(fallbackProducts).map((product) => ({ ...product, images: product.images || [] }));
-
-    const requestedProduct = requestedSlug
-      ? fallbackAllProducts.find((product) => product.slug === requestedSlug) || null
-      : null;
 
     const configRaw = redis ? await redis.get(CONFIG_KEY) : null;
     const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
@@ -146,11 +137,11 @@ export async function GET(request: NextRequest) {
     if (!redis) {
       return NextResponse.json({
         config: effectiveConfig,
-        activeProducts: fallbackActiveProducts,
-        archivedProducts: fallbackArchivedProducts,
-        upcomingProducts: fallbackUpcomingProducts,
-        allProducts: fallbackAllProducts,
-        product: requestedProduct,
+        activeProducts: [],
+        archivedProducts: [],
+        upcomingProducts: [],
+        allProducts: [],
+        product: null,
         scheduleOverride: {},
         socialOverride: {},
         timestamp: Date.now(),
@@ -220,13 +211,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const hasRedisProducts = activeProducts.length > 0 || archivedProducts.length > 0 || upcomingProducts.length > 0 || allProducts.length > 0;
-    if (!hasRedisProducts) {
-      activeProducts = fallbackActiveProducts;
-      archivedProducts = fallbackArchivedProducts;
-      upcomingProducts = fallbackUpcomingProducts;
-      allProducts = fallbackAllProducts;
-    } else {
+    {
       activeProducts = sortProducts(activeProducts);
       archivedProducts = sortProducts(archivedProducts);
       upcomingProducts = sortProducts(upcomingProducts);
@@ -237,7 +222,6 @@ export async function GET(request: NextRequest) {
       ? allProducts.find((product) => product.slug === requestedSlug)
         || activeProducts.find((product) => product.slug === requestedSlug)
         || archivedProducts.find((product) => product.slug === requestedSlug)
-        || fallbackAllProducts.find((product) => product.slug === requestedSlug)
         || null
       : null;
 
@@ -266,10 +250,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       error: err.message,
       config: DEFAULT_CONFIG,
-      activeProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isActive !== false),
-      archivedProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isArchived),
-      upcomingProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isUpcoming),
-      allProducts: Object.values(getFallbackStoreProducts()),
+      activeProducts: [],
+      archivedProducts: [],
+      upcomingProducts: [],
+      allProducts: [],
       product: null,
       scheduleOverride: {},
       socialOverride: {},
