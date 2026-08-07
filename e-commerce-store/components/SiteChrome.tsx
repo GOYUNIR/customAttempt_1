@@ -108,11 +108,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const now = Date.now();
       const idleFor = now - lastInteraction;
       const scrollMomentumAge = now - lastScrollAtRef.current;
-      if (scrollMomentumAge < 1400) {
+      if (scrollMomentumAge < 2200) {
         targetXRef.current = clamp(targetXRef.current + velocityXRef.current, 0.05, 0.95);
         targetYRef.current = clamp(targetYRef.current + velocityYRef.current, 0.08, 0.92);
-        velocityXRef.current *= 0.93;
-        velocityYRef.current *= 0.93;
+        velocityXRef.current *= 0.962;
+        velocityYRef.current *= 0.962;
       }
       if (idleFor > 950) {
         if (now >= nextIdleRetargetAt) {
@@ -126,8 +126,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.02 + microDriftX, 0.05, 0.95);
         targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.02 + microDriftY, 0.08, 0.92);
       }
-      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.065, 0.05, 0.95));
-      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.065, 0.08, 0.92));
+      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.095, 0.05, 0.95));
+      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.095, 0.08, 0.92));
       rafId = window.requestAnimationFrame(animateIdle);
     };
 
@@ -138,10 +138,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const deltaY = window.scrollY - lastScrollYRef.current;
       const deltaT = Math.max(16, now - lastScrollAtRef.current || 16);
       const scrollVelocity = deltaY / deltaT;
-      velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.22, -0.05, 0.05);
-      velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.012 + scrollVelocity * 0.03, -0.03, 0.03);
+      velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.36, -0.08, 0.08);
+      velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.018 + scrollVelocity * 0.045, -0.05, 0.05);
       targetYRef.current = clamp(0.15 + progress * 0.7, 0.1, 0.9);
-      targetXRef.current = clamp(0.5 + Math.sin(progress * Math.PI * 4) * 0.12, 0.08, 0.92);
+      targetXRef.current = clamp(0.5 + Math.sin(progress * Math.PI * 4) * 0.16, 0.08, 0.92);
       lastScrollYRef.current = window.scrollY || 0;
       lastScrollAtRef.current = now;
       lastInteraction = Date.now();
@@ -249,10 +249,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const glowX = 15 + pointerX * 70;
   const glowY = 8 + pointerY * 55;
   const blurBoost = Math.min(10, Math.floor(scrollY / 60));
+  const orbPrimaryX = -16 + pointerX * 68;
+  const orbPrimaryY = -8 + pointerY * 72;
+  const orbSecondaryX = 56 - pointerX * 32;
+  const orbSecondaryY = 48 - pointerY * 26;
+  const orbTertiaryX = 18 + pointerX * 24;
+  const orbTertiaryY = 62 - pointerY * 18;
 
   return (
     <>
-      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, background: `radial-gradient(circle at ${glowX}% ${glowY}%, ${headerAccent}18, transparent 24%), radial-gradient(circle at ${100 - glowX}% ${100 - glowY}%, rgba(168,85,247,0.14), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.02), transparent 26%)`, transition: 'background 120ms linear' }} />
+      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
+        <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(circle at ${glowX}% ${glowY}%, rgba(255,255,255,0.022), transparent 16%)` }} />
+        <div style={{ position: 'absolute', width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, left: `${orbPrimaryX}%`, top: `${orbPrimaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `${headerAccent}22`, filter: 'blur(48px)', willChange: 'transform,left,top', opacity: 0.95 }} />
+        <div style={{ position: 'absolute', width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, left: `${orbSecondaryX}%`, top: `${orbSecondaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(168,85,247,0.18)', filter: 'blur(54px)', willChange: 'transform,left,top', opacity: 0.92 }} />
+        <div style={{ position: 'absolute', width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, left: `${orbTertiaryX}%`, top: `${orbTertiaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(255,244,214,0.09)', filter: 'blur(34px)', willChange: 'transform,left,top', opacity: 0.9 }} />
+      </div>
       {bannerMessage && (
         <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
           {bannerMessage}{promoCode ? ` · ${promoCode}` : ''}
