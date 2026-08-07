@@ -185,7 +185,7 @@ export default function AdminPortal() {
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
   const [productActionLoading, setProductActionLoading] = useState(false);
-  const [availableSizes, setAvailableSizes] = useState<string[]>(['50ml']);
+  const [availableSizes, setAvailableSizes] = useState<string[]>(['Standard']);
   const [newSizeInput, setNewSizeInput] = useState('');
 
   // ===== Users state =====
@@ -1396,17 +1396,20 @@ export default function AdminPortal() {
                     <select value={scheduleForm.mode || 'weekly'} onChange={(e) => setScheduleForm((f: any) => ({ ...f, mode: e.target.value }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
                       <option value="fixed">Fixed date</option>
+                      <option value="hourly">Hourly</option>
                       <option value="daily">Daily</option>
                       <option value="weekly">Weekly</option>
+                      <option value="biweekly">Biweekly</option>
                       <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
                     </select>
                   </label>
                   <label style={{ fontSize: 11 }}>Timezone
                     <input value={scheduleForm.timezone || ''} onChange={(e) => setScheduleForm((f: any) => ({ ...f, timezone: e.target.value }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
-                  {scheduleForm.mode === 'fixed' && (
-                    <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>Fixed date/time (YYYY-MM-DDTHH:MM:SS)
+                  {(scheduleForm.mode === 'fixed' || scheduleForm.mode === 'biweekly' || scheduleForm.mode === 'yearly') && (
+                    <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>{scheduleForm.mode === 'fixed' ? 'Fixed date/time (YYYY-MM-DDTHH:MM:SS)' : 'Anchor date/time (YYYY-MM-DDTHH:MM:SS)'}
                       <input value={scheduleForm.targetEndDateTime || ''} onChange={(e) => setScheduleForm((f: any) => ({ ...f, targetEndDateTime: e.target.value }))}
                         style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                     </label>
@@ -1422,6 +1425,13 @@ export default function AdminPortal() {
                     <label style={{ fontSize: 11 }}>Day of month (1-31)
                       <input type="number" min={1} max={31} value={scheduleForm.drawDayOfMonth ?? 1}
                         onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawDayOfMonth: Number(e.target.value) }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                    </label>
+                  )}
+                  {scheduleForm.mode === 'hourly' && (
+                    <label style={{ fontSize: 11 }}>Minute (0-59)
+                      <input type="number" min={0} max={59} value={scheduleForm.drawMinute ?? 0}
+                        onChange={(e) => setScheduleForm((f: any) => ({ ...f, drawMinute: Number(e.target.value) }))}
                         style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                     </label>
                   )}

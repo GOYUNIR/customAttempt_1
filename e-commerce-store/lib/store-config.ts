@@ -14,7 +14,7 @@ export interface StoreConfig {
   availableSizes: string[];
   homeRedirectSlug?: string;
   dropSchedule: {
-    mode: 'fixed' | 'daily' | 'weekly' | 'monthly';
+    mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
     timezone: string;
     targetEndDateTime: string;
     drawDayOfWeek: number;
@@ -86,7 +86,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     textMuted: '#888888',
     checkoutCtaButton: '#635bff',
   },
-  availableSizes: ['50ml'],
+  availableSizes: ['Standard'],
   dropSchedule: {
     mode: 'weekly',
     timezone: 'America/Los_Angeles',

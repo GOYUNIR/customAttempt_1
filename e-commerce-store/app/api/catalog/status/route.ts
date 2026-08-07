@@ -8,9 +8,10 @@ export async function GET() {
     const redis = createRedisClient();
 
     const fallbackProducts = Object.values(getFallbackStoreProducts()) as any[];
+    const sortProducts = (items: any[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
     if (!redis) {
       return NextResponse.json({
-        activeDrops: fallbackProducts
+        activeDrops: sortProducts(fallbackProducts)
           .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
           .map((p) => ({
             id: p.id,
@@ -20,7 +21,7 @@ export async function GET() {
             slug: p.slug,
             image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
           })),
-        upcomingDrops: fallbackProducts
+        upcomingDrops: sortProducts(fallbackProducts)
           .filter((p) => p.isUpcoming && !p.isArchived)
           .map((p) => ({
             name: p.name,
@@ -30,7 +31,7 @@ export async function GET() {
             description: p.desc || '',
             slug: p.slug,
           })),
-        archiveScents: fallbackProducts
+        archiveScents: sortProducts(fallbackProducts)
           .filter((p) => p.isArchived)
           .map((p) => ({
             name: p.name,
@@ -68,7 +69,7 @@ export async function GET() {
     }
 
     // Separate into categories - sort by sortOrder
-    const sortedProducts = [...allProducts].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const sortedProducts = sortProducts(allProducts);
 
     const activeDrops = sortedProducts.length > 0
       ? sortedProducts
@@ -81,7 +82,7 @@ export async function GET() {
             slug: p.slug,
             image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
           }))
-      : fallbackProducts
+      : sortProducts(fallbackProducts)
           .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
           .map((p) => ({
             id: p.id,
@@ -103,7 +104,7 @@ export async function GET() {
             description: p.desc || '',
             slug: p.slug,
           }))
-      : fallbackProducts
+      : sortProducts(fallbackProducts)
           .filter((p) => p.isUpcoming && !p.isArchived)
           .map((p) => ({
             name: p.name,
@@ -127,7 +128,7 @@ export async function GET() {
             productId: p.id,
             soldOut: p.totalInventory === 0,
           }))
-      : fallbackProducts
+      : sortProducts(fallbackProducts)
           .filter((p) => p.isArchived)
           .map((p) => ({
             name: p.name,

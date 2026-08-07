@@ -5,14 +5,14 @@ export interface StorefrontNote {
 }
 
 export interface DropScheduleConfig {
-  mode: 'fixed' | 'daily' | 'weekly' | 'monthly';
+  mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   timezone: string;
-  targetEndDateTime: string; // used when mode is 'fixed'
+  targetEndDateTime: string; // used when mode is 'fixed', and as the anchor date/time for 'biweekly' and 'yearly'
   drawDayOfWeek: number;     // 0=Sun...6=Sat, used when mode is 'weekly'
   drawDayOfMonth: number;    // 1-31, used when mode is 'monthly' (clamped to the last real day of shorter months)
-  drawHour: number;          // used by 'daily' / 'weekly' / 'monthly'
+  drawHour: number;          // used by 'hourly' / 'daily' / 'weekly' / 'monthly'
   drawMinute: number;
-  /** 0-59, used by daily/weekly/monthly (optional, default 0) */
+  /** 0-59, used by hourly/daily/weekly/monthly (optional, default 0) */
   drawSecond?: number;
   countdownExpiredText: string;
   daysLabel: string;
@@ -274,7 +274,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
 
   const sizes = Array.isArray(input.availableSizes) && input.availableSizes.length > 0
     ? input.availableSizes.map(String)
-    : ['50ml'];
+    : ['Standard'];
 
   return {
     themeColors: { ...defaultThemeColors, ...(input.themeColors ?? {}) },
@@ -297,6 +297,25 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
 export function getVisibleProducts(config: StorefrontConfig): StorefrontProduct[] {
   return config.productCatalog.filter((product) => product.isActive !== false);
 }
+
+export function getDrawIntervalMs(schedule: Partial<DropScheduleConfig> | undefined): number | null {
+  switch (schedule?.mode) {
+    case 'hourly': return 60 * 60 * 1000;
+    case 'daily': return 24 * 60 * 60 * 1000;
+    case 'weekly': return 7 * 24 * 60 * 60 * 1000;
+    case 'biweekly': return 14 * 24 * 60 * 60 * 1000;
+    case 'monthly': return 30 * 24 * 60 * 60 * 1000;
+    case 'yearly': return 365 * 24 * 60 * 60 * 1000;
+    default: return null;
+  }
+}
+
+export function shouldRunDraw(schedule: Partial<DropScheduleConfig> | undefined, lastAutoAt: number | null | undefined, now: number = Date.now()): boolean {
+  const intervalMs = getDrawIntervalMs(schedule);
+  if (intervalMs === null || intervalMs <= 0) return true;
+  if (!lastAutoAt || Number(lastAutoAt) <= 0) return true;
+  return now - Number(lastAutoAt) >= intervalMs;
+}
 export function getProductBySlug(config: StorefrontConfig, slug: string): StorefrontProduct | undefined {
   return config.productCatalog.find((product) => product.slug === slug);
 }
@@ -317,7 +336,7 @@ export function getWinnerCount(config: StorefrontConfig, size: string): number {
   return Math.max(0, count || 0);
 }
 export function getAvailableSizes(config: StorefrontConfig): string[] {
-  return config.availableSizes?.length ? config.availableSizes : ['50ml'];
+  return config.availableSizes?.length ? config.availableSizes : ['Standard'];
 }
 
 export function resolveProductSchedule(config: StorefrontConfig, product: StorefrontProduct): DropScheduleConfig {
@@ -396,7 +415,8 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   const now = new Date();
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: schedule.timezone,
-    weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+    hourCycle: 'h23',
+    weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
   });
   const parts = dtf.formatToParts(now);
   const map: Record<string, string> = {};
@@ -404,6 +424,31 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   const year = Number(map.year);
   const month = Number(map.month);
   const day = Number(map.day);
+  const hour = Number(map.hour);
+
+  if (schedule.mode === 'hourly') {
+    let candidate = zonedTimeToTimestamp({
+      timezone: schedule.timezone,
+      year,
+      month,
+      day,
+      hour,
+      minute: schedule.drawMinute,
+      second: schedule.drawSecond ?? 0,
+    });
+    if (candidate <= now.getTime()) {
+      candidate = zonedTimeToTimestamp({
+        timezone: schedule.timezone,
+        year,
+        month,
+        day,
+        hour: hour + 1,
+        minute: schedule.drawMinute,
+        second: schedule.drawSecond ?? 0,
+      });
+    }
+    return candidate;
+  }
 
   if (schedule.mode === 'daily') {
     let candidate = zonedTimeToTimestamp({
@@ -436,6 +481,44 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
       });
     }
     return candidate;
+  }
+
+  if (schedule.mode === 'yearly') {
+    const anchor = parseISOLocal(schedule.targetEndDateTime);
+    const anchorMonth = Math.min(Math.max(1, anchor.month || 1), 12);
+    const anchorDay = Math.min(Math.max(1, anchor.day || 1), daysInMonth(year, anchorMonth));
+    let candidate = zonedTimeToTimestamp({
+      timezone: schedule.timezone,
+      year,
+      month: anchorMonth,
+      day: anchorDay,
+      hour: anchor.hour || 0,
+      minute: anchor.minute || 0,
+      second: anchor.second || 0,
+    });
+    if (candidate <= now.getTime()) {
+      const nextYear = year + 1;
+      const nextAnchorDay = Math.min(Math.max(1, anchor.day || 1), daysInMonth(nextYear, anchorMonth));
+      candidate = zonedTimeToTimestamp({
+        timezone: schedule.timezone,
+        year: nextYear,
+        month: anchorMonth,
+        day: nextAnchorDay,
+        hour: anchor.hour || 0,
+        minute: anchor.minute || 0,
+        second: anchor.second || 0,
+      });
+    }
+    return candidate;
+  }
+
+  if (schedule.mode === 'biweekly') {
+    const anchor = scheduledDateToTimestamp(schedule.targetEndDateTime, schedule.timezone);
+    const intervalMs = 14 * 24 * 60 * 60 * 1000;
+    if (anchor > now.getTime()) return anchor;
+    const elapsed = now.getTime() - anchor;
+    const cycles = Math.floor(elapsed / intervalMs) + 1;
+    return anchor + (cycles * intervalMs);
   }
 
   // 'weekly' (default)

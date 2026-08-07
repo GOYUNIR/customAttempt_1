@@ -9,6 +9,13 @@ function getProductPriceCategory(product: any, size: string) {
   return cats.find((c: any) => c.size === size) || null;
 }
 
+function getFallbackImage(product: any) {
+  const images = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
+  if (images.length > 0) return images[0];
+  if (String(product?.slug || '').includes('direct')) return '/images/baseItem2/EXAMPLEPICV2_1.jpg';
+  return '/images/baseItem1/EXAMPLEPICV1_1.jpg';
+}
+
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
@@ -25,6 +32,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [isRaffleMode, setIsRaffleMode] = useState(true);
   const [isCheckoutMode, setIsCheckoutMode] = useState(false);
   const [showModeSelector, setShowModeSelector] = useState(true);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -36,6 +44,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         setProduct(data.product);
         const cats = data.product.priceCategories || [];
         if (cats.length > 0) setSelectedSize(cats[0].size);
+        setSelectedImageIndex(0);
       } else {
         setError('Product not found');
       }
@@ -50,25 +59,39 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     try {
       const res = await fetch('/api/store/config');
       const data = await res.json();
-      if (data.activeProducts) setAllProducts(data.activeProducts);
-    } catch (e) { /* ignore */ }
+      const sorted = Array.isArray(data.activeProducts)
+        ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
+        : [];
+      setAllProducts(sorted);
+      return sorted;
+    } catch (e) {
+      return [];
+    }
   }, []);
 
   useEffect(() => {
     if (initialSlug) {
       fetchProduct(initialSlug);
-    } else {
-      fetchAllProducts().then(() => {
-        if (allProducts.length > 0) {
-          router.push(`/${allProducts[0].slug}`);
-        } else {
-          setLoading(false);
-          setError('No products available');
-        }
-      });
+      return;
     }
-    fetchAllProducts();
-  }, [initialSlug, fetchProduct, fetchAllProducts, router, allProducts.length]);
+
+    fetchAllProducts().then((products) => {
+      if (products.length > 0) {
+        router.push(`/${products[0].slug}`);
+      } else {
+        setLoading(false);
+        setError('No products available');
+      }
+    });
+  }, [initialSlug, fetchProduct, fetchAllProducts, router]);
+
+  useEffect(() => {
+    if (!product) return;
+    const cats = product.priceCategories || [];
+    if (cats.length > 0 && !cats.some((cat: any) => cat.size === selectedSize)) {
+      setSelectedSize(cats[0].size);
+    }
+  }, [product, selectedSize]);
 
   const addToCart = () => {
     if (!product) return;
@@ -104,13 +127,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: product.id,
-          size: selectedSize,
-          email,
-          address,
-          mode: 'raffle',
-        }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle' }),
       });
       const data = await res.json();
       if (res.ok && data.setupIntentId) {
@@ -137,19 +154,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     setIsSubmitting(true);
     setMessage('');
     try {
-      const res = await fetch('/api/checkout/direct', {
+      const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: product.id,
-          size: selectedSize,
-          email,
-          address,
-        }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'direct' }),
       });
       const data = await res.json();
-      if (res.ok && data.paymentIntentId) {
-        setMessage('Payment successful! Order placed.');
+      if (res.ok && (data.paymentIntentId || data.clientSecret)) {
+        setMessage('Direct purchase flow started. Your payment can be completed using the configured Stripe setup.');
         setCart([]);
         setShowCart(false);
       } else {
@@ -167,153 +179,102 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const priceCat = getProductPriceCategory(product, selectedSize);
   const price = priceCat?.price || 0;
-  const winnerTiers = priceCat?.winnerTiers || '0';
   const canCheckoutDirect = product.productType !== 'raffle' || product.isRaffle === false;
   const isRaffleProduct = product.isRaffle !== false;
+  const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : [getFallbackImage(product)];
+  const activeProductLabel = product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now');
 
   return (
-    <main style={{ minHeight: 'calc(100vh - 56px)', background: '#0a0a0a', color: '#fff', padding: '20px 16px 60px' }}>
-      <div style={{ maxWidth: 480, margin: '0 auto' }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontFamily: 'serif', marginBottom: 4 }}>{product.name}</h1>
-          <p style={{ color: '#888', fontSize: 13 }}>{product.tagline}</p>
-          <p style={{ color: '#aaa', fontSize: 14, margin: '8px 0' }}>{product.desc}</p>
-        </div>
+    <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
+      <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <section style={{ borderRadius: 24, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: '#111116' }}>
+          <div style={{ height: 280, background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover` }} />
+          <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{activeProductLabel}</div>
+              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{product.productType || 'raffle'}</div>
+            </div>
+            <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0 }}>{product.name}</h1>
+            <p style={{ margin: 0, color: '#c9c9d3', fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {galleryImages.map((image: string, index: number) => (
+                <button key={`${image}-${index}`} onClick={() => setSelectedImageIndex(index)} style={{ width: 54, height: 54, borderRadius: 10, border: selectedImageIndex === index ? `1px solid ${configPalette.accentPurple}` : `1px solid ${configPalette.cardBorder}`, background: `url(${image}) center/cover`, cursor: 'pointer' }} />
+              ))}
+            </div>
+          </div>
+        </section>
 
-        <div style={{ margin: '16px 0' }}>
-          <label style={{ fontSize: 12, color: '#888' }}>Select Size</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-            {(product.priceCategories || []).map((cat: any) => (
-              <button
-                key={cat.size}
-                onClick={() => setSelectedSize(cat.size)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 20,
-                  border: selectedSize === cat.size ? '1px solid #fff' : '1px solid #333',
-                  background: selectedSize === cat.size ? '#fff' : 'transparent',
-                  color: selectedSize === cat.size ? '#000' : '#aaa',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                }}
-              >
-                {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+        <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted }}>Select size</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              {(product.priceCategories || []).map((cat: any) => (
+                <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? configPalette.textMain : 'transparent', color: selectedSize === cat.size ? configPalette.primaryBackground : configPalette.textMain, cursor: 'pointer', fontSize: 12 }}>
+                  {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {showModeSelector && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" checked={isRaffleMode} onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }} />
+                Raffle entry
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="radio" checked={isCheckoutMode} onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }} />
+                Direct buy
+              </label>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {isRaffleProduct && isRaffleMode && (
+              <button onClick={handleRaffleSubmit} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
+                {isSubmitting ? 'Processing...' : 'Enter raffle'}
               </button>
+            )}
+            {(canCheckoutDirect || isCheckoutMode) && (
+              <button onClick={handleDirectCheckout} disabled={isSubmitting || !selectedSize || price <= 0} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#34c759', color: '#000', border: 'none', fontWeight: 700, cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
+                {isSubmitting ? 'Processing...' : `Buy now $${price.toFixed(2)}`}
+              </button>
+            )}
+            <button onClick={addToCart} disabled={!selectedSize || price <= 0} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer' }}>Add to cart</button>
+          </div>
+
+          {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
+        </section>
+
+        <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+          <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(product.notes || []).map((note: any, index: number) => (
+              <div key={`${note.label}-${index}`} style={{ borderRadius: 16, background: '#09090b', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
+                <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{note.name}</div>
+                <div style={{ fontSize: 12, color: '#c8c8cf', lineHeight: 1.55 }}>{note.text}</div>
+              </div>
             ))}
           </div>
-        </div>
-
-        {showModeSelector && (
-          <div style={{ display: 'flex', gap: 12, margin: '12px 0' }}>
-            <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input
-                type="radio"
-                checked={isRaffleMode}
-                onChange={() => { setIsRaffleMode(true); setIsCheckoutMode(false); }}
-              />
-              Raffle (enter draw)
-            </label>
-            <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input
-                type="radio"
-                checked={isCheckoutMode}
-                onChange={() => { setIsCheckoutMode(true); setIsRaffleMode(false); }}
-              />
-              Buy Now (direct)
-            </label>
-          </div>
-        )}
-
-        <div style={{ margin: '12px 0' }}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: '100%', padding: 10, borderRadius: 8, background: '#16161a', border: '1px solid #222', color: '#fff', marginBottom: 8 }}
-          />
-          <input
-            type="text"
-            placeholder="Shipping Address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            style={{ width: '100%', padding: 10, borderRadius: 8, background: '#16161a', border: '1px solid #222', color: '#fff' }}
-          />
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          {isRaffleProduct && isRaffleMode && (
-            <button
-              onClick={handleRaffleSubmit}
-              disabled={isSubmitting || !selectedSize || price <= 0}
-              style={{
-                flex: 1,
-                padding: 12,
-                borderRadius: 30,
-                background: configPalette.checkoutCtaButton,
-                color: '#fff',
-                border: 'none',
-                fontWeight: 700,
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {isSubmitting ? 'Processing...' : 'Enter Raffle'}
-            </button>
-          )}
-          {(canCheckoutDirect || isCheckoutMode) && (
-            <button
-              onClick={handleDirectCheckout}
-              disabled={isSubmitting || !selectedSize || price <= 0}
-              style={{
-                flex: 1,
-                padding: 12,
-                borderRadius: 30,
-                background: '#34c759',
-                color: '#000',
-                border: 'none',
-                fontWeight: 700,
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {isSubmitting ? 'Processing...' : `Buy Now $${price.toFixed(2)}`}
-            </button>
-          )}
-          <button
-            onClick={addToCart}
-            disabled={!selectedSize || price <= 0}
-            style={{
-              padding: '12px 20px',
-              borderRadius: 30,
-              background: '#333',
-              color: '#fff',
-              border: 'none',
-              cursor: !selectedSize || price <= 0 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            Add to Cart
-          </button>
-        </div>
-
-        {message && <p style={{ marginTop: 12, fontSize: 12, color: '#edb210' }}>{message}</p>}
+        </section>
 
         {showCart && cart.length > 0 && (
-          <div style={{ marginTop: 20, borderTop: '1px solid #222', paddingTop: 16 }}>
-            <h3 style={{ fontSize: 14 }}>Cart ({cart.length})</h3>
-            {cart.map((item, idx) => (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
-                <span>{item.name} ({item.size})</span>
+          <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
+            {cart.map((item, index) => (
+              <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>
+                <span>{item.name} · {item.size}</span>
                 <span>${item.price.toFixed(2)}</span>
               </div>
             ))}
-            <button
-              onClick={() => {
-                setMessage('Cart checkout is ready for admin-controlled payment flows.');
-              }}
-              style={{ marginTop: 8, padding: '8px 16px', borderRadius: 20, background: '#fff', color: '#000', border: 'none', fontWeight: 600 }}
-            >
-              Checkout Cart (${cart.reduce((sum, i) => sum + i.price, 0).toFixed(2)})
-            </button>
-          </div>
+            <button onClick={() => setMessage('Cart checkout is ready for admin-controlled payment flows.')} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Checkout</button>
+          </section>
         )}
       </div>
     </main>

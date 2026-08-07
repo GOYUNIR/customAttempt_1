@@ -5,6 +5,7 @@ import {
   safeParseRedisItem,
   archiveEntry,
   resolveCustomerId,
+  getGlobalScheduleOverride,
   LAST_DRAW_KEY,
   POOL_STATS_KEY,
   poolStatField,
@@ -16,7 +17,7 @@ import {
   getProductOverride,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice, getWinnerCount } from '@/lib/storefront-config';
+import { getProductPrice, getWinnerCount, shouldRunDraw } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -80,12 +81,11 @@ async function runAutoDraw(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        // Auto-draw throttle: at most once per 20h per pool unless force=1
         const force = new URL(request.url).searchParams.get('force') === '1';
-        if (!force) {
-          const lastAuto = Number((await redis.get(`draw:last_auto:${productName}:${productSize}`)) || 0);
-          if (lastAuto && Date.now() - lastAuto < 20 * 60 * 60 * 1000) continue;
-        }
+        const scheduleOverride = await getGlobalScheduleOverride(redis);
+        const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(scheduleOverride || {}) };
+        const lastAuto = Number((await redis.get(`draw:last_auto:${productName}:${productSize}`)) || 0);
+        if (!force && !shouldRunDraw(effectiveSchedule, lastAuto, Date.now())) continue;
 
         // Live price override (from /admin) takes priority over the static
         // config price. Keep the Stripe Price object's amount matching if

@@ -17,6 +17,7 @@ type StoreProduct = {
   prefix: string;
   tagline: string;
   desc: string;
+  sortOrder?: number;
   priceCategories?: Array<{ size: string; price: number; stripeId: string; winnerTiers?: string | number[] }>;
   maxRaffleAllocationLimit: number;
   isActive: boolean;
@@ -111,10 +112,11 @@ export async function GET(request: NextRequest) {
 
     const redis = createRedisClient();
     const fallbackProducts = Object.values(getFallbackStoreProducts()) as StoreProduct[];
-    const fallbackActiveProducts = fallbackProducts.filter((product) => product.isActive !== false).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackArchivedProducts = fallbackProducts.filter((product) => product.isArchived).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackUpcomingProducts = fallbackProducts.filter((product) => product.isUpcoming).map((product) => ({ ...product, images: product.images || [] }));
-    const fallbackAllProducts = fallbackProducts.map((product) => ({ ...product, images: product.images || [] }));
+    const sortProducts = (items: StoreProduct[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
+    const fallbackActiveProducts = sortProducts(fallbackProducts.filter((product) => product.isActive !== false)).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackArchivedProducts = sortProducts(fallbackProducts.filter((product) => product.isArchived)).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackUpcomingProducts = sortProducts(fallbackProducts.filter((product) => product.isUpcoming)).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackAllProducts = sortProducts(fallbackProducts).map((product) => ({ ...product, images: product.images || [] }));
 
     const requestedProduct = requestedSlug
       ? fallbackAllProducts.find((product) => product.slug === requestedSlug) || null
@@ -213,6 +215,11 @@ export async function GET(request: NextRequest) {
       archivedProducts = fallbackArchivedProducts;
       upcomingProducts = fallbackUpcomingProducts;
       allProducts = fallbackAllProducts;
+    } else {
+      activeProducts = sortProducts(activeProducts);
+      archivedProducts = sortProducts(archivedProducts);
+      upcomingProducts = sortProducts(upcomingProducts);
+      allProducts = sortProducts(allProducts);
     }
 
     const resolvedProduct = requestedSlug
