@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord, loadProducts } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +21,8 @@ export async function POST(request: Request) {
     const size = String(body?.size || '').trim();
     if (!email || last4.length !== 4 || !variant || !size) return NextResponse.json({ error: 'Missing verification details.' }, { status: 400 });
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const liveProducts = await loadProducts(redis);
+    const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const matches = await findPoolEntriesByEmail(redis, productNames, email);
     const target = matches.find((m) => m.variant === variant && m.size === size && String(m.parsed.cardLast4 || '') === last4);
     if (!target) return NextResponse.json({ error: 'No matching entry found to cancel.' }, { status: 404 });

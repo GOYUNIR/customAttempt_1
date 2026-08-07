@@ -1,121 +1,66 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { randomBytes, scryptSync } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
-const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
-const IMAGES_KEY = 'store:product_images';
+const USERS_KEY = 'store:users';
 
-export type StoreProduct = {
+type StoreUser = {
   id: string;
-  name: string;
-  slug: string;
-  prefix: string;
-  tagline: string;
-  desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
-  maxRaffleAllocationLimit: number;
-  isActive: boolean;
-  isArchived: boolean;
-  isUpcoming: boolean;
-  isRaffle: boolean;
-  productType: string;
-  sortOrder: number;
-  notes: { label: string; name: string; text: string }[];
-  images: string[];
-  totalInventory: number;
-  winnerTiers: number[];
+  email: string;
+  password: string;
+  role: string;
+  rewards: number;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 };
 
-async function loadProducts(redis: any): Promise<Record<string, StoreProduct>> {
-  const raw = await redis.hgetall(PRODUCTS_KEY);
+function hashPassword(password: string, salt: string): string {
+  return scryptSync(password, salt, 64).toString('hex');
+}
+
+async function loadUsers(redis: any): Promise<Record<string, StoreUser>> {
+  const raw = await redis.hgetall(USERS_KEY);
   if (!raw) return {};
-  const out: Record<string, StoreProduct> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    const parsed = safeParseRedisItem<StoreProduct>(v);
-    if (parsed) out[k] = parsed;
+  const out: Record<string, StoreUser> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const parsed = safeParseRedisItem<StoreUser>(value);
+    if (parsed) out[key] = parsed;
   }
   return out;
 }
 
-async function saveProduct(redis: any, product: StoreProduct) {
-  await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  
-  await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
-  await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
-  await redis.hdel(UPCOMING_PRODUCTS_KEY, product.id);
-  
-  if (product.isActive && !product.isArchived && !product.isUpcoming) {
-    await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  } else if (product.isArchived) {
-    await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  } else if (product.isUpcoming) {
-    await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  }
-  
-  if (product.images && product.images.length > 0) {
-    const imgKey = `${IMAGES_KEY}:${product.id}`;
-    await redis.set(imgKey, JSON.stringify(product.images));
-  }
-}
-
-async function deleteProduct(redis: any, productId: string) {
-  await redis.hdel(PRODUCTS_KEY, productId);
-  await redis.hdel(ACTIVE_PRODUCTS_KEY, productId);
-  await redis.hdel(ARCHIVED_PRODUCTS_KEY, productId);
-  await redis.hdel(UPCOMING_PRODUCTS_KEY, productId);
-  await redis.del(`${IMAGES_KEY}:${productId}`);
-}
-
-function generateSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+function serializeUser(user: StoreUser) {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    rewards: user.rewards || 0,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 }
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const includeArchived = url.searchParams.get('includeArchived') === 'true';
-    
-    const redis = createRedisClient();
-    if (!redis) return NextResponse.json({ products: [] });
-    
-    let products: StoreProduct[] = [];
-    const all = await loadProducts(redis);
-    
-    if (includeArchived) {
-      products = Object.values(all);
-    } else {
-      const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-      const upcomingRaw = await redis.hgetall(UPCOMING_PRODUCTS_KEY);
-      const allProducts = [];
-      
-      if (activeRaw) {
-        for (const [k, v] of Object.entries(activeRaw)) {
-          const p = safeParseRedisItem<StoreProduct>(v);
-          if (p) allProducts.push(p);
-        }
-      }
-      if (upcomingRaw) {
-        for (const [k, v] of Object.entries(upcomingRaw)) {
-          const p = safeParseRedisItem<StoreProduct>(v);
-          if (p) allProducts.push(p);
-        }
-      }
-      products = allProducts.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const password = String(url.searchParams.get('password') || '');
+    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    if (!master || password !== master) {
+      return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
-    
-    return NextResponse.json({ products });
+
+    const redis = createRedisClient();
+    if (!redis) return NextResponse.json({ users: [] });
+
+    const users = Object.values(await loadUsers(redis))
+      .sort((a, b) => String(a.email).localeCompare(String(b.email)))
+      .map(serializeUser);
+
+    return NextResponse.json({ users });
   } catch (err: any) {
-    console.error('[Products API] GET Error:', err);
-    return NextResponse.json({ error: err.message, products: [] }, { status: 500 });
+    return NextResponse.json({ error: err.message, users: [] }, { status: 500 });
   }
 }
 
@@ -131,136 +76,74 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    const action = String(body?.action || 'upsert');
+    const action = String(body?.action || 'create');
+    const users = await loadUsers(redis);
 
     if (action === 'delete') {
       const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      await deleteProduct(redis, id);
+      if (!id) return NextResponse.json({ error: 'Missing user ID' }, { status: 400 });
+      await redis.hdel(USERS_KEY, id);
       return NextResponse.json({ success: true });
     }
 
-    if (action === 'archive') {
-      const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.isArchived = true;
-      product.isActive = false;
-      product.isUpcoming = false;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
+    const email = String(body?.email || '').trim().toLowerCase();
+    if (!email) return NextResponse.json({ error: 'Email is required' }, { status: 400 });
+
+    const rewards = Math.max(0, Number(body?.rewards ?? 0) || 0);
+    const role = String(body?.role || 'customer').trim() || 'customer';
+
+    if (action === 'create') {
+      const alreadyExists = Object.values(users).some((user) => user.email === email);
+      if (alreadyExists) return NextResponse.json({ error: 'A user with this email already exists.' }, { status: 400 });
+
+      const rawPassword = String(body?.userPassword || '').trim();
+      if (!rawPassword) return NextResponse.json({ error: 'Password is required for new users.' }, { status: 400 });
+
+      const salt = randomBytes(16).toString('hex');
+      const hashed = hashPassword(rawPassword, salt);
+      const user: StoreUser = {
+        id: `usr_${Date.now().toString(36)}`,
+        email,
+        password: `${salt}:${hashed}`,
+        role,
+        rewards,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await redis.hset(USERS_KEY, { [user.id]: JSON.stringify(user) });
+      return NextResponse.json({ success: true, user: serializeUser(user) });
     }
 
-    if (action === 'unarchive') {
+    if (action === 'update') {
       const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.isArchived = false;
-      product.isActive = true;
-      product.isUpcoming = false;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
+      if (!id) return NextResponse.json({ error: 'Missing user ID' }, { status: 400 });
+      const existing = users[id];
+      if (!existing) return NextResponse.json({ error: 'User not found.' }, { status: 404 });
+
+      const emailTaken = Object.values(users).some((user) => user.id !== id && user.email === email);
+      if (emailTaken) return NextResponse.json({ error: 'Another user already has this email.' }, { status: 400 });
+
+      let nextPassword = existing.password;
+      const rawPassword = String(body?.userPassword || '').trim();
+      if (rawPassword) {
+        const salt = randomBytes(16).toString('hex');
+        nextPassword = `${salt}:${hashPassword(rawPassword, salt)}`;
+      }
+
+      const updated: StoreUser = {
+        ...existing,
+        email,
+        role,
+        rewards,
+        password: nextPassword,
+        updatedAt: new Date().toISOString(),
+      };
+      await redis.hset(USERS_KEY, { [updated.id]: JSON.stringify(updated) });
+      return NextResponse.json({ success: true, user: serializeUser(updated) });
     }
 
-    if (action === 'toggleActive') {
-      const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.isActive = !product.isActive;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
-    }
-
-    if (action === 'addToUpcoming') {
-      const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.isUpcoming = true;
-      product.isActive = true;
-      product.isArchived = false;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
-    }
-
-    if (action === 'removeFromUpcoming') {
-      const id = String(body?.id || '');
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.isUpcoming = false;
-      product.isActive = true;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
-    }
-
-    if (action === 'reorder') {
-      const id = String(body?.id || '');
-      const sortOrder = Number(body?.sortOrder ?? 0);
-      if (!id) return NextResponse.json({ error: 'Missing product ID' }, { status: 400 });
-      const all = await loadProducts(redis);
-      const product = all[id];
-      if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-      product.sortOrder = sortOrder;
-      product.updatedAt = new Date().toISOString();
-      await saveProduct(redis, product);
-      return NextResponse.json({ success: true, product });
-    }
-
-    // upsert - create or update
-    const name = String(body?.name || '').trim();
-    if (!name) return NextResponse.json({ error: 'Product name is required' }, { status: 400 });
-    
-    const id = String(body?.id || `prod_${Date.now().toString(36)}`);
-    const allProducts = await loadProducts(redis);
-    const existing = allProducts[id] || null;
-    
-    const slug = String(body?.slug || existing?.slug || generateSlug(name));
-    const prefix = String(body?.prefix || existing?.prefix || slug);
-    
-    const product: StoreProduct = {
-      id,
-      name,
-      slug,
-      prefix,
-      tagline: String(body?.tagline || existing?.tagline || 'LIMITED DROP'),
-      desc: String(body?.desc || existing?.desc || 'A refined signature profile.'),
-      price50ml: Number(body?.price50ml ?? existing?.price50ml ?? 0),
-      price100ml: Number(body?.price100ml ?? existing?.price100ml ?? 0),
-      stripeId50ml: String(body?.stripeId50ml || existing?.stripeId50ml || ''),
-      stripeId100ml: String(body?.stripeId100ml || existing?.stripeId100ml || ''),
-      maxRaffleAllocationLimit: Number(body?.maxRaffleAllocationLimit ?? existing?.maxRaffleAllocationLimit ?? 0),
-      isActive: body?.isActive !== undefined ? body.isActive : (existing?.isActive ?? true),
-      isArchived: body?.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
-      isUpcoming: body?.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
-      isRaffle: body?.isRaffle !== undefined ? body.isRaffle : (existing?.isRaffle ?? true),
-      productType: String(body?.productType || existing?.productType || 'raffle'),
-      sortOrder: Number(body?.sortOrder ?? existing?.sortOrder ?? 0),
-      notes: Array.isArray(body?.notes) ? body.notes : (existing?.notes || []),
-      images: Array.isArray(body?.images) ? body.images : (existing?.images || []),
-      totalInventory: Number(body?.totalInventory ?? existing?.totalInventory ?? 0),
-      winnerTiers: Array.isArray(body?.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
-      createdAt: existing?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await saveProduct(redis, product);
-    return NextResponse.json({ success: true, product });
+    return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
   } catch (err: any) {
-    console.error('[Products API] POST Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

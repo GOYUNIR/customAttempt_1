@@ -4,8 +4,8 @@ import {
   findAllOpenOrders,
   adminCancelOrder,
   adminUpdateOrderAddress,
+  loadProducts,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +22,8 @@ export async function GET(request: Request) {
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ orders: [] });
 
-  const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+  const liveProducts = await loadProducts(redis);
+  const productNames = Object.values(liveProducts).map((p: any) => p.name);
   const orders = await findAllOpenOrders(redis, productNames);
 
   return NextResponse.json({
@@ -55,7 +56,8 @@ export async function POST(request: Request) {
 
   if (!variant || !size || !email) return NextResponse.json({ error: 'Missing order identification.' }, { status: 400 });
 
-  const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+  const liveProducts = await loadProducts(redis);
+  const productNames = Object.values(liveProducts).map((p: any) => p.name);
   const orders = await findAllOpenOrders(redis, productNames);
   const target = orders.find(
     (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,

@@ -265,6 +265,64 @@ export async function sendEntryRecoveryEmail(opts: {
   }
 }
 
+export async function sendWaitlistConfirmationEmail(opts: { to: string }) {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true };
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: 'You are on the GOYUNIR release list',
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">You’re in.</h1>
+          <p style="margin:0 0 12px;color:#4b5563">You will be first to know when the next release opens or a new product goes live.</p>
+          <p style="margin:0;color:#6b7280;font-size:13px">This list is managed directly by the brand team from the admin portal.</p>
+        </div>
+      `,
+    });
+    if (error) return { ok: false, error };
+    return { ok: true, id: data?.id };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
+export async function sendReleaseAnnouncementEmail(opts: {
+  to: string;
+  productName: string;
+  slug: string;
+  tagline?: string;
+}) {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true };
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com';
+  const productUrl = siteUrl ? `${siteUrl.replace(/\/$/, '')}/${opts.slug}` : `/${opts.slug}`;
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: `Now live — ${opts.productName}`,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <h1 style="font-size:24px;font-weight:700;margin:0 0 8px">${opts.productName} is now live.</h1>
+          <p style="margin:0 0 14px;color:#4b5563">${opts.tagline || 'Limited release access is now open.'}</p>
+          <p style="margin:0 0 20px"><a href="${productUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">Open release</a></p>
+          <p style="margin:0;color:#6b7280;font-size:13px">You are receiving this because you joined the private release list.</p>
+        </div>
+      `,
+    });
+    if (error) return { ok: false, error };
+    return { ok: true, id: data?.id };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
 /** Optional: notify promoter when their code produces a charged win */
 export async function sendPromoterInvoiceEmail(opts: {
   to: string;

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 
 interface CatalogItem {
   name: string;
@@ -118,16 +119,16 @@ export default function CatalogPage() {
     <main
       style={{
         minHeight: 'calc(100vh - 56px)',
-        background: configPalette.primaryBackground,
+        background: 'radial-gradient(circle at top, rgba(59,130,246,0.1), transparent 36%), radial-gradient(circle at 80% 0%, rgba(168,85,247,0.12), transparent 32%), #07070a',
         color: configPalette.textMain,
         padding: '24px 20px 60px',
         boxSizing: 'border-box',
       }}
     >
       <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '20px', fontFamily: 'serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
+        <h1 style={{ fontSize: '22px', fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
         <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 24px 0' }}>
-          Browse available and past allocations.
+          Built for attention-scarce traffic: live now, what is next, and what already moved.
         </p>
 
         {activeDrops.length > 0 && (
@@ -176,7 +177,7 @@ export default function CatalogPage() {
             margin: '0 0 12px 0',
           }}
         >
-          👔 Upcoming Releases
+          Upcoming Releases
         </h2>
         {renderGrid(upcomingDrops, isLoading ? 'Loading…' : 'No upcoming releases announced yet.')}
 
@@ -189,9 +190,19 @@ export default function CatalogPage() {
             margin: '32px 0 12px 0',
           }}
         >
-          🧪 Past Archives
+          Past Archives
         </h2>
         {renderGrid(archiveScents, isLoading ? 'Loading…' : 'No archived items yet.')}
+
+        {activeDrops.length === 0 && upcomingDrops.length === 0 && !isLoading && (
+          <div style={{ marginTop: 24 }}>
+            <ReleaseWaitlist
+              source="catalog"
+              headline="Nothing public yet? Get the next release before everyone else does."
+              body="This list is for quiet launch notices, not noise. Brands can notify the list directly from the admin portal when a new raffle or FCFS product goes live."
+            />
+          </div>
+        )}
       </div>
 
       <AnimatePresence>

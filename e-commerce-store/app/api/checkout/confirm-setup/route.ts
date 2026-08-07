@@ -10,10 +10,9 @@ import {
   POOL_STATS_KEY,
   PROCESSED_SESSIONS_KEY,
   cleanupMatchingIntent,
+  loadProducts,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +30,7 @@ function siteUrlFromRequest(request: Request) {
     const u = new URL(request.url);
     return `${u.protocol}//${u.host}`;
   } catch {
-    return 'https://custom-attempt-1.vercel.app';
+    return 'https://goyunir.com';
   }
 }
 
@@ -89,7 +88,7 @@ export async function POST(request: Request) {
       .trim()
       .toLowerCase();
     const variant = String(meta.variant || '');
-    const size = String(meta.size || '50ml');
+    const size = String(meta.size || 'Standard');
     const shippingAddress = String(meta.address || '');
     const promoCode = String(meta.promoCode || meta.ref || '')
       .trim()
@@ -245,10 +244,9 @@ export async function POST(request: Request) {
     try {
       const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
       if (sent !== 1) {
-        const product = GOYUNIR_STORE_SUITE.productCatalog.find(
-          (p) => p.name === variant || p.id === variant,
-        );
-        const listPrice = product ? getProductPrice(product, size) : 0;
+        const liveProducts = await loadProducts(redis);
+        const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === meta.productId) as any;
+        const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
         const emailResult = await sendEntryConfirmedEmail({
           to: email,
           product: variant,

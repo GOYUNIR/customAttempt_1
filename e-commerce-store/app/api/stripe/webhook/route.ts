@@ -10,10 +10,11 @@ import {
   POOL_STATS_KEY,
   PROCESSED_SESSIONS_KEY,
   safeParseRedisItem,
+  loadProducts,
+  getLiveProductState,
+  saveLiveState,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ function usedEmailsKey(code: string) {
 function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
   if (env) return env.replace(/\/$/, '');
-  return 'https://custom-attempt-1.vercel.app';
+  return 'https://goyunir.com';
 }
 
 async function resolvePromo(
@@ -99,20 +100,20 @@ export async function POST(request: Request) {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+    const sessionId = session.id;
+    const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
+
+    if (already === 1) {
+      return NextResponse.json({ received: true, skipped: 'already_processed' });
+    }
+
     if (session.mode === 'setup' && session.status === 'complete') {
-      const sessionId = session.id;
-      const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
-
-      if (already === 1) {
-        return NextResponse.json({ received: true, skipped: 'already_processed' });
-      }
-
       const meta = session.metadata || {};
       const email = String(meta.email || session.customer_email || '')
         .trim()
         .toLowerCase();
       const variant = String(meta.variant || '').trim();
-      const size = String(meta.size || '50ml').trim();
+      const size = String(meta.size || 'Standard').trim();
       const shippingAddress = String(meta.address || '').trim();
       const customerId = typeof session.customer === 'string' ? session.customer : '';
       const rawPromo = String(meta.promoCode || meta.ref || '');
@@ -194,10 +195,10 @@ export async function POST(request: Request) {
           try {
             const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
             if (sent !== 1) {
-              const product = GOYUNIR_STORE_SUITE.productCatalog.find(
-                (p) => p.name === variant || p.id === variant,
-              );
-              const listPrice = product ? getProductPrice(product, size) : undefined;
+              const liveProducts = await loadProducts(redis);
+              const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === meta.productId);
+              const category = (product as any)?.priceCategories?.find((item: any) => item.size === size);
+              const listPrice = category?.price;
               await sendEntryConfirmedEmail({
                 to: email,
                 product: variant,
@@ -225,6 +226,41 @@ export async function POST(request: Request) {
 
         await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
       }
+    }
+
+    if (session.mode === 'payment' && session.status === 'complete') {
+      const meta = session.metadata || {};
+      const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
+      const productId = String(meta.productId || '').trim();
+      const variant = String(meta.variant || '').trim();
+      const size = String(meta.size || 'Standard').trim();
+      const shippingAddress = String(meta.address || '').trim();
+
+      const allProducts = await loadProducts(redis);
+      const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
+      if (product && email) {
+        const live = await getLiveProductState(redis, product, size);
+        if (live.inventoryRemaining > 0) {
+          live.inventoryRemaining -= 1;
+        }
+        live.salesCompleted = (live.salesCompleted || 0) + 1;
+        await saveLiveState(redis, live);
+
+        await archiveEntry(redis, {
+          email,
+          variant: product.name,
+          size,
+          shippingAddress,
+          id: typeof session.customer === 'string' ? session.customer : 'n/a',
+          registeredAt: new Date().toISOString(),
+          type: 'WINNER_CHARGED',
+          shippingStatus: 'PENDING_FULFILLMENT',
+          amountCents: Number(session.amount_total || 0),
+          orderRef: `DIRECT-${session.id}`,
+        } as any);
+      }
+
+      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
     }
   }
 

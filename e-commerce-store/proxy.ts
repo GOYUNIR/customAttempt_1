@@ -27,10 +27,10 @@ function verifyBasicAuth(authorization: string | null) {
   return user === ADMIN_USER && pass === ADMIN_PASSWORD;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  if (PASSWORD_GATE_ONLY.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+  if (PASSWORD_GATE_ONLY.some((item) => pathname === item || pathname.startsWith(item + '/'))) {
     return NextResponse.next();
   }
 
@@ -41,7 +41,7 @@ export function middleware(request: NextRequest) {
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
       });
     }
-    
+
     const authHeader = request.headers.get('authorization');
     if (!verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {

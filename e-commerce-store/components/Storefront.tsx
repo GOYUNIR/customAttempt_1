@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
+const CART_KEY = 'goyunir-cart';
+
 function getProductPriceCategory(product: any, size: string) {
   const cats = product.priceCategories || [];
   return cats.find((c: any) => c.size === size) || null;
@@ -14,6 +16,23 @@ function getFallbackImage(product: any) {
   if (images.length > 0) return images[0];
   if (String(product?.slug || '').includes('direct')) return '/images/baseItem2/EXAMPLEPICV2_1.jpg';
   return '/images/baseItem1/EXAMPLEPICV1_1.jpg';
+}
+
+function readStoredCart() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(CART_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredCart(items: any[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CART_KEY, JSON.stringify(items));
+  window.dispatchEvent(new CustomEvent('goyunir-cart-updated'));
 }
 
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
@@ -93,6 +112,51 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   }, [product, selectedSize]);
 
+  useEffect(() => {
+    setCart(readStoredCart());
+  }, []);
+
+  useEffect(() => {
+    if (!initialSlug || typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    const setupState = params.get('setup');
+    const purchaseState = params.get('purchase');
+    if (!sessionId) {
+      if (setupState === 'cancel') setMessage('Card setup was cancelled before the entry was secured.');
+      if (purchaseState === 'cancel') setMessage('Checkout was cancelled before payment completed.');
+      return;
+    }
+
+    const clearQuery = () => {
+      const cleanUrl = `${window.location.pathname}`;
+      window.history.replaceState({}, '', cleanUrl);
+    };
+
+    if (setupState === 'success') {
+      fetch('/api/checkout/confirm-setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setMessage(data.message || 'Your entry is locked in.');
+          clearQuery();
+        })
+        .catch(() => setMessage('We could not verify the completed setup, but it may still have succeeded.'));
+      return;
+    }
+
+    if (purchaseState === 'success') {
+      setCart([]);
+      writeStoredCart([]);
+      setMessage('Purchase complete. Your order is now being prepared.');
+      clearQuery();
+    }
+  }, [initialSlug]);
+
   const addToCart = () => {
     if (!product) return;
     const cat = getProductPriceCategory(product, selectedSize);
@@ -110,7 +174,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       isRaffle: product.isRaffle !== false,
       productType: product.productType || 'raffle',
     };
-    setCart((prev) => [...prev, item]);
+    const next = [...cart, item];
+    setCart(next);
+    writeStoredCart(next);
     setMessage(`Added ${product.name} (${selectedSize}) to cart`);
     setShowCart(true);
     setShowModeSelector(false);
@@ -130,11 +196,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle' }),
       });
       const data = await res.json();
-      if (res.ok && data.setupIntentId) {
-        setMessage('Raffle entry setup is ready. Please complete your secure checkout flow.');
-        setShowCart(false);
-        setShowModeSelector(false);
-      } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+      if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         window.location.href = data.url;
       } else {
         setMessage(data.error || 'Failed to start checkout');
@@ -160,10 +222,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'direct' }),
       });
       const data = await res.json();
-      if (res.ok && (data.paymentIntentId || data.clientSecret)) {
-        setMessage('Direct purchase flow started. Your payment can be completed using the configured Stripe setup.');
-        setCart([]);
-        setShowCart(false);
+      if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+        window.location.href = data.url;
       } else {
         setMessage(data.error || 'Checkout failed');
       }
@@ -273,7 +333,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <span>${item.price.toFixed(2)}</span>
               </div>
             ))}
-            <button onClick={() => setMessage('Cart checkout is ready for admin-controlled payment flows.')} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Checkout</button>
+            <button onClick={() => setMessage('Use the product checkout controls for final payment. The top-right cart stays available across the site.')} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Review in header cart</button>
           </section>
         )}
       </div>

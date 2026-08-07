@@ -5,10 +5,8 @@ import {
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
   safeParseRedisItem,
-  getProductOverride,
+  loadProducts,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +25,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email and last 4 required.' }, { status: 400 });
     }
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const liveProducts = await loadProducts(redis);
+    const allProducts = Object.values(liveProducts) as any[];
+    const productNames = allProducts.map((p) => p.name);
     const poolMatches = await findPoolEntriesByEmail(redis, productNames, email);
 
     // Build a map of ALL statuses from the ledger
@@ -75,20 +75,8 @@ export async function POST(request: Request) {
       if (cardLast4 && cardLast4 !== last4) continue;
       const key = `${m.variant}|${m.size}`;
       const settled = statusByKey[key];
-      const product = GOYUNIR_STORE_SUITE.productCatalog.find(
-        (p) => p.name === m.variant || p.id === m.variant,
-      );
-      let listPrice: number | undefined;
-      if (product) {
-        try {
-          const override = await getProductOverride(redis, product.id);
-          const ov =
-            m.size === '100ml' ? override?.price100ml : override?.price50ml;
-          listPrice = typeof ov === 'number' ? ov : getProductPrice(product, m.size);
-        } catch {
-          listPrice = getProductPrice(product, m.size);
-        }
-      }
+      const product = allProducts.find((p) => p.name === m.variant || p.id === m.variant);
+      const listPrice = product?.priceCategories?.find((category: any) => category.size === m.size)?.price;
 
       const promoCode = m.parsed.promoCode || settled?.promoCode || undefined;
       const discountPercent =
@@ -131,19 +119,8 @@ export async function POST(request: Request) {
       const alreadyListed = entries.some((e) => e.variant === variant && e.size === size);
       if (alreadyListed) continue;
 
-      const product = GOYUNIR_STORE_SUITE.productCatalog.find(
-        (p) => p.name === variant || p.id === variant,
-      );
-      let listPrice: number | undefined;
-      if (product) {
-        try {
-          const override = await getProductOverride(redis, product.id);
-          const ov = size === '100ml' ? override?.price100ml : override?.price50ml;
-          listPrice = typeof ov === 'number' ? ov : getProductPrice(product, size);
-        } catch {
-          listPrice = getProductPrice(product, size);
-        }
-      }
+      const product = allProducts.find((p) => p.name === variant || p.id === variant);
+      const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price;
 
       entries.push({
         variant,

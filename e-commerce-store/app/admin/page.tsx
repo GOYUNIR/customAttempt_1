@@ -139,6 +139,10 @@ export default function AdminPortal() {
   const [recoveryMsg, setRecoveryMsg] = useState('');
 
   const [promos, setPromos] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsMsg, setAlertsMsg] = useState('');
+  const [selectedAlertProductId, setSelectedAlertProductId] = useState('');
   const [promoForm, setPromoForm] = useState({
     code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '',
     timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', firstXWinnersDiscount: '',
@@ -146,10 +150,8 @@ export default function AdminPortal() {
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
 
-  const [configData, setConfigData] = useState<any>(null);
   const [scheduleForm, setScheduleForm] = useState<any>({});
   const [socialForm, setSocialForm] = useState<any>({});
-  const [priceForm, setPriceForm] = useState<Record<string, { price50ml: string; price100ml: string }>>({});
   const [configMsg, setConfigMsg] = useState('');
 
   const [selftestResults, setSelftestResults] = useState<any>(null);
@@ -248,6 +250,7 @@ export default function AdminPortal() {
       fetchProducts(),
       fetchUsers(),
       fetchCatalogSettings(),
+      fetchAlerts(),
     ]);
     setIsRefreshing(false);
     showToast('🔄 All data refreshed');
@@ -282,6 +285,22 @@ export default function AdminPortal() {
     } catch {}
   };
 
+  const fetchAlerts = async () => {
+    if (!password) {
+      setAlerts([]);
+      return;
+    }
+    setAlertsLoading(true);
+    try {
+      const res = await adminFetch(`/api/admin/alerts?password=${encodeURIComponent(password)}`);
+      const data = await res.json();
+      setAlerts(Array.isArray(data.subscribers) ? data.subscribers : []);
+    } catch {
+      setAlerts([]);
+    }
+    setAlertsLoading(false);
+  };
+
   const fetchAudit = async () => {
     if (!password) {
       setAudit([]);
@@ -301,15 +320,8 @@ export default function AdminPortal() {
     try {
       const res = await adminFetch('/api/admin/config');
       const data = await res.json();
-      setConfigData(data);
       setScheduleForm({ ...data.baseSchedule, ...(data.globalScheduleOverride || {}) });
       setSocialForm({ ...data.baseSocialProof, ...(data.socialProofOverride || {}) });
-      const pf: Record<string, { price50ml: string; price100ml: string }> = {};
-      for (const p of data.products || []) {
-        const override = data.productOverrides?.[p.id];
-        pf[p.id] = { price50ml: String(override?.price50ml ?? p.price50ml), price100ml: String(override?.price100ml ?? p.price100ml) };
-      }
-      setPriceForm(pf);
       
       const notes: Record<string, any[]> = {};
       for (const p of GOYUNIR_STORE_SUITE.productCatalog) {
@@ -335,10 +347,10 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/settings');
       const data = await res.json();
       if (data.settings) {
-        if (data.settings.theme) setThemeSettings(data.settings.theme);
-        if (data.settings.hero) setHeroSettings(data.settings.hero);
-        if (data.settings.form) setFormSettings(data.settings.form);
-        if (data.settings.footer) setFooterSettings(data.settings.footer);
+        if (data.settings.themeColors) setThemeSettings(data.settings.themeColors);
+        if (data.settings.heroContent) setHeroSettings(data.settings.heroContent);
+        if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
+        if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.availableSizes) setAvailableSizes(data.settings.availableSizes);
       }
@@ -356,8 +368,8 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/products?includeArchived=true');
       const data = await res.json();
       if (data.products) {
-        setAllProducts(data.products);
-        const sorted = [...data.products].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        const sorted = [...data.products].sort((a, b) => ((a.sortOrder || 0) - (b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
+        setAllProducts(sorted);
         setProducts(sorted.filter((p: any) => !p.isArchived && !p.isUpcoming));
       }
     } catch (err) {
@@ -581,7 +593,7 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'toggleActive', id }),
+        body: JSON.stringify({ password, action: 'toggleActive', id, nextActive: !currentActive }),
       });
       if (res.ok) {
         showToast(`UPDATED · ${currentActive ? 'Hidden' : 'Visible'}`);
@@ -635,10 +647,12 @@ export default function AdminPortal() {
 
   const addNote = () => {
     if (!noteForm.label || !noteForm.name) return;
-    setProductForm((prev: any) => ({
-      ...prev,
-      notes: [...prev.notes, { ...noteForm }]
-    }));
+    setProductForm((prev: any) => {
+      const nextNotes = [...(prev.notes || [])];
+      if (editingNoteIdx !== null) nextNotes[editingNoteIdx] = { ...noteForm };
+      else nextNotes.push({ ...noteForm });
+      return { ...prev, notes: nextNotes };
+    });
     setNoteForm({ label: '', name: '', text: '' });
     setEditingNoteIdx(null);
   };
@@ -861,16 +875,6 @@ export default function AdminPortal() {
       body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
     });
     if (res.ok) { setConfigMsg('Social proof settings saved.'); showToast('UPDATED · Social proof'); } else setConfigMsg('Failed to save.');
-  };
-
-  const savePrice = async (productId: string) => {
-    if (!password) return alert('Enter password');
-    const v = priceForm[productId];
-    const res = await adminFetch('/api/admin/config', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, section: 'product', productId, value: { price50ml: Number(v.price50ml), price100ml: Number(v.price100ml) } }),
-    });
-    if (res.ok) { setConfigMsg(`Price saved for ${productId}.`); showToast('UPDATED · Price'); } else setConfigMsg('Failed to save price.');
   };
 
   const runSelftest = async () => {
@@ -1102,6 +1106,38 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
+  const notifyReleaseList = async () => {
+    if (!password) return alert('Enter password');
+    if (!selectedAlertProductId) return alert('Choose a product first');
+    setAlertsMsg('Sending release emails…');
+    try {
+      const res = await adminFetch('/api/admin/alerts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'notifyProduct', productId: selectedAlertProductId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAlertsMsg(`Sent ${data.sent || 0} release alerts${data.skipped ? ` · skipped ${data.skipped}` : ''}.`);
+        await fetchAlerts();
+      } else {
+        setAlertsMsg(data.error || 'Failed to send alerts.');
+      }
+    } catch (err: any) {
+      setAlertsMsg(err.message || 'Failed to send alerts.');
+    }
+  };
+
+  const removeAlertSubscriber = async (email: string) => {
+    if (!password) return alert('Enter password');
+    try {
+      const res = await adminFetch('/api/admin/alerts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, action: 'remove', email }),
+      });
+      if (res.ok) await fetchAlerts();
+    } catch {}
+  };
+
   // ============================================================
   // USE EFFECTS (unchanged)
   // ============================================================
@@ -1220,7 +1256,7 @@ export default function AdminPortal() {
             <button key={t.id}
               onClick={() => {
                 setTab(t.id);
-                if (t.id === 'growth') { fetchPromos(); fetchAudit(); }
+                if (t.id === 'growth') { fetchPromos(); fetchAudit(); fetchAlerts(); }
                 if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
@@ -1784,10 +1820,11 @@ export default function AdminPortal() {
                 </div>
               )}
               {allProducts.length > 0 && allProducts.map((product) => {
-                const isActive = product.isActive && !product.isArchived && !product.isUpcoming;
+                const isPublished = product.isActive === true;
+                const isActive = isPublished && !product.isArchived && !product.isUpcoming;
                 const isArchived = product.isArchived;
                 const isUpcoming = product.isUpcoming;
-                const isHidden = !isActive && !isArchived && !isUpcoming;
+                const isHidden = !isPublished;
                 return (
                   <div key={product.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: `1px solid ${isActive ? '#1c1c1e' : isArchived ? '#5a3d1a' : isUpcoming ? '#1a3a5a' : '#2a1a1a'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -1795,6 +1832,7 @@ export default function AdminPortal() {
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
                         <div style={{ fontSize: 10, color: '#666' }}>
                           slug: {product.slug} · images: {product.images?.length || 0}
+                          {isPublished && <span style={{ color: '#d4d4d8', marginLeft: 8 }}>● Published</span>}
                           {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
                           {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
                           {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
@@ -1810,8 +1848,8 @@ export default function AdminPortal() {
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
                         <button onClick={() => { const newOrder = prompt('New sort order (lower = first):', String(product.sortOrder || 0)); if (newOrder !== null) reorderProducts(product.id, Number(newOrder)); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Reorder</button>
-                        <button onClick={() => toggleActive(product.id, isActive)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isActive ? '#f87171' : '#34d399', color: isActive ? '#f87171' : '#34d399' }}>
-                          {isActive ? 'Hide' : 'Show'}
+                        <button onClick={() => toggleActive(product.id, isPublished)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isPublished ? '#f87171' : '#34d399', color: isPublished ? '#f87171' : '#34d399' }}>
+                          {isPublished ? 'Unpublish' : 'Publish'}
                         </button>
                         <button onClick={() => toggleArchive(product.id, isArchived)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
                           {isArchived ? 'Unarchive' : 'Archive'}
@@ -2117,6 +2155,40 @@ export default function AdminPortal() {
                 )}
               </div>
             ))}
+
+            <div style={{ marginTop: 18, borderTop: '1px solid #27272a', paddingTop: 16 }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 12, textTransform: 'uppercase' }}>Release Alert List</h3>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
+                Capture private-release emails from the storefront and notify the list from here when a product goes live.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                <select value={selectedAlertProductId} onChange={(e) => setSelectedAlertProductId(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 180 }}>
+                  <option value="">Choose a product to notify</option>
+                  {allProducts.map((product) => (
+                    <option key={product.id} value={product.id}>{product.name}</option>
+                  ))}
+                </select>
+                <button onClick={notifyReleaseList} style={buttonPrimary}>Notify Release List</button>
+                <button onClick={fetchAlerts} style={buttonGhost}>{alertsLoading ? 'Loading…' : 'Refresh'}</button>
+              </div>
+              {alertsMsg && <p style={{ fontSize: 12, color: alertsMsg.includes('Failed') ? '#f87171' : '#34d399', marginBottom: 10 }}>{alertsMsg}</p>}
+              {alerts.length === 0 && !alertsLoading && <p style={{ color: '#555', fontSize: 12 }}>No subscribers yet.</p>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
+                {alerts.map((subscriber) => (
+                  <div key={subscriber.email} style={{ background: '#09090b', padding: 12, borderRadius: 10, fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{subscriber.email}</div>
+                        <div style={{ color: '#888', fontSize: 10, marginTop: 2 }}>
+                          Sources: {(subscriber.sources || []).join(', ') || 'site'} · joined {subscriber.createdAt ? new Date(subscriber.createdAt).toLocaleDateString() : 'n/a'}
+                        </div>
+                      </div>
+                      <button onClick={() => removeAlertSubscriber(subscriber.email)} style={{ ...buttonGhost, color: '#f87171', borderColor: '#f87171' }}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 

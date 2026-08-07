@@ -3,8 +3,8 @@ import {
   createRedisClient,
   createStripeClient,
   findPoolEntriesByEmail,
+  loadProducts,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +60,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Enter your email and card digits first.' }, { status: 400 });
     }
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.name);
+    const liveProducts = await loadProducts(redis);
+    const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const matches = await findPoolEntriesByEmail(redis, productNames, email);
     
     // Filter by variant/size if provided

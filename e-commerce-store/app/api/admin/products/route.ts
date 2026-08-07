@@ -86,7 +86,7 @@ export async function POST(request: Request) {
   if (action === 'toggleActive') {
     const product = allProducts[body.id];
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    product.isActive = !product.isActive;
+    product.isActive = typeof body.nextActive === 'boolean' ? body.nextActive : !Boolean(product.isActive);
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
     return NextResponse.json({ success: true, product });
@@ -119,27 +119,34 @@ export async function POST(request: Request) {
   // Upsert (create or update)
   const id = body.id || `prod_${Date.now().toString(36)}`;
   const existing = allProducts[id] || null;
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
+  const numberOr = (value: any, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
   const name = body.name?.trim() || existing?.name || '';
   if (!name) return NextResponse.json({ error: 'Name required' }, { status: 400 });
+  const slugSource = has('slug') ? String(body.slug || '').trim() : String(existing?.slug || '');
+  const slug = slugSource || name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
 
   const product = {
     id,
     name,
-    slug: body.slug || existing?.slug || name.toLowerCase().replace(/[^a-z0-9-]+/g, '-'),
-    prefix: body.prefix || existing?.prefix || '',
-    tagline: body.tagline || existing?.tagline || '',
-    desc: body.desc || existing?.desc || '',
+    slug,
+    prefix: has('prefix') ? String(body.prefix || '') : (existing?.prefix || ''),
+    tagline: has('tagline') ? String(body.tagline || '') : (existing?.tagline || ''),
+    desc: has('desc') ? String(body.desc || '') : (existing?.desc || ''),
     priceCategories: Array.isArray(body.priceCategories) ? body.priceCategories : (existing?.priceCategories || [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }]),
     isActive: body.isActive !== undefined ? body.isActive : (existing?.isActive ?? false),
     isArchived: body.isArchived !== undefined ? body.isArchived : (existing?.isArchived ?? false),
     isUpcoming: body.isUpcoming !== undefined ? body.isUpcoming : (existing?.isUpcoming ?? false),
     isRaffle: body.isRaffle !== undefined ? body.isRaffle : (existing?.isRaffle ?? true),
-    productType: body.productType || existing?.productType || 'raffle',
-    sortOrder: Number(body.sortOrder) || existing?.sortOrder || 0,
+    productType: has('productType') ? String(body.productType || '') : (existing?.productType || 'raffle'),
+    sortOrder: has('sortOrder') ? numberOr(body.sortOrder, existing?.sortOrder || 0) : (existing?.sortOrder || 0),
     notes: Array.isArray(body.notes) ? body.notes : (existing?.notes || []),
     images: Array.isArray(body.images) ? body.images : (existing?.images || []),
-    maxRaffleAllocationLimit: Number(body.maxRaffleAllocationLimit) || existing?.maxRaffleAllocationLimit || 0,
-    totalInventory: Number(body.totalInventory) || existing?.totalInventory || 0,
+    maxRaffleAllocationLimit: has('maxRaffleAllocationLimit') ? numberOr(body.maxRaffleAllocationLimit, existing?.maxRaffleAllocationLimit || 0) : (existing?.maxRaffleAllocationLimit || 0),
+    totalInventory: has('totalInventory') ? numberOr(body.totalInventory, existing?.totalInventory || 0) : (existing?.totalInventory || 0),
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),

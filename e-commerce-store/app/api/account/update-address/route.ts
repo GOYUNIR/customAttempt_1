@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress, loadProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +19,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const productNames = GOYUNIR_STORE_SUITE.productCatalog.map((p: any) => p.name);
+    const liveProducts = await loadProducts(redis);
+    const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const orders = await findAllOpenOrders(redis, productNames);
     const target = orders.find(
       (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email

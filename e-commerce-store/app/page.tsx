@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 
 export default function HomePage() {
   const [loading, setLoading] = useState(true);
@@ -43,13 +44,13 @@ export default function HomePage() {
   const secondaryProducts = activeProducts.slice(1);
 
   return (
-    <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '24px 16px 64px', fontFamily: 'system-ui, sans-serif' }}>
+    <main style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, rgba(59,130,246,0.14), transparent 36%), radial-gradient(circle at 20% 20%, rgba(168,85,247,0.16), transparent 28%), #07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '20px 18px', background: '#0e0e10' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / LIVE ACCESS</div>
-          <h1 style={{ fontSize: 30, fontFamily: 'serif', margin: '0 0 10px', lineHeight: 1.1 }}>Fast launches. Premium access. Built for mobile-first hype traffic.</h1>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)' }}>
+          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
+          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02 }}>Luxury drops engineered for fast taps, fast trust, and zero friction.</h1>
           <p style={{ color: '#c8c8cf', fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
-            The storefront is designed to feel effortless on phones, convert quickly, and let admins manage drops, pricing, and raffle timing without touching code.
+            Built for raffle launches, premium FCFS releases, and mobile-first social traffic that decides in seconds.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Browse catalog</Link>
@@ -100,6 +101,14 @@ export default function HomePage() {
             <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Admins can launch a new raffle or direct-buy drop from the portal and it will appear here automatically.</p>
             <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>View catalog</Link>
           </section>
+        )}
+
+        {activeProducts.length === 0 && (
+          <ReleaseWaitlist
+            source="home"
+            headline="Join the private alert list before the next release opens."
+            body="If nothing is visible right now, this is the fastest path back in. The brand can trigger release alerts directly from the admin portal without touching code."
+          />
         )}
       </div>
     </main>

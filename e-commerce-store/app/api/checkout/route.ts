@@ -27,6 +27,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Price not set for this size' }, { status: 400 });
     }
     const priceCents = Math.round(priceCat.price * 100);
+    const productSlug = String(product.slug || product.id);
+
+    const origin = (() => {
+      const forwardedProto = request.headers.get('x-forwarded-proto');
+      const forwardedHost = request.headers.get('x-forwarded-host');
+      const host = forwardedHost || request.headers.get('host') || 'localhost:3000';
+      const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
+      return `${protocol}://${host}`;
+    })();
 
     // Get or create customer
     let customer;
@@ -41,24 +50,64 @@ export async function POST(request: Request) {
     }
 
     if (mode === 'raffle') {
-      // Create SetupIntent – save payment method for later charge
-      const setupIntent = await stripe.setupIntents.create({
+      const session = await stripe.checkout.sessions.create({
+        mode: 'setup',
         customer: customer.id,
         payment_method_types: ['card'],
-        metadata: { productId, size, email, address },
+        success_url: `${origin}/${productSlug}?setup=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/${productSlug}?setup=cancel`,
+        metadata: {
+          productId: String(productId),
+          productSlug,
+          variant: String(product.name || ''),
+          size: String(size),
+          email: String(email),
+          address: String(address),
+        },
       });
-      return NextResponse.json({ url: setupIntent.client_secret, setupIntentId: setupIntent.id });
+      return NextResponse.json({ url: session.url, sessionId: session.id });
     } else {
-      // Direct checkout – charge immediately
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: priceCents,
-        currency: 'usd',
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
         customer: customer.id,
+        customer_email: email,
         payment_method_types: ['card'],
-        receipt_email: email,
-        metadata: { productId, size, email, address },
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              unit_amount: priceCents,
+              product_data: {
+                name: `${product.name} - ${size}`,
+                description: product.tagline || product.desc || undefined,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/${productSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/${productSlug}?purchase=cancel`,
+        metadata: {
+          productId: String(productId),
+          productSlug,
+          variant: String(product.name || ''),
+          size: String(size),
+          email: String(email),
+          address: String(address),
+        },
+        payment_intent_data: {
+          receipt_email: email,
+          metadata: {
+            productId: String(productId),
+            productSlug,
+            variant: String(product.name || ''),
+            size: String(size),
+            email: String(email),
+            address: String(address),
+          },
+        },
       });
-      return NextResponse.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
+      return NextResponse.json({ url: session.url, sessionId: session.id });
     }
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
