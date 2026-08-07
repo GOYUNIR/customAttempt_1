@@ -66,12 +66,25 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
   const [showPromoField, setShowPromoField] = useState(false);
+  const [notice, setNotice] = useState<{ id?: string; type: string; message: string } | null>(null);
   const targetXRef = useRef(0.5);
   const targetYRef = useRef(0.35);
   const velocityXRef = useRef(0);
   const velocityYRef = useRef(0);
   const lastScrollYRef = useRef(0);
   const lastScrollAtRef = useRef(0);
+  const noticeTimerRef = useRef<number | null>(null);
+
+  const showNotice = (next: { id?: string; type: string; message: string; persist?: boolean }) => {
+    setNotice({ id: next.id, type: next.type, message: next.message });
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    if (!next.persist && next.type !== 'loading') {
+      noticeTimerRef.current = window.setTimeout(() => setNotice((current) => (current?.id === next.id || !next.id ? null : current)), 2400);
+    }
+  };
 
   useEffect(() => {
     const sync = () => setCart(readCart());
@@ -176,9 +189,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       })
       .catch(() => {});
 
+    const onNotify = (event: Event) => {
+      const custom = event as CustomEvent<any>;
+      const detail = custom.detail || {};
+      if (detail.action === 'dismiss') {
+        setNotice((current) => {
+          if (!detail.id) return null;
+          return current?.id === detail.id ? null : current;
+        });
+        return;
+      }
+      if (!detail.message) return;
+      showNotice({
+        id: detail.id,
+        type: String(detail.type || 'info'),
+        message: String(detail.message),
+        persist: detail.persist === true,
+      });
+    };
+
     window.addEventListener('goyunir-open-cart', open as EventListener);
     window.addEventListener('goyunir-cart-updated', sync as EventListener);
     window.addEventListener('storage', sync);
+    window.addEventListener('goyunir-notify', onNotify as EventListener);
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('scroll', onScrollMotion, { passive: true });
     window.addEventListener('pointermove', onPointer, { passive: true });
@@ -188,11 +221,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       window.removeEventListener('goyunir-open-cart', open as EventListener);
       window.removeEventListener('goyunir-cart-updated', sync as EventListener);
       window.removeEventListener('storage', sync);
+      window.removeEventListener('goyunir-notify', onNotify as EventListener);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('scroll', onScrollMotion);
       window.removeEventListener('pointermove', onPointer);
       window.removeEventListener('touchmove', onTouchMove);
       window.cancelAnimationFrame(rafId);
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
 
@@ -208,14 +243,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     if (!hasItems) return;
     if (!cartIsFcfsOnly) {
       setCartMsg('Raffle items cannot be purchased in cart. Enter raffle from the product page.');
+      showNotice({ type: 'error', message: 'Raffle items need to be entered from the product page.' });
       return;
     }
     if (!checkoutEmail || !checkoutAddress) {
       setCartMsg('Enter your email and shipping address to continue.');
+      showNotice({ type: 'alert', message: 'Add your email and shipping address first.' });
       return;
     }
     setCheckoutBusy(true);
     setCartMsg('');
+    showNotice({ id: 'cart-checkout', type: 'loading', message: 'Preparing secure checkout...', persist: true });
     try {
       const payload = {
         email: checkoutEmail.trim().toLowerCase(),
@@ -231,14 +269,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const data = await res.json();
       if (res.ok && data.url) {
         setEncryptionHealthy(true);
+        showNotice({ id: 'cart-checkout', type: 'success', message: 'Checkout is ready.' });
         window.location.assign(data.url);
         return;
       }
       setEncryptionHealthy(false);
       setCartMsg(data.error || 'Unable to start checkout.');
+      showNotice({ id: 'cart-checkout', type: 'error', message: data.error || 'Unable to start checkout.' });
     } catch {
       setEncryptionHealthy(false);
       setCartMsg('Unable to start checkout.');
+      showNotice({ id: 'cart-checkout', type: 'error', message: 'Unable to start checkout.' });
     } finally {
       setCheckoutBusy(false);
     }
@@ -269,6 +310,25 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           {bannerMessage}{promoCode ? ` · ${promoCode}` : ''}
         </div>
       )}
+      {notice && (
+        <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', zIndex: 170, pointerEvents: 'none' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '9px 13px', borderRadius: 999, background: 'rgba(10,10,12,0.94)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.28)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.24)' : notice.type === 'loading' ? 'rgba(125,211,252,0.24)' : 'rgba(255,255,255,0.1)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.34)', backdropFilter: 'blur(16px)' }}>
+            <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
+              {notice.type === 'loading' ? (
+                <>
+                  <span style={{ width: 5, height: 5, borderRadius: 999, background: '#7dd3fc', opacity: 0.45, animation: 'goyunirPulse 0.9s ease-in-out infinite' }} />
+                  <span style={{ width: 5, height: 5, borderRadius: 999, background: '#7dd3fc', opacity: 0.75, animation: 'goyunirPulse 0.9s ease-in-out 0.15s infinite' }} />
+                  <span style={{ width: 5, height: 5, borderRadius: 999, background: '#7dd3fc', opacity: 1, animation: 'goyunirPulse 0.9s ease-in-out 0.3s infinite' }} />
+                </>
+              ) : (
+                <span style={{ width: 7, height: 7, borderRadius: 999, background: notice.type === 'error' ? '#f87171' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? '#34d399' : notice.type === 'alert' ? '#facc15' : '#d4d4d8', boxShadow: `0 0 0 2px ${notice.type === 'error' ? 'rgba(248,113,113,0.16)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.16)' : notice.type === 'alert' ? 'rgba(250,204,21,0.14)' : 'rgba(255,255,255,0.08)'}` }} />
+              )}
+            </span>
+            <span>{notice.message}</span>
+          </div>
+        </div>
+      )}
+      <style>{`@keyframes goyunirPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .28; } 40% { transform: translateY(-1px); opacity: 1; } }`}</style>
       <header
         style={{
           position: 'fixed',

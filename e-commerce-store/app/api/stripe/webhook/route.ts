@@ -26,6 +26,10 @@ function usedEmailsKey(code: string) {
   return `promo:used_emails:${code}`;
 }
 
+function pendingPromoKey(code: string, email: string) {
+  return `promo:pending:${code}:${email}`;
+}
+
 function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
   if (env) return env.replace(/\/$/, '');
@@ -263,6 +267,7 @@ export async function POST(request: Request) {
       const size = String(meta.size || 'Standard').trim();
       const shippingAddress = String(meta.address || '').trim();
       const checkoutType = String(meta.checkoutType || 'single');
+      const appliedPromo = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
 
       const allProducts = await loadProducts(redis);
       if (checkoutType === 'cart') {
@@ -296,6 +301,7 @@ export async function POST(request: Request) {
               type: 'WINNER_CHARGED',
               shippingStatus: 'PENDING_FULFILLMENT',
               amountCents: priceCents,
+              promoCode: appliedPromo || undefined,
               orderRef: `DIRECT-${session.id}-${i + 1}`,
             } as any);
           }
@@ -324,8 +330,25 @@ export async function POST(request: Request) {
             type: 'WINNER_CHARGED',
             shippingStatus: 'PENDING_FULFILLMENT',
             amountCents: Number(session.amount_total || 0),
+            promoCode: appliedPromo || undefined,
             orderRef: `DIRECT-${session.id}`,
           } as any);
+        }
+      }
+
+      if (appliedPromo) {
+        try {
+          await redis.sadd(usedEmailsKey(appliedPromo), email);
+          await redis.del(pendingPromoKey(appliedPromo, email));
+          await redis.del(pendingPromoKey(appliedPromo, email));
+          const raw = await redis.hget(PROMOS_KEY, appliedPromo);
+          const promo = safeParseRedisItem<any>(raw);
+          if (promo) {
+            promo.uses = (Number(promo.uses) || 0) + 1;
+            await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
+          }
+        } catch (e) {
+          console.error('[webhook] payment promo accounting failed', e);
         }
       }
 

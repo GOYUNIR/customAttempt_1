@@ -217,6 +217,14 @@ export default function AdminPortal() {
     releaseEndsAt: '',
     soldOutBehavior: 'stay_visible',
     soldOutArchiveDelayHours: 24,
+    deliveryIncentiveEnabled: false,
+    deliveryIncentiveCreditCents: 0,
+    deliveryIncentiveMinOrderSubtotalCents: 0,
+    deliveryIncentiveExpiresDays: 60,
+    deliveryIncentiveCodePrefix: '',
+    deliveryIncentiveEligibleProductSlugs: [],
+    deliveryIncentiveEligibleSizes: [],
+    deliveryIncentiveTriggerSizes: [],
     sortOrder: 0,
     notes: [],
     images: [],
@@ -474,6 +482,14 @@ export default function AdminPortal() {
       releaseEndsAt: '',
       soldOutBehavior: 'stay_visible',
       soldOutArchiveDelayHours: 24,
+      deliveryIncentiveEnabled: false,
+      deliveryIncentiveCreditCents: 0,
+      deliveryIncentiveMinOrderSubtotalCents: 0,
+      deliveryIncentiveExpiresDays: 60,
+      deliveryIncentiveCodePrefix: '',
+      deliveryIncentiveEligibleProductSlugs: [],
+      deliveryIncentiveEligibleSizes: [],
+      deliveryIncentiveTriggerSizes: [],
       sortOrder: 0,
       notes: [],
       images: [],
@@ -1838,6 +1854,40 @@ export default function AdminPortal() {
 
                 <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: '#060606', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.6 }}>
                   RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Sold-out hold keeps proof of demand visible before archiving.
+                </div>
+
+                <div style={{ marginTop: 12, borderTop: '1px solid #27272a', paddingTop: 12 }}>
+                  <h5 style={{ fontSize: 11, color: '#aaa', margin: '0 0 8px' }}>Post-Delivery Credit</h5>
+                  <p style={{ fontSize: 10, color: '#666', margin: '0 0 8px' }}>
+                    Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} />
+                      <span>Enable delivery credit</span>
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Credit value (cents)
+                      <input type="number" min={0} value={productForm.deliveryIncentiveCreditCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
+                      <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Expires after delivery (days)
+                      <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Code prefix
+                      <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Trigger on size(s) CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveTriggerSizes) ? productForm.deliveryIncentiveTriggerSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveTriggerSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                  </div>
                 </div>
 
                 {/* ===== PRICE CATEGORIES (DYNAMIC) ===== */}

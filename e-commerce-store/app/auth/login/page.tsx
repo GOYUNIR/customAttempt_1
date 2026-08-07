@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -12,10 +13,25 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
+  const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('reset') === 'success') {
+        notify({ type: 'success', message: 'Password updated. You can log in now.' });
+      }
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    notify({ id: 'auth-login', type: 'loading', message: 'Signing you in...', persist: true });
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -24,12 +40,15 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        notify({ id: 'auth-login', type: 'success', message: 'Signed in.' });
         router.push('/account');
       } else {
         setError(data.error || 'Login failed');
+        notify({ id: 'auth-login', type: 'error', message: data.error || 'Login failed.' });
       }
     } catch (err) {
       setError('Network error');
+      notify({ id: 'auth-login', type: 'error', message: 'Network error.' });
     } finally {
       setLoading(false);
     }

@@ -10,10 +10,16 @@ export default function ForgotPasswordPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
+  const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setMessage('');
+    notify({ id: 'forgot-password', type: 'loading', message: 'Sending reset link...', persist: true });
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
@@ -23,11 +29,14 @@ export default function ForgotPasswordPage() {
       const data = await res.json();
       if (res.ok) {
         setMessage('If this email exists, a reset link has been sent.');
+        notify({ id: 'forgot-password', type: 'success', message: 'If the account exists, a reset link is on the way.' });
       } else {
         setMessage(data.error || 'Unable to send reset link.');
+        notify({ id: 'forgot-password', type: 'error', message: data.error || 'Unable to send reset link.' });
       }
     } catch {
       setMessage('Unable to send reset link.');
+      notify({ id: 'forgot-password', type: 'error', message: 'Unable to send reset link.' });
     } finally {
       setBusy(false);
     }

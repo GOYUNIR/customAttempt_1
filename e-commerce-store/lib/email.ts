@@ -445,6 +445,48 @@ export async function sendAccountUpdateEmail(opts: {
   }
 }
 
+export async function sendDeliveryIncentiveEmail(opts: {
+  to: string;
+  product: string;
+  size?: string;
+  code: string;
+  creditAmountCents: number;
+  minimumOrderSubtotalCents?: number;
+  eligibleProductSlugs?: string[];
+  eligibleSizes?: string[];
+}) {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true };
+  const eligibleProducts = Array.isArray(opts.eligibleProductSlugs) ? opts.eligibleProductSlugs.join(', ') : '';
+  const eligibleSizes = Array.isArray(opts.eligibleSizes) ? opts.eligibleSizes.join(', ') : '';
+  try {
+    const { data, error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: `Your GOYUNIR delivery credit is ready`,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.55">
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <h1 style="font-size:22px;font-weight:700;margin:0 0 12px">Your delivery credit is unlocked.</h1>
+          <p style="margin:0 0 12px">Thanks for receiving <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''}. Your private follow-up credit is now active.</p>
+          <div style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#111;color:#fff;display:inline-block;font-weight:700;letter-spacing:1px">${opts.code}</div>
+          <p style="margin:0 0 8px">Credit: <strong>$${(opts.creditAmountCents / 100).toFixed(2)}</strong></p>
+          ${opts.minimumOrderSubtotalCents ? `<p style="margin:0 0 8px">Minimum order: <strong>$${(opts.minimumOrderSubtotalCents / 100).toFixed(2)}</strong></p>` : ''}
+          ${eligibleProducts ? `<p style="margin:0 0 8px">Eligible release(s): <strong>${eligibleProducts}</strong></p>` : ''}
+          ${eligibleSizes ? `<p style="margin:0 0 14px">Eligible size(s): <strong>${eligibleSizes}</strong></p>` : ''}
+          <p style="margin:0 0 14px;color:#4b5563">This code is linked to your email, limited to one use, and cannot be transferred or stacked.</p>
+          <p style="margin:0;color:#666;font-size:13px">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+        </div>
+      `,
+    });
+    if (error) return { ok: false, error };
+    return { ok: true, id: data?.id };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
 /** Alias used by trigger-drop */
 export async function sendPromoterPayoutEmail(opts: {
   to: string;

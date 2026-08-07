@@ -2,6 +2,16 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+const PROMOS_KEY = 'config:promos';
+const PROMO_PENDING_TTL_SECONDS = 30 * 60;
+
+function usedEmailsKey(code: string) {
+  return `promo:used_emails:${code}`;
+}
+
+function pendingPromoKey(code: string, email: string) {
+  return `promo:pending:${code}:${email}`;
+}
 
 function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
   const mode = String(product?.checkoutMode || '').toUpperCase();
@@ -62,13 +72,75 @@ export async function POST(request: Request) {
     if (!priceCat || priceCat.price <= 0) {
       return NextResponse.json({ error: 'Price not set for this size' }, { status: 400 });
     }
-    const priceCents = Math.round(priceCat.price * 100);
+    const basePriceCents = Math.round(priceCat.price * 100);
     const productSlug = String(product.slug || product.id);
     const variant = String(product.name || product.id);
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const checkoutMode = getCheckoutMode(product);
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
     const orderRef = buildRef(normalizedEmail, String(productId), String(size));
+    let priceCents = basePriceCents;
+    const normalizedPromo = String(promoCode || ref || '').trim().toUpperCase();
+
+    if (normalizedPromo && checkoutMode === 'FCFS') {
+      const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
+      const promo = typeof rawPromo === 'string' ? JSON.parse(rawPromo) : rawPromo;
+      if (!promo || promo.active === false) {
+        return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
+      }
+      if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
+        return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
+      }
+      if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === normalizedEmail) {
+        return NextResponse.json({ error: 'Promoters cannot use their own code.' }, { status: 403 });
+      }
+      if (Number(promo.maxUsesTotal || 0) > 0 && Number(promo.uses || 0) >= Number(promo.maxUsesTotal || 0)) {
+        return NextResponse.json({ error: 'This code has been fully claimed.' }, { status: 409 });
+      }
+      if (Number(promo.maxUsesPerEmail || 0) > 0) {
+        const used = await redis.sismember(usedEmailsKey(normalizedPromo), normalizedEmail);
+        if (used === 1) {
+          return NextResponse.json({ error: 'This code has already been used with this email address.' }, { status: 409 });
+        }
+      }
+      const pendingKey = pendingPromoKey(normalizedPromo, normalizedEmail);
+      const pending = await redis.get(pendingKey);
+      if (pending) {
+        return NextResponse.json({ error: 'This code already has a checkout in progress for this email. Finish that checkout or wait a bit before trying again.' }, { status: 409 });
+      }
+      const eligibleProductSlugs = Array.isArray(promo.eligibleProductSlugs) ? promo.eligibleProductSlugs.map(String) : [];
+      const eligibleSizes = Array.isArray(promo.eligibleSizes) ? promo.eligibleSizes.map(String) : [];
+      const minimumOrderSubtotalCents = Math.max(0, Number(promo.minimumOrderSubtotalCents || 0));
+      if (eligibleProductSlugs.length > 0 && !eligibleProductSlugs.includes(productSlug)) {
+        return NextResponse.json({ error: 'This code only works on selected full-size items.' }, { status: 409 });
+      }
+      if (eligibleSizes.length > 0 && !eligibleSizes.includes(String(size))) {
+        return NextResponse.json({ error: 'This code only works on selected sizes.' }, { status: 409 });
+      }
+      if (minimumOrderSubtotalCents > 0 && basePriceCents < minimumOrderSubtotalCents) {
+        return NextResponse.json({ error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}.` }, { status: 409 });
+      }
+      const fixedDiscountCents = Math.max(0, Number(promo.fixedDiscountCents || 0));
+      const percentDiscount = Math.min(50, Math.max(0, Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0));
+      if (fixedDiscountCents > 0) {
+        priceCents = Math.max(50, basePriceCents - Math.min(basePriceCents - 50, fixedDiscountCents));
+      } else if (percentDiscount > 0) {
+        priceCents = Math.max(50, Math.round(basePriceCents * (1 - percentDiscount / 100)));
+      }
+    } else if (normalizedPromo && checkoutMode === 'RAFFLE') {
+      const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
+      const promo = typeof rawPromo === 'string' ? JSON.parse(rawPromo) : rawPromo;
+      if (promo) {
+        const hasRestrictedCredit = Number(promo.fixedDiscountCents || 0) > 0
+          || Number(promo.minimumOrderSubtotalCents || 0) > 0
+          || (Array.isArray(promo.eligibleProductSlugs) && promo.eligibleProductSlugs.length > 0)
+          || (Array.isArray(promo.eligibleSizes) && promo.eligibleSizes.length > 0)
+          || Boolean(promo.issuedForEmail);
+        if (hasRestrictedCredit) {
+          return NextResponse.json({ error: 'This credit only works on qualifying direct-purchase items.' }, { status: 409 });
+        }
+      }
+    }
 
     if (checkoutMode === 'FCFS') {
       const live = await getLiveProductState(redis, product, String(size));
@@ -128,7 +200,7 @@ export async function POST(request: Request) {
           address: String(address),
           maxPerEmail: String(maxPerEmail),
           orderRef,
-          promoCode: String(promoCode || ref || '').trim().toUpperCase(),
+          promoCode: normalizedPromo,
           ref: String(ref || promoCode || '').trim().toUpperCase(),
         },
       });
@@ -163,6 +235,8 @@ export async function POST(request: Request) {
           address: String(address),
           maxPerEmail: String(maxPerEmail),
           orderRef,
+          promoCode: normalizedPromo,
+          ref: String(ref || promoCode || '').trim().toUpperCase(),
         },
         payment_intent_data: {
           receipt_email: email,
@@ -175,11 +249,14 @@ export async function POST(request: Request) {
             address: String(address),
             maxPerEmail: String(maxPerEmail),
             orderRef,
-            promoCode: String(promoCode || ref || '').trim().toUpperCase(),
+            promoCode: normalizedPromo,
             ref: String(ref || promoCode || '').trim().toUpperCase(),
           },
         },
       });
+      if (normalizedPromo) {
+        await redis.set(pendingPromoKey(normalizedPromo, normalizedEmail), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
+      }
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }
   } catch (err: any) {

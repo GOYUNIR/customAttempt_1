@@ -54,6 +54,11 @@ function writeCheckoutDetails(email: string, address: string) {
   window.localStorage.setItem(CHECKOUT_DETAILS_KEY, JSON.stringify({ email, address }));
 }
 
+function notify(detail: { id?: string; type: string; message: string; persist?: boolean }) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+}
+
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
@@ -226,6 +231,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const cat = getProductPriceCategory(product, selectedSize);
     if (!cat || cat.price <= 0) {
       setMessage('Price not set for this size. Please set in admin.');
+      notify({ type: 'error', message: 'This size is not ready yet.' });
       return;
     }
     const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
@@ -241,12 +247,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
     if (inCartCount >= maxPerCart) {
       setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
+      notify({ type: 'alert', message: `Limit reached for ${product.name}.` });
       return;
     }
     const next = [...cart, item];
     setCart(next);
     writeStoredCart(next);
     setMessage(`Added ${product.name} (${selectedSize}) to cart`);
+    notify({ type: 'success', message: `${product.name} added to your bag.` });
     setShowCart(true);
   };
 
@@ -277,10 +285,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const handleRaffleSubmit = async () => {
     if (!email || !address || !selectedSize) {
       setMessage('Please fill in all fields and select a size.');
+      notify({ type: 'alert', message: 'Complete your details before entering.' });
       return;
     }
     setIsSubmitting(true);
     setMessage('');
+    notify({ id: 'product-submit', type: 'loading', message: 'Securing encrypted entry...', persist: true });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
@@ -290,14 +300,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         setEncryptionHealthy(true);
+        notify({ id: 'product-submit', type: 'entered', message: 'Entry handoff is ready.' });
         window.location.href = data.url;
       } else {
         setEncryptionHealthy(false);
         setMessage(data.error || 'Failed to start checkout');
+        notify({ id: 'product-submit', type: 'error', message: data.error || 'Failed to start checkout.' });
       }
     } catch (e) {
       setEncryptionHealthy(false);
       setMessage('Connection error');
+      notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -306,10 +319,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const handleDirectCheckout = async () => {
     if (!email || !address || !selectedSize) {
       setMessage('Please fill in all fields and select a size.');
+      notify({ type: 'alert', message: 'Complete your details before checkout.' });
       return;
     }
     setIsSubmitting(true);
     setMessage('');
+    notify({ id: 'product-submit', type: 'loading', message: 'Preparing secure checkout...', persist: true });
     try {
       const res = await fetch('/api/checkout', {
         method: 'POST',
@@ -319,14 +334,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         setEncryptionHealthy(true);
+        notify({ id: 'product-submit', type: 'success', message: 'Checkout is ready.' });
         window.location.href = data.url;
       } else {
         setEncryptionHealthy(false);
         setMessage(data.error || 'Checkout failed');
+        notify({ id: 'product-submit', type: 'error', message: data.error || 'Checkout failed.' });
       }
     } catch (e) {
       setEncryptionHealthy(false);
       setMessage('Connection error');
+      notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -337,23 +355,28 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (!code) {
       setPromoMsg('Enter a promo code first.');
       setPromoValid(false);
+      notify({ type: 'alert', message: 'Enter a promo code first.' });
       return;
     }
+    notify({ id: 'promo-apply', type: 'loading', message: 'Checking promo...', persist: true });
     try {
-      const res = await fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(email || '')}`);
+      const res = await fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(email || '')}&productId=${encodeURIComponent(product?.id || '')}&size=${encodeURIComponent(selectedSize || '')}&orderSubtotal=${encodeURIComponent(String(price || 0))}`);
       const data = await res.json();
       if (data.valid) {
         window.localStorage.setItem('goyunir-promo-code', code);
         setPromoCode(code);
         setPromoValid(true);
-        setPromoMsg(`Promo ${code} applied${data.customerDiscountPercent ? ` · ${data.customerDiscountPercent}% off` : ''}.`);
+        setPromoMsg(`Promo ${code} applied${data.fixedDiscountCents ? ` · $${(Number(data.fixedDiscountCents) / 100).toFixed(2)} credit` : data.customerDiscountPercent ? ` · ${data.customerDiscountPercent}% off` : ''}.`);
+        notify({ id: 'promo-apply', type: 'success', message: `Promo ${code} applied.` });
         return;
       }
       setPromoValid(false);
       setPromoMsg(data.error || 'Promo is invalid.');
+      notify({ id: 'promo-apply', type: 'error', message: data.error || 'Promo is invalid.' });
     } catch {
       setPromoValid(false);
       setPromoMsg('Could not validate promo right now.');
+      notify({ id: 'promo-apply', type: 'error', message: 'Could not validate promo right now.' });
     }
   };
 

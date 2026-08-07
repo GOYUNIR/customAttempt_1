@@ -8,6 +8,16 @@ import {
 } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+const PROMOS_KEY = 'config:promos';
+const PROMO_PENDING_TTL_SECONDS = 30 * 60;
+
+function usedEmailsKey(code: string) {
+  return `promo:used_emails:${code}`;
+}
+
+function pendingPromoKey(code: string, email: string) {
+  return `promo:pending:${code}:${email}`;
+}
 
 type CartInputItem = {
   productId: string;
@@ -78,6 +88,7 @@ export async function POST(request: Request) {
 
     const line_items: any[] = [];
     const summaryItems: Array<{ productId: string; variant: string; size: string; quantity: number; priceCents: number }> = [];
+    const lineDrafts: Array<{ product: any; size: string; quantity: number; baseUnitPriceCents: number; baseLineTotalCents: number; eligible: boolean }> = [];
 
     for (const item of normalizedItems) {
       const product = allProducts[item.productId];
@@ -109,24 +120,118 @@ export async function POST(request: Request) {
       }
 
       const priceCents = Math.round(Number(category.price || 0) * 100);
-      line_items.push({
-        price_data: {
-          currency: 'usd',
-          unit_amount: priceCents,
-          product_data: {
-            name: `${product.name} - ${item.size}`,
-            description: product.tagline || product.desc || undefined,
-          },
-        },
-        quantity: item.quantity,
-      });
-
-      summaryItems.push({
-        productId: String(product.id || item.productId),
-        variant: String(product.name || product.id),
+      lineDrafts.push({
+        product,
         size: item.size,
         quantity: item.quantity,
-        priceCents,
+        baseUnitPriceCents: priceCents,
+        baseLineTotalCents: priceCents * item.quantity,
+        eligible: true,
+      });
+    }
+
+    const promoSubtotalCents = lineDrafts.reduce((sum, line) => sum + line.baseLineTotalCents, 0);
+    const normalizedPromo = promoCode;
+    if (normalizedPromo) {
+      const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
+      const promo = typeof rawPromo === 'string' ? JSON.parse(rawPromo) : rawPromo;
+      if (!promo || promo.active === false) {
+        return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
+      }
+      if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== email) {
+        return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
+      }
+      if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email) {
+        return NextResponse.json({ error: 'Promoters cannot use their own code.' }, { status: 403 });
+      }
+      if (Number(promo.maxUsesTotal || 0) > 0 && Number(promo.uses || 0) >= Number(promo.maxUsesTotal || 0)) {
+        return NextResponse.json({ error: 'This code has been fully claimed.' }, { status: 409 });
+      }
+      if (Number(promo.maxUsesPerEmail || 0) > 0) {
+        const used = await redis.sismember(usedEmailsKey(normalizedPromo), email);
+        if (used === 1) {
+          return NextResponse.json({ error: 'This code has already been used with this email address.' }, { status: 409 });
+        }
+      }
+      const pendingKey = pendingPromoKey(normalizedPromo, email);
+      const pending = await redis.get(pendingKey);
+      if (pending) {
+        return NextResponse.json({ error: 'This code already has a checkout in progress for this email. Finish that checkout or wait a bit before trying again.' }, { status: 409 });
+      }
+      const eligibleProductSlugs = Array.isArray(promo.eligibleProductSlugs) ? promo.eligibleProductSlugs.map(String) : [];
+      const eligibleSizes = Array.isArray(promo.eligibleSizes) ? promo.eligibleSizes.map(String) : [];
+      const minimumOrderSubtotalCents = Math.max(0, Number(promo.minimumOrderSubtotalCents || 0));
+      if (minimumOrderSubtotalCents > 0 && promoSubtotalCents < minimumOrderSubtotalCents) {
+        return NextResponse.json({ error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}.` }, { status: 409 });
+      }
+      for (const line of lineDrafts) {
+        line.eligible = (eligibleProductSlugs.length === 0 || eligibleProductSlugs.includes(String(line.product.slug || '')))
+          && (eligibleSizes.length === 0 || eligibleSizes.includes(String(line.size)));
+      }
+      if (!lineDrafts.some((line) => line.eligible)) {
+        return NextResponse.json({ error: 'This code only works on selected full-size items.' }, { status: 409 });
+      }
+
+      const eligibleSubtotalCents = lineDrafts.reduce((sum, line) => sum + (line.eligible ? line.baseLineTotalCents : 0), 0);
+      const fixedDiscountCents = Math.max(0, Number(promo.fixedDiscountCents || 0));
+      const percentDiscount = Math.min(50, Math.max(0, Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0));
+      let remainingDiscountCents = fixedDiscountCents > 0
+        ? Math.min(Math.max(0, eligibleSubtotalCents - 50), fixedDiscountCents)
+        : 0;
+
+      lineDrafts.forEach((line, index) => {
+        let lineTotal = line.baseLineTotalCents;
+        if (line.eligible) {
+          if (fixedDiscountCents > 0 && eligibleSubtotalCents > 0) {
+            const proportional = index === lineDrafts.length - 1
+              ? remainingDiscountCents
+              : Math.min(remainingDiscountCents, Math.round((line.baseLineTotalCents / eligibleSubtotalCents) * fixedDiscountCents));
+            lineTotal = Math.max(50 * line.quantity, lineTotal - proportional);
+            remainingDiscountCents -= proportional;
+          } else if (percentDiscount > 0) {
+            lineTotal = Math.max(50 * line.quantity, Math.round(lineTotal * (1 - percentDiscount / 100)));
+          }
+        }
+        const unitAmount = Math.max(50, Math.round(lineTotal / line.quantity));
+        line_items.push({
+          price_data: {
+            currency: 'usd',
+            unit_amount: unitAmount,
+            product_data: {
+              name: `${line.product.name} - ${line.size}`,
+              description: line.product.tagline || line.product.desc || undefined,
+            },
+          },
+          quantity: line.quantity,
+        });
+        summaryItems.push({
+          productId: String(line.product.id),
+          variant: String(line.product.name || line.product.id),
+          size: line.size,
+          quantity: line.quantity,
+          priceCents: unitAmount,
+        });
+      });
+    } else {
+      lineDrafts.forEach((line) => {
+        line_items.push({
+          price_data: {
+            currency: 'usd',
+            unit_amount: line.baseUnitPriceCents,
+            product_data: {
+              name: `${line.product.name} - ${line.size}`,
+              description: line.product.tagline || line.product.desc || undefined,
+            },
+          },
+          quantity: line.quantity,
+        });
+        summaryItems.push({
+          productId: String(line.product.id),
+          variant: String(line.product.name || line.product.id),
+          size: line.size,
+          quantity: line.quantity,
+          priceCents: line.baseUnitPriceCents,
+        });
       });
     }
 
@@ -163,10 +268,13 @@ export async function POST(request: Request) {
         email,
         address,
         cartItems: JSON.stringify(summaryItems),
-          promoCode,
-          ref: promoCode,
+        promoCode: normalizedPromo,
+        ref: normalizedPromo,
       },
     });
+    if (normalizedPromo) {
+      await redis.set(pendingPromoKey(normalizedPromo, email), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
+    }
 
     return NextResponse.json({ url: session.url, sessionId: session.id });
   } catch (err: any) {

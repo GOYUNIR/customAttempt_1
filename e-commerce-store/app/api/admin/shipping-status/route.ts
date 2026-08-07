@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem } from '@/lib/server-config';
-import { sendAccountUpdateEmail } from '@/lib/email';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem } from '@/lib/server-config';
+import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
 const ALLOWED = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'];
+const PROMOS_KEY = 'config:promos';
+
+function issueKey(orderRef: string) {
+  return `promo:delivery_credit_issued:${orderRef}`;
+}
+
+function generatePromoCode(prefix: string) {
+  const root = (prefix || 'GOY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'GOY';
+  return `${root}-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -23,62 +33,108 @@ export async function POST(request: Request) {
     const size = String(body?.size || '');
     const shippingStatus = String(body?.shippingStatus || '');
     const trackingNumber = String(body?.trackingNumber || '').trim();
-    
+
     if (!email || !variant || !ALLOWED.includes(shippingStatus)) {
       return NextResponse.json({ error: 'Bad payload' }, { status: 400 });
     }
 
     const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
+    const liveProducts = await loadProducts(redis);
     let updated = 0;
-    let updatedEntry: any = null;
-    
+
     for (let i = 0; i < all.length; i++) {
-      const e = safeParseRedisItem<any>(all[i]);
-      if (!e) continue;
+      const entry = safeParseRedisItem<any>(all[i]);
+      if (!entry) continue;
       if (
-        e.type === 'WINNER_CHARGED' &&
-        String(e.email || '').toLowerCase() === email &&
-        e.variant === variant &&
-        (!size || e.size === size)
+        entry.type === 'WINNER_CHARGED' &&
+        String(entry.email || '').toLowerCase() === email &&
+        entry.variant === variant &&
+        (!size || entry.size === size)
       ) {
-        const updatedEntryData = { 
-          ...e, 
+        const updatedEntry = {
+          ...entry,
           shippingStatus,
           ...(trackingNumber ? { trackingNumber } : {}),
         };
-        await redis.lset(ARCHIVE_LEDGER_KEY, i, JSON.stringify(updatedEntryData));
-        updated++;
-        updatedEntry = updatedEntryData;
-        
-        // Send email notification for shipping updates
+        await redis.lset(ARCHIVE_LEDGER_KEY, i, JSON.stringify(updatedEntry));
+        updated += 1;
+
         try {
-          let notificationType = 'shipping';
           let message = `Status updated to: ${shippingStatus.replace(/_/g, ' ')}`;
-          if (trackingNumber) {
-            message += `\nTracking Number: ${trackingNumber}`;
-          }
+          if (trackingNumber) message += `\nTracking Number: ${trackingNumber}`;
           if (shippingStatus === 'DELIVERED') {
-            notificationType = 'delivered';
-            message = 'Your order has been delivered!';
-            if (trackingNumber) {
-              message += `\nTracking Number: ${trackingNumber}`;
-            }
+            message = `Your order has been delivered!${trackingNumber ? `\nTracking Number: ${trackingNumber}` : ''}`;
           }
-          
           await sendAccountUpdateEmail({
             to: email,
             product: variant,
             size: size || undefined,
-            changeType: notificationType === 'delivered' ? 'shipping' : 'shipping',
+            changeType: 'shipping',
             newAddress: message,
           });
-        } catch (e) {
-          console.error('[shipping-status] email failed', e);
+        } catch (error) {
+          console.error('[shipping-status] email failed', error);
+        }
+
+        if (shippingStatus === 'DELIVERED') {
+          try {
+            const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === entry.productId) as any;
+            const triggerSizes = Array.isArray(product?.deliveryIncentiveTriggerSizes) ? product.deliveryIncentiveTriggerSizes.map(String) : [];
+            const shouldIssue = product?.deliveryIncentiveEnabled === true && (triggerSizes.length === 0 || triggerSizes.includes(String(entry.size || size)));
+            const ref = String(entry.orderRef || `${email}:${variant}:${size}`);
+            const alreadyIssued = await redis.get(issueKey(ref));
+            if (shouldIssue && !alreadyIssued) {
+              const fixedDiscountCents = Math.max(0, Number(product.deliveryIncentiveCreditCents || 0));
+              if (fixedDiscountCents > 0) {
+                const promoCode = generatePromoCode(product.deliveryIncentiveCodePrefix || product.slug || 'GOY');
+                const record = {
+                  code: promoCode,
+                  promoterName: 'Delivery Credit',
+                  promoterEmail: '',
+                  customerDiscountPercent: 0,
+                  fixedDiscountCents,
+                  minimumOrderSubtotalCents: Math.max(0, Number(product.deliveryIncentiveMinOrderSubtotalCents || 0)),
+                  eligibleProductSlugs: Array.isArray(product.deliveryIncentiveEligibleProductSlugs) ? product.deliveryIncentiveEligibleProductSlugs : [],
+                  eligibleSizes: Array.isArray(product.deliveryIncentiveEligibleSizes) ? product.deliveryIncentiveEligibleSizes : [],
+                  issuedForEmail: email,
+                  autoGenerated: true,
+                  incentiveSourceProductId: product.id,
+                  promoterPayoutPercent: 0,
+                  maxUsesPerEmail: 1,
+                  maxUsesTotal: 1,
+                  timeLimited: true,
+                  startAt: new Date().toISOString(),
+                  endAt: new Date(Date.now() + Math.max(1, Number(product.deliveryIncentiveExpiresDays || 60)) * 24 * 60 * 60 * 1000).toISOString(),
+                  firstXWinnersDiscount: 0,
+                  active: true,
+                  uses: 0,
+                  clicks: 0,
+                  revenueAttributed: 0,
+                  payoutOwedCents: 0,
+                  payoutPaidCents: 0,
+                  createdAt: new Date().toISOString(),
+                };
+                await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(record) });
+                await redis.set(issueKey(ref), promoCode);
+                await sendDeliveryIncentiveEmail({
+                  to: email,
+                  product: variant,
+                  size: size || undefined,
+                  code: promoCode,
+                  creditAmountCents: fixedDiscountCents,
+                  minimumOrderSubtotalCents: record.minimumOrderSubtotalCents,
+                  eligibleProductSlugs: record.eligibleProductSlugs,
+                  eligibleSizes: record.eligibleSizes,
+                });
+              }
+            }
+          } catch (error) {
+            console.error('[shipping-status] incentive issue failed', error);
+          }
         }
       }
     }
 
-    // Also update the live pool entry if it exists
     try {
       const poolKey = `drop_pool:${variant}:${size}`;
       const items = await redis.lrange(poolKey, 0, -1);
@@ -92,11 +148,7 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    return NextResponse.json({ 
-      success: true, 
-      updated,
-      message: `Updated ${updated} record(s) to ${shippingStatus}`
-    });
+    return NextResponse.json({ success: true, updated, message: `Updated ${updated} record(s) to ${shippingStatus}` });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
@@ -125,12 +177,12 @@ export async function GET(request: Request) {
     const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     const entries = all
       .map((item) => safeParseRedisItem<any>(item))
-      .filter((e) => 
-        e && 
-        e.type === 'WINNER_CHARGED' &&
-        String(e.email || '').toLowerCase() === email &&
-        e.variant === variant &&
-        (!size || e.size === size)
+      .filter((entry) =>
+        entry &&
+        entry.type === 'WINNER_CHARGED' &&
+        String(entry.email || '').toLowerCase() === email &&
+        entry.variant === variant &&
+        (!size || entry.size === size),
       )
       .sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
 

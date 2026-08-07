@@ -12,12 +12,26 @@ export default function ResetPasswordForm({ token }: { token: string }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password.length < 6) return setMessage('Password must be at least 6 characters.');
-    if (password !== confirm) return setMessage('Passwords do not match.');
+    if (password.length < 6) {
+      setMessage('Password must be at least 6 characters.');
+      notify({ type: 'alert', message: 'Password must be at least 6 characters.' });
+      return;
+    }
+    if (password !== confirm) {
+      setMessage('Passwords do not match.');
+      notify({ type: 'alert', message: 'Passwords do not match.' });
+      return;
+    }
     setBusy(true);
     setMessage('');
+    notify({ id: 'reset-password', type: 'loading', message: 'Updating your password...', persist: true });
     try {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
@@ -26,10 +40,15 @@ export default function ResetPasswordForm({ token }: { token: string }) {
       });
       const data = await res.json();
       if (res.ok) {
+        notify({ id: 'reset-password', type: 'success', message: 'Password updated.' });
         router.push('/auth/login?reset=success');
       } else {
         setMessage(data.error || 'Unable to reset password.');
+        notify({ id: 'reset-password', type: 'error', message: data.error || 'Unable to reset password.' });
       }
+    } catch {
+      setMessage('Unable to reset password.');
+      notify({ id: 'reset-password', type: 'error', message: 'Unable to reset password.' });
     } finally {
       setBusy(false);
     }

@@ -13,18 +13,26 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
+  const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirm) {
       setError('Passwords do not match');
+      notify({ type: 'alert', message: 'Passwords do not match.' });
       return;
     }
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
+      notify({ type: 'alert', message: 'Password must be at least 6 characters.' });
       return;
     }
     setError('');
     setLoading(true);
+    notify({ id: 'auth-signup', type: 'loading', message: 'Creating your account...', persist: true });
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
@@ -33,12 +41,15 @@ export default function SignupPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        notify({ id: 'auth-signup', type: 'success', message: 'Account created.' });
         router.push('/account');
       } else {
         setError(data.error || 'Signup failed');
+        notify({ id: 'auth-signup', type: 'error', message: data.error || 'Signup failed.' });
       }
     } catch (err) {
       setError('Network error');
+      notify({ id: 'auth-signup', type: 'error', message: 'Network error.' });
     } finally {
       setLoading(false);
     }

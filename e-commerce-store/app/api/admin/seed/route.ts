@@ -33,14 +33,14 @@ const DEFAULT_PRODUCTS = [
     id: 'p3', name: 'Noir Citrus — Instant Drop', slug: 'noir-citrus-instant-drop', prefix: 'baseItem1', tagline: 'FCFS / LIVE', desc: 'Fast-checkout direct buy drop for cart flow.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 2,
     notes: [{ label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Fastest checkout path, but it can sell through instantly without the anticipation of a draw.' }],
-    priceCategories: [{ size: 'Standard', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
-    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
+    priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p4', name: 'Amber Pulse — Direct Release', slug: 'amber-pulse-direct-release', prefix: 'baseItem2', tagline: 'FCFS / LIVE', desc: 'Cart-compatible direct release for mixed traffic.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 3,
     notes: [{ label: 'MODE', name: 'Direct release', text: 'Great for polished launches where the goal is immediate revenue without raffle friction.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Excellent for speed and repeat purchases, but less selective than an allocation draw.' }],
-    priceCategories: [{ size: 'Standard', price: 130, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -54,7 +54,7 @@ const DEFAULT_PRODUCTS = [
     id: 'p6', name: 'Solar Drift — Upcoming FCFS', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'Upcoming direct-buy release for catalog simulation.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 5,
     notes: [{ label: 'MODE', name: 'Upcoming FCFS', text: 'Signals a precise opening moment for direct purchase traffic.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Great for countdown marketing and influencer drops, but inventory can disappear very quickly.' }],
-    priceCategories: [{ size: 'Standard', price: 122, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, createdAt: NOW, updatedAt: NOW,
   },
   {

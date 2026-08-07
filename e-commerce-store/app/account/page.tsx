@@ -17,6 +17,11 @@ interface EntryRecord {
   expectedAmountCents?: number;
 }
 
+function notify(detail: { id?: string; type: string; message: string; persist?: boolean }) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+}
+
 function statusBanner(entry: EntryRecord) {
   if (entry.status === 'WINNER_CHARGED') {
     return {
@@ -81,10 +86,12 @@ export default function AccountPage() {
   const lookup = async () => {
     if (!email) {
       setMessage('Please enter your email address.');
+      notify({ type: 'alert', message: 'Enter your email address first.' });
       return;
     }
     setIsBusy(true);
     setMessage('');
+    notify({ id: 'account-lookup', type: 'loading', message: 'Looking up your entries...', persist: true });
     try {
       const res = await fetch('/api/account/lookup', {
         method: 'POST',
@@ -102,15 +109,19 @@ export default function AccountPage() {
         if (filteredEntries.length === 0) {
           setEntries([]);
           setMessage('No active entries found for this email.');
+          notify({ id: 'account-lookup', type: 'info', message: 'No active entries found for this email.' });
         } else {
           setEntries(filteredEntries);
+          notify({ id: 'account-lookup', type: 'success', message: 'Entries loaded.' });
         }
       } else {
         setEntries(null);
         setMessage(data.error || 'No matching entry found.');
+        notify({ id: 'account-lookup', type: 'error', message: data.error || 'No matching entry found.' });
       }
     } catch {
       setMessage('Connection failed. Please try again.');
+      notify({ id: 'account-lookup', type: 'error', message: 'Connection failed. Please try again.' });
     } finally {
       setIsBusy(false);
     }
@@ -119,6 +130,7 @@ export default function AccountPage() {
   const cancelEntry = async (entry: EntryRecord) => {
     if (!confirm(`Cancel your entry for ${entry.variant} (${entry.size})?`)) return;
     setIsBusy(true);
+    notify({ id: 'account-cancel', type: 'loading', message: 'Cancelling your entry...', persist: true });
     try {
       const res = await fetch('/api/account/cancel', {
         method: 'POST',
@@ -133,10 +145,15 @@ export default function AccountPage() {
       const data = await res.json();
       if (res.ok) {
         setMessage('Your entry has been cancelled.');
+        notify({ id: 'account-cancel', type: 'success', message: 'Your entry has been cancelled.' });
         await lookup();
-      } else setMessage(data.error || 'Could not cancel entry.');
+      } else {
+        setMessage(data.error || 'Could not cancel entry.');
+        notify({ id: 'account-cancel', type: 'error', message: data.error || 'Could not cancel entry.' });
+      }
     } catch {
       setMessage('Connection failed. Please try again.');
+      notify({ id: 'account-cancel', type: 'error', message: 'Connection failed. Please try again.' });
     } finally {
       setIsBusy(false);
     }
@@ -144,6 +161,7 @@ export default function AccountPage() {
 
   const saveAddress = async (entry: EntryRecord) => {
     setIsBusy(true);
+    notify({ id: 'account-address', type: 'loading', message: 'Updating your shipping address...', persist: true });
     try {
       const res = await fetch('/api/account/update-address', {
         method: 'POST',
@@ -159,11 +177,16 @@ export default function AccountPage() {
       const data = await res.json();
       if (res.ok) {
         setMessage('Shipping address updated.');
+        notify({ id: 'account-address', type: 'success', message: 'Shipping address updated.' });
         setEditingAddressFor(null);
         await lookup();
-      } else setMessage(data.error || 'Could not update address.');
+      } else {
+        setMessage(data.error || 'Could not update address.');
+        notify({ id: 'account-address', type: 'error', message: data.error || 'Could not update address.' });
+      }
     } catch {
       setMessage('Connection failed. Please try again.');
+      notify({ id: 'account-address', type: 'error', message: 'Connection failed. Please try again.' });
     } finally {
       setIsBusy(false);
     }
@@ -172,6 +195,7 @@ export default function AccountPage() {
   const openPaymentPortal = async (entry?: EntryRecord) => {
     setIsBusy(true);
     setPaymentPortalFor(entry ? `${entry.variant}|${entry.size}` : 'all');
+    notify({ id: 'account-portal', type: 'loading', message: 'Opening secure payment portal...', persist: true });
     try {
       const res = await fetch('/api/account/payment-portal', {
         method: 'POST',
@@ -184,10 +208,16 @@ export default function AccountPage() {
         }),
       });
       const data = await res.json();
-      if (res.ok && data.url) window.location.assign(data.url);
-      else setMessage(data.error || 'Could not open payment portal.');
+      if (res.ok && data.url) {
+        notify({ id: 'account-portal', type: 'success', message: 'Secure payment portal ready.' });
+        window.location.assign(data.url);
+      } else {
+        setMessage(data.error || 'Could not open payment portal.');
+        notify({ id: 'account-portal', type: 'error', message: data.error || 'Could not open payment portal.' });
+      }
     } catch {
       setMessage('Connection failed. Please try again.');
+      notify({ id: 'account-portal', type: 'error', message: 'Connection failed. Please try again.' });
     } finally {
       setIsBusy(false);
       setPaymentPortalFor(null);
