@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { NextResponse, type NextRequest } from 'next/server';
+import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,10 +17,7 @@ type StoreProduct = {
   prefix: string;
   tagline: string;
   desc: string;
-  price50ml: number;
-  price100ml: number;
-  stripeId50ml: string;
-  stripeId100ml: string;
+  priceCategories?: Array<{ size: string; price: number; stripeId: string; winnerTiers?: string | number[] }>;
   maxRaffleAllocationLimit: number;
   isActive: boolean;
   isArchived: boolean;
@@ -29,8 +26,8 @@ type StoreProduct = {
   images: string[];
   totalInventory: number;
   winnerTiers: number[];
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 const DEFAULT_CONFIG = {
@@ -107,15 +104,30 @@ const DEFAULT_CONFIG = {
   },
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const requestedSlug = searchParams.get('slug');
+
     const redis = createRedisClient();
+    const fallbackProducts = Object.values(getFallbackStoreProducts()) as StoreProduct[];
+    const fallbackActiveProducts = fallbackProducts.filter((product) => product.isActive !== false).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackArchivedProducts = fallbackProducts.filter((product) => product.isArchived).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackUpcomingProducts = fallbackProducts.filter((product) => product.isUpcoming).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackAllProducts = fallbackProducts.map((product) => ({ ...product, images: product.images || [] }));
+
+    const requestedProduct = requestedSlug
+      ? fallbackAllProducts.find((product) => product.slug === requestedSlug) || null
+      : null;
+
     if (!redis) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         config: DEFAULT_CONFIG,
-        activeProducts: [],
-        archivedProducts: [],
-        allProducts: [],
+        activeProducts: fallbackActiveProducts,
+        archivedProducts: fallbackArchivedProducts,
+        upcomingProducts: fallbackUpcomingProducts,
+        allProducts: fallbackAllProducts,
+        product: requestedProduct,
         scheduleOverride: {},
         socialOverride: {},
         timestamp: Date.now(),
@@ -128,9 +140,13 @@ export async function GET() {
     const configRaw = await redis.get(CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
 
+    let activeProducts: StoreProduct[] = [];
+    let archivedProducts: StoreProduct[] = [];
+    let upcomingProducts: StoreProduct[] = [];
+    let allProducts: StoreProduct[] = [];
+
     // Get active products from Redis
     const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-    const activeProducts: StoreProduct[] = [];
     if (activeRaw) {
       for (const [k, v] of Object.entries(activeRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -145,7 +161,6 @@ export async function GET() {
 
     // Get archived products
     const archivedRaw = await redis.hgetall(ARCHIVED_PRODUCTS_KEY);
-    const archivedProducts: StoreProduct[] = [];
     if (archivedRaw) {
       for (const [k, v] of Object.entries(archivedRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -160,7 +175,6 @@ export async function GET() {
 
     // Get upcoming products
     const upcomingRaw = await redis.hgetall(UPCOMING_PRODUCTS_KEY);
-    const upcomingProducts: StoreProduct[] = [];
     if (upcomingRaw) {
       for (const [k, v] of Object.entries(upcomingRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -175,7 +189,6 @@ export async function GET() {
 
     // Get all products
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
-    const allProducts: StoreProduct[] = [];
     if (allRaw) {
       for (const [k, v] of Object.entries(allRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -187,6 +200,22 @@ export async function GET() {
         }
       }
     }
+
+    const hasRedisProducts = activeProducts.length > 0 || archivedProducts.length > 0 || upcomingProducts.length > 0 || allProducts.length > 0;
+    if (!hasRedisProducts) {
+      activeProducts = fallbackActiveProducts;
+      archivedProducts = fallbackArchivedProducts;
+      upcomingProducts = fallbackUpcomingProducts;
+      allProducts = fallbackAllProducts;
+    }
+
+    const resolvedProduct = requestedSlug
+      ? allProducts.find((product) => product.slug === requestedSlug)
+        || activeProducts.find((product) => product.slug === requestedSlug)
+        || archivedProducts.find((product) => product.slug === requestedSlug)
+        || fallbackAllProducts.find((product) => product.slug === requestedSlug)
+        || null
+      : null;
 
     // Get global schedule override
     const scheduleRaw = await redis.get('config:drop_schedule');
@@ -202,6 +231,7 @@ export async function GET() {
       archivedProducts,
       upcomingProducts,
       allProducts,
+      product: resolvedProduct,
       scheduleOverride,
       socialOverride,
       timestamp: Date.now(),
@@ -209,13 +239,14 @@ export async function GET() {
     });
   } catch (err: any) {
     console.error('[store/config] Error:', err);
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: err.message,
       config: DEFAULT_CONFIG,
-      activeProducts: [],
-      archivedProducts: [],
-      upcomingProducts: [],
-      allProducts: [],
+      activeProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isActive !== false),
+      archivedProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isArchived),
+      upcomingProducts: Object.values(getFallbackStoreProducts()).filter((product: any) => product.isUpcoming),
+      allProducts: Object.values(getFallbackStoreProducts()),
+      product: null,
       scheduleOverride: {},
       socialOverride: {},
       timestamp: Date.now(),

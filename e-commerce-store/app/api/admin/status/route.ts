@@ -13,6 +13,26 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getWinnerCount, getAvailableSizes } from '@/lib/storefront-config';
 
+function parseWinnerTier(value: unknown): number {
+  if (Array.isArray(value)) {
+    const first = value.find((item) => typeof item === 'number' || (typeof item === 'string' && item.trim()));
+    if (typeof first === 'number' && Number.isFinite(first)) return first;
+    if (typeof first === 'string' && first.trim()) {
+      const parsed = Number(first.trim());
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  }
+
+  if (typeof value === 'string') {
+    const parts = value.split(',').map((part) => Number(part.trim())).filter((part) => Number.isFinite(part));
+    return parts[0] ?? 0;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return 0;
+}
+
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
@@ -83,7 +103,7 @@ export async function GET() {
         const cats = product.priceCategories || [];
         for (const cat of cats) {
           const size = cat.size;
-          const winnersPerDraw = Number(cat.winnerTiers?.split(',')[0] || 0);
+          const winnersPerDraw = parseWinnerTier(cat.winnerTiers);
           const live = await getOrSeedLiveState(redis, product, size, winnersPerDraw);
           const intCount = Number(statsHash?.[`int:${product.name}:${size}`] ?? 0);
           const subCount = Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0);

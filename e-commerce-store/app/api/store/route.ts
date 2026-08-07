@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, getFallbackStoreProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,22 +34,37 @@ type StoreProduct = {
 export async function GET() {
   try {
     const redis = createRedisClient();
+    const fallbackProducts = Object.values(getFallbackStoreProducts()) as StoreProduct[];
+    const fallbackActiveProducts = fallbackProducts.filter((product) => product.isActive !== false).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackArchivedProducts = fallbackProducts.filter((product) => product.isArchived).map((product) => ({ ...product, images: product.images || [] }));
+    const fallbackAllProducts = fallbackProducts.map((product) => ({ ...product, images: product.images || [] }));
+
     if (!redis) {
-      return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
+      return NextResponse.json({
+        config: {},
+        activeProducts: fallbackActiveProducts,
+        archivedProducts: fallbackArchivedProducts,
+        allProducts: fallbackAllProducts,
+        scheduleOverride: {},
+        socialOverride: {},
+        timestamp: Date.now(),
+      });
     }
 
     // Get store config
     const configRaw = await redis.get(CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || {};
 
+    let activeProducts: StoreProduct[] = [];
+    let archivedProducts: StoreProduct[] = [];
+    let allProducts: StoreProduct[] = [];
+
     // Get all active products
     const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-    const activeProducts: StoreProduct[] = [];
     if (activeRaw) {
       for (const [k, v] of Object.entries(activeRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
         if (p) {
-          // Load images for this product
           const imgKey = `${IMAGES_KEY}:${p.id}`;
           const imgRaw = await redis.get(imgKey);
           const images = safeParseRedisItem<string[]>(imgRaw) || [];
@@ -60,7 +75,6 @@ export async function GET() {
 
     // Get archived products (for catalog page)
     const archivedRaw = await redis.hgetall(ARCHIVED_PRODUCTS_KEY);
-    const archivedProducts: StoreProduct[] = [];
     if (archivedRaw) {
       for (const [k, v] of Object.entries(archivedRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -75,7 +89,6 @@ export async function GET() {
 
     // Get all products (for admin)
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
-    const allProducts: StoreProduct[] = [];
     if (allRaw) {
       for (const [k, v] of Object.entries(allRaw)) {
         const p = safeParseRedisItem<StoreProduct>(v);
@@ -86,6 +99,13 @@ export async function GET() {
           allProducts.push({ ...p, images });
         }
       }
+    }
+
+    const hasRedisProducts = activeProducts.length > 0 || archivedProducts.length > 0 || allProducts.length > 0;
+    if (!hasRedisProducts) {
+      activeProducts = fallbackActiveProducts;
+      archivedProducts = fallbackArchivedProducts;
+      allProducts = fallbackAllProducts;
     }
 
     // Get global schedule override

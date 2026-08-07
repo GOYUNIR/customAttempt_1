@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getCatalogArchiveRecords } from '@/lib/server-config';
+import { createRedisClient, getCatalogArchiveRecords, getFallbackStoreProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,11 +7,41 @@ export async function GET() {
   try {
     const redis = createRedisClient();
 
+    const fallbackProducts = Object.values(getFallbackStoreProducts()) as any[];
     if (!redis) {
       return NextResponse.json({
-        activeDrops: [],
-        upcomingDrops: [],
-        archiveScents: [],
+        activeDrops: fallbackProducts
+          .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            tagline: p.tagline || 'LIMITED DROP',
+            desc: p.desc || '',
+            slug: p.slug,
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          })),
+        upcomingDrops: fallbackProducts
+          .filter((p) => p.isUpcoming && !p.isArchived)
+          .map((p) => ({
+            name: p.name,
+            status: 'Upcoming',
+            eta: p.tagline || 'Coming soon',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || '',
+            slug: p.slug,
+          })),
+        archiveScents: fallbackProducts
+          .filter((p) => p.isArchived)
+          .map((p) => ({
+            name: p.name,
+            status: 'Archived',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || p.notes?.[0]?.text || '',
+            availableFrom: p.availableFrom || 'Previously available',
+            slug: p.slug,
+            productId: p.id,
+            soldOut: p.totalInventory === 0,
+          })),
         archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
@@ -40,40 +70,75 @@ export async function GET() {
     // Separate into categories - sort by sortOrder
     const sortedProducts = [...allProducts].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-    const activeDrops = sortedProducts
-      .filter(p => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        tagline: p.tagline || 'LIMITED DROP',
-        desc: p.desc || '',
-        slug: p.slug,
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-      }));
+    const activeDrops = sortedProducts.length > 0
+      ? sortedProducts
+          .filter(p => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
+          .map(p => ({
+            id: p.id,
+            name: p.name,
+            tagline: p.tagline || 'LIMITED DROP',
+            desc: p.desc || '',
+            slug: p.slug,
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          }))
+      : fallbackProducts
+          .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            tagline: p.tagline || 'LIMITED DROP',
+            desc: p.desc || '',
+            slug: p.slug,
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          }));
 
-    const upcomingDrops = sortedProducts
-      .filter(p => p.isUpcoming && !p.isArchived)
-      .map(p => ({
-        name: p.name,
-        status: 'Upcoming',
-        eta: p.tagline || 'Coming soon',
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-        description: p.desc || '',
-        slug: p.slug,
-      }));
+    const upcomingDrops = sortedProducts.length > 0
+      ? sortedProducts
+          .filter(p => p.isUpcoming && !p.isArchived)
+          .map(p => ({
+            name: p.name,
+            status: 'Upcoming',
+            eta: p.tagline || 'Coming soon',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || '',
+            slug: p.slug,
+          }))
+      : fallbackProducts
+          .filter((p) => p.isUpcoming && !p.isArchived)
+          .map((p) => ({
+            name: p.name,
+            status: 'Upcoming',
+            eta: p.tagline || 'Coming soon',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || '',
+            slug: p.slug,
+          }));
 
-    const archiveScents = sortedProducts
-      .filter(p => p.isArchived || archivedProductIds.includes(p.id))
-      .map(p => ({
-        name: p.name,
-        status: 'Archived',
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-        description: p.desc || p.notes?.[0]?.text || '',
-        availableFrom: p.availableFrom || 'Previously available',
-        slug: p.slug,
-        productId: p.id,
-        soldOut: p.totalInventory === 0,
-      }));
+    const archiveScents = sortedProducts.length > 0
+      ? sortedProducts
+          .filter(p => p.isArchived || archivedProductIds.includes(p.id))
+          .map(p => ({
+            name: p.name,
+            status: 'Archived',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || p.notes?.[0]?.text || '',
+            availableFrom: p.availableFrom || 'Previously available',
+            slug: p.slug,
+            productId: p.id,
+            soldOut: p.totalInventory === 0,
+          }))
+      : fallbackProducts
+          .filter((p) => p.isArchived)
+          .map((p) => ({
+            name: p.name,
+            status: 'Archived',
+            image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+            description: p.desc || p.notes?.[0]?.text || '',
+            availableFrom: p.availableFrom || 'Previously available',
+            slug: p.slug,
+            productId: p.id,
+            soldOut: p.totalInventory === 0,
+          }));
 
     return NextResponse.json({
       activeDrops,

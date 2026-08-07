@@ -109,7 +109,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }),
       });
       const data = await res.json();
-      if (res.ok && data.url) {
+      if (res.ok && data.setupIntentId) {
+        setMessage('Raffle entry setup is ready. Please continue with the next step in your checkout flow.');
+        setShowCart(false);
+      } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         window.location.href = data.url;
       } else {
         setMessage(data.error || 'Failed to start checkout');

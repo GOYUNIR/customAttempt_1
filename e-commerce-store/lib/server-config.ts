@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export function safeParseRedisItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
@@ -438,14 +439,78 @@ export async function trackPromoClick(redis: Redis, code: string) {
   return true;
 }
 
-// Add this function to your existing server-config.ts
+function normalizePriceCategory(category: any, fallbackSize: string) {
+  const size = typeof category?.size === 'string' && category.size.trim() ? category.size.trim() : fallbackSize;
+  const price = typeof category?.price === 'number' ? category.price : Number(category?.price ?? 0);
+  const stripeId = typeof category?.stripeId === 'string' && category.stripeId.trim()
+    ? category.stripeId
+    : (typeof category?.stripePriceId === 'string' && category.stripePriceId.trim() ? category.stripePriceId : '');
+  const winnerTiers = typeof category?.winnerTiers === 'string'
+    ? category.winnerTiers
+    : (Array.isArray(category?.winnerTiers) ? category.winnerTiers.join(',') : '0');
+  return {
+    size,
+    price: Number.isFinite(price) ? price : 0,
+    stripeId,
+    winnerTiers,
+  };
+}
+
+function normalizeFallbackProduct(product: any, index: number) {
+  const fallbackSize = Array.isArray(GOYUNIR_STORE_SUITE.availableSizes) && GOYUNIR_STORE_SUITE.availableSizes.length
+    ? String(GOYUNIR_STORE_SUITE.availableSizes[0])
+    : 'Standard';
+
+  const fallbackCategories = Array.isArray(product?.priceCategories) && product.priceCategories.length > 0
+    ? product.priceCategories.map((category: any) => normalizePriceCategory(category, fallbackSize))
+    : [{ size: fallbackSize, price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }];
+
+  return {
+    ...product,
+    id: String(product?.id || `fallback-${index + 1}`),
+    name: String(product?.name || `Product ${index + 1}`),
+    slug: String(product?.slug || `product-${index + 1}`),
+    prefix: String(product?.prefix || `product-${index + 1}`),
+    tagline: String(product?.tagline || 'LIMITED DROP'),
+    desc: String(product?.desc || ''),
+    priceCategories: fallbackCategories,
+    images: Array.isArray(product?.images) ? product.images : [],
+    isActive: true,
+    isArchived: Boolean(product?.isArchived),
+    isUpcoming: Boolean(product?.isUpcoming),
+    totalInventory: Number(product?.totalInventory ?? 0) || 0,
+    winnerTiers: Array.isArray(product?.winnerTiers) ? product.winnerTiers : (typeof product?.winnerTiers === 'number' ? [product.winnerTiers] : [0]),
+  };
+}
+
+export function getFallbackStoreProducts(): Record<string, any> {
+  const sourceProducts = Array.isArray((GOYUNIR_STORE_SUITE as any).productCatalog) ? (GOYUNIR_STORE_SUITE as any).productCatalog : [];
+  return sourceProducts.reduce((out: Record<string, any>, product: any, index: number) => {
+    const key = String(product?.id || `fallback-${index + 1}`);
+    out[key] = normalizeFallbackProduct(product, index);
+    return out;
+  }, {});
+}
+
 export async function loadProducts(redis: any): Promise<Record<string, any>> {
+  if (!redis) return getFallbackStoreProducts();
+
   const raw = await redis.hgetall('store:products');
-  if (!raw) return {};
+  if (!raw || Object.keys(raw).length === 0) return getFallbackStoreProducts();
+
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw)) {
     const parsed = safeParseRedisItem<any>(v);
-    if (parsed) out[k] = parsed;
+    if (parsed) {
+      const normalized = {
+        ...parsed,
+        priceCategories: Array.isArray(parsed.priceCategories) && parsed.priceCategories.length > 0
+          ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard'))
+          : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }],
+      };
+      out[k] = normalized;
+    }
   }
-  return out;
+
+  return Object.keys(out).length > 0 ? out : getFallbackStoreProducts();
 }
