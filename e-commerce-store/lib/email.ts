@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 function getResend() {
   const key = process.env.RESEND_API_KEY;
@@ -18,6 +19,7 @@ export async function sendEntryConfirmedEmail(opts: {
   promoCode?: string;
   discountPercent?: number;
   listPrice?: number;
+  orderRef?: string;
   siteUrl?: string;
 }) {
   const resend = getResend();
@@ -74,8 +76,7 @@ export async function sendEntryConfirmedEmail(opts: {
       ? `<p style="margin:16px 0 0"><a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="color:#10b981;font-weight:600;font-size:13px;text-decoration:none;">Manage My Entry →</a></p>`
       : '';
 
-  // Generate a unique order reference
-  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
 
   try {
     const { data, error } = await resend.emails.send({
@@ -144,7 +145,7 @@ export async function sendWinnerEmail(opts: {
     return { ok: false, skipped: true };
   }
   
-  const orderRef = opts.orderRef || `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
   const hasDiscount = opts.discountPercent && opts.discountPercent > 0 && opts.originalPrice;
   
   const manageLink = opts.siteUrl ? `
@@ -363,7 +364,7 @@ export async function sendPromoterInvoiceEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
-  const orderRef = `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const orderRef = buildOrderRef(opts.customerEmail, opts.product, 'promo');
   try {
     const { data, error } = await resend.emails.send({
       from: from(),

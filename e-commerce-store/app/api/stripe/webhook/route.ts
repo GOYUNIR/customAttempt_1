@@ -15,6 +15,7 @@ import {
   saveLiveState,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 
@@ -123,7 +124,7 @@ export async function POST(request: Request) {
       const customerId = typeof session.customer === 'string' ? session.customer : '';
       const rawPromo = String(meta.promoCode || meta.ref || '');
       const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
-      const orderRef = String(meta.orderRef || `GOY-${session.id}`).slice(0, 64);
+      const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
 
       if (email && variant) {
         let paymentMethodId = '';
@@ -226,6 +227,7 @@ export async function POST(request: Request) {
                 promoCode: appliedPromo,
                 discountPercent: discountPercent || undefined,
                 listPrice,
+                orderRef,
                 siteUrl: siteUrlFromEnv(),
               });
               await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
@@ -268,6 +270,7 @@ export async function POST(request: Request) {
       const shippingAddress = String(meta.address || '').trim();
       const checkoutType = String(meta.checkoutType || 'single');
       const appliedPromo = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
+      const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
 
       const allProducts = await loadProducts(redis);
       if (checkoutType === 'cart') {
@@ -302,7 +305,7 @@ export async function POST(request: Request) {
               shippingStatus: 'PENDING_FULFILLMENT',
               amountCents: priceCents,
               promoCode: appliedPromo || undefined,
-              orderRef: `DIRECT-${session.id}-${i + 1}`,
+              orderRef: orderRef ? `${orderRef}-${i + 1}` : `DIRECT-${session.id}-${i + 1}`,
             } as any);
           }
         }
@@ -331,7 +334,7 @@ export async function POST(request: Request) {
             shippingStatus: 'PENDING_FULFILLMENT',
             amountCents: Number(session.amount_total || 0),
             promoCode: appliedPromo || undefined,
-            orderRef: `DIRECT-${session.id}`,
+            orderRef: orderRef || `DIRECT-${session.id}`,
           } as any);
         }
       }

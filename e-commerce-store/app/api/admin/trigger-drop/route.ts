@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem } from '@/lib/server-config';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
         if (!entry) continue;
         const customerId = entry.customerId || entry.stripeCustomerId;
         const paymentMethodId = entry.paymentMethodId;
+        const orderRef = formatOrderRef(String(entry.orderRef || '')) || buildOrderRef(entry.email, product.name, size);
 
         if (!customerId || !paymentMethodId) {
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });
@@ -83,7 +85,6 @@ export async function POST(request: Request) {
           totalCharged++;
           totalRevenueCents += priceCents;
 
-          const orderRef = String(entry.orderRef || `GOY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
           await archiveEntry(redis, {
             ...entry,
             type: 'WINNER_CHARGED',

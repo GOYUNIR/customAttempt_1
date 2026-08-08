@@ -13,6 +13,7 @@ import {
   loadProducts,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
     const promoCode = String(meta.promoCode || meta.ref || '')
       .trim()
       .toUpperCase();
+    const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
 
     if (!email || !variant) {
       return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
@@ -218,6 +220,7 @@ export async function POST(request: Request) {
       id: customerId || 'n/a',
       registeredAt: entry.registeredAt,
       type: 'ENTERED',
+      orderRef,
       ...(appliedPromo
         ? { promoCode: appliedPromo, discountPercent: discountPercent || undefined }
         : {}),
@@ -255,6 +258,7 @@ export async function POST(request: Request) {
           promoCode: appliedPromo,
           discountPercent: discountPercent || undefined,
           listPrice: listPrice > 0 ? listPrice : undefined,
+          orderRef,
           siteUrl: siteUrlFromRequest(request),
         });
         if ((emailResult as any)?.ok) {

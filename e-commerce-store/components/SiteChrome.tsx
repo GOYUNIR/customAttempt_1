@@ -67,6 +67,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
   const [showPromoField, setShowPromoField] = useState(false);
   const [notice, setNotice] = useState<{ id?: string; type: string; message: string } | null>(null);
+  const [showScrollCue, setShowScrollCue] = useState(true);
   const targetXRef = useRef(0.5);
   const targetYRef = useRef(0.35);
   const velocityXRef = useRef(0);
@@ -93,7 +94,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     if (draft.email) setCheckoutEmail(draft.email);
     if (draft.address) setCheckoutAddress(draft.address);
     const open = () => setCartOpen(true);
-    const onScroll = () => setScrollY(window.scrollY || 0);
+    const onScroll = () => {
+      const nextScroll = window.scrollY || 0;
+      setScrollY(nextScroll);
+      if (nextScroll > 120) setShowScrollCue(false);
+      else if (nextScroll < 40) setShowScrollCue(true);
+    };
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
     const onPointer = (event: PointerEvent) => {
       const width = window.innerWidth || 1;
@@ -217,6 +223,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('pointermove', onPointer, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
     rafId = window.requestAnimationFrame(animateIdle);
+    const cueTimer = window.setTimeout(() => setShowScrollCue((current) => (current ? true : current)), 600);
     return () => {
       window.removeEventListener('goyunir-open-cart', open as EventListener);
       window.removeEventListener('goyunir-cart-updated', sync as EventListener);
@@ -227,6 +234,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       window.removeEventListener('pointermove', onPointer);
       window.removeEventListener('touchmove', onTouchMove);
       window.cancelAnimationFrame(rafId);
+      window.clearTimeout(cueTimer);
       if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
@@ -287,6 +295,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
   const headerAccent = theme?.accentBlue || '#7dd3fc';
   const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.82)';
+  const headerMode = String(branding?.headerMode || 'both').toLowerCase();
+  const showBrandText = headerMode !== 'logo';
+  const showBrandLogo = headerMode !== 'text';
   const glowX = 15 + pointerX * 70;
   const glowY = 8 + pointerY * 55;
   const blurBoost = Math.min(10, Math.floor(scrollY / 60));
@@ -328,32 +339,36 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           </div>
         </div>
       )}
-      <style>{`@keyframes goyunirPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .28; } 40% { transform: translateY(-1px); opacity: 1; } }`}</style>
+      <style>{`@keyframes goyunirPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .28; } 40% { transform: translateY(-1px); opacity: 1; } } @keyframes goyunirBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }`}</style>
       <header
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
           width: '100%',
-          minHeight: '60px',
+          minHeight: '84px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           background: `${headerBg}`,
-          backdropFilter: `blur(${18 + blurBoost}px)`,
+          backdropFilter: `blur(${20 + blurBoost}px)`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 12px',
+          padding: '12px 12px 14px',
           zIndex: 100,
           boxSizing: 'border-box',
           transform: `translateY(${Math.min(8, scrollY * 0.02)}px)`,
           transition: 'transform 160ms ease, backdrop-filter 220ms ease',
           backgroundImage: `radial-gradient(circle at ${glowX}% -20%, ${headerAccent}33, transparent 35%)`,
+          boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
         }}
       >
-        <div style={{ display: 'flex', gap: 10, fontSize: 10, letterSpacing: 1.4, fontWeight: 700, flexWrap: 'wrap', maxWidth: '34%', alignItems: 'center' }}>
-          <Link href="/catalog" style={{ color: '#d4d4d8', textDecoration: 'none' }}>CATALOG</Link>
-          <span style={{ color: '#4b5563', userSelect: 'none' }}>|</span>
-          <Link href="/story" style={{ color: '#71717a', textDecoration: 'none' }}>STORY</Link>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
+          <Link href="/catalog" aria-label="Catalog" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>
+          </Link>
+          <Link href="/story" aria-label="Story" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z" /><path d="M6 12h9a4 4 0 0 1 0 8H6z" /></svg>
+          </Link>
         </div>
 
         <Link
@@ -375,30 +390,43 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
+            padding: '4px 6px',
           }}
         >
-          {branding?.logoUrl ? (
+          {showBrandLogo && (branding?.logoUrl ? (
             <img src={branding.logoUrl} alt={branding?.shareTitle || 'GOYUNIR'} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
-          ) : null}
-          <span>GOYUNIR</span>
+          ) : null)}
+          {showBrandText ? <span>{branding?.shareTitle || 'GOYUNIR'}</span> : null}
         </Link>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', maxWidth: '34%' }}>
-          <Link href="/account" style={{ color: '#a1a1aa', textDecoration: 'none', fontSize: 10, letterSpacing: 1.6, fontWeight: 700 }}>ACCOUNT</Link>
-          {promoCode && <span style={{ color: '#6b7280', fontSize: 9, letterSpacing: 1, maxWidth: 62, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{promoCode}</span>}
-          <span style={{ color: '#4b5563', userSelect: 'none' }}>|</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: 1 }}>
+          <Link href="/catalog" aria-label="Search" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /></svg>
+          </Link>
+          <Link href="/account" aria-label="Account" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+          </Link>
           <button
             onClick={() => setCartOpen(true)}
-            style={{ border: '1px solid rgba(255,255,255,0.1)', background: hasItems ? '#f3f4f6' : 'transparent', color: hasItems ? '#09090b' : '#d4d4d8', borderRadius: 999, padding: '7px 11px', fontSize: 10, fontWeight: 700, cursor: 'pointer', letterSpacing: 1 }}
+            aria-label="Cart"
+            style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : '#f5f5f5', cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
           >
-            CART {cart.length > 0 ? `(${cart.length})` : ''}
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M3 4h2l2.4 9.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L17 7H7" /></svg>
+            {cart.length > 0 ? <span style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, padding: '0 4px', fontSize: 10, borderRadius: 999, background: '#7dd3fc', color: '#07121f', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{cart.length}</span> : null}
           </button>
         </div>
       </header>
 
-      <div style={{ paddingTop: '60px', minHeight: '100vh' }}>{children}</div>
+      <div style={{ paddingTop: '92px', minHeight: '100vh' }}>{children}</div>
 
-      <footer style={{ background: 'rgba(8,8,10,0.96)', backdropFilter: 'blur(18px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '28px 20px 22px', textAlign: 'center', color: '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
+      <div style={{ position: 'fixed', left: '50%', bottom: 18, transform: 'translateX(-50%)', zIndex: 90, opacity: showScrollCue ? 1 : 0, pointerEvents: 'none', transition: 'opacity 220ms ease' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.8)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', boxShadow: '0 12px 38px rgba(0,0,0,0.28)', backdropFilter: 'blur(16px)', animation: 'goyunirBounce 1.4s ease-in-out infinite' }}>
+          <span>Scroll</span>
+          <span style={{ fontSize: 12 }}>↓</span>
+        </div>
+      </div>
+
+      <footer style={{ background: 'rgba(8,8,10,0.96)', backdropFilter: 'blur(18px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
             <Link href="/terms" style={{ color: '#71717a', textDecoration: 'none' }}>Terms</Link>

@@ -32,6 +32,7 @@ export default function CatalogPage() {
   const [archiveScents, setArchiveScents] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [clock, setClock] = useState(Date.now());
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -88,36 +89,56 @@ export default function CatalogPage() {
     setSelectedItem(item);
   };
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredActiveDrops = activeDrops.filter((drop) => {
+    if (!normalizedQuery) return true;
+    const haystack = `${drop.name} ${drop.tagline} ${drop.desc}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+  const filteredUpcomingDrops = upcomingDrops.filter((item) => {
+    if (!normalizedQuery) return true;
+    const haystack = `${item.name} ${item.description || ''} ${item.status} ${item.eta || ''}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+  const filteredArchiveScents = archiveScents.filter((item) => {
+    if (!normalizedQuery) return true;
+    const haystack = `${item.name} ${item.description || ''} ${item.status} ${item.eta || ''}`.toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+
   const renderGrid = (items: CatalogItem[], emptyText: string) => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
       {items.length === 0 && (
-        <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: '#555', textAlign: 'center', padding: '30px 0' }}>
+        <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: '#777', textAlign: 'center', padding: '30px 0' }}>
           {emptyText}
         </p>
       )}
       {items.map((item) => (
-        <button
+        <motion.button
           key={item.name}
+          whileHover={{ y: -3, scale: 1.01 }}
+          whileTap={{ scale: 0.985 }}
           onClick={() => handleTileClick(item)}
           style={{
             textAlign: 'left',
-            background: configPalette.cardBackground,
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
             border: `1px solid ${configPalette.cardBorder}`,
             borderRadius: '16px',
             overflow: 'hidden',
             cursor: 'pointer',
             padding: 0,
+            boxShadow: '0 12px 30px rgba(0,0,0,0.16)',
           }}
         >
           <div
             style={{
               width: '100%',
               aspectRatio: '1/1',
-              background: item.image ? `url(${item.image}) center/cover` : '#1a1a1a',
+              background: item.image ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#444',
+              color: '#777',
               fontSize: '10px',
             }}
           >
@@ -130,7 +151,7 @@ export default function CatalogPage() {
               {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
             </div>
           </div>
-        </button>
+        </motion.button>
       ))}
     </div>
   );
@@ -157,11 +178,34 @@ export default function CatalogPage() {
             View what's active
           </Link>
         </div>
-        <div style={{ marginBottom: 24, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8', lineHeight: 1.6 }}>
+        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8', lineHeight: 1.6 }}>
           Upcoming and archived raffle pages can still carry countdown context, collector narrative, and private-entry energy when a brand wants the release story to stay alive.
         </div>
 
-        {activeDrops.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          style={{ marginBottom: 20, padding: '10px 12px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 8 }}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: configPalette.accentBlue }}>
+            <circle cx="11" cy="11" r="6" />
+            <path d="m20 20-4.2-4.2" />
+          </svg>
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search releases"
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: configPalette.textMain, fontSize: 12 }}
+          />
+          {searchQuery ? (
+            <button onClick={() => setSearchQuery('')} style={{ border: 'none', background: 'transparent', color: configPalette.textMuted, cursor: 'pointer', fontSize: 12 }}>
+              Clear
+            </button>
+          ) : null}
+        </motion.div>
+
+        {filteredActiveDrops.length > 0 && (
           <>
             <h2
               style={{
@@ -175,7 +219,7 @@ export default function CatalogPage() {
               🧴 Currently Available
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
-              {activeDrops.map((drop) => (
+              {filteredActiveDrops.map((drop) => (
                 <Link
                   key={drop.id}
                   href={drop.slug ? `/${drop.slug}` : '/'}
@@ -210,7 +254,7 @@ export default function CatalogPage() {
         >
           Upcoming Releases
         </h2>
-        {renderGrid(upcomingDrops, isLoading ? 'Loading…' : 'No upcoming releases announced yet.')}
+        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'))}
 
         <h2
           style={{
@@ -223,9 +267,9 @@ export default function CatalogPage() {
         >
           Past Archives
         </h2>
-        {renderGrid(archiveScents, isLoading ? 'Loading…' : 'No archived items yet.')}
+        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'))}
 
-        {activeDrops.length === 0 && upcomingDrops.length === 0 && !isLoading && (
+        {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && (
           <div style={{ marginTop: 24 }}>
             <ReleaseWaitlist
               source="catalog"

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem } from '@/lib/server-config';
+import { buildOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -38,17 +39,6 @@ async function countChargedByEmail(redis: any, email: string, variant: string, s
   return count;
 }
 
-function buildRef(email: string, productId: string, size: string) {
-  const seed = `${email}|${productId}|${size}|${Date.now()}`;
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  const token = Math.abs(hash >>> 0).toString(36).toUpperCase();
-  return `GOY-${token.slice(0, 6)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-}
-
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -78,7 +68,7 @@ export async function POST(request: Request) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const checkoutMode = getCheckoutMode(product);
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
-    const orderRef = buildRef(normalizedEmail, String(productId), String(size));
+    const orderRef = buildOrderRef(normalizedEmail, String(productId), String(size));
     let priceCents = basePriceCents;
     const normalizedPromo = String(promoCode || ref || '').trim().toUpperCase();
 

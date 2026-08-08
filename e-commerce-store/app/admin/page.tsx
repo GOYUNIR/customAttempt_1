@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog';
 
@@ -37,12 +38,9 @@ function typeLabel(type: string | undefined) {
 }
 
 function stableOrderRef(entry: any, index: number) {
-  const seed = `${entry?.email || 'anon'}|${entry?.variant || 'product'}|${entry?.size || 'size'}|${entry?.registeredAt || index}`;
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return `GOY-${hash.toString(36).toUpperCase().padStart(6, '0').slice(0, 6)}`;
+  const existing = formatOrderRef(entry?.orderRef || entry?.ref || '');
+  if (existing) return existing;
+  return buildOrderRef(entry?.email || 'anon', entry?.variant || 'product', entry?.size || 'size');
 }
 
 function Bar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -259,6 +257,7 @@ export default function AdminPortal() {
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
   const [brandingSettings, setBrandingSettings] = useState({
     logoUrl: '',
+    headerMode: 'both',
     shareImageUrl: '',
     shareTitle: 'GOYUNIR',
     shareDescription: 'Raffle entries, direct releases, alerts, and clean checkout flows for mobile-first traffic.',

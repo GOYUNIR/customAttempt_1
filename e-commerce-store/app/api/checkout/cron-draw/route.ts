@@ -19,6 +19,7 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount, shouldRunDraw } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -122,6 +123,7 @@ async function runAutoDraw(request: Request) {
           const customerId = resolveCustomerId(winnerData) || null;
           const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
           const promoCode = String(winnerData.promoCode || '').trim().toUpperCase();
+          const orderRef = formatOrderRef(String(winnerData.orderRef || '')) || buildOrderRef(winnerEmail, productName, productSize);
 
           if (successfulPoolCaptures >= inventoryLimit) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
@@ -195,10 +197,10 @@ async function runAutoDraw(request: Request) {
               await archiveEntry(redis, {
                 email: winnerEmail, variant: productName, size: productSize, shippingAddress,
                 id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
-                shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
+                shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents, orderRef,
               });
 
-              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}` });
+              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}`, orderRef });
 
               processedWinners.push({
                 email: winnerEmail, product: productName, size: productSize, shippingAddress,
@@ -211,11 +213,11 @@ async function runAutoDraw(request: Request) {
                 email: winnerEmail, variant: productName, size: productSize, shippingAddress,
                 id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
               });
-              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: 'MISSING_PAYMENT_METHOD' });
+              processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: 'MISSING_PAYMENT_METHOD', orderRef });
             }
           } catch (err: any) {
             remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
-            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: `DECLINED: ${err.message}` });
+            processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: `DECLINED: ${err.message}`, orderRef });
             await archiveEntry(redis, {
               email: winnerEmail, variant: productName, size: productSize, shippingAddress,
               id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
