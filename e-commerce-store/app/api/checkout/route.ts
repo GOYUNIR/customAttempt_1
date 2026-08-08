@@ -49,6 +49,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const { productId, size, email, address, promoCode, ref } = body;
+    const requestedMode = String(body?.mode || '').toLowerCase();
 
     if (!productId || !size || !email || !address) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
     const variant = String(product.name || product.id);
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const checkoutMode = getCheckoutMode(product);
+    const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && (product.isArchived === true || product.isUpcoming === true));
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
     const orderRef = buildOrderRef(normalizedEmail, String(productId), String(size));
     let priceCents = basePriceCents;
@@ -132,7 +134,7 @@ export async function POST(request: Request) {
       }
     }
 
-    if (checkoutMode === 'FCFS') {
+    if (checkoutMode === 'FCFS' && !usesWaitlist) {
       const live = await getLiveProductState(redis, product, String(size));
       if (!live || live.inventoryRemaining <= 0) {
         return NextResponse.json({ error: 'Sold out for this size.' }, { status: 409 });
@@ -174,7 +176,7 @@ export async function POST(request: Request) {
       });
     }
 
-    if (checkoutMode === 'RAFFLE') {
+    if (checkoutMode === 'RAFFLE' || usesWaitlist) {
       const session = await stripe.checkout.sessions.create({
         mode: 'setup',
         customer: customer.id,
@@ -192,6 +194,7 @@ export async function POST(request: Request) {
           orderRef,
           promoCode: normalizedPromo,
           ref: String(ref || promoCode || '').trim().toUpperCase(),
+          entryType: usesWaitlist ? 'waitlist' : 'raffle',
         },
       });
       return NextResponse.json({ url: session.url, sessionId: session.id });
@@ -227,6 +230,7 @@ export async function POST(request: Request) {
           orderRef,
           promoCode: normalizedPromo,
           ref: String(ref || promoCode || '').trim().toUpperCase(),
+          entryType: usesWaitlist ? 'waitlist' : 'raffle',
         },
         payment_intent_data: {
           receipt_email: email,

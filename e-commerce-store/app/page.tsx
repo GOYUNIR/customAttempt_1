@@ -118,9 +118,9 @@ export default function HomePage() {
                       </div>
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4 }}>{product.name}</div>
                       <div style={{ fontSize: 12, color: '#b8b8c0', lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
-                      <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#e7e7eb' }}>
-                        <span style={{ width: 7, height: 7, borderRadius: 999, background: product.soldOut ? '#fbbf24' : '#7dd3fc', animation: 'goyunirPulse 1s ease-in-out infinite' }} />
-                        {formatCountdown(product)}
+                      <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? '#dbeafe' : '#e7e7eb', fontWeight: 700, border: product.isUpcoming ? '1px solid rgba(59,130,246,0.24)' : '1px solid rgba(255,255,255,0.08)' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? '#60a5fa' : (product.soldOut ? '#fbbf24' : '#7dd3fc'), animation: 'goyunirPulse 1s ease-in-out infinite' }} />
+                        {product.isUpcoming ? `Release opens: ${formatCountdown(product)}` : formatCountdown(product)}
                       </div>
                     </div>
                   </div>

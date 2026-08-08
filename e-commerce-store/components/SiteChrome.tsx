@@ -173,6 +173,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       setPromoCode(incomingPromo);
       setShowPromoField(true);
       setBannerMessage(`Promoter credit ${incomingPromo} is locked for this session.`);
+      window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
       fetch('/api/promo/validate/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,8 +260,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       return;
     }
     if (raffleOnlyCart) {
-      setCartMsg('Raffle entries stay in your private bag until you secure them from the product page.');
-      showNotice({ type: 'alert', message: 'Use the product page to secure raffle entries.' });
+      setCartMsg(`Raffle entries are prepared in your ${actionTitle.toLowerCase()} and secured from the product page.`);
+      showNotice({ type: 'alert', message: `Use the product page to secure raffle entries in your ${actionTitle.toLowerCase()}.` });
       return;
     }
     if (!checkoutEmail || !checkoutAddress) {
@@ -307,6 +308,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
+  const headerActionMode = String(branding?.headerActionMode || 'cart').toLowerCase();
+  const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
+  const actionVerb = headerActionMode === 'bag' ? 'bag' : 'cart';
   const glowX = 15 + pointerX * 70;
   const glowY = 8 + pointerY * 55;
   const blurBoost = Math.min(10, Math.floor(scrollY / 60));
@@ -414,7 +418,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           </Link>
           <button
             onClick={() => setCartOpen(true)}
-            aria-label="Cart"
+            aria-label={actionTitle}
+            title={actionTitle}
             style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : '#f5f5f5', cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
           >
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M3 4h2l2.4 9.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L17 7H7" /></svg>
@@ -457,7 +462,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', background: '#0b0b0f', borderLeft: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>
-                <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: '#7dd3fc' }}>Cart</div>
+                <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: '#7dd3fc' }}>{actionTitle}</div>
                 <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: '#fff' }}>Review items</div>
               </div>
               <button onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#d4d4d8', borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
@@ -466,7 +471,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {cart.length === 0 ? (
                 <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: 20, padding: 18, color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>
-                  Your cart is empty. Add direct-purchase items from a product page to review them here.
+                  Your {actionTitle.toLowerCase()} is empty. Add direct-purchase items from a product page to review them here.
                 </div>
               ) : (
                 cart.map((item, index) => (

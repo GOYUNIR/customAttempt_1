@@ -258,6 +258,7 @@ export default function AdminPortal() {
   const [brandingSettings, setBrandingSettings] = useState({
     logoUrl: '',
     headerMode: 'both',
+    headerActionMode: 'cart',
     shareImageUrl: '',
     shareTitle: 'GOYUNIR',
     shareDescription: 'Raffle entries, direct releases, alerts, and clean checkout flows for mobile-first traffic.',
@@ -1810,6 +1811,9 @@ export default function AdminPortal() {
                       <option value="RAFFLE">RAFFLE</option>
                       <option value="FCFS">FCFS</option>
                     </select>
+                    <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
+                      Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout.
+                    </div>
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
@@ -2524,6 +2528,13 @@ export default function AdminPortal() {
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  Top-right action label
+                  <select value={brandingSettings.headerActionMode || 'cart'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, headerActionMode: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
+                    <option value="cart">Cart</option>
+                    <option value="bag">Bag</option>
+                  </select>
+                </label>
                 <label style={{ fontSize: 11 }}>
                   Logo Upload or URL
                   <input

@@ -94,6 +94,7 @@ export async function POST(request: Request) {
     const promoCode = String(meta.promoCode || meta.ref || '')
       .trim()
       .toUpperCase();
+    const entryType = String(meta.entryType || '').toLowerCase();
     const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
 
     if (!email || !variant) {
@@ -206,7 +207,21 @@ export async function POST(request: Request) {
     };
 
     // Save to Redis
-    await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+    if (entryType === 'waitlist') {
+      await redis.rpush(`waitlist:${variant}:${size}`, JSON.stringify({ ...entry, registrationType: 'waitlist' }));
+      await archiveEntry(redis, {
+        email,
+        variant,
+        size,
+        shippingAddress,
+        id: customerId || 'n/a',
+        registeredAt: entry.registeredAt,
+        type: 'WAITLIST_JOINED',
+        orderRef,
+      } as any);
+    } else {
+      await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+    }
     await redis.sadd(emailBlockKey(variant, size), email);
     if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
     await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);

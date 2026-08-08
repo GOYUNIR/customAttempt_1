@@ -83,6 +83,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [countdownPulse, setCountdownPulse] = useState(false);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  const actionMode = typeof window !== 'undefined' ? (window.localStorage.getItem('goyunir-header-action-mode') === 'bag' ? 'bag' : 'cart') : 'cart';
+  const actionLabel = actionMode === 'bag' ? 'bag' : 'cart';
 
   const fetchProduct = useCallback(async (slug: string) => {
     try {
@@ -258,8 +260,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const next = [...cart, item];
     setCart(next);
     writeStoredCart(next);
-    setMessage(isRaffleEntry ? `Saved ${product.name} (${selectedSize}) for later review.` : `Added ${product.name} (${selectedSize}) to cart`);
-    notify({ type: 'success', message: isRaffleEntry ? `${product.name} saved in your private bag.` : `${product.name} added to your bag.` });
+    setMessage(isRaffleEntry ? `Prepared ${product.name} (${selectedSize}) for entry.` : `Added ${product.name} (${selectedSize}) to your ${actionLabel}.`);
+    notify({ type: 'success', message: isRaffleEntry ? `${product.name} is ready to secure.` : `${product.name} added to your ${actionLabel}.` });
     setShowCart(true);
   };
 
@@ -355,6 +357,40 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  const handleWaitlistSubmit = async () => {
+    if (!email || !address || !selectedSize) {
+      setMessage('Please fill in all fields and select a size.');
+      notify({ type: 'alert', message: 'Complete your details before joining the waitlist.' });
+      return;
+    }
+    setIsSubmitting(true);
+    setMessage('');
+    notify({ id: 'product-submit', type: 'loading', message: 'Preparing release reservation...', persist: true });
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'waitlist', promoCode }),
+      });
+      const data = await res.json();
+      if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+        setEncryptionHealthy(true);
+        notify({ id: 'product-submit', type: 'success', message: 'Card is ready for the release window.' });
+        window.location.href = data.url;
+      } else {
+        setEncryptionHealthy(false);
+        setMessage(data.error || 'Could not start waitlist reservation');
+        notify({ id: 'product-submit', type: 'error', message: data.error || 'Could not start waitlist reservation.' });
+      }
+    } catch {
+      setEncryptionHealthy(false);
+      setMessage('Connection error');
+      notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const applyPromo = async () => {
     const code = promoCode.trim().toUpperCase();
     if (!code) {
@@ -414,6 +450,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         ? 'Archive placement preserves the release as proof of demand and collectability.'
         : 'Reserved for collectors moving early, before the allocation tightens further.';
   const checkoutDisabled = soldOut || !selectedSize || price <= 0;
+  const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
 
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
@@ -429,7 +466,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <p style={{ margin: 0, color: '#c9c9d3', fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 16, background: 'rgba(255,255,255,0.02)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.06)'}` }}>
               <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : '#e5e7eb' }}>{urgencyLabel}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.5 }}>{statusStory}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {galleryImages.map((image: string, index: number) => (
@@ -459,8 +496,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           )}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
-            <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="email" placeholder="Email for release updates and fulfillment" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="text" placeholder="Shipping address for delivery" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
           </div>
 
           <div style={{ marginBottom: 8 }}>
@@ -482,15 +519,22 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
               <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : 'Enter allocation'}
+                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Re-enter for future return' : 'Enter allocation'}
               </button>
             )}
             {canCheckoutDirect && (
-              <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#d6c29c', color: '#09090b', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
-              </button>
+              <>
+                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#d6c29c', color: '#09090b', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                  {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
+                </button>
+                {showWaitlistOption && (
+                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#17171b', color: '#fff', border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                    {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Reserve for next opening' : 'Reserve for launch'}
+                  </button>
+                )}
+              </>
             )}
-            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>{isRaffleProduct ? 'Save for later' : 'Add to private bag'}</button>}
+            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to {actionLabel}</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}

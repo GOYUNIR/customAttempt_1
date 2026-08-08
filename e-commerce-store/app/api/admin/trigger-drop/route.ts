@@ -99,6 +99,42 @@ export async function POST(request: Request) {
         }
       }
 
+      const waitlistKey = `waitlist:${product.name}:${size}`;
+      const waitlistEntries = await redis.lrange(waitlistKey, 0, -1);
+      if (waitlistEntries.length > 0 && !product.isRaffle) {
+        const available = Math.max(0, live.inventoryRemaining);
+        const pendingWaitlist = waitlistEntries.slice(0, available);
+        for (const waitlistStr of pendingWaitlist) {
+          const entry = safeParseRedisItem<any>(waitlistStr);
+          if (!entry) continue;
+          const customerId = entry.customerId || entry.stripeCustomerId;
+          const paymentMethodId = entry.paymentMethodId;
+          if (!customerId || !paymentMethodId) continue;
+          try {
+            await stripe.paymentIntents.create({
+              amount: priceCents,
+              currency: 'usd',
+              customer: customerId,
+              payment_method: paymentMethodId,
+              off_session: true,
+              confirm: true,
+              receipt_email: entry.email,
+              description: `${product.name} (${size})`,
+            });
+            live.inventoryRemaining -= 1;
+            live.salesCompleted = (live.salesCompleted || 0) + 1;
+            totalCharged++;
+            totalRevenueCents += priceCents;
+            await archiveEntry(redis, { ...entry, type: 'WAITLIST_CHARGED', amountCents: priceCents, shippingStatus: 'PENDING_FULFILLMENT' });
+          } catch (err: any) {
+            await archiveEntry(redis, { ...entry, type: 'WAITLIST_DECLINED' });
+          }
+        }
+        const remainingWaitlist = waitlistEntries.slice(pendingWaitlist.length);
+        await redis.del(waitlistKey);
+        for (const item of remainingWaitlist) await redis.rpush(waitlistKey, item);
+      }
+
       // Remove winners from pool, keep the rest
       const remaining = shuffled.slice(winnerCount);
       await redis.del(poolKey);
