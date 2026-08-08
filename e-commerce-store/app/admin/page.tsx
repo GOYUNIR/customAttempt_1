@@ -565,6 +565,11 @@ export default function AdminPortal() {
     let uploaded = 0;
     for (const file of fileArray) {
       const compressed = await compressImageFile(file);
+      const previewUrl = await fileToDataURL(compressed);
+      setProductForm((prev: any) => ({
+        ...prev,
+        images: [...(prev.images || []), previewUrl],
+      }));
       const uploadData = new FormData();
       uploadData.append('productId', editingProduct);
       uploadData.append('password', password);
@@ -572,6 +577,10 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/upload', { method: 'POST', body: uploadData });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        setProductForm((prev: any) => ({
+          ...prev,
+          images: (prev.images || []).filter((image: string) => image !== previewUrl),
+        }));
         setProductMsg(`❌ Upload failed: ${data.error || file.name}`);
         return;
       }
@@ -1858,7 +1867,7 @@ export default function AdminPortal() {
                 <div style={{ marginTop: 12, borderTop: '1px solid #27272a', paddingTop: 12 }}>
                   <h5 style={{ fontSize: 11, color: '#aaa', margin: '0 0 8px' }}>Post-Delivery Credit</h5>
                   <p style={{ fontSize: 10, color: '#666', margin: '0 0 8px' }}>
-                    Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum.
+                    Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum. Generated credits remain usable until they are manually removed.
                   </p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1871,7 +1880,7 @@ export default function AdminPortal() {
                     <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
                       <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
                     </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Expires after delivery (days)
+                    <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
                       <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
                     </label>
                     <label style={{ fontSize: 10, color: '#888' }}>Code prefix

@@ -90,9 +90,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (data.product) {
         setProduct(data.product);
-        const drawAnchor = data.product.isUpcoming ? (data.product.goLiveAt || data.product.releaseEndsAt) : (data.product.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime);
-        const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
-        setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
+        if (data.product.isArchived) {
+          setRaffleEndsAt(null);
+        } else {
+          const drawAnchor = data.product.isUpcoming ? (data.product.goLiveAt || data.product.releaseEndsAt) : (data.product.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime);
+          const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
+          setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
+        }
         const cats = data.product.priceCategories || [];
         if (cats.length > 0) setSelectedSize(cats[0].size);
         setSelectedImageIndex(0);
@@ -235,13 +239,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       return;
     }
     const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
+    const isRaffleEntry = checkoutMode === 'RAFFLE';
     const item = {
       productId: product.id,
       name: product.name,
       size: selectedSize,
       price: cat.price,
       checkoutMode: checkoutMode,
-      productType: checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
+      productType: isRaffleEntry ? 'raffle' : 'fcfs',
     };
     const maxPerCart = Math.max(1, Number(product.maxPerCart || product.maxPerEmail || 1));
     const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
@@ -253,8 +258,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const next = [...cart, item];
     setCart(next);
     writeStoredCart(next);
-    setMessage(`Added ${product.name} (${selectedSize}) to cart`);
-    notify({ type: 'success', message: `${product.name} added to your bag.` });
+    setMessage(isRaffleEntry ? `Saved ${product.name} (${selectedSize}) for later review.` : `Added ${product.name} (${selectedSize}) to cart`);
+    notify({ type: 'success', message: isRaffleEntry ? `${product.name} saved in your private bag.` : `${product.name} added to your bag.` });
     setShowCart(true);
   };
 
@@ -446,7 +451,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
 
-          {isRaffleProduct && countdownLabel && (
+          {isRaffleProduct && !product.isArchived && countdownLabel && (
             <div style={{ marginBottom: 10, fontSize: 12, color: '#c9c9d3', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: countdownPulse ? '#facc15' : '#fef08a', boxShadow: countdownPulse ? '0 0 0 4px rgba(250,204,21,0.15)' : '0 0 0 1px rgba(254,240,138,0.08)', transition: 'all 180ms ease' }} />
               <span>{product.isUpcoming ? 'Release opens in' : 'Raffle ends in'}: <strong>{countdownLabel}</strong></span>
@@ -485,7 +490,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
               </button>
             )}
-            {canCheckoutDirect && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to private bag</button>}
+            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>{isRaffleProduct ? 'Save for later' : 'Add to private bag'}</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}

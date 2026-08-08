@@ -58,8 +58,10 @@ export async function POST(request: Request) {
       product.images = [];
     }
 
-    // Append the new image
-    product.images.push(dataUrl);
+    const alreadyPresent = product.images.some((image: unknown) => typeof image === 'string' && image === dataUrl);
+    if (!alreadyPresent) {
+      product.images.push(dataUrl);
+    }
     product.updatedAt = new Date().toISOString();
 
     // Save back to Redis

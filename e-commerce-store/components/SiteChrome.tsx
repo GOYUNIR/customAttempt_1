@@ -127,11 +127,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const now = Date.now();
       const idleFor = now - lastInteraction;
       const scrollMomentumAge = now - lastScrollAtRef.current;
-      if (scrollMomentumAge < 2200) {
+      if (scrollMomentumAge < 2600) {
         targetXRef.current = clamp(targetXRef.current + velocityXRef.current, 0.05, 0.95);
         targetYRef.current = clamp(targetYRef.current + velocityYRef.current, 0.08, 0.92);
-        velocityXRef.current *= 0.962;
-        velocityYRef.current *= 0.962;
+        velocityXRef.current *= 0.98;
+        velocityYRef.current *= 0.98;
       }
       if (idleFor > 950) {
         if (now >= nextIdleRetargetAt) {
@@ -145,8 +145,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.02 + microDriftX, 0.05, 0.95);
         targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.02 + microDriftY, 0.08, 0.92);
       }
-      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.095, 0.05, 0.95));
-      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.095, 0.08, 0.92));
+      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.06, 0.05, 0.95));
+      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.06, 0.08, 0.92));
       rafId = window.requestAnimationFrame(animateIdle);
     };
 
@@ -157,8 +157,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const deltaY = window.scrollY - lastScrollYRef.current;
       const deltaT = Math.max(16, now - lastScrollAtRef.current || 16);
       const scrollVelocity = deltaY / deltaT;
-      velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.36, -0.08, 0.08);
-      velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.018 + scrollVelocity * 0.045, -0.05, 0.05);
+      velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.62, -0.14, 0.14);
+      velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.028 + scrollVelocity * 0.07, -0.08, 0.08);
       targetYRef.current = clamp(0.15 + progress * 0.7, 0.1, 0.9);
       targetXRef.current = clamp(0.5 + Math.sin(progress * Math.PI * 4) * 0.16, 0.08, 0.92);
       lastScrollYRef.current = window.scrollY || 0;
@@ -245,13 +245,22 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
   const total = cart.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
   const hasItems = cart.length > 0;
-  const cartIsFcfsOnly = cart.every((item) => (item.checkoutMode || '').toUpperCase() !== 'RAFFLE' && String(item.productType || '').toLowerCase() !== 'raffle');
+  const hasRaffleItems = cart.some((item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle');
+  const hasFcfsItems = cart.some((item) => (item.checkoutMode || '').toUpperCase() === 'FCFS' || String(item.productType || '').toLowerCase() === 'fcfs');
+  const cartHasMixedModes = hasRaffleItems && hasFcfsItems;
+  const raffleOnlyCart = hasRaffleItems && !hasFcfsItems;
+  const checkoutLabel = raffleOnlyCart ? 'Secure entry' : 'Checkout now';
 
   const checkoutCart = async () => {
     if (!hasItems) return;
-    if (!cartIsFcfsOnly) {
-      setCartMsg('Raffle items cannot be purchased in cart. Enter raffle from the product page.');
-      showNotice({ type: 'error', message: 'Raffle items need to be entered from the product page.' });
+    if (cartHasMixedModes) {
+      setCartMsg('Separate raffle entries from direct-purchase items so checkout stays simple and secure.');
+      showNotice({ type: 'alert', message: 'Separate raffle entries from direct purchases.' });
+      return;
+    }
+    if (raffleOnlyCart) {
+      setCartMsg('Raffle entries stay in your private bag until you secure them from the product page.');
+      showNotice({ type: 'alert', message: 'Use the product page to secure raffle entries.' });
       return;
     }
     if (!checkoutEmail || !checkoutAddress) {
@@ -339,7 +348,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           </div>
         </div>
       )}
-      <style>{`@keyframes goyunirPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .28; } 40% { transform: translateY(-1px); opacity: 1; } } @keyframes goyunirBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }`}</style>
+      <style>{`@keyframes goyunirPulse { 0%, 80%, 100% { transform: translateY(0); opacity: .28; } 40% { transform: translateY(-1px); opacity: 1; } } @keyframes goyunirBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } } @keyframes goyunirFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }`}</style>
       <header
         style={{
           position: 'fixed',
@@ -366,8 +375,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           <Link href="/catalog" aria-label="Catalog" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>
           </Link>
-          <Link href="/story" aria-label="Story" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z" /><path d="M6 12h9a4 4 0 0 1 0 8H6z" /></svg>
+          <Link href="/catalog" aria-label="Search" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /></svg>
           </Link>
         </div>
 
@@ -400,9 +409,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </Link>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: 1 }}>
-          <Link href="/catalog" aria-label="Search" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /></svg>
-          </Link>
           <Link href="/account" aria-label="Account" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
           </Link>
@@ -420,9 +426,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       <div style={{ paddingTop: '92px', minHeight: '100vh' }}>{children}</div>
 
       <div style={{ position: 'fixed', left: '50%', bottom: 18, transform: 'translateX(-50%)', zIndex: 90, opacity: showScrollCue ? 1 : 0, pointerEvents: 'none', transition: 'opacity 220ms ease' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.8)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', boxShadow: '0 12px 38px rgba(0,0,0,0.28)', backdropFilter: 'blur(16px)', animation: 'goyunirBounce 1.4s ease-in-out infinite' }}>
-          <span>Scroll</span>
-          <span style={{ fontSize: 12 }}>↓</span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 0', color: '#f5f5f5', fontSize: 10, letterSpacing: '2px', textTransform: 'uppercase', opacity: 0.9 }}>
+          <span style={{ width: 24, height: 1, background: 'rgba(255,255,255,0.35)' }} />
+          <span>Keep scrolling</span>
+          <span style={{ fontSize: 12, animation: 'goyunirFloat 1.2s ease-in-out infinite' }}>↓</span>
         </div>
       </div>
 
@@ -526,8 +533,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems ? 'not-allowed' : 'pointer' }}>
-                  {checkoutBusy ? 'Starting…' : 'Checkout now'}
+                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems || raffleOnlyCart} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems || raffleOnlyCart ? 'not-allowed' : 'pointer' }}>
+                  {checkoutBusy ? 'Starting…' : checkoutLabel}
                 </button>
                 <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#d4d4d8', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
               </div>

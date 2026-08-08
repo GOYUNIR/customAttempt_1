@@ -9,9 +9,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
-  const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
-  const [raffleCountdown, setRaffleCountdown] = useState('');
-  const [countdownPulse, setCountdownPulse] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
@@ -29,10 +26,6 @@ export default function HomePage() {
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
         setActiveProducts(sorted);
-        const firstRaffle = sorted.find((product: any) => String(product.checkoutMode || '').toUpperCase() === 'RAFFLE');
-        const drawAnchor = firstRaffle?.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime;
-        const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
-        setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
       } catch (err) {
         console.error('[HomePage] Error checking products:', err);
       } finally {
@@ -54,30 +47,6 @@ export default function HomePage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!raffleEndsAt) {
-      setRaffleCountdown('');
-      return;
-    }
-    const update = () => {
-      const diff = raffleEndsAt - Date.now();
-      if (diff <= 0) {
-        setRaffleCountdown('Raffle window closed');
-        return;
-      }
-      const total = Math.floor(diff / 1000);
-      const days = Math.floor(total / 86400);
-      const hours = Math.floor((total % 86400) / 3600);
-      const minutes = Math.floor((total % 3600) / 60);
-      const seconds = total % 60;
-      setRaffleCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
-      setCountdownPulse((prev) => !prev);
-    };
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [raffleEndsAt]);
-
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: '#0a0a0a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
@@ -90,11 +59,10 @@ export default function HomePage() {
   }
 
   const primaryProduct = activeProducts[0];
-  const secondaryProducts = activeProducts.slice(1);
   const soldOutProducts = activeProducts.filter((product: any) => product.soldOut);
-  const hasRaffleProduct = activeProducts.some((product) => String(product.checkoutMode || '').toUpperCase() === 'RAFFLE');
 
   const formatCountdown = (product: any) => {
+    if (product.isArchived) return 'Archived release';
     const releaseEndsAt = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
     if (product.soldOut) return 'Sold out';
     if (Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick) {
@@ -103,7 +71,8 @@ export default function HomePage() {
       const days = Math.floor(total / 86400);
       const hours = Math.floor((total % 86400) / 3600);
       const minutes = Math.floor((total % 3600) / 60);
-      return `${days}d ${hours}h ${minutes}m left`;
+      const seconds = total % 60;
+      return `${days}d ${hours}h ${minutes}m ${seconds}s left`;
     }
     if (product.goLiveAt) {
       const goLiveAt = new Date(product.goLiveAt).getTime();
@@ -114,7 +83,7 @@ export default function HomePage() {
 
   return (
     <main style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, rgba(59,130,246,0.14), transparent 36%), radial-gradient(circle at 20% 20%, rgba(168,85,247,0.16), transparent 28%), #07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
-      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } }`}</style>
+      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
@@ -123,18 +92,12 @@ export default function HomePage() {
             Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            {primaryProduct?.slug ? <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Enter the active release</Link> : <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>View the release ledger</Link>}
+            {primaryProduct?.slug ? <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Our Story</Link> : <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Our Story</Link>}
             <span style={{ fontSize: 11, color: '#9ca3af' }}>Low supply. Fast conversion. Quiet exclusivity.</span>
           </div>
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
             Live raffle entries signal: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
-          {hasRaffleProduct && raffleCountdown && (
-            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.015)', fontSize: 12, color: '#d4d4d8', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 999, background: countdownPulse ? '#facc15' : '#fef08a', boxShadow: countdownPulse ? '0 0 0 4px rgba(250,204,21,0.15)' : '0 0 0 1px rgba(254,240,138,0.08)', transition: 'all 180ms ease' }} />
-              <span>Raffle ends in: <strong>{raffleCountdown}</strong></span>
-            </div>
-          )}
         </section>
 
         {activeProducts.length > 0 ? (
@@ -156,7 +119,7 @@ export default function HomePage() {
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4 }}>{product.name}</div>
                       <div style={{ fontSize: 12, color: '#b8b8c0', lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
                       <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#e7e7eb' }}>
-                        <span style={{ width: 7, height: 7, borderRadius: 999, background: product.soldOut ? '#fbbf24' : '#7dd3fc' }} />
+                        <span style={{ width: 7, height: 7, borderRadius: 999, background: product.soldOut ? '#fbbf24' : '#7dd3fc', animation: 'goyunirPulse 1s ease-in-out infinite' }} />
                         {formatCountdown(product)}
                       </div>
                     </div>
