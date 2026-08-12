@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getCatalogArchiveRecords, listLiveStates, safeParseRedisItem } from '@/lib/server-config';
+import {
+  aggregateLiveInventoryByProduct,
+  createRedisClient,
+  findLiveInventoryForProduct,
+  getCatalogArchiveRecords,
+  getFallbackStoreProducts,
+  listLiveStates,
+  safeParseRedisItem,
+} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,17 +18,61 @@ export async function GET() {
       const parsed = typeof value === 'string' && value ? new Date(value).getTime() : NaN;
       return Number.isFinite(parsed) ? parsed : null;
     };
-    const sortProducts = (items: any[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
+    const sortProducts = (items: any[]) =>
+      [...items].sort(
+        (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
+      );
+
     if (!redis) {
+      const fallback = Object.values(getFallbackStoreProducts());
+      const activeDrops = sortProducts(fallback)
+        .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          tagline: p.tagline || 'LIMITED DROP',
+          desc: p.desc || '',
+          slug: p.slug,
+          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          soldOut: false,
+          inventoryRemaining: Number(p.totalInventory || 0),
+        }));
+      const upcomingDrops = sortProducts(fallback)
+        .filter((p) => p.isUpcoming && !p.isArchived)
+        .map((p) => ({
+          name: p.name,
+          status: 'Upcoming',
+          eta: p.tagline || 'Coming soon',
+          goLiveAt: p.goLiveAt || '',
+          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          description: p.desc || '',
+          slug: p.slug,
+        }));
+      const archiveScents = sortProducts(fallback)
+        .filter((p) => p.isArchived)
+        .map((p) => ({
+          name: p.name,
+          status: 'Archived',
+          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+          description: p.desc || '',
+          availableFrom: 'Previously available',
+          slug: p.slug,
+          productId: p.id,
+          // No live state exists in fallback mode, so follow the storefront rule:
+          // only sold out when the product itself is flagged sold out.
+          soldOut: p.soldOut === true,
+        }));
+
       return NextResponse.json({
-        activeDrops: [],
-        upcomingDrops: [],
-        archiveScents: [],
-        archivedProductIds: [],
+        activeDrops,
+        upcomingDrops,
+        archiveScents,
+        archivedProductIds: archiveScents.map((item) => item.productId),
         soldOutProductIds: [],
         notesByProductId: {},
         availableFromByProductId: {},
         records: [],
+        fromFallback: true,
       });
     }
 
@@ -30,41 +82,40 @@ export async function GET() {
     const configuredUpcoming = Array.isArray(catalogConfig.upcomingDrops) ? catalogConfig.upcomingDrops : [];
     const configuredArchive = Array.isArray(catalogConfig.archiveScents) ? catalogConfig.archiveScents : [];
     const liveStates = await listLiveStates(redis);
-    const liveStatesByProduct = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
-    for (const state of liveStates) {
-      const existing = liveStatesByProduct.get(state.productId) || { inventoryRemaining: 0, totalInventory: 0 };
-      liveStatesByProduct.set(state.productId, {
-        inventoryRemaining: existing.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
-        totalInventory: existing.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
-      });
-    }
+    const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
 
-    // Get ALL products from Redis
+    let allProducts: any[] = [];
     const allRaw = await redis.hgetall('store:products');
-    const allProducts: any[] = [];
     if (allRaw) {
-      for (const [key, value] of Object.entries(allRaw)) {
-        try {
-          const product = JSON.parse(typeof value === 'string' ? value : '{}');
-          allProducts.push(product);
-        } catch (e) {
-          console.error('[catalog/status] Error parsing product:', e);
-        }
+      for (const value of Object.values(allRaw)) {
+        const product = safeParseRedisItem<any>(value);
+        if (product) allProducts.push(product);
       }
     }
 
-    // Separate into categories - sort by sortOrder
+    if (allProducts.length === 0) {
+      allProducts = Object.values(getFallbackStoreProducts());
+    }
+
     const now = Date.now();
     const sortedProducts = sortProducts(allProducts).map((product) => {
-      const inventory = liveStatesByProduct.get(product.id);
-      const inventoryRemaining = inventory ? inventory.inventoryRemaining : Math.max(0, Number(product.totalInventory || 0));
-      const totalInventory = inventory ? inventory.totalInventory : Math.max(0, Number(product.totalInventory || 0));
+      const inventory = findLiveInventoryForProduct(liveStatesByProduct, product, liveStates);
+      const inventoryRemaining = inventory
+        ? inventory.inventoryRemaining
+        : Math.max(0, Number(product.totalInventory || 0));
+      const totalInventory = inventory
+        ? inventory.totalInventory
+        : Math.max(0, Number(product.totalInventory || 0));
       const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
       const goLiveAtMs = toMs(product.goLiveAt);
       const soldOutAtMs = toMs(product.soldOutAt);
       const shouldGoLive = product.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;
       const shouldArchiveFromSoldOut = soldOut && product.soldOutBehavior === 'archive_now';
-      const shouldArchiveAfterDelay = soldOut && product.soldOutBehavior === 'archive_after_delay' && soldOutAtMs !== null && now >= soldOutAtMs + (Math.max(0, Number(product.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000);
+      const shouldArchiveAfterDelay =
+        soldOut &&
+        product.soldOutBehavior === 'archive_after_delay' &&
+        soldOutAtMs !== null &&
+        now >= soldOutAtMs + Math.max(0, Number(product.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000;
       return {
         ...product,
         inventoryRemaining,
@@ -77,8 +128,8 @@ export async function GET() {
     });
 
     const activeDrops = sortedProducts
-      .filter(p => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
-      .map(p => ({
+      .filter((p) => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
+      .map((p) => ({
         id: p.id,
         name: p.name,
         tagline: p.tagline || 'LIMITED DROP',
@@ -89,12 +140,17 @@ export async function GET() {
         inventoryRemaining: p.inventoryRemaining,
       }));
 
+    // Never list a product in BOTH live drops and upcoming. Products that
+    // transitioned live (their goLiveAt passed) are already in activeDrops,
+    // so drop any stale configured-upcoming entry that points at the same slug.
+    const activeSlugs = new Set(activeDrops.map((d: any) => String(d.slug || '').toLowerCase()));
+
     const upcomingFromProducts = sortedProducts
-      .filter(p => p.isUpcoming && !p.isArchived)
-      .map(p => ({
+      .filter((p) => p.isUpcoming && !p.isArchived)
+      .map((p) => ({
         name: p.name,
         status: 'Upcoming',
-        eta: p.goLiveAt ? `Opens ${p.goLiveAt}` : (p.tagline || 'Coming soon'),
+        eta: p.goLiveAt ? `Opens ${p.goLiveAt}` : p.tagline || 'Coming soon',
         goLiveAt: p.goLiveAt || '',
         image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
         description: p.desc || '',
@@ -102,12 +158,17 @@ export async function GET() {
       }));
 
     const upcomingDrops = sortProducts(
-      [...upcomingFromProducts, ...configuredUpcoming].filter((item: any, index: number, all: any[]) => all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index),
+      [...upcomingFromProducts, ...configuredUpcoming]
+        .filter((item: any) => !activeSlugs.has(String(item.slug || item.name || '').toLowerCase()))
+        .filter(
+          (item: any, index: number, all: any[]) =>
+            all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index,
+        ),
     );
 
     const archiveFromProducts = sortedProducts
-      .filter(p => p.isArchived || archivedProductIds.includes(p.id))
-      .map(p => ({
+      .filter((p) => p.isArchived || archivedProductIds.includes(p.id))
+      .map((p) => ({
         name: p.name,
         status: 'Archived',
         image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
@@ -115,11 +176,14 @@ export async function GET() {
         availableFrom: p.availableFrom || 'Previously available',
         slug: p.slug,
         productId: p.id,
-        soldOut: p.soldOut === true || p.totalInventory === 0,
+        soldOut: p.soldOut === true,
       }));
 
     const archiveScents = sortProducts(
-      [...archiveFromProducts, ...configuredArchive].filter((item: any, index: number, all: any[]) => all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index),
+      [...archiveFromProducts, ...configuredArchive].filter(
+        (item: any, index: number, all: any[]) =>
+          all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index,
+      ),
     );
 
     return NextResponse.json({

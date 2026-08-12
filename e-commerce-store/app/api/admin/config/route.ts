@@ -7,6 +7,7 @@ import {
   saveSocialProofOverride,
   getProductOverride,
   saveProductOverride,
+  getAdminPassword,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -29,7 +30,12 @@ export async function GET() {
     baseSocialProof: GOYUNIR_STORE_SUITE.socialProof,
     socialProofOverride,
     products: GOYUNIR_STORE_SUITE.productCatalog.map((p) => ({
-      id: p.id, name: p.name, price50ml: p.price50ml, price100ml: p.price100ml,
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      priceCategories: (p as any).priceCategories || [],
+      price50ml: p.price50ml,
+      price100ml: p.price100ml,
     })),
     productOverrides,
   });
@@ -41,7 +47,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (password !== process.env.ADMIN_BASIC_AUTH_PASSWORD) {
+  if (password !== getAdminPassword()) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

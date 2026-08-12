@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride } from '@/lib/server-config';
+import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride , getAdminPassword} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ const TICKS_DAY_STAMP_KEY = 'stats:social_proof_ticks_day_stamp';
 
 function authorized(request: Request) {
   const url = new URL(request.url);
-  const secret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD;
+  const secret = process.env.CRON_SECRET || getAdminPassword();
   if (!secret) return true;
   const auth = request.headers.get('authorization');
   const key = url.searchParams.get('key') || '';

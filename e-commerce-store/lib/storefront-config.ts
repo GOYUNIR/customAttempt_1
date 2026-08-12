@@ -321,14 +321,36 @@ export function shouldRunDraw(schedule: Partial<DropScheduleConfig> | undefined,
 export function getProductBySlug(config: StorefrontConfig, slug: string): StorefrontProduct | undefined {
   return config.productCatalog.find((product) => product.slug === slug);
 }
+function findPriceCategory(product: StorefrontProduct, size: string) {
+  const categories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+  const normalizedSize = String(size || '').trim();
+  return categories.find((category) => String(category?.size || '').trim() === normalizedSize) || null;
+}
+
 export function getProductPrice(product: StorefrontProduct, size: string): number {
+  const category = findPriceCategory(product, size);
+  if (category && Number.isFinite(Number(category.price))) {
+    const categoryPrice = Number(category.price);
+    if (categoryPrice > 999999) return 0;
+    return Math.max(0, categoryPrice);
+  }
+
+  // Legacy fallback for older Redis records that still store fixed size fields.
   const price = size === '100ml' ? product.price100ml : product.price50ml;
   const numericPrice = typeof price === 'number' ? price : 0;
-  // If price is unreasonably high (placeholder), return 0 to indicate not set
   if (numericPrice > 999999) return 0;
-  return numericPrice;
+  return Math.max(0, numericPrice);
 }
 export function getProductStripeId(product: StorefrontProduct, size: string): string {
+  const category = findPriceCategory(product, size);
+  if (category) {
+    const categoryStripeId = typeof (category as any).stripeId === 'string'
+      ? (category as any).stripeId
+      : (typeof (category as any).stripePriceId === 'string' ? (category as any).stripePriceId : '');
+    if (categoryStripeId.trim()) return categoryStripeId.trim();
+  }
+
+  // Legacy fallback for older Redis records.
   const stripeId = size === '100ml' ? product.stripeId100ml : product.stripeId50ml;
   return typeof stripeId === 'string' ? stripeId : '';
 }

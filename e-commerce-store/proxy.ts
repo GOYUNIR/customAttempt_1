@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getAdminPassword } from '@/lib/server-config';
 
-const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME;
-const ADMIN_PASSWORD = process.env.ADMIN_BASIC_AUTH_PASSWORD;
+const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
+const ADMIN_PASSWORD = getAdminPassword();
 
 const PASSWORD_GATE_ONLY = [
   '/api/admin/self-test',

@@ -19,6 +19,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'System error' }, { status: 500 });
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+
   // Get all users from Redis
   const raw = await redis.hgetall('store:users');
   if (!raw) {
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
   let user: any = null;
   for (const [key, value] of Object.entries(raw)) {
     const u = safeParseRedisItem<any>(value);
-    if (u && u.email === email) {
+    if (u && String(u.email || '').toLowerCase() === normalizedEmail) {
       user = u;
       break;
     }

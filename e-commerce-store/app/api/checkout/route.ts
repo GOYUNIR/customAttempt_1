@@ -202,7 +202,6 @@ export async function POST(request: Request) {
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         customer: customer.id,
-        customer_email: email,
         payment_method_types: ['card'],
         line_items: [
           {
@@ -230,7 +229,7 @@ export async function POST(request: Request) {
           orderRef,
           promoCode: normalizedPromo,
           ref: String(ref || promoCode || '').trim().toUpperCase(),
-          entryType: usesWaitlist ? 'waitlist' : 'raffle',
+          entryType: usesWaitlist ? 'waitlist' : 'direct',
         },
         payment_intent_data: {
           receipt_email: email,

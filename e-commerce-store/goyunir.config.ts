@@ -102,49 +102,74 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ],
   },
 
-  // NOTE: The type StorefrontProduct expects price50ml/100ml, but we override with priceCategories.
-  // We cast as any to bypass type errors – these fields are used in Redis, not here.
+  // NOTE: Fallback catalog used when Redis is empty. Keep these aligned with
+  // admin seed defaults so empty-Redis and seeded experiences stay consistent.
   productCatalog: [
     {
       id: 'p1',
-      name: 'Drop 01 — Raffle Access',
-      slug: 'drop-01-raffle-access',
-      prefix: 'drop-01',
-      tagline: 'LIMITED Raffle / 01',
-      desc: 'A premium release designed for raffle entry and controlled allocation.',
+      name: 'Elysian White — Launch Draw',
+      slug: 'elysian-white-launch-draw',
+      prefix: 'elysian-white',
+      tagline: 'RAFFLE / LIVE',
+      desc: 'Primary hero raffle drop with tight allocation.',
       priceCategories: [
-        { size: 'Standard', price: 95, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2,1' }
+        { size: 'Standard', price: 95, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '3,2,2' }
       ],
       notes: [
-        { label: 'DROP', name: 'Raffle Access', text: 'Entry is limited and managed through the admin-controlled draw system.' },
+        { label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' },
       ],
-      images: ['/images/baseItem1/1.jpeg'],
-      maxRaffleAllocationLimit: 100,
-      totalInventory: 100,
-      winnerTiers: [2, 2, 1],
+      images: ['/images/elysian-white/1.jpeg'],
+      maxRaffleAllocationLimit: 120,
+      totalInventory: 120,
+      winnerTiers: [3, 2, 2],
       isActive: true,
       isRaffle: true,
+      checkoutMode: 'RAFFLE',
       productType: 'raffle',
     },
     {
       id: 'p2',
-      name: 'Drop 02 — Direct Buy',
-      slug: 'drop-02-direct-buy',
-      prefix: 'drop-02',
-      tagline: 'DIRECT BUY / 02',
-      desc: 'A ready-to-purchase release for immediate checkout and cart fulfillment.',
+      name: 'Obsidian Void — Priority Draw',
+      slug: 'obsidian-void-priority-draw',
+      prefix: 'obsidian-void',
+      tagline: 'RAFFLE / LIVE',
+      desc: 'High-intent raffle queue with limited winners.',
       priceCategories: [
-        { size: 'Standard', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }
+        { size: 'Standard', price: 110, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2,1' }
       ],
       notes: [
-        { label: 'BUY NOW', name: 'Instant Checkout', text: 'This item can be purchased immediately and added to cart.' },
+        { label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' },
       ],
-      images: ['/images/baseItem2/1.jpeg'],
+      images: ['/images/obsidian-void/1.jpeg'],
+      maxRaffleAllocationLimit: 90,
+      totalInventory: 90,
+      winnerTiers: [2, 2, 1],
+      isActive: true,
+      isRaffle: true,
+      checkoutMode: 'RAFFLE',
+      productType: 'raffle',
+    },
+    {
+      id: 'p3',
+      name: 'Noir Citrus — Instant Drop',
+      slug: 'noir-citrus-instant-drop',
+      prefix: 'baseItem1',
+      tagline: 'FCFS / LIVE',
+      desc: 'Fast-checkout direct buy drop for cart flow.',
+      priceCategories: [
+        { size: 'Sampler Set', price: 19, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' },
+        { size: 'Full Bottle', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' },
+      ],
+      notes: [
+        { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },
+      ],
+      images: ['/images/baseItem1/1.jpeg'],
       maxRaffleAllocationLimit: 0,
-      totalInventory: 120,
+      totalInventory: 160,
       winnerTiers: [0],
       isActive: true,
       isRaffle: false,
+      checkoutMode: 'FCFS',
       productType: 'checkout',
     },
   ] as any[], // cast to any to allow extra fields not in StorefrontProduct

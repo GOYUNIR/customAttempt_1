@@ -9,6 +9,7 @@ import {
   LAST_DRAW_KEY,
   ARCHIVE_LEDGER_KEY,
   loadProducts,
+  getAdminPassword,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getWinnerCount, getAvailableSizes } from '@/lib/storefront-config';
@@ -74,7 +75,7 @@ export async function GET() {
         hasRedisToken,
         hasResend,
         hasAdminUser: Boolean(process.env.ADMIN_BASIC_AUTH_USERNAME),
-        hasAdminPassword: Boolean(process.env.ADMIN_BASIC_AUTH_PASSWORD),
+        hasAdminPassword: Boolean(getAdminPassword()),
         hasCronSecret: Boolean(process.env.CRON_SECRET),
       },
       fallbackEntries: [] as any[],

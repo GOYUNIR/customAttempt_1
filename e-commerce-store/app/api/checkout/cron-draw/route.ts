@@ -15,6 +15,7 @@ import {
   saveLiveState,
   archiveProductToCatalog,
   getProductOverride,
+  getAdminPassword,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount, shouldRunDraw } from '@/lib/storefront-config';
@@ -28,7 +29,7 @@ const PROMOS_KEY = 'config:promos';
 
 function authorized(request: Request) {
   const url = new URL(request.url);
-  const secret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD;
+  const secret = process.env.CRON_SECRET || getAdminPassword();
   if (!secret) return false;
   const auth = request.headers.get('authorization');
   const key = url.searchParams.get('key') || '';

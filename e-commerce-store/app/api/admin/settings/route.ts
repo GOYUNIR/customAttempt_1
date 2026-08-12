@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY , getAdminPassword} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    const master = getAdminPassword() || '';
     if (!master || password !== master) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }

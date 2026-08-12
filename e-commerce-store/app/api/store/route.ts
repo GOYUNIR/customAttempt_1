@@ -1,5 +1,14 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, listLiveStates, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import {
+  aggregateLiveInventoryByProduct,
+  createRedisClient,
+  findLiveInventoryForProduct,
+  getFallbackStoreProducts,
+  listLiveStates,
+  loadStoreConfig,
+  safeParseRedisItem,
+} from '@/lib/server-config';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +54,7 @@ function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
   const mode = String(product?.checkoutMode || '').toUpperCase();
   if (mode === 'FCFS') return 'FCFS';
   if (mode === 'RAFFLE') return 'RAFFLE';
-  if (product?.isRaffle === false) return 'FCFS';
+  if (product?.isRaffle === false || String(product?.productType || '').toLowerCase() === 'checkout') return 'FCFS';
   return 'RAFFLE';
 }
 
@@ -64,9 +73,10 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     checkoutMode,
     maxPerEmail: Math.max(1, Number(raw?.maxPerEmail || 1)),
     maxPerCart: Math.max(1, Number(raw?.maxPerCart || raw?.maxPerEmail || 1)),
-    isActive: raw?.isActive === true,
-    isArchived: raw?.isArchived === true,
-    isUpcoming: raw?.isUpcoming === true,
+    // Explicit publish flag: only true when set. Missing/false stays unpublished.
+    isActive: raw?.isActive === true || raw?.isActive === 'true',
+    isArchived: raw?.isArchived === true || raw?.isArchived === 'true',
+    isUpcoming: raw?.isUpcoming === true || raw?.isUpcoming === 'true',
     notes: Array.isArray(raw?.notes) ? raw.notes : [],
     images: Array.isArray(raw?.images) ? raw.images.filter(Boolean) : [],
     priceCategories: categories.map((category: any) => ({
@@ -84,6 +94,73 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
   };
 }
 
+function mergePublicConfig(redisConfig: Record<string, any> = {}) {
+  const defaults = GOYUNIR_STORE_SUITE as any;
+  return {
+    ...defaults,
+    ...redisConfig,
+    themeColors: { ...(defaults.themeColors || {}), ...(redisConfig.themeColors || {}) },
+    availableSizes:
+      Array.isArray(redisConfig.availableSizes) && redisConfig.availableSizes.length > 0
+        ? redisConfig.availableSizes
+        : defaults.availableSizes || ['Standard'],
+    dropSchedule: { ...(defaults.dropSchedule || {}), ...(redisConfig.dropSchedule || {}) },
+    animationMechanics: { ...(defaults.animationMechanics || {}), ...(redisConfig.animationMechanics || {}) },
+    raffleRegistrationForm: { ...(defaults.raffleRegistrationForm || {}), ...(redisConfig.raffleRegistrationForm || {}) },
+    heroContent: { ...(defaults.heroContent || {}), ...(redisConfig.heroContent || {}) },
+    socialProof: { ...(defaults.socialProof || {}), ...(redisConfig.socialProof || {}) },
+    brandFooterData: { ...(defaults.brandFooterData || {}), ...(redisConfig.brandFooterData || {}) },
+    catalogPreview: {
+      upcomingDrops: Array.isArray(redisConfig?.catalogPreview?.upcomingDrops)
+        ? redisConfig.catalogPreview.upcomingDrops
+        : defaults.catalogPreview?.upcomingDrops || [],
+      archiveScents: Array.isArray(redisConfig?.catalogPreview?.archiveScents)
+        ? redisConfig.catalogPreview.archiveScents
+        : defaults.catalogPreview?.archiveScents || [],
+    },
+    branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
+  };
+}
+
+function applyLifecycle(
+  products: PublicStoreProduct[],
+  liveStates: Awaited<ReturnType<typeof listLiveStates>>,
+) {
+  const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
+  const now = Date.now();
+
+  return products.map((item) => {
+    const inventory = findLiveInventoryForProduct(liveStatesByProduct, item, liveStates);
+    const inventoryRemaining = inventory
+      ? inventory.inventoryRemaining
+      : Math.max(0, Number(item.totalInventory || 0));
+    const totalInventory = inventory
+      ? inventory.totalInventory
+      : Math.max(0, Number(item.totalInventory || 0));
+    // Only sold out when inventory was configured and remaining hits zero.
+    const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
+    const goLiveAtMs = toMs(item.goLiveAt);
+    const soldOutAtMs = toMs(item.soldOutAt);
+    const shouldGoLive = item.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;
+    const shouldArchiveFromSoldOut = soldOut && item.soldOutBehavior === 'archive_now';
+    const shouldArchiveAfterDelay =
+      soldOut &&
+      item.soldOutBehavior === 'archive_after_delay' &&
+      soldOutAtMs !== null &&
+      now >= soldOutAtMs + Math.max(0, Number(item.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000;
+
+    return {
+      ...item,
+      inventoryRemaining,
+      totalInventory,
+      soldOut,
+      isUpcoming: shouldGoLive ? false : item.isUpcoming,
+      isArchived: shouldArchiveFromSoldOut || shouldArchiveAfterDelay ? true : item.isArchived,
+      isActive: shouldGoLive ? true : item.isActive,
+    };
+  });
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -96,31 +173,31 @@ export async function GET(request: Request) {
       );
 
     if (!redis) {
+      const fallbackProducts = sortProducts(Object.values(getFallbackStoreProducts()).map(sanitizeProduct));
+      const lifecycleProducts = applyLifecycle(fallbackProducts, []);
+      const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
+      const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
+      const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
+      const product = requestedSlug
+        ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
+        : null;
+
       return NextResponse.json({
-        config: {},
-        activeProducts: [],
-        archivedProducts: [],
-        upcomingProducts: [],
-        allProducts: [],
-        product: null,
+        config: mergePublicConfig({}),
+        activeProducts,
+        archivedProducts,
+        upcomingProducts,
+        allProducts: lifecycleProducts,
+        product,
         scheduleOverride: {},
         socialOverride: {},
         timestamp: Date.now(),
+        fromFallback: true,
       });
     }
 
-    // Get store config
-    const configRaw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(configRaw) || {};
+    const config = mergePublicConfig(await loadStoreConfig(redis));
     const liveStates = await listLiveStates(redis);
-    const liveStatesByProduct = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
-    for (const state of liveStates) {
-      const existing = liveStatesByProduct.get(state.productId) || { inventoryRemaining: 0, totalInventory: 0 };
-      liveStatesByProduct.set(state.productId, {
-        inventoryRemaining: existing.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
-        totalInventory: existing.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
-      });
-    }
 
     let allProducts: PublicStoreProduct[] = [];
     const allRaw = await redis.hgetall('store:products');
@@ -131,42 +208,23 @@ export async function GET(request: Request) {
       }
     }
 
+    // Redis empty → serve config fallbacks so the storefront is never blank.
+    if (allProducts.length === 0) {
+      allProducts = Object.values(getFallbackStoreProducts()).map(sanitizeProduct);
+    }
+
     allProducts = sortProducts(allProducts);
-    const now = Date.now();
-    const lifecycleProducts = allProducts.map((item) => {
-      const inventory = liveStatesByProduct.get(item.id);
-      const inventoryRemaining = inventory ? inventory.inventoryRemaining : Math.max(0, Number(item.totalInventory || 0));
-      const totalInventory = inventory ? inventory.totalInventory : Math.max(0, Number(item.totalInventory || 0));
-      const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
-      const goLiveAtMs = toMs(item.goLiveAt);
-      const soldOutAtMs = toMs(item.soldOutAt);
-      const shouldGoLive = item.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;
-      const shouldArchiveFromSoldOut = soldOut && item.soldOutBehavior === 'archive_now';
-      const shouldArchiveAfterDelay = soldOut && item.soldOutBehavior === 'archive_after_delay' && soldOutAtMs !== null && now >= soldOutAtMs + (Math.max(0, Number(item.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000);
-      return {
-        ...item,
-        inventoryRemaining,
-        totalInventory,
-        soldOut,
-        isUpcoming: shouldGoLive ? false : item.isUpcoming,
-        isArchived: shouldArchiveFromSoldOut || shouldArchiveAfterDelay ? true : item.isArchived,
-        isActive: shouldGoLive ? true : item.isActive,
-      };
-    });
+    const lifecycleProducts = applyLifecycle(allProducts, liveStates);
     const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
     const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
     const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
 
     const product = requestedSlug
-      ? lifecycleProducts.find((item) => item.slug === requestedSlug)
-          || null
+      ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
       : null;
 
-    // Get global schedule override
     const scheduleRaw = await redis.get('config:drop_schedule');
     const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
-
-    // Get social proof override
     const socialRaw = await redis.get('config:social_proof');
     const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
@@ -175,7 +233,7 @@ export async function GET(request: Request) {
       activeProducts,
       archivedProducts,
       upcomingProducts,
-      allProducts: [],
+      allProducts: lifecycleProducts,
       product,
       scheduleOverride,
       socialOverride,

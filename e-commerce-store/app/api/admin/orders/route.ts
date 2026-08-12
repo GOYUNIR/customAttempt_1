@@ -5,12 +5,13 @@ import {
   adminCancelOrder,
   adminUpdateOrderAddress,
   loadProducts,
+  getAdminPassword,
 } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 function checkAuth(password: string) {
-  const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+  const master = getAdminPassword() || '';
   return Boolean(master) && password === master;
 }
 

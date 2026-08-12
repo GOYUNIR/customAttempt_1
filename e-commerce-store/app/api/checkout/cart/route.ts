@@ -7,6 +7,7 @@ import {
   ARCHIVE_LEDGER_KEY,
   safeParseRedisItem,
 } from '@/lib/server-config';
+import { buildOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -255,11 +256,16 @@ export async function POST(request: Request) {
       return `${protocol}://${host}`;
     })();
 
-    const returnSlug = Object.values(allProducts)[0]?.slug || 'catalog';
+    const returnSlug = String(summaryItems[0]?.variant
+      ? (allProducts[summaryItems[0].productId]?.slug || Object.values(allProducts)[0]?.slug || 'catalog')
+      : (Object.values(allProducts)[0]?.slug || 'catalog'));
+    // Session-level order ref for the webhook to expand per cart line (`GY-xxx-1`, `GY-xxx-2`, ...).
+    const orderRef = summaryItems.length > 0
+      ? buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size)
+      : buildOrderRef(email, 'cart', 'Standard');
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       customer: customer.id,
-      customer_email: email,
       payment_method_types: ['card'],
       line_items,
       success_url: `${origin}/${returnSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
@@ -271,6 +277,7 @@ export async function POST(request: Request) {
         cartItems: JSON.stringify(summaryItems),
         promoCode: normalizedPromo,
         ref: normalizedPromo,
+        orderRef,
       },
     });
     if (normalizedPromo) {

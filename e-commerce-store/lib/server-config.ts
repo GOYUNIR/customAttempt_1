@@ -91,6 +91,7 @@ export function liveStateField(productId: string, slug: string, size: string) {
 
 export interface LiveStateRecord {
   productId: string;
+  sourceProductId?: string;
   productName: string;
   slug: string;
   size: string;
@@ -102,6 +103,68 @@ export interface LiveStateRecord {
   salesCompleted: number;
 }
 
+/** Resolve the real catalog product id from a live-state record/hash field. */
+export function resolveLiveStateSourceProductId(state: Pick<LiveStateRecord, 'productId' | 'sourceProductId' | 'slug'>): string {
+  if (state.sourceProductId && String(state.sourceProductId).trim()) {
+    return String(state.sourceProductId).trim();
+  }
+
+  const field = String(state.productId || '');
+  // liveStateField format: `${productId}-${safeSlug}:${size}`
+  const colon = field.lastIndexOf(':');
+  if (colon > 0) {
+    const withoutSize = field.slice(0, colon);
+    const slug = String(state.slug || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (slug && withoutSize.toLowerCase().endsWith(`-${slug}`)) {
+      return withoutSize.slice(0, -(slug.length + 1));
+    }
+    const dash = withoutSize.indexOf('-');
+    if (dash > 0) return withoutSize.slice(0, dash);
+  }
+
+  return field;
+}
+
+export function aggregateLiveInventoryByProduct(
+  liveStates: LiveStateRecord[],
+): Map<string, { inventoryRemaining: number; totalInventory: number }> {
+  const liveStatesByProduct = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
+  for (const state of liveStates) {
+    const key = resolveLiveStateSourceProductId(state);
+    if (!key) continue;
+    const existing = liveStatesByProduct.get(key) || { inventoryRemaining: 0, totalInventory: 0 };
+    liveStatesByProduct.set(key, {
+      inventoryRemaining: existing.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
+      totalInventory: existing.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
+    });
+  }
+  return liveStatesByProduct;
+}
+
+export function findLiveInventoryForProduct(
+  liveStatesByProduct: Map<string, { inventoryRemaining: number; totalInventory: number }>,
+  product: { id?: string; slug?: string },
+  liveStates?: LiveStateRecord[],
+): { inventoryRemaining: number; totalInventory: number } | null {
+  const byId = product.id ? liveStatesByProduct.get(String(product.id)) : null;
+  if (byId) return byId;
+
+  if (liveStates && product.slug) {
+    const matching = liveStates.filter((state) => String(state.slug || '') === String(product.slug));
+    if (matching.length > 0) {
+      return matching.reduce(
+        (acc, state) => ({
+          inventoryRemaining: acc.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
+          totalInventory: acc.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
+        }),
+        { inventoryRemaining: 0, totalInventory: 0 },
+      );
+    }
+  }
+
+  return null;
+}
+
 function normalizeWinners(value: unknown, fallback = 1): number {
   if (Array.isArray(value)) return Math.max(1, Number(value[0] ?? fallback) || fallback);
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, value);
@@ -111,7 +174,7 @@ function normalizeWinners(value: unknown, fallback = 1): number {
 
 export async function getOrSeedLiveState(
   redis: Redis,
-  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number },
+  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number; totalInventory?: number },
   size: string,
   winnersPerDraw: number,
 ): Promise<LiveStateRecord> {
@@ -119,22 +182,60 @@ export async function getOrSeedLiveState(
   const raw = await redis.hget(LIVE_STATE_KEY, field);
   const existing = safeParseRedisItem<LiveStateRecord>(raw);
   if (existing && typeof existing.inventoryRemaining === 'number') {
+    const storedTotal = Math.max(0, Number(existing.totalInventory) || 0);
+    const storedRemaining = Math.max(0, Number(existing.inventoryRemaining) || 0);
+    const productStock = Math.max(0, Number(product.totalInventory) || 0);
+    const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
+    const expectedSeed = raffleLimit > 0 ? raffleLimit : productStock;
+    const noActivity =
+      Number(existing.salesCompleted || 0) === 0 && Number(existing.drawsCompleted || 0) === 0;
+
+    // Heal stale/zeroed live states. This can happen when a live state was
+    // seeded from an older schema or a draft product record. We only refresh
+    // when the stored state is completely unconfigured (0 total, 0 remaining)
+    // and has no sales/draws, and the product definition carries real stock.
+    // Intentional sold-out states keep a positive totalInventory, so they are
+    // never overwritten here.
+    if (expectedSeed > 0 && storedTotal === 0 && storedRemaining === 0 && noActivity) {
+      const healed: LiveStateRecord = {
+        ...existing,
+        sourceProductId: existing.sourceProductId || String(product.id || ''),
+        productName: existing.productName || product.name,
+        slug: existing.slug || product.slug,
+        size,
+        isActive: true,
+        totalInventory: expectedSeed,
+        inventoryRemaining: expectedSeed,
+        winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
+      };
+      await redis.hset(LIVE_STATE_KEY, { [field]: JSON.stringify(healed) });
+      return healed;
+    }
+
     return {
       ...existing,
+      sourceProductId: existing.sourceProductId || String(product.id || ''),
       productName: existing.productName || product.name,
       slug: existing.slug || product.slug,
       size,
       winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
     };
   }
+  // Live inventory mirrors the product's real stock. FCFS products keep
+  // maxRaffleAllocationLimit at 0 (no raffle cap), so fall back to
+  // totalInventory whenever the raffle limit is unset or zero.
+  const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
+  const stock = Math.max(0, Number(product.totalInventory) || 0);
+  const seedInventory = raffleLimit > 0 ? raffleLimit : stock;
   const seed: LiveStateRecord = {
     productId: field,
+    sourceProductId: String(product.id || ''),
     productName: product.name,
     slug: product.slug,
     size,
     isActive: true,
-    totalInventory: Math.max(0, Number(product.maxRaffleAllocationLimit) || 0),
-    inventoryRemaining: Math.max(0, Number(product.maxRaffleAllocationLimit) || 0),
+    totalInventory: seedInventory,
+    inventoryRemaining: seedInventory,
     winnersPerDraw: normalizeWinners(winnersPerDraw, 1),
     drawsCompleted: 0,
     salesCompleted: 0,
@@ -146,6 +247,7 @@ export async function getOrSeedLiveState(
 export async function saveLiveState(redis: Redis, state: LiveStateRecord) {
   const normalized: LiveStateRecord = {
     ...state,
+    sourceProductId: String(state.sourceProductId || resolveLiveStateSourceProductId(state) || ''),
     winnersPerDraw: normalizeWinners(state.winnersPerDraw, 1),
     inventoryRemaining: Math.max(0, Number(state.inventoryRemaining) || 0),
     totalInventory: Math.max(0, Number(state.totalInventory) || 0),
@@ -177,7 +279,11 @@ export async function getLiveProductState(redis: Redis, productOrId: any, size: 
     if (opts.slug) slug = String(opts.slug);
   } else if (productOrId && typeof productOrId === 'object') {
     id = String(productOrId.id || ''); name = String(productOrId.name || productOrId.id || ''); slug = String(productOrId.slug || productOrId.id || '');
-    seedInv = Number(productOrId.maxRaffleAllocationLimit ?? productOrId.totalInventory ?? 10) || 10;
+    // Prefer the raffle cap when set; otherwise seed from real stock so FCFS
+    // products (maxRaffleAllocationLimit = 0) never collapse to the 10-unit default.
+    const raffleLimit = Math.max(0, Number(productOrId.maxRaffleAllocationLimit) || 0);
+    const stock = Math.max(0, Number(productOrId.totalInventory) || 0);
+    seedInv = (raffleLimit > 0 ? raffleLimit : stock) || 10;
     if (typeof fourth === 'number') winners = normalizeWinners(fourth, 1);
     else if (fourth && typeof fourth === 'object') {
       winners = normalizeWinners(fourth.winnersPerDraw, 1);
@@ -195,9 +301,10 @@ export async function getLiveProductState(redis: Redis, productOrId: any, size: 
 export async function setLiveProductState(redis: Redis, state: any) {
   const normalized: LiveStateRecord = {
     productId: String(state.productId || ''),
+    sourceProductId: String(state.sourceProductId || state.id || ''),
     productName: String(state.productName || state.name || ''),
     slug: String(state.slug || ''),
-    size: String(state.size || '50ml'),
+    size: String(state.size || 'Standard'),
     isActive: state.isActive !== false,
     totalInventory: Math.max(0, Number(state.totalInventory) || 0),
     inventoryRemaining: Math.max(0, Number(state.inventoryRemaining) || 0),
@@ -406,11 +513,27 @@ export function createRedisClient(): Redis | null {
   }
 }
 
+/**
+ * Resolve the admin password used to gate /admin and the admin API routes.
+ *
+ * In production the value MUST come from `ADMIN_BASIC_AUTH_PASSWORD` (set in
+ * the platform's environment). Outside production we allow a documented local
+ * dev fallback so the admin portal stays usable on a fresh clone without env
+ * setup — it is never active in production builds.
+ */
+export function getAdminPassword(): string {
+  const configured = process.env.ADMIN_BASIC_AUTH_PASSWORD;
+  if (configured) return configured;
+  if (process.env.NODE_ENV !== 'production') return 'goyunir-admin-dev';
+  return '';
+}
+
 export function createStripeClient(): Stripe | null {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) return null;
   try {
-    return new Stripe(secretKey, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+    // Let the installed Stripe SDK pick its supported latest API version.
+    return new Stripe(secretKey);
   } catch {
     return null;
   }
@@ -509,11 +632,12 @@ function normalizeFallbackProduct(product: any, index: number) {
     desc: String(product?.desc || ''),
     priceCategories: fallbackCategories,
     images: Array.isArray(product?.images) ? product.images : [],
-    isActive: true,
+    isActive: product?.isActive !== false,
     isArchived: Boolean(product?.isArchived),
     isUpcoming: Boolean(product?.isUpcoming),
     isRaffle: product?.isRaffle !== false,
-    productType: String(product?.productType || 'raffle'),
+    checkoutMode: String(product?.checkoutMode || (product?.isRaffle === false ? 'FCFS' : 'RAFFLE')),
+    productType: String(product?.productType || (product?.isRaffle === false ? 'checkout' : 'raffle')),
     totalInventory: Number(product?.totalInventory ?? 0) || 0,
     winnerTiers: Array.isArray(product?.winnerTiers) ? product.winnerTiers : (typeof product?.winnerTiers === 'number' ? [product.winnerTiers] : [0]),
   };
@@ -529,24 +653,28 @@ export function getFallbackStoreProducts(): Record<string, any> {
 }
 
 export async function loadProducts(redis: any): Promise<Record<string, any>> {
-  if (!redis) return {};
+  if (!redis) return getFallbackStoreProducts();
 
-  const raw = await redis.hgetall('store:products');
-  if (!raw || Object.keys(raw).length === 0) return {};
+  try {
+    const raw = await redis.hgetall('store:products');
+    if (!raw || Object.keys(raw).length === 0) return getFallbackStoreProducts();
 
-  const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    const parsed = safeParseRedisItem<any>(v);
-    if (parsed) {
-      const normalized = {
-        ...parsed,
-        priceCategories: Array.isArray(parsed.priceCategories) && parsed.priceCategories.length > 0
-          ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard'))
-          : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }],
-      };
-      out[k] = normalized;
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const parsed = safeParseRedisItem<any>(v);
+      if (parsed) {
+        const normalized = {
+          ...parsed,
+          priceCategories: Array.isArray(parsed.priceCategories) && parsed.priceCategories.length > 0
+            ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard'))
+            : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }],
+        };
+        out[k] = normalized;
+      }
     }
-  }
 
-  return out;
+    return Object.keys(out).length > 0 ? out : getFallbackStoreProducts();
+  } catch {
+    return getFallbackStoreProducts();
+  }
 }

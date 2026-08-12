@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
     const sessionUser = await getSessionUser(request);
     const authHeader = request.headers.get('authorization') || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const adminPassword = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    const adminPassword = getAdminPassword() || '';
     const isAuthorized = Boolean((sessionUser && sessionUser.role === 'admin') || (adminPassword && bearer === adminPassword));
     if (!isAuthorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

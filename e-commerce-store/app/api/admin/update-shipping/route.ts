@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (password !== process.env.ADMIN_BASIC_AUTH_PASSWORD) {
+    if (password !== getAdminPassword()) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

@@ -92,7 +92,18 @@ export default function HomePage() {
             Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            {primaryProduct?.slug ? <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Our Story</Link> : <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>Our Story</Link>}
+            {primaryProduct?.slug ? (
+              <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                Enter live drop
+              </Link>
+            ) : (
+              <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                Browse catalog
+              </Link>
+            )}
+            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.textMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+              Our Story
+            </Link>
             <span style={{ fontSize: 11, color: '#9ca3af' }}>Low supply. Fast conversion. Quiet exclusivity.</span>
           </div>
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>

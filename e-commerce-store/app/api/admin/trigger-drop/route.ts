@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const targetPool = body.targetPool || 'ALL_POOLS';
     const password = body.verificationKey || body.password || '';
-    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    const master = getAdminPassword() || '';
     if (!master || password !== master) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }

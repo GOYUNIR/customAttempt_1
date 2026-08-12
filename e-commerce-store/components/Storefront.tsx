@@ -95,9 +95,27 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         if (data.product.isArchived) {
           setRaffleEndsAt(null);
         } else {
-          const drawAnchor = data.product.isUpcoming ? (data.product.goLiveAt || data.product.releaseEndsAt) : (data.product.releaseEndsAt || data?.config?.dropSchedule?.targetEndDateTime);
+          const now = Date.now();
+          const releaseEndsAt = data.product.releaseEndsAt;
+          const releaseMs = releaseEndsAt ? new Date(releaseEndsAt).getTime() : NaN;
+          // A live (non-upcoming) drop should count down to its release end
+          // while that's still in the future; if it has already passed, fall
+          // back to the configured drop-schedule anchor so a live allocation
+          // never shows a misleading "closed" countdown.
+          let drawAnchor: string | undefined;
+          if (data.product.isUpcoming) {
+            drawAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
+          } else if (Number.isFinite(releaseMs) && releaseMs > now) {
+            drawAnchor = data.product.releaseEndsAt;
+          } else {
+            drawAnchor =
+              data?.config?.dropSchedule?.targetEndDateTime ||
+              data?.config?.dropSchedule?.countdownEndsAt ||
+              data.product.releaseEndsAt ||
+              undefined;
+          }
           const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
-          setRaffleEndsAt(Number.isFinite(anchorMs) ? anchorMs : null);
+          setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
         }
         const cats = data.product.priceCategories || [];
         if (cats.length > 0) setSelectedSize(cats[0].size);
@@ -432,8 +450,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const fallbackImage = getFallbackImage(product);
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
   const inventoryRemaining = Number(product.inventoryRemaining ?? product.totalInventory ?? 0);
-  const totalInventory = Number(product.totalInventory ?? inventoryRemaining ?? 0);
-  const soldOut = product.soldOut === true || (Number.isFinite(inventoryRemaining) && inventoryRemaining <= 0 && totalInventory >= 0);
+  const totalInventory = Number(product.totalInventory ?? 0);
+  // Only treat as sold out when inventory was configured and remaining is depleted.
+  const soldOut = product.soldOut === true || (totalInventory > 0 && inventoryRemaining <= 0);
   const activeProductLabel = soldOut ? 'Sold out' : (product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now'));
   const urgencyLabel = soldOut
     ? 'This release is fully spoken for.'

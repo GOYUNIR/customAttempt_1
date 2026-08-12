@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
@@ -23,7 +23,7 @@ async function getConfig(redis: any) {
 
 function authorized(request: Request) {
   const url = new URL(request.url);
-  const secret = process.env.CRON_SECRET || process.env.ADMIN_BASIC_AUTH_PASSWORD;
+  const secret = process.env.CRON_SECRET || getAdminPassword();
   if (!secret) return true;
   const auth = request.headers.get('authorization');
   const key = url.searchParams.get('key') || '';

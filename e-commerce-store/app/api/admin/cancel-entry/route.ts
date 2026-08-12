@@ -5,6 +5,7 @@ import {
   adminCancelOrder,
   ArchiveRecord,
   loadProducts,
+  getAdminPassword,
 } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    const master = process.env.ADMIN_BASIC_AUTH_PASSWORD || '';
+    const master = getAdminPassword() || '';
     if (!master || password !== master) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
