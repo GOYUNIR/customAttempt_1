@@ -101,6 +101,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       else if (nextScroll < 40) setShowScrollCue(true);
     };
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    let lastInteraction = Date.now();
     const onPointer = (event: PointerEvent) => {
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
@@ -119,8 +120,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     };
 
     let rafId = 0;
-    let lastInteraction = Date.now();
     let idleTargetX = 0.52;
+
     let idleTargetY = 0.42;
     let nextIdleRetargetAt = Date.now() + 2300;
     const animateIdle = () => {
@@ -156,7 +157,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const now = Date.now();
       const deltaY = window.scrollY - lastScrollYRef.current;
       const deltaT = Math.max(16, now - lastScrollAtRef.current || 16);
-      const scrollVelocity = deltaY / deltaT;
+            const scrollVelocity = deltaY / deltaT;
       velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.62, -0.14, 0.14);
       velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.028 + scrollVelocity * 0.07, -0.08, 0.08);
       targetYRef.current = clamp(0.15 + progress * 0.7, 0.1, 0.9);
@@ -173,7 +174,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       setPromoCode(incomingPromo);
       setShowPromoField(true);
       setBannerMessage(`Promoter credit ${incomingPromo} is locked for this session.`);
-      window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
       fetch('/api/promo/validate/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -311,6 +311,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const headerActionMode = String(branding?.headerActionMode || 'cart').toLowerCase();
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
   const actionVerb = headerActionMode === 'bag' ? 'bag' : 'cart';
+
+  // Keep the resolved header action mode ("bag" vs "cart") in sync so the
+  // storefront can read it on render. Without this, the value was only ever
+  // written inside the promo-link branch with the initial render's value, so
+  // the Admin "Top-right action label" setting never reached the storefront.
+  useEffect(() => {
+    window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
+  }, [headerActionMode]);
+
   const glowX = 15 + pointerX * 70;
   const glowY = 8 + pointerY * 55;
   const blurBoost = Math.min(10, Math.floor(scrollY / 60));

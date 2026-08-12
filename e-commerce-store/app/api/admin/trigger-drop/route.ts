@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       poolKeys = poolKeys.filter(k => k === targetPool);
     }
 
-    const allProducts = await loadProducts(redis);
+        const allProducts = await loadProducts(redis);
     const results: any[] = [];
     let totalCharged = 0;
     let totalRevenueCents = 0;
@@ -55,6 +55,11 @@ export async function POST(request: Request) {
       const winnerCount = Math.min(liveWinnerCount, live.inventoryRemaining, shuffled.length);
       const winners = shuffled.slice(0, winnerCount);
 
+      // Winners whose card can't be charged are NOT removed from the pool —
+      // they keep their slot and enter the next draw, matching the auto-draw
+      // cron behavior so a declined charge never silently loses an entry.
+      const declinedEntries: string[] = [];
+
       for (const winnerStr of winners) {
         const entry = safeParseRedisItem<any>(winnerStr);
         if (!entry) continue;
@@ -63,6 +68,7 @@ export async function POST(request: Request) {
         const orderRef = formatOrderRef(String(entry.orderRef || '')) || buildOrderRef(entry.email, product.name, size);
 
         if (!customerId || !paymentMethodId) {
+          declinedEntries.push(winnerStr);
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });
           results.push({ email: entry.email, status: 'declined (no payment method)' });
           continue;
@@ -94,6 +100,7 @@ export async function POST(request: Request) {
           });
           results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, orderRef });
         } catch (err: any) {
+          declinedEntries.push(winnerStr);
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });
           results.push({ email: entry.email, status: 'declined', error: err.message });
         }
@@ -119,7 +126,7 @@ export async function POST(request: Request) {
               off_session: true,
               confirm: true,
               receipt_email: entry.email,
-              description: `${product.name} (${size})`,
+                            description: `${product.name} (${size})`,
             });
             live.inventoryRemaining -= 1;
             live.salesCompleted = (live.salesCompleted || 0) + 1;
@@ -135,8 +142,9 @@ export async function POST(request: Request) {
         for (const item of remainingWaitlist) await redis.rpush(waitlistKey, item);
       }
 
-      // Remove winners from pool, keep the rest
-      const remaining = shuffled.slice(winnerCount);
+      // Remove winners from pool, keep the rest (including declared winners,
+      // who keep their entry for the next draw).
+      const remaining = [...shuffled.slice(winnerCount), ...declinedEntries];
       await redis.del(poolKey);
       for (const item of remaining) {
         await redis.rpush(poolKey, item);

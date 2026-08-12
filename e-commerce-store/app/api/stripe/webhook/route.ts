@@ -343,7 +343,6 @@ export async function POST(request: Request) {
         try {
           await redis.sadd(usedEmailsKey(appliedPromo), email);
           await redis.del(pendingPromoKey(appliedPromo, email));
-          await redis.del(pendingPromoKey(appliedPromo, email));
           const raw = await redis.hget(PROMOS_KEY, appliedPromo);
           const promo = safeParseRedisItem<any>(raw);
           if (promo) {

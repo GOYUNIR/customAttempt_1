@@ -1,4 +1,5 @@
-import { NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
+
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   buildAbsoluteUrl,
@@ -11,7 +12,7 @@ import {
   LAST_DRAW_KEY,
   loadProducts,
 } from '@/lib/server-config';
-import { getProductPrice, getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
+import { getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
 
 export interface DrawResult {
   email: string;
@@ -36,7 +37,10 @@ export async function runDropDraw(request: Request | NextRequest) {
   for (const product of products as any[]) {
     const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
     for (const category of priceCategories) {
-      const size = String(category?.size || 'Standard');
+            const size = String(category?.size || 'Standard');
+      const categoryPriceCents = category && Number(category.price) > 0
+        ? Math.round(Number(category.price) * 100)
+        : 0;
       const poolKey = `drop_pool:${product.name}:${size}`;
       const totalEntries = await redis.llen(poolKey);
       if (totalEntries === 0) continue;
@@ -63,7 +67,7 @@ export async function runDropDraw(request: Request | NextRequest) {
         const customerId = resolveCustomerId(entry) || '';
         const paymentMethodId = String(entry.paymentMethodId ?? '');
         const shippingAddress = String(entry.shippingAddress ?? entry.address ?? 'No Address Logged');
-        const priceCents = Math.round(getProductPrice(product, size) * 100);
+        const priceCents = categoryPriceCents;
 
         if (successCount >= targetLimit) {
           await archiveEntry(redis, {

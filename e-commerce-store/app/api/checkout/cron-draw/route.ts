@@ -65,7 +65,7 @@ async function runAutoDraw(request: Request) {
 
     const processedWinners: any[] = [];
     let grandRevenueChargesCount = 0;
-    let allPoolKeys = await redis.keys('*drop_pool*');
+        let allPoolKeys = await redis.keys('*drop_pool*');
     if (targetPoolSignature !== 'ALL_POOLS') {
       allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
@@ -89,11 +89,20 @@ async function runAutoDraw(request: Request) {
         if (!force && !shouldRunDraw(effectiveSchedule, lastAuto, Date.now())) continue;
 
         // Live price override (from /admin) takes priority over the static
-        // config price. Keep the Stripe Price object's amount matching if
-        // you also rely on the fallback checkout-session path.
+        // config price. Prices now live in the product's `priceCategories`
+        // (managed in the admin portal), so resolve the unit price from there
+        // and fall back to the legacy override/config fields only if needed.
         const override = await getProductOverride(redis, productDefinition.id);
+        const priceCat = (productDefinition.priceCategories || []).find(
+          (c: any) => String(c?.size || '') === productSize,
+        );
+        const categoryPriceCents = priceCat && Number(priceCat.price) > 0
+          ? Math.round(Number(priceCat.price) * 100)
+          : 0;
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
-        const basePriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
+        const legacyPriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
+        const basePriceCents = legacyPriceCents > 0 ? legacyPriceCents : categoryPriceCents;
+        if (!basePriceCents || basePriceCents <= 0) continue;
 
         const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);

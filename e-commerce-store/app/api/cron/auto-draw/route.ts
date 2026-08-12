@@ -119,9 +119,17 @@ async function runAutoDraw(request: Request) {
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
-        const override = await getProductOverride(redis, productDefinition.id);
+                const override = await getProductOverride(redis, productDefinition.id);
+        const priceCat = (productDefinition.priceCategories || []).find(
+          (c: any) => String(c?.size || '') === productSize,
+        );
+        const categoryPriceCents = priceCat && Number(priceCat.price) > 0
+          ? Math.round(Number(priceCat.price) * 100)
+          : 0;
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;
-        const basePriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
+        const legacyPriceCents = Math.round((overridePrice ?? getProductPrice(productDefinition, productSize)) * 100);
+        const basePriceCents = legacyPriceCents > 0 ? legacyPriceCents : categoryPriceCents;
+        if (!basePriceCents || basePriceCents <= 0) continue;
 
         const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
         const live = await getOrSeedLiveState(redis, productDefinition, productSize, winnersPerDraw);
