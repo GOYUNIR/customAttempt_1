@@ -248,33 +248,41 @@
       }
 
       function resolveToken() {
+        var found = '';
         if (typeof window !== 'undefined' && window.ENV_MAPBOX_TOKEN) {
-          return window.ENV_MAPBOX_TOKEN;
+          found = window.ENV_MAPBOX_TOKEN;
         }
-        var el = document.getElementById('search-js');
-        var attr = el ? el.getAttribute('data-mapbox-token') : '';
-        if (attr && attr !== MAPBOX_PLACEHOLDER) {
-          return attr;
+        if (!found) {
+          var el = document.getElementById('search-js');
+          var attr = el ? el.getAttribute('data-mapbox-token') : '';
+          if (attr && attr !== MAPBOX_PLACEHOLDER) found = attr;
         }
-        if (isLocalhost()) {
+        if (!found && isLocalhost()) {
           try {
             var qsToken = new URLSearchParams(window.location.search).get('mapbox_token');
-            if (qsToken) return qsToken.trim();
+            if (qsToken) found = qsToken.trim();
             var lsToken = window.localStorage.getItem('mapbox_dev_token');
-            if (lsToken) return lsToken.trim();
+            if (!found && lsToken) found = lsToken.trim();
           } catch (e) { /* ignore */ }
         }
-        // Local fallback: YOUR_MAPBOX_ACCESS_TOKEN is missing or undefined.
-        // If we're on localhost, dynamically load the hardcoded token string
-        // above so the checkout flow still works during local testing.
         if (
+          !found &&
           isLocalhost() &&
           YOUR_MAPBOX_ACCESS_TOKEN &&
           YOUR_MAPBOX_ACCESS_TOKEN !== LOCALHOST_TOKEN_PLACEHOLDER
         ) {
-          return YOUR_MAPBOX_ACCESS_TOKEN;
+          found = YOUR_MAPBOX_ACCESS_TOKEN;
         }
-        return '';
+        found = String(found || '').trim();
+        // Mapbox browser autofill requires a PUBLIC `pk.*` token. A secret
+        // `sk.*` token, or a leftover placeholder such as
+        // `pk.YOUR_LOCALHOST_MAPBOX_TOKEN`, can NEVER work in the browser and
+        // would silently produce "autofill is on but no dropdown" (the SDK
+        // loads fine, then every suggest request is rejected — and rejected
+        // requests do not bill, so the dashboard shows nothing).
+        if (!found || found === LOCALHOST_TOKEN_PLACEHOLDER) return '';
+        if (!/^pk\.[A-Za-z0-9_-]{6,}/.test(found)) return '';
+        return found;
       }
 
       function setFeedback(message, isError) {
@@ -330,9 +338,29 @@
                     if (f) f.setAttribute('data-mapbox-verified', 'true');
                   }, 0);
                 });
+                collection.addEventListener('suggesterror', function (ev) {
+                  var detail = ev && ev.detail;
+                  var msg = detail && detail.message ? detail.message : String(detail || 'error');
+                  console.warn('[mapbox-autofill] Suggest error:', msg);
+                  if (/401|403|unauthorized|forbidden|access token|invalid token/i.test(msg)) {
+                    console.error(
+                      '[mapbox-autofill] Mapbox is REJECTING the access token. Use a public pk.* token ' +
+                      'and make sure its URL restrictions include this host.'
+                    );
+                  }
+                });
               }
-              autofillReady = true;
-              setNote('Start typing in "Address Line 1" to autofill the rest.');
+              // Only treat autofill as "ready" (i.e. enforce pick-from-dropdown)
+              // when the SDK actually attached a dropdown listbox to the page.
+              // "collection created" alone means nothing if the token is invalid.
+              var attached = document.querySelectorAll('mapbox-search-listbox').length > 0;
+              autofillReady = attached;
+              if (attached) {
+                setNote('Start typing in "Address Line 1" to autofill the rest.');
+              } else {
+                setNote('Address autofill loaded but could not attach — enter your address manually.', true);
+                console.warn('[mapbox-autofill] SDK loaded but no dropdown was attached. Check the Mapbox token and its URL restrictions for this domain.');
+              }
             } catch (err) {
               console.error('[autofill] init failed', err);
               setNote('Address autofill could not start — enter your address manually.', true);

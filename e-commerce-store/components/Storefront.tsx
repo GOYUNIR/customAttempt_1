@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
@@ -20,7 +20,7 @@ const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 function addressValidationError(address: string): string | null {
   const base = validateShippingAddress(address);
   if (base) return base;
-  if (getMapboxStatus().status === 'active' && !isMapboxVerifiedAddress(address)) {
+  if (isMapboxAutofillActive() && !isMapboxVerifiedAddress(address)) {
     return 'Choose your shipping address from the autofill suggestions so we can verify it.';
   }
   return null;
@@ -100,6 +100,21 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
   const [showPromoField, setShowPromoField] = useState(false);
   const [countdownPulse, setCountdownPulse] = useState(false);
+  const [mapboxHint, setMapboxHint] = useState('');
+
+  // Live Mapbox autofill hint (drives the small status line under the shipping
+  // field). Updated whenever lib/mapbox-autofill.ts refreshes its status.
+  useEffect(() => {
+    const sync = () => {
+      const s = getMapboxStatus();
+      if (s.status === 'active') setMapboxHint(s.tokenRejected ? 'token-rejected' : (s.attached ? 'autofill-on' : 'autofill-off'));
+      else if (s.status === 'no-token') setMapboxHint('no-token');
+      else setMapboxHint('');
+    };
+    sync();
+    window.addEventListener('goyunir-mapbox-status', sync);
+    return () => window.removeEventListener('goyunir-mapbox-status', sync);
+  }, []);
 
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
   const actionMode = typeof window !== 'undefined' ? (window.localStorage.getItem('goyunir-header-action-mode') === 'bag' ? 'bag' : 'cart') : 'cart';
@@ -356,7 +371,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       notify({ type: 'alert', message: 'Complete your details before entering.' });
       return;
     }
-    const addrErr = addressValidationError(address);
+    const liveAddress = getAutofillAddressValue() || address;
+    const addrErr = addressValidationError(liveAddress);
     if (addrErr) {
       setMessage(addrErr);
       notify({ type: 'alert', message: addrErr });
@@ -369,7 +385,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle', promoCode }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address: liveAddress, mode: 'raffle', promoCode }),
       });
       const data = await res.json();
       if (data.alreadyEntered) {
@@ -401,7 +417,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       notify({ type: 'alert', message: 'Complete your details before checkout.' });
       return;
     }
-    const addrErr = addressValidationError(address);
+    const liveAddress = getAutofillAddressValue() || address;
+    const addrErr = addressValidationError(liveAddress);
     if (addrErr) {
       setMessage(addrErr);
       notify({ type: 'alert', message: addrErr });
@@ -414,7 +431,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'direct', promoCode }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address: liveAddress, mode: 'direct', promoCode }),
       });
       const data = await res.json();
       if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
@@ -441,7 +458,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       notify({ type: 'alert', message: 'Complete your details before joining the waitlist.' });
       return;
     }
-    const addrErr = addressValidationError(address);
+    const liveAddress = getAutofillAddressValue() || address;
+    const addrErr = addressValidationError(liveAddress);
     if (addrErr) {
       setMessage(addrErr);
       notify({ type: 'alert', message: addrErr });
@@ -454,7 +472,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'waitlist', promoCode }),
+        body: JSON.stringify({ productId: product.id, size: selectedSize, email, address: liveAddress, mode: 'waitlist', promoCode }),
       });
       const data = await res.json();
       if (data.alreadyEntered) {
@@ -601,6 +619,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
             <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
           </form>
+          {mapboxHint === 'autofill-on' && (
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing in the shipping field to pick your address.</div>
+          )}
+          {mapboxHint === 'autofill-off' && (
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>
+          )}
+          {mapboxHint === 'no-token' && (
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your address manually.</div>
+          )}
+          {mapboxHint === 'token-rejected' && (
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
+          )}
 
           <div style={{ marginBottom: 8 }}>
             {!showPromoField ? (

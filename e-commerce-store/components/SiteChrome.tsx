@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
-import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 
 type CartItem = {
@@ -23,7 +23,7 @@ type CartItem = {
 function addressValidationError(address: string): string | null {
   const base = validateShippingAddress(address);
   if (base) return base;
-  if (getMapboxStatus().status === 'active' && !isMapboxVerifiedAddress(address)) {
+  if (isMapboxAutofillActive() && !isMapboxVerifiedAddress(address)) {
     return 'Choose your shipping address from the autofill suggestions so we can verify it.';
   }
   return null;
@@ -123,6 +123,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [showPromoField, setShowPromoField] = useState(false);
   const [notice, setNotice] = useState<{ id?: string; type: string; message: string } | null>(null);
   const [showScrollCue, setShowScrollCue] = useState(true);
+  const [mapboxHint, setMapboxHint] = useState('');
   const targetXRef = useRef(0.5);
   const targetYRef = useRef(0.35);
   const velocityXRef = useRef(0);
@@ -176,6 +177,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // added later (the drawer only mounts when opened), so this call is enough.
   useEffect(() => {
     ensureMapboxAutofill();
+  }, []);
+
+  // Live Mapbox autofill hint (drives the small status line in the cart drawer).
+  useEffect(() => {
+    const sync = () => {
+      const s = getMapboxStatus();
+      if (s.status === 'active') setMapboxHint(s.tokenRejected ? 'token-rejected' : (s.attached ? 'autofill-on' : 'autofill-off'));
+      else if (s.status === 'no-token') setMapboxHint('no-token');
+      else setMapboxHint('');
+    };
+    sync();
+    window.addEventListener('goyunir-mapbox-status', sync);
+    return () => window.removeEventListener('goyunir-mapbox-status', sync);
   }, []);
 
   useEffect(() => {
@@ -520,7 +534,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       showNotice({ type: 'alert', message: 'Add your email first.' });
       return;
     }
-    const addrErr = addressValidationError(checkoutAddress);
+    const liveAddress = getAutofillAddressValue() || checkoutAddress;
+    const addrErr = addressValidationError(liveAddress);
     if (addrErr) {
       setCartMsg(addrErr);
       showNotice({ type: 'alert', message: addrErr });
@@ -532,7 +547,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     try {
       const payload = {
         email: checkoutEmail.trim().toLowerCase(),
-        address: checkoutAddress.trim(),
+        address: liveAddress,
         promoCode: String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase(),
         items: cart.map((item) => ({ productId: item.productId, size: item.size, quantity: 1 })),
       };
@@ -795,6 +810,18 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
                   />
                   <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
+                  {mapboxHint === 'autofill-on' && (
+                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing to pick your address.</div>
+                  )}
+                  {mapboxHint === 'autofill-off' && (
+                    <div style={{ fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>
+                  )}
+                  {mapboxHint === 'no-token' && (
+                    <div style={{ fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your address manually.</div>
+                  )}
+                  {mapboxHint === 'token-rejected' && (
+                    <div style={{ fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
+                  )}
                   {!showPromoField ? (
                     <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
                   ) : (

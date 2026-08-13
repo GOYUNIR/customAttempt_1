@@ -67,7 +67,29 @@ type AddressAutofillCollection = {
 export type GoyunirMapboxStatus =
   | { status: 'no-token'; token: false; error?: undefined }
   | { status: 'loading'; token: true; error?: undefined }
-  | { status: 'active'; token: true; error?: undefined }
+  | {
+      status: 'active';
+      token: true;
+      error?: undefined;
+      /** True ONLY when the SDK actually attached autofill to >=1 address input. */
+      attached?: boolean;
+      /** Number of eligible address inputs currently on the page. */
+      inputs?: number;
+      /** Number of inputs the SDK successfully attached to. */
+      attachedInputs?: number;
+      /** Number of <mapbox-search-listbox> dropdown elements the SDK created. */
+      listboxes?: number;
+      /** First characters of the resolved token (for diagnosing wrong/placeholder tokens). */
+      tokenPrefix?: string;
+      /** Current hostname (for diagnosing Mapbox token URL restrictions). */
+      host?: string;
+      /** Mapbox suggest API error messages seen this session. */
+      suggestErrors?: string[];
+      /** Number of Mapbox suggest requests issued this session. */
+      suggestCount?: number;
+      /** True when a Mapbox suggest request was rejected (401/403) this session. */
+      tokenRejected?: boolean;
+    }
   | { status: 'sdk-missing'; token: true; error?: string }
   | { status: 'failed'; token: true; error?: string };
 
@@ -90,10 +112,29 @@ const verifiedAddresses = new Set<string>();
 let autofillObserver: MutationObserver | null = null;
 let attachedInputs: HTMLInputElement[] = [];
 
+// ── Actual-attach tracking ───────────────────────────────────────────────────
+// `status: 'active'` only means "SDK loaded + collection created". It does NOT
+// mean the SDK attached autofill to any input. We track real attachment here by
+// inspecting the DOM for the SDK's side effects: it renames attached inputs to
+// `<name> address-search`, adds `data-lpignore`, and appends a
+// `<mapbox-search-listbox>` element to <body> per attached input.
+let attachTimer: number | null = null;
+let suggestErrors: string[] = [];
+let suggestCount = 0;
+let resolvedTokenPrefix = '';
+let tokenRejected = false;
+
 function setStatus(next: GoyunirMapboxStatus): void {
   status = next;
   if (typeof window !== 'undefined') {
-    window.__GOYUNIR_MAPBOX__ = { ...next };
+    window.__GOYUNIR_MAPBOX__ = { ...next } as GoyunirMapboxStatus;
+    try {
+      window.dispatchEvent(
+        new CustomEvent('goyunir-mapbox-status', { detail: { ...next } })
+      );
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -106,45 +147,172 @@ function isLocalhostHost(): boolean {
 
 export function resolveMapboxToken(): string {
   if (typeof window === 'undefined') return '';
-  if (window.ENV_MAPBOX_TOKEN) return window.ENV_MAPBOX_TOKEN.trim();
-
-  const marker = document.getElementById('search-js');
-  if (marker) {
-    const attr = marker.getAttribute('data-mapbox-token') || '';
-    if (attr && attr !== PLACEHOLDER_ATTR) return attr.trim();
-  }
-
-  const buildToken = (
-    process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
-    process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ||
-    ''
-  ).trim();
-  if (buildToken) return buildToken;
-
-  // Localhost-only dev override — never read on a production host. Lets you
-  // test the real dropdown locally by opening the site with
-  //   ?mapbox_token=pk.eyJ…   (or setting localStorage "mapbox_dev_token").
-  if (isLocalhostHost()) {
-    try {
-      const qs = new URLSearchParams(window.location.search).get('mapbox_token');
-      if (qs) return qs.trim();
-      const ls = window.localStorage.getItem('mapbox_dev_token');
-      if (ls) return ls.trim();
-    } catch {
-      /* ignore storage/query errors */
+  let token = '';
+  if (window.ENV_MAPBOX_TOKEN) {
+    token = window.ENV_MAPBOX_TOKEN.trim();
+  } else {
+    const marker = document.getElementById('search-js');
+    if (marker) {
+      const attr = marker.getAttribute('data-mapbox-token') || '';
+      if (attr && attr !== PLACEHOLDER_ATTR) token = attr.trim();
+    }
+    if (!token) {
+      const buildToken = (
+        process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
+        process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ||
+        ''
+      ).trim();
+      if (buildToken) token = buildToken;
+    }
+    // Localhost-only dev override — never read on a production host. Lets you
+    // test the real dropdown locally by opening the site with
+    //   ?mapbox_token=pk.eyJ…   (or setting localStorage "mapbox_dev_token").
+    if (!token && isLocalhostHost()) {
+      try {
+        const qs = new URLSearchParams(window.location.search).get('mapbox_token');
+        if (qs) token = qs.trim();
+        else {
+          const ls = window.localStorage.getItem('mapbox_dev_token');
+          if (ls) token = ls.trim();
+        }
+      } catch {
+        /* ignore storage/query errors */
+      }
     }
   }
-  return '';
+
+  // Mapbox browser autofill requires a PUBLIC `pk.*` token. A secret `sk.*`
+  // token or an obvious placeholder makes the SDK load (status "active") but
+  // every suggest request is then rejected — and rejected requests do not
+  // bill, so the Mapbox dashboard shows zero usage while no dropdown appears.
+  if (!token) return '';
+  if (!/^pk\.[A-Za-z0-9_-]{6,}/.test(token)) {
+    console.warn(
+      '[mapbox-autofill] Rejecting non-public Mapbox token (must start with "pk."). ' +
+        'A secret "sk.*" token or placeholder can never work in the browser.'
+    );
+    return '';
+  }
+  return token;
 }
 
 /** Current autofill status — mirror of window.__GOYUNIR_MAPBOX__. */
 export function getMapboxStatus(): GoyunirMapboxStatus {
+  if (status.status === 'active') {
+    const info = verifyMapboxAttachment();
+    return {
+      ...status,
+      attached: !tokenRejected && (info.attachedInputs > 0 || info.listboxes > 0),
+      inputs: info.inputs,
+      attachedInputs: info.attachedInputs,
+      listboxes: info.listboxes,
+      tokenPrefix: resolvedTokenPrefix,
+      host: typeof window !== 'undefined' ? window.location.hostname : undefined,
+      suggestErrors: suggestErrors.slice(-5),
+      suggestCount,
+      tokenRejected,
+    } as GoyunirMapboxStatus;
+  }
   return { ...status };
 }
 
-/** True once the SDK loaded and autofill is attached to the page. */
+/**
+ * Count the dropdown listbox elements the SDK created. The SDK appends one
+ * `<mapbox-search-listbox>` per attached input to `document.body`.
+ */
+function listboxElements(): Element[] {
+  if (typeof document === 'undefined') return [];
+  try {
+    return Array.from(document.querySelectorAll('mapbox-search-listbox'));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Inspect the DOM for the SDK's attach side effects:
+ *  - the SDK renames each attached input to `<name> address-search`
+ *  - the SDK adds `data-lpignore` to each attached input
+ *  - the SDK appends a `<mapbox-search-listbox>` dropdown per attached input
+ * These are the ONLY reliable signals that autofill actually attached; the
+ * `status: 'active'` flag merely means the SDK loaded.
+ */
+export function verifyMapboxAttachment(): {
+  inputs: number;
+  attachedInputs: number;
+  listboxes: number;
+} {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return { inputs: 0, attachedInputs: 0, listboxes: 0 };
+  }
+  const eligible = findAddressInputs();
+  const attached = eligible.filter(
+    (i) =>
+      (i.getAttribute('name') || '').includes('address-search') ||
+      i.hasAttribute('data-lpignore')
+  ).length;
+  return {
+    inputs: eligible.length,
+    attachedInputs: attached,
+    listboxes: listboxElements().length,
+  };
+}
+
+/** True once the SDK loaded AND is actually attached to at least one input. */
 export function isMapboxAutofillActive(): boolean {
-  return status.status === 'active';
+  if (status.status !== 'active') return false;
+  // If Mapbox rejected the token, the dropdown can never produce results, so
+  // don't force customers to "pick from the suggestions" — fall back to
+  // structural validation instead.
+  if (tokenRejected) return false;
+  const info = verifyMapboxAttachment();
+  return info.attachedInputs > 0 || info.listboxes > 0;
+}
+
+/**
+ * The current live value of an eligible address input. This is the DOM truth,
+ * which matters because the Mapbox SDK fills the input value programmatically
+ * when a suggestion is picked — that does NOT trigger React's onChange, so
+ * React state can be stale (empty) while the input visibly shows the selected
+ * address. Submit handlers should prefer this over state.
+ *
+ * Selection order: the input the user is currently typing in (active element),
+ * else the LAST eligible input (the cart drawer mounts after the product form,
+ * so its input comes later in document order), else the first eligible input.
+ */
+export function getAutofillAddressValue(input?: HTMLInputElement | null): string {
+  if (typeof document === 'undefined') return '';
+  const read = (el: HTMLInputElement | null | undefined): string =>
+    el ? String(el.value || '').trim() : '';
+  if (input) return read(input);
+  const inputs = findAddressInputs();
+  if (inputs.length === 0) return '';
+  const active = document.activeElement as HTMLInputElement | null;
+  if (active && active.matches && inputs.includes(active)) return read(active);
+  return read(inputs[inputs.length - 1]);
+}
+
+/**
+ * Refresh the `active` status payload with live attach diagnostics so
+ * `window.__GOYUNIR_MAPBOX__` (and any UI hint) always reflects reality.
+ */
+function refreshActiveStatus(): void {
+  if (status.status !== 'active') return;
+  const info = verifyMapboxAttachment();
+  const next: GoyunirMapboxStatus = {
+    status: 'active',
+    token: true,
+    attached: !tokenRejected && (info.attachedInputs > 0 || info.listboxes > 0),
+    inputs: info.inputs,
+    attachedInputs: info.attachedInputs,
+    listboxes: info.listboxes,
+    tokenPrefix: resolvedTokenPrefix,
+    host: typeof window !== 'undefined' ? window.location.hostname : undefined,
+    suggestErrors: suggestErrors.slice(-5),
+    suggestCount,
+    tokenRejected,
+  };
+  setStatus(next);
 }
 
 /**
@@ -241,20 +409,26 @@ function inputsEqual(a: HTMLInputElement[], b: HTMLInputElement[]): boolean {
 
 /**
  * Attach the SDK to any street-address input that mounted since the last pass
- * (e.g. the cart drawer's shipping field). Comparison is by identity only —
- * never deep-equality — so React's circular `__reactFiber$…` DOM properties
- * can never make this recurse. No-op when nothing changed.
+ * (e.g. the cart drawer's shipping field), or re-attach when the SDK is loaded
+ * but somehow didn't attach (React can replace input DOM nodes on re-render).
+ * Comparison is by identity only — never deep-equality — so React's circular
+ * `__reactFiber$…` DOM properties can never make this recurse.
  */
 export function resyncMapboxAutofill(): void {
   if (!collection || typeof collection.update !== 'function') return;
   const current = findAddressInputs();
-  if (inputsEqual(current, attachedInputs)) return;
+  const info = verifyMapboxAttachment();
+  const inputsChanged = !inputsEqual(current, attachedInputs);
+  const missingAttach =
+    current.length > 0 && info.attachedInputs === 0 && info.listboxes === 0;
+  if (!inputsChanged && !missingAttach) return;
   attachedInputs = current;
   try {
     collection.update();
   } catch (err) {
     console.warn('[mapbox-autofill] Failed to attach autofill to a newly mounted input.', err);
   }
+  refreshActiveStatus();
 }
 
 /**
@@ -274,6 +448,68 @@ function startAutofillObserver(): void {
   resyncMapboxAutofill();
 }
 
+function stopAttachLoop(): void {
+  if (attachTimer !== null && typeof window !== 'undefined') {
+    window.clearInterval(attachTimer);
+    attachTimer = null;
+  }
+}
+
+/**
+ * Safety net that keeps forcing `collection.update()` until the SDK really
+ * attached to the address inputs (or until there is nothing left to attach).
+ *
+ * The SDK's constructor runs `update()` once, but on a React page the eligible
+ * inputs can mount AFTER the SDK finished loading (the product fetch races the
+ * cached SDK script) or React can replace input DOM nodes on re-render. The
+ * collection's own `observe()` can't be used — its MutationObserver callback
+ * deep-compares React DOM nodes (`at(Hi(), …)`) and overflows the stack — so
+ * we retry `update()` (which is idempotent) until the DOM shows real attach
+ * side effects, then stop.
+ */
+function startAttachLoop(): void {
+  if (attachTimer !== null || typeof window === 'undefined') return;
+  const MAX_ATTEMPTS = 20; // ~16s of retries
+  let attempts = 0;
+  attachTimer = window.setInterval(() => {
+    attempts += 1;
+    const info = verifyMapboxAttachment();
+    if (info.attachedInputs > 0 || info.listboxes > 0) {
+      stopAttachLoop();
+      console.info(
+        `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
+      );
+      refreshActiveStatus();
+      return;
+    }
+    if (info.inputs === 0) {
+      // No eligible inputs yet — React may still be mounting the form.
+      if (attempts >= MAX_ATTEMPTS) {
+        stopAttachLoop();
+        console.warn(
+          '[mapbox-autofill] No address inputs found after retrying. It will re-attach if one appears later.'
+        );
+      }
+      return;
+    }
+    // Eligible inputs exist but nothing is attached — force the SDK to re-scan.
+    try {
+      collection?.update();
+    } catch (err) {
+      console.warn('[mapbox-autofill] Retry update() failed:', err);
+    }
+    if (attempts >= MAX_ATTEMPTS) {
+      stopAttachLoop();
+      console.warn(
+        '[mapbox-autofill] Could not attach autofill after retrying. ' +
+          'If Mapbox requests are rejected, the token is likely invalid or URL-restricted for this domain ' +
+          '(see window.__GOYUNIR_MAPBOX__).'
+      );
+      refreshActiveStatus();
+    }
+  }, 800);
+}
+
 /**
  * Attach Mapbox address autofill to the page. Safe to call from multiple
  * components and on every mount: the SDK + collection are created only once,
@@ -284,8 +520,10 @@ export async function ensureMapboxAutofill(): Promise<void> {
   if (status.status === 'loading') return;
   if (status.status === 'active') {
     // Already running — pick up any input that mounted since the last observer
-    // tick (no-op unless the input set actually changed).
+    // tick (no-op unless the input set actually changed or attach is missing).
     resyncMapboxAutofill();
+    startAttachLoop();
+    refreshActiveStatus();
     return;
   }
 
@@ -299,6 +537,8 @@ export async function ensureMapboxAutofill(): Promise<void> {
     return;
   }
 
+  resolvedTokenPrefix = token.length > 7 ? `${token.slice(0, 7)}…` : '(token too short?)';
+
   setStatus({ status: 'loading', token: true });
   await loadMapboxSdk();
   const mapbox = window.mapboxsearch;
@@ -309,6 +549,9 @@ export async function ensureMapboxAutofill(): Promise<void> {
   }
   if (collection) {
     setStatus({ status: 'active', token: true });
+    resyncMapboxAutofill();
+    startAttachLoop();
+    refreshActiveStatus();
     return;
   }
   try {
@@ -318,14 +561,55 @@ export async function ensureMapboxAutofill(): Promise<void> {
     collection = mapbox.autofill({ accessToken: token });
     if (collection && typeof collection.addEventListener === 'function') {
       collection.addEventListener('retrieve', handleRetrieve);
+      collection.addEventListener('suggest', () => {
+        suggestCount += 1;
+        refreshActiveStatus();
+      });
+      collection.addEventListener('suggesterror', (event: any) => {
+        const detail = event && event.detail;
+        const message =
+          detail instanceof Error
+            ? detail.message
+            : (detail && detail.message) || String(detail || 'Mapbox suggest error');
+        suggestErrors = suggestErrors.concat(message);
+        console.warn('[mapbox-autofill] Mapbox suggest error:', message);
+        if (/401|403|unauthorized|not authorized|forbidden|access token|invalid token/i.test(message)) {
+          tokenRejected = true;
+          console.error(
+            '[mapbox-autofill] Mapbox is REJECTING the access token. Fix: (1) use a PUBLIC pk.* token, ' +
+              '(2) in account.mapbox.com → Access Tokens check URL restrictions include this domain (' +
+              (typeof window !== 'undefined' ? window.location.hostname : '?') +
+              '), (3) ensure the token was not revoked/expired. Token prefix: ' +
+              resolvedTokenPrefix
+          );
+        }
+        refreshActiveStatus();
+      });
     }
     watchManualEdits();
+    // Force an explicit scan+attach ONLY if the constructor didn't already
+    // attach (e.g. the eligible inputs mounted after the SDK finished loading).
+    // update() is idempotent but re-creating wrappers duplicates the SDK's
+    // hidden data-seed element, so skip it when the DOM already shows attach
+    // side effects.
+    const initialAttach = verifyMapboxAttachment();
+    if (initialAttach.attachedInputs === 0 && initialAttach.listboxes === 0) {
+      try {
+        collection?.update();
+      } catch (err) {
+        console.warn('[mapbox-autofill] Initial update() failed:', err);
+      }
+    }
     // NOTE: we deliberately do NOT call collection.observe() here — the SDK's
     // MutationObserver deep-compares React DOM nodes and overflows the stack.
     // startAutofillObserver() provides the same auto-attach behaviour safely.
     startAutofillObserver();
     setStatus({ status: 'active', token: true });
-    console.info('[mapbox-autofill] Address autofill is ACTIVE. Requests will count on your Mapbox dashboard.');
+    console.info(
+      '[mapbox-autofill] SDK loaded (token ' + resolvedTokenPrefix + '). Verifying attach…'
+    );
+    startAttachLoop();
+    refreshActiveStatus();
   } catch (err) {
     setStatus({
       status: 'failed',
