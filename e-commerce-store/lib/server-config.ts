@@ -664,11 +664,15 @@ export function getFallbackStoreProducts(): Record<string, any> {
 }
 
 export async function loadProducts(redis: any): Promise<Record<string, any>> {
-  if (!redis) return getFallbackStoreProducts();
+  // Return an empty map when Redis is missing or has no products yet — the
+  // storefront should show zero items until a seed is generated in Redis via
+  // the admin portal (Seed Defaults / Add Product). No config fallback catalog
+  // is served on the public site.
+  if (!redis) return {};
 
   try {
     const raw = await redis.hgetall('store:products');
-    if (!raw || Object.keys(raw).length === 0) return getFallbackStoreProducts();
+    if (!raw || Object.keys(raw).length === 0) return {};
 
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(raw)) {
@@ -684,8 +688,8 @@ export async function loadProducts(redis: any): Promise<Record<string, any>> {
       }
     }
 
-    return Object.keys(out).length > 0 ? out : getFallbackStoreProducts();
+    return out;
   } catch {
-    return getFallbackStoreProducts();
+    return {};
   }
 }

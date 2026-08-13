@@ -300,8 +300,7 @@ export default function CatalogPage() {
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0,0,0,0.75)',
-              backdropFilter: 'blur(10px)',
+              background: 'rgba(0,0,0,0.82)',
               zIndex: 300,
               display: 'flex',
               alignItems: 'flex-end',

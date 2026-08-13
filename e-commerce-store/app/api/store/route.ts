@@ -3,7 +3,6 @@ import {
   aggregateLiveInventoryByProduct,
   createRedisClient,
   findLiveInventoryForProduct,
-  getFallbackStoreProducts,
   listLiveStates,
   loadStoreConfigCached,
   safeParseRedisItem,
@@ -182,22 +181,15 @@ async function buildStorePayload(requestedSlug: string) {
     );
 
   if (!redis) {
-    const fallbackProducts = sortProducts(Object.values(getFallbackStoreProducts()).map(sanitizeProduct));
-    const lifecycleProducts = applyLifecycle(fallbackProducts, []);
-    const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
-    const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
-    const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
-    const product = requestedSlug
-      ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
-      : null;
-
+    // No Redis configured and nothing has been seeded yet → start with zero
+    // products. Operators publish content via /admin (Seed Defaults or Add Product).
     return {
       config: mergePublicConfig({}),
-      activeProducts,
-      archivedProducts,
-      upcomingProducts,
-      allProducts: lifecycleProducts,
-      product,
+      activeProducts: [],
+      archivedProducts: [],
+      upcomingProducts: [],
+      allProducts: [],
+      product: null,
       scheduleOverride: {},
       socialOverride: {},
       timestamp: Date.now(),
@@ -215,11 +207,6 @@ async function buildStorePayload(requestedSlug: string) {
       const p = safeParseRedisItem<any>(value);
       if (p) allProducts.push(sanitizeProduct(p));
     }
-  }
-
-  // Redis empty → serve config fallbacks so the storefront is never blank.
-  if (allProducts.length === 0) {
-    allProducts = Object.values(getFallbackStoreProducts()).map(sanitizeProduct);
   }
 
   allProducts = sortProducts(allProducts);

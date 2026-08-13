@@ -124,9 +124,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     };
 
     // Pushes the eased glow position straight onto the DOM (no React state),
-    // which keeps the animation at 60fps without re-rendering the app. The
-    // CSS variables live on <html> so both the background glow and the header
-    // accent glow can read them.
+    // which keeps the animation at 60fps without re-rendering the app. Only
+    // `transform` is written on the glow orbs — transform-only updates run on
+    // the compositor thread, so nothing forces a paint per frame. The orbs are
+    // pre-blurred radial gradients (no `filter: blur()`), so the glow is
+    // painted once and then only composited.
     const applyGlow = (x: number, y: number) => {
       const primary = orbPrimaryRef.current;
       const secondary = orbSecondaryRef.current;
@@ -134,8 +136,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (!primary || !secondary || !tertiary) return;
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
-      document.documentElement.style.setProperty('--glow-x', `${15 + x * 70}%`);
-      document.documentElement.style.setProperty('--glow-y', `${8 + y * 55}%`);
       primary.style.transform = `translate3d(${((-16 + x * 68) / 100) * vw}px, ${((-8 + y * 72) / 100) * vh}px, 0)`;
       secondary.style.transform = `translate3d(${((56 - x * 32) / 100) * vw}px, ${((48 - y * 26) / 100) * vh}px, 0)`;
       tertiary.style.transform = `translate3d(${((18 + x * 24) / 100) * vw}px, ${((62 - y * 18) / 100) * vh}px, 0)`;
@@ -343,7 +343,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   };
 
   const headerAccent = theme?.accentBlue || '#7dd3fc';
-  const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.82)';
+  const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.94)';
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
@@ -362,10 +362,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at var(--glow-x, 50%) var(--glow-y, 35%), rgba(255,255,255,0.022), transparent 16%)' }} />
-        <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `${headerAccent}22`, filter: 'blur(48px)', willChange: 'transform', opacity: 0.95 }} />
-        <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(168,85,247,0.18)', filter: 'blur(54px)', willChange: 'transform', opacity: 0.92 }} />
-        <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(255,244,214,0.09)', filter: 'blur(34px)', willChange: 'transform', opacity: 0.9 }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />
+        <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `radial-gradient(circle, ${headerAccent}40 0%, ${headerAccent}14 38%, transparent 70%)`, willChange: 'transform', opacity: 0.95 }} />
+        <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'radial-gradient(circle, rgba(168,85,247,0.36) 0%, rgba(168,85,247,0.12) 40%, transparent 70%)', willChange: 'transform', opacity: 0.92 }} />
+        <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'radial-gradient(circle, rgba(255,244,214,0.16) 0%, rgba(255,244,214,0.05) 42%, transparent 72%)', willChange: 'transform', opacity: 0.9 }} />
       </div>
       {bannerMessage && (
         <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
@@ -374,7 +374,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       )}
       {notice && (
         <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', zIndex: 170, pointerEvents: 'none' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '9px 13px', borderRadius: 999, background: 'rgba(10,10,12,0.94)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.28)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.24)' : notice.type === 'loading' ? 'rgba(125,211,252,0.24)' : 'rgba(255,255,255,0.1)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.34)', backdropFilter: 'blur(16px)' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '9px 13px', borderRadius: 999, background: 'rgba(10,10,12,0.94)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.28)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.24)' : notice.type === 'loading' ? 'rgba(125,211,252,0.24)' : 'rgba(255,255,255,0.1)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.34)' }}>
             <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
               {notice.type === 'loading' ? (
                 <>
@@ -400,7 +400,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           minHeight: '84px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           background: `${headerBg}`,
-          backdropFilter: 'blur(18px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -408,8 +407,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           zIndex: 100,
           boxSizing: 'border-box',
           transform: 'translateY(0)',
-          transition: 'transform 160ms ease, backdrop-filter 220ms ease',
-          backgroundImage: `radial-gradient(circle at var(--glow-x, 50%) -20%, ${headerAccent}33, transparent 35%)`,
+          transition: 'transform 160ms ease',
+          backgroundImage: `radial-gradient(circle at 50% -20%, ${headerAccent}33, transparent 35%)`,
           boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
         }}
       >
@@ -476,7 +475,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </div>
       </div>
 
-      <footer style={{ background: 'rgba(8,8,10,0.96)', backdropFilter: 'blur(18px)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
+      <footer style={{ background: 'rgba(8,8,10,0.96)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
             <Link href="/terms" style={{ color: '#71717a', textDecoration: 'none' }}>Terms</Link>
@@ -496,7 +495,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       </footer>
 
       {cartOpen && (
-        <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+        <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', background: '#0b0b0f', borderLeft: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>

@@ -15,7 +15,7 @@ GOYUNIR is a raffle/drop allocation storefront built on Next.js with Redis as th
 ### Data Storage
 - **Redis** is the source of truth for ALL store data
 - Products, config, settings, and entries are stored in Redis
-- **Fallback products** exist in `components/Storefront.tsx` if Redis is empty
+- **No fallback catalog is served** – if Redis is empty the storefront shows **0 items** until products are seeded via `/admin` (Seed Defaults or Add Product).
 
 ### Key Redis Keys
 
@@ -38,9 +38,9 @@ archive:ledger - Permanent entry history
 ## CRITICAL RULES FOR AI AGENTS
 
 ### When Making Changes
-1. **Never assume Redis has data** – always use fallbacks.
+1. **Never assume Redis has data** – handle an empty Redis gracefully (empty lists, never fallback products). The storefront intentionally shows **0 items** until a seed exists.
 2. **Products must be in Redis to appear on site** – use the **Seed Defaults** button in admin if Redis is empty.
-3. **/elysian-white and /obsidian-void are fallback slugs** – they redirect if not in Redis.
+3. **Product slugs only resolve when the product exists in Redis** – an unseeded store returns empty results, and direct product URLs show "Product not found".
 4. **All business logic is now configurable via the admin portal** – do NOT suggest code changes for:
    - Adding/removing product sizes
    - Changing product prices
@@ -65,7 +65,7 @@ archive:ledger - Permanent entry history
 3. Test admin portal for each feature
 
 ### Files to NEVER Modify
-- `components/Storefront.tsx` – Contains fallback products, modify carefully
+- `components/Storefront.tsx` – Modify carefully (cart/checkout/product-page flow; no fallback catalog is served here)
 - `app/api/store/config/route.ts` – Critical for site loading
 - `app/[slug]/page.tsx` – Product page routing
 - `goyunir.config.ts` – Only change if you need a new hardcoded default; prefer using admin portal
@@ -89,7 +89,7 @@ RESEND_FROM (optional)
 - When critical bugs are fixed
 - When architecture changes
 
-**Last Updated**: 2026-08-06
+**Last Updated**: 2026-08-13
 
 ---
 
@@ -97,6 +97,8 @@ RESEND_FROM (optional)
 - ✅ Stripe unified price ID `price_1U1MD0PIsR6ijfBZ872i58N1` is now the default for all seed products.
 - ✅ Default size label is now `'Standard'` – changeable via admin portal.
 - ✅ All products, prices, sizes, and Stripe IDs can be fully customized through `/admin` → Products and Settings.
+- ✅ Unseeded store now shows **0 items** (no fallback catalog is served from `goyunir.config.ts`).
+- ✅ Chrome/desktop lag reduced: glow orbs are radial gradients (no `filter: blur()`), and `backdrop-filter` was removed from the header, footer, cart overlay, and modals.
 - ✅ No further code changes required for normal store operation – everything is portal‑driven.
 - 🔄 Future improvements: Consider adding direct product import/export CSV in admin.
 
@@ -187,6 +189,6 @@ Public-facing display data is cached with short TTLs to keep the site snappy. Th
 - `lib/ttl-cache.ts` — server-side in-memory TTL cache (`withTtlCache(key, ttlMs, fetcher)`). Used by `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s), the heartbeat social-proof tally (15s), and `loadStoreConfigCached` (30s, used by layout metadata / favicon / OG image).
 - `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes in-flight requests and reuses results for 10s. HomePage and SiteChrome both fetch `/api/store`; this makes it a single round trip.
 - `app/layout.tsx` has **no** `force-dynamic` — the page shell is statically prerendered (`/`, `/catalog`, legal pages). Product slugs (`/[slug]`) and admin/account remain dynamic on purpose.
-- `components/SiteChrome.tsx` animates the background glow via **direct DOM writes** (refs + CSS custom properties), never React state, so the ~60fps idle drift does not re-render the app. Keep it that way.
+- `components/SiteChrome.tsx` animates the background glow via **direct DOM writes** (refs), never React state, so the ~60fps idle drift does not re-render the app. Keep it transform-only: do NOT add `filter: blur()` or `backdrop-filter` to animated/large elements — they force per-frame paints and cause Chrome lag. Glows are pre-blurred radial gradients instead.
 - Home (`app/page.tsx`) and Catalog (`app/catalog/page.tsx`) only run their 1-second countdown tickers while a live countdown is actually visible.
 - If you add a new public read endpoint, wrap its Redis reads in `withTtlCache` with a short TTL instead of hitting Redis on every request. If you change storefront config/settings, remember the public site may show cached values for up to 30s.

@@ -4,7 +4,6 @@ import {
   createRedisClient,
   findLiveInventoryForProduct,
   getCatalogArchiveRecords,
-  getFallbackStoreProducts,
   listLiveStates,
   safeParseRedisItem,
 } from '@/lib/server-config';
@@ -48,50 +47,13 @@ async function buildCatalogPayload() {
       );
 
     if (!redis) {
-      const fallback = Object.values(getFallbackStoreProducts());
-      const activeDrops = sortProducts(fallback)
-        .filter((p) => p.isActive !== false && !p.isArchived && !p.isUpcoming)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          tagline: p.tagline || 'LIMITED DROP',
-          desc: p.desc || '',
-          slug: p.slug,
-          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-          soldOut: false,
-          inventoryRemaining: Number(p.totalInventory || 0),
-        }));
-      const upcomingDrops = sortProducts(fallback)
-        .filter((p) => p.isUpcoming && !p.isArchived)
-        .map((p) => ({
-          name: p.name,
-          status: 'Upcoming',
-          eta: p.tagline || 'Coming soon',
-          goLiveAt: p.goLiveAt || '',
-          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-          description: p.desc || '',
-          slug: p.slug,
-        }));
-      const archiveScents = sortProducts(fallback)
-        .filter((p) => p.isArchived)
-        .map((p) => ({
-          name: p.name,
-          status: 'Archived',
-          image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
-          description: p.desc || '',
-          availableFrom: 'Previously available',
-          slug: p.slug,
-          productId: p.id,
-          // No live state exists in fallback mode, so follow the storefront rule:
-          // only sold out when the product itself is flagged sold out.
-          soldOut: p.soldOut === true,
-        }));
-
+      // No Redis configured and nothing has been seeded yet → start with zero
+      // products. Operators publish content via /admin (Seed Defaults or Add Product).
       return {
-        activeDrops,
-        upcomingDrops,
-        archiveScents,
-        archivedProductIds: archiveScents.map((item) => item.productId),
+        activeDrops: [],
+        upcomingDrops: [],
+        archiveScents: [],
+        archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
         availableFromByProductId: {},
@@ -115,10 +77,6 @@ async function buildCatalogPayload() {
         const product = safeParseRedisItem<any>(value);
         if (product) allProducts.push(product);
       }
-    }
-
-    if (allProducts.length === 0) {
-      allProducts = Object.values(getFallbackStoreProducts());
     }
 
     const now = Date.now();
