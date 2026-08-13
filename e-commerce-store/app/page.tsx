@@ -210,7 +210,7 @@ export default function HomePage() {
               </div>
               <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4 }}>
                 {authUser
-                  ? `You have ${Number(authUser.rewards || 0).toLocaleString()} points${authUser.welcomePromoCode ? ' · 10% welcome credit is ready at checkout' : ' · claim your 10% welcome credit in your account'}.`
+                  ? `You have ${Number(authUser.rewards || 0).toLocaleString()} points — redeem them for store credit in your account${authUser.welcomePromoCode ? '. Your 10% welcome credit is ready at checkout' : ''}.`
                   : 'Get 10% off your first release and private updates.'}
               </div>
             </div>

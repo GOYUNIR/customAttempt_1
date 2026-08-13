@@ -31,9 +31,13 @@ function createSessionCookie(response: NextResponse, token: string) {
 }
 
 export async function POST(request: Request) {
-  const { email, password } = await request.json();
+  const body = await request.json();
+  const { email, password, emailOptIn, termsAgreed } = body;
   if (!email || !password) {
     return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
+  }
+  if (termsAgreed !== true) {
+    return NextResponse.json({ error: 'You must agree to the Terms of Service and Privacy Policy to create an account.' }, { status: 400 });
   }
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
@@ -98,6 +102,8 @@ export async function POST(request: Request) {
     rewards: WELCOME_POINTS,
     welcomePromoCode: welcomeCode,
     welcomePromoIssuedAt: new Date().toISOString(),
+    emailOptIn: emailOptIn === true,
+    termsAgreedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
   await redis.hset('store:users', { [id]: JSON.stringify(user) });

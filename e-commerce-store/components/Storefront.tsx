@@ -95,6 +95,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [showPromoField, setShowPromoField] = useState(false);
   const [countdownPulse, setCountdownPulse] = useState(false);
   const [mapboxHint, setMapboxHint] = useState('');
+  // Admin-configurable gallery behaviour (auto-advance + slow zoom). Filled from
+  // /api/store → config.gallery with sensible defaults for a premium look.
+  const [gallerySettings, setGallerySettings] = useState<any>({
+    autoPlay: true,
+    intervalSeconds: 4,
+    zoom: true,
+    zoomDurationSeconds: 14,
+  });
 
   // Live Mapbox autofill hint (drives the small status line under the shipping
   // field). Updated whenever lib/mapbox-autofill.ts refreshes its status, plus a
@@ -137,6 +145,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch(`/api/store?slug=${slug}`);
       const data = await res.json();
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+      if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data.product) {
         setProduct(data.product);
         if (data.product.isArchived) {
@@ -182,6 +191,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const res = await fetch('/api/store');
       const data = await res.json();
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+      if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
@@ -223,6 +233,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (!product) return;
     ensureMapboxAutofill();
   }, [product]);
+
+  // Elegant auto-advancing gallery: slowly cycles through the product photos
+  // while a Ken Burns zoom plays, exactly like a high-end storefront. Hovering
+  // pauses so collectors can take their time. Configurable in /admin → Settings.
+  const imgCount = Array.isArray(product?.images) ? product.images.filter(Boolean).length : 0;
+  const autoPlayOn = gallerySettings?.autoPlay !== false && imgCount > 1;
+  const galleryIntervalMs = Math.max(2, Number(gallerySettings?.intervalSeconds) || 4) * 1000;
+  const zoomSeconds = Math.max(4, Number(gallerySettings?.zoomDurationSeconds) || 14);
+  const zoomOn = gallerySettings?.zoom !== false;
+  const [galleryPaused, setGalleryPaused] = useState(false);
+  useEffect(() => {
+    if (!autoPlayOn || galleryPaused) return;
+    const timer = window.setInterval(() => {
+      setSelectedImageIndex((prev) => (prev + 1) % imgCount);
+    }, galleryIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [autoPlayOn, galleryPaused, galleryIntervalMs, imgCount]);
 
   useEffect(() => {
     setCart(readStoredCart());
@@ -305,6 +332,21 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             notify({ id: 'entry-locked', type: 'success', message: msg, persist: true });
           }
           clearQuery();
+          // Entries are now secured — drop the prepared raffle items from the bag.
+          if (data.success) {
+            setCart([]);
+            writeStoredCart([]);
+          }
+          // Mixed carts (raffle + direct items) continue into the FCFS payment
+          // session after the raffle card setup is confirmed.
+          try {
+            const pendingPaymentUrl = window.sessionStorage.getItem('goyunir-pending-payment-url');
+            if (pendingPaymentUrl && /^https?:\/\//i.test(pendingPaymentUrl)) {
+              window.sessionStorage.removeItem('goyunir-pending-payment-url');
+              window.location.assign(pendingPaymentUrl);
+              return;
+            }
+          } catch {}
         })
         .catch(() => {
           setMessage('We could not verify the completed setup, but it may still have succeeded.');
@@ -412,7 +454,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         notify({ id: 'product-submit', type: 'entered', message: 'Entry handoff is ready.' });
         window.location.href = data.url;
       } else {
-        setEncryptionHealthy(false);
+        // Business errors (invalid promo, already entered, sold out...) are NOT
+        // encryption failures — keep the handoff indicator honest.
         setMessage(data.error || 'Failed to start checkout');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Failed to start checkout.' });
       }
@@ -453,7 +496,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         notify({ id: 'product-submit', type: 'success', message: 'Checkout is ready.' });
         window.location.href = data.url;
       } else {
-        setEncryptionHealthy(false);
         setMessage(data.error || 'Checkout failed');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Checkout failed.' });
       }
@@ -497,7 +539,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         notify({ id: 'product-submit', type: 'success', message: 'Card is ready for the release window.' });
         window.location.href = data.url;
       } else {
-        setEncryptionHealthy(false);
         setMessage(data.error || 'Could not start waitlist reservation');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Could not start waitlist reservation.' });
       }
@@ -540,7 +581,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
-  if (loading) return <div style={{ padding: 40, color: '#888' }}>Loading...</div>;
+  if (loading) {
+    return (
+      <div style={{ minHeight: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: '#888' }}>
+        <div style={{ width: 34, height: 34, borderRadius: 999, background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 55%, transparent 72%)', animation: 'goyunirSpin 1.1s linear infinite, goyunirPulse 1.6s ease-in-out infinite' }} />
+        <div style={{ fontSize: 12, letterSpacing: '2px', textTransform: 'uppercase' }}>Preparing the drop</div>
+      </div>
+    );
+  }
   // An unknown/typo'd product URL renders the same friendly 404 page as any
   // other unmatched route. Network failures and the empty-store home state
   // keep their distinct messages below.
@@ -585,7 +633,33 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
-          <div style={{ height: 280, background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover` }} />
+          <div
+            onMouseEnter={() => setGalleryPaused(true)}
+            onMouseLeave={() => setGalleryPaused(false)}
+            style={{ height: 280, position: 'relative', overflow: 'hidden', cursor: galleryImages.length > 1 ? 'pointer' : 'default' }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                inset: -16,
+                background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover`,
+                animation: zoomOn ? `goyunirKenburns ${zoomSeconds}s ease-in-out infinite alternate` : 'none',
+                willChange: 'transform',
+              }}
+            />
+            {galleryImages.length > 1 && autoPlayOn && (
+              <div style={{ position: 'absolute', left: 12, bottom: 12, display: 'flex', gap: 5, alignItems: 'center' }}>
+                {galleryImages.map((_img: string, index: number) => (
+                  <button
+                    key={`dot-${index}`}
+                    onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(index); }}
+                    aria-label={`View photo ${index + 1}`}
+                    style={{ width: 7, height: 7, borderRadius: 999, border: 'none', padding: 0, cursor: 'pointer', background: index === selectedImageIndex ? '#ffffff' : 'rgba(255,255,255,0.4)' }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: soldOut ? '#fbbf24' : configPalette.accentBlue }}>{activeProductLabel}</div>
@@ -669,13 +743,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
-              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
                 {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Re-enter for future return' : 'Enter allocation'}
               </button>
             )}
             {canCheckoutDirect && (
               <>
-                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#ffffff', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
                   {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
                 </button>
                 {showWaitlistOption && (

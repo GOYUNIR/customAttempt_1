@@ -16,11 +16,28 @@ interface EntryRecord {
   discountPercent?: number;
   listPrice?: number;
   expectedAmountCents?: number;
+  orderRef?: string;
 }
 
 function notify(detail: { id?: string; type: string; message: string; persist?: boolean }) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
+}
+
+function statusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    ENTERED: 'Entry active',
+    WAITLIST_JOINED: 'On the waitlist',
+    WINNER_CHARGED: '🏆 Won & charged',
+    WINNER_DECLINED: 'Selected — charge declined',
+    NOT_SELECTED: 'Not selected this round',
+    CANCELLED_BY_USER: 'Cancelled by you',
+    CANCELLED_BY_ADMIN: 'Cancelled by admin',
+    DUPLICATE_BLOCKED: 'Already entered',
+    INTENT_STARTED: 'Card setup started',
+    INTENT_EXPIRED: 'Card setup unfinished',
+  };
+  return labels[String(status || '')] || String(status || 'Entry active');
 }
 
 function statusBanner(entry: EntryRecord) {
@@ -276,6 +293,92 @@ export default function AccountPage() {
     }
   };
 
+  // ── Redeem points for store credit ─────────────────────────────────────────
+  const [redeemPointsInput, setRedeemPointsInput] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemMsg, setRedeemMsg] = useState('');
+  const [redeemedCode, setRedeemedCode] = useState('');
+
+  const redeemPoints = async () => {
+    const points = Math.floor(Number(redeemPointsInput || 0));
+    if (!Number.isFinite(points) || points <= 0) {
+      setRedeemMsg('Enter how many points to redeem.');
+      return;
+    }
+    setRedeeming(true);
+    setRedeemMsg('');
+    setRedeemedCode('');
+    notify({ id: 'account-redeem', type: 'loading', message: 'Creating your store credit...', persist: true });
+    try {
+      const res = await fetch('/api/account/redeem-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points }),
+      });
+      const data = await res.json();
+      if (res.ok && data.code) {
+        setRedeemedCode(data.code);
+        setRedeemMsg(data.message || 'Credit created.');
+        setUser((prev: any) => ({ ...(prev || {}), rewards: data.remainingPoints }));
+        notify({ id: 'account-redeem', type: 'success', message: data.message || 'Credit created.' });
+      } else {
+        setRedeemMsg(data.error || 'Could not redeem points right now.');
+        notify({ id: 'account-redeem', type: 'error', message: data.error || 'Could not redeem points right now.' });
+      }
+    } catch {
+      setRedeemMsg('Connection failed. Please try again.');
+      notify({ id: 'account-redeem', type: 'error', message: 'Connection failed. Please try again.' });
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  // ── Change password ────────────────────────────────────────────────────────
+  const [pwdCurrent, setPwdCurrent] = useState('');
+  const [pwdNew, setPwdNew] = useState('');
+  const [pwdConfirm, setPwdConfirm] = useState('');
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [showPwdForm, setShowPwdForm] = useState(false);
+
+  const changePassword = async () => {
+    if (pwdNew !== pwdConfirm) {
+      setPwdMsg('New passwords do not match.');
+      return;
+    }
+    if (pwdNew.length < 6) {
+      setPwdMsg('New password must be at least 6 characters.');
+      return;
+    }
+    setPwdBusy(true);
+    setPwdMsg('');
+    notify({ id: 'account-password', type: 'loading', message: 'Updating your password...', persist: true });
+    try {
+      const res = await fetch('/api/account/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: pwdCurrent, newPassword: pwdNew }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPwdMsg(data.message || 'Password updated.');
+        setPwdCurrent('');
+        setPwdNew('');
+        setPwdConfirm('');
+        setShowPwdForm(false);
+        notify({ id: 'account-password', type: 'success', message: 'Password updated. Log in again with your new password.' });
+      } else {
+        setPwdMsg(data.error || 'Could not update password.');
+        notify({ id: 'account-password', type: 'error', message: data.error || 'Could not update password.' });
+      }
+    } catch {
+      setPwdMsg('Connection failed. Please try again.');
+      notify({ id: 'account-password', type: 'error', message: 'Connection failed. Please try again.' });
+    } finally {
+      setPwdBusy(false);
+    }
+  };
+
   const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
 
   return (
@@ -354,6 +457,53 @@ export default function AccountPage() {
             )}
           </div>
         )}
+
+            {isLoggedIn && (
+              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(125,211,252,0.06)', border: '1px solid rgba(125,211,252,0.16)', fontSize: 12, lineHeight: 1.5 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 8 }}>Redeem points for store credit</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Points"
+                    value={redeemPointsInput}
+                    onChange={(e) => setRedeemPointsInput(e.target.value)}
+                    style={{ flex: 1, padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }}
+                  />
+                  <button onClick={redeemPoints} disabled={redeeming} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#7dd3fc', color: '#07121f', fontWeight: 700, fontSize: 12, cursor: redeeming ? 'not-allowed' : 'pointer' }}>
+                    {redeeming ? 'Redeeming…' : 'Redeem'}
+                  </button>
+                </div>
+                {redeemMsg && <div style={{ marginTop: 8, fontSize: 11, color: redeemedCode ? '#34d399' : '#fbbf24' }}>{redeemMsg}</div>}
+                {redeemedCode && (
+                  <div style={{ marginTop: 6, fontWeight: 800, letterSpacing: 1, color: '#7dd3fc' }}>{redeemedCode}</div>
+                )}
+              </div>
+            )}
+
+            {isLoggedIn && (
+              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+                {!showPwdForm ? (
+                  <button onClick={() => setShowPwdForm(true)} style={{ padding: 0, border: 'none', background: 'transparent', color: '#7dd3fc', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    Change password
+                  </button>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Change password</div>
+                    <input type="password" placeholder="Current password" value={pwdCurrent} onChange={(e) => setPwdCurrent(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="New password (min 6 chars)" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="Confirm new password" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    {pwdMsg && <div style={{ fontSize: 11, color: pwdMsg.includes('updated') ? '#34d399' : '#f87171' }}>{pwdMsg}</div>}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={changePassword} disabled={pwdBusy} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#f3f4f6', color: '#09090b', fontWeight: 700, fontSize: 12, cursor: pwdBusy ? 'not-allowed' : 'pointer' }}>
+                        {pwdBusy ? 'Saving…' : 'Update password'}
+                      </button>
+                      <button onClick={() => setShowPwdForm(false)} style={{ padding: '9px 14px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
         <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
         <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
@@ -434,7 +584,12 @@ export default function AccountPage() {
                     {entry.variant} — {entry.size}
                   </div>
                   <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>
-                    {entry.status || 'Active entry'}
+                    {statusLabel(entry.status)}
+                    {entry.status === 'WINNER_CHARGED' && entry.orderRef ? (
+                      <span style={{ color: '#34d399', fontWeight: 700, marginLeft: 6 }}>REF {entry.orderRef}</span>
+                    ) : entry.orderRef ? (
+                      <span style={{ color: configPalette.textMuted, marginLeft: 6 }}>REF {entry.orderRef}</span>
+                    ) : null}
                   </div>
                   {(typeof entry.listPrice === 'number' ||
                     typeof entry.amountCents === 'number' ||

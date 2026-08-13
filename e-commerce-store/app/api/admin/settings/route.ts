@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     const { 
-      theme, hero, form, footer, branding,
+      theme, hero, form, footer, branding, rewards, gallery,
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs
@@ -49,6 +49,8 @@ export async function POST(request: Request) {
       raffleRegistrationForm: form || current.raffleRegistrationForm || {},
       brandFooterData: footer || current.brandFooterData || {},
       branding: branding || current.branding || {},
+      rewards: rewards || current.rewards || {},
+      gallery: gallery || current.gallery || {},
       productNotes: productNotes || current.productNotes || {},
       animationMechanics: animationMechanics || current.animationMechanics || {},
       dropSchedule: dropSchedule || current.dropSchedule || {},

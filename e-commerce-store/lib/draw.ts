@@ -14,6 +14,7 @@ import {
   resolveStripePriceId,
 } from '@/lib/server-config';
 import { getProductStripeId, getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export interface DrawResult {
   email: string;
@@ -69,7 +70,13 @@ export async function runDropDraw(request: Request | NextRequest) {
         const customerId = resolveCustomerId(entry) || '';
         const paymentMethodId = String(entry.paymentMethodId ?? '');
         const shippingAddress = String(entry.shippingAddress ?? entry.address ?? 'No Address Logged');
-        const priceCents = categoryPriceCents;
+        const promoCode = String(entry.promoCode ?? '').trim().toUpperCase();
+        // Apply the promo stored on the entry at signup time ("X% off if
+        // selected") so winners always pay the discounted amount.
+        const entryDiscount = Math.min(50, Math.max(0, Number(entry.discountPercent) || 0));
+        const priceCents = entryDiscount > 0
+          ? Math.max(50, Math.round(categoryPriceCents * (1 - entryDiscount / 100)))
+          : categoryPriceCents;
 
         if (successCount >= targetLimit) {
           await archiveEntry(redis, {
@@ -95,9 +102,13 @@ export async function runDropDraw(request: Request | NextRequest) {
             resultsSummary.push({ email, scent: product.name, size, checkout: `charged:${paymentIntent.id}`, status: 'charged', message: 'Auto-charge succeeded.' });
             successCount += 1;
             directChargeCompleted = true;
+            const winnerOrderRef = String(entry.orderRef || '') || buildOrderRef(email, product.name, size);
             await archiveEntry(redis, {
               email, variant: product.name, size, shippingAddress,
               id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
+              ...(promoCode ? { promoCode, discountPercent: entryDiscount || undefined } : {}),
+              orderRef: winnerOrderRef,
+              amountCents: priceCents,
             });
           } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Charge failed.';

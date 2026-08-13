@@ -13,6 +13,7 @@ import {
   loadProducts,
   getLiveProductState,
   saveLiveState,
+  STORE_CONFIG_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
@@ -35,6 +36,35 @@ function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
   if (env) return env.replace(/\/$/, '');
   return 'https://goyunir.com';
+}
+
+/**
+ * Every paid purchase earns rewards points for the account owner (if they have
+ * an account). Rate is configurable in /admin → Settings → Rewards & Points.
+ */
+async function awardPurchasePoints(redis: any, email: string, amountCents: number) {
+  try {
+    if (!email || Number(amountCents) <= 0) return;
+    const rawConfig = await redis.get(STORE_CONFIG_KEY);
+    const config = safeParseRedisItem<any>(rawConfig) || {};
+    const rate = Math.max(0, Number(config?.rewards?.purchasePointsPerDollar) || 10);
+    if (rate <= 0) return;
+    const pointsEarned = Math.floor((Number(amountCents) / 100) * rate);
+    if (pointsEarned <= 0) return;
+    const raw = await redis.hgetall('store:users');
+    if (!raw) return;
+    for (const [k, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
+        u.rewards = Math.max(0, Number(u.rewards || 0)) + pointsEarned;
+        await redis.hset('store:users', { [k]: JSON.stringify(u) });
+        console.log('[webhook] awarded points', email, pointsEarned);
+        break;
+      }
+    }
+  } catch (e) {
+    console.error('[webhook] award points failed', e);
+  }
 }
 
 async function resolvePromo(
@@ -173,7 +203,11 @@ export async function POST(request: Request) {
         }, 0);
 
         const emailBlocked = await redis.sismember(emailBlockKey(variant, size), email);
-        const blockedByLegacyOneEntryRule = emailBlocked === 1 && maxPerEmail <= 1;
+        // Only treat the fraud-block as a duplicate when this email actually holds
+        // an ACTIVE entry — after a draw resets the pool, a stale block from the
+        // previous cycle must not block a fresh entry in the new cycle.
+        const hasActiveEntry = activeCountForEmail > 0;
+        const blockedByLegacyOneEntryRule = emailBlocked === 1 && maxPerEmail <= 1 && hasActiveEntry;
         const blockedByLimit = activeCountForEmail >= maxPerEmail;
         if (!blockedByLegacyOneEntryRule && !blockedByLimit) {
           const { appliedPromo, discountPercent } = await resolvePromo(redis, rawPromo, email);
@@ -326,6 +360,7 @@ export async function POST(request: Request) {
               orderRef: orderRef ? `${orderRef}-${i + 1}` : `DIRECT-${session.id}-${i + 1}`,
             } as any);
           }
+          await awardPurchasePoints(redis, email, priceCents * qty);
         }
       } else {
         const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
@@ -354,6 +389,7 @@ export async function POST(request: Request) {
             promoCode: appliedPromo || undefined,
             orderRef: orderRef || `DIRECT-${session.id}`,
           } as any);
+          await awardPurchasePoints(redis, email, Number(session.amount_total || 0));
         }
       }
 

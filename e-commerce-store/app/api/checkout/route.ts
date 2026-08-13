@@ -96,7 +96,12 @@ export async function POST(request: Request) {
         }
       } catch {}
       const blocked = await redis.sismember(emailBlockKey(variant, size), normalizedEmail);
-      if (blocked === 1 || alreadyEnteredCount >= maxPerEmail) {
+      // A customer may re-enter once a draw completes and the pool is reset for a
+      // new cycle. A stale fraud-block flag from the previous cycle must NOT block
+      // a fresh entry when the pool no longer holds this email — so only block when
+      // the email actually has an ACTIVE entry (or has hit the per-email cap).
+      const hasActiveEntry = alreadyEnteredCount > 0;
+      if (hasActiveEntry && (blocked === 1 || alreadyEnteredCount >= maxPerEmail)) {
         // Reuse the ORIGINAL entry's order ref (if any) so the ledger REF for
         // the DUPLICATE_BLOCKED row matches the original entry instead of a
         // newly generated one.
@@ -175,16 +180,30 @@ export async function POST(request: Request) {
         priceCents = Math.max(50, Math.round(basePriceCents * (1 - percentDiscount / 100)));
       }
     } else if (normalizedPromo && checkoutMode === 'RAFFLE') {
+      // Promo codes now work on raffle entries too (the % discount is applied
+      // "if selected" — the entry stores promoCode + discountPercent, and the
+      // draw/webhook applies it at charge time). We only validate that the code
+      // is active, belongs to this email, and has quota left.
       const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
       const promo = safeParseRedisItem<any>(rawPromo);
       if (promo) {
-        const hasRestrictedCredit = Number(promo.fixedDiscountCents || 0) > 0
-          || Number(promo.minimumOrderSubtotalCents || 0) > 0
-          || (Array.isArray(promo.eligibleProductSlugs) && promo.eligibleProductSlugs.length > 0)
-          || (Array.isArray(promo.eligibleSizes) && promo.eligibleSizes.length > 0)
-          || Boolean(promo.issuedForEmail);
-        if (hasRestrictedCredit) {
-          return NextResponse.json({ error: 'This credit only works on qualifying direct-purchase items.' }, { status: 409 });
+        if (promo.active === false) {
+          return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
+        }
+        if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
+          return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
+        }
+        if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === normalizedEmail) {
+          return NextResponse.json({ error: 'Promoters cannot use their own code.' }, { status: 403 });
+        }
+        if (Number(promo.maxUsesTotal || 0) > 0 && Number(promo.uses || 0) >= Number(promo.maxUsesTotal || 0)) {
+          return NextResponse.json({ error: 'This code has been fully claimed.' }, { status: 409 });
+        }
+        if (Number(promo.maxUsesPerEmail || 0) > 0) {
+          const used = await redis.sismember(usedEmailsKey(normalizedPromo), normalizedEmail);
+          if (used === 1) {
+            return NextResponse.json({ error: 'This code has already been used with this email address.' }, { status: 409 });
+          }
         }
       }
     }

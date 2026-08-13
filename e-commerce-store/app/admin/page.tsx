@@ -311,6 +311,9 @@ export default function AdminPortal() {
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
   const [brandingSettings, setBrandingSettings] = useState({
     logoUrl: '',
+    logoWidth: 28,
+    logoHeight: 28,
+    logoTransparent: false,
     brandName: 'GOYUNIR',
     brandFontFamily: '',
     headerMode: 'both',
@@ -323,6 +326,20 @@ export default function AdminPortal() {
     shareText: '#F5F2E9',
     iconBackground: '#0B0B0F',
     iconText: '#D4AF37',
+  });
+  // Rewards & points configuration (points earned per $1, redemption rate).
+  const [rewardsSettings, setRewardsSettings] = useState({
+    pointsPerDollar: 100,
+    minRedeemPoints: 100,
+    maxRedeemPoints: 0,
+    purchasePointsPerDollar: 10,
+  });
+  // Product gallery behaviour (auto-advance + slow zoom).
+  const [gallerySettings, setGallerySettings] = useState({
+    autoPlay: true,
+    intervalSeconds: 4,
+    zoom: true,
+    zoomDurationSeconds: 14,
   });
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
@@ -469,6 +486,8 @@ export default function AdminPortal() {
         if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
         if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
+        if (data.settings.rewards) setRewardsSettings((prev) => ({ ...prev, ...data.settings.rewards }));
+        if (data.settings.gallery) setGallerySettings((prev) => ({ ...prev, ...data.settings.gallery }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
@@ -1320,6 +1339,8 @@ export default function AdminPortal() {
           form: formSettings,
           footer: footerSettings,
           branding: brandingSettings,
+          rewards: rewardsSettings,
+          gallery: gallerySettings,
           productNotes,
           orbs: orbSettings,
         }),
@@ -2285,6 +2306,7 @@ export default function AdminPortal() {
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promotions & Affiliate Codes</h2>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
               Create promo codes with time limits, max uses, and special discounts for the first X winners.
+              <strong style={{ color: '#ccc' }}> Codes now work on raffle entries too</strong> — a percentage discount is applied "if selected" when the draw charges a winner, and direct purchases get the discount immediately at checkout. Set <code style={{ color: '#7dd3fc' }}>eligibleProductSlugs</code>/<code style={{ color: '#7dd3fc' }}>eligibleSizes</code> to restrict, or leave empty to work on everything.
             </p>
             
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -2789,6 +2811,19 @@ export default function AdminPortal() {
                   </select>
                 </label>
                 <label style={{ fontSize: 11 }}>
+                  Logo width (px)
+                  <input type="number" min={16} max={160} value={brandingSettings.logoWidth || 28} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, logoWidth: Math.max(16, Number(e.target.value) || 28) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  <span style={{ fontSize: 10, color: '#666' }}>28 default · 44 default in logo-only mode.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Logo height (px)
+                  <input type="number" min={16} max={160} value={brandingSettings.logoHeight || 28} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, logoHeight: Math.max(16, Number(e.target.value) || 28) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={Boolean(brandingSettings.logoTransparent)} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, logoTransparent: e.target.checked }))} />
+                  Transparent logo (keep corners, don't crop)
+                </label>
+                <label style={{ fontSize: 11 }}>
                   Top-bar name font (optional)
                   <input
                     type="text"
@@ -2932,6 +2967,57 @@ export default function AdminPortal() {
                 </>
               )}
 
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Rewards &amp; Points</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                Customers earn points on every paid purchase and can redeem them for store credit. Welcome bonus and per-user balances stay editable in the Users tab.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+                <label style={{ fontSize: 11 }}>
+                  Points earned per $1 spent
+                  <input type="number" min={0} value={rewardsSettings.purchasePointsPerDollar} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, purchasePointsPerDollar: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  <span style={{ fontSize: 10, color: '#666' }}>Default 10 = $1 purchase earns 10 pts.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Points per $1 of credit when redeeming
+                  <input type="number" min={1} value={rewardsSettings.pointsPerDollar} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, pointsPerDollar: Math.max(1, Number(e.target.value) || 100) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  <span style={{ fontSize: 10, color: '#666' }}>Default 100 = 100 pts → $1 credit.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Minimum points to redeem
+                  <input type="number" min={1} value={rewardsSettings.minRedeemPoints} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, minRedeemPoints: Math.max(1, Number(e.target.value) || 500) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Max points per redemption (0 = unlimited)
+                  <input type="number" min={0} value={rewardsSettings.maxRedeemPoints} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, maxRedeemPoints: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Product Gallery</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                Product photos can auto-advance with a slow cinematic zoom (Ken Burns) — the way big fashion houses present a drop. Changes apply immediately to product pages.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={Boolean(gallerySettings.autoPlay)} onChange={(e) => setGallerySettings((prev) => ({ ...prev, autoPlay: e.target.checked }))} />
+                  Auto-advance photos
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={Boolean(gallerySettings.zoom)} onChange={(e) => setGallerySettings((prev) => ({ ...prev, zoom: e.target.checked }))} />
+                  Slow zoom effect
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Seconds per photo
+                  <input type="number" min={2} max={30} value={gallerySettings.intervalSeconds} onChange={(e) => setGallerySettings((prev) => ({ ...prev, intervalSeconds: Math.max(2, Number(e.target.value) || 4) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Zoom duration (seconds)
+                  <input type="number" min={4} max={60} value={gallerySettings.zoomDurationSeconds} onChange={(e) => setGallerySettings((prev) => ({ ...prev, zoomDurationSeconds: Math.max(4, Number(e.target.value) || 14) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+              </div>
+
+              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
+                {settingsLoading ? 'Saving…' : 'Save All Settings'}
+              </button>
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
                 {settingsLoading ? 'Saving…' : 'Save All Settings'}
               </button>

@@ -535,22 +535,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const hasItems = cart.length > 0;
   const hasRaffleItems = cart.some((item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle');
   const hasFcfsItems = cart.some((item) => (item.checkoutMode || '').toUpperCase() === 'FCFS' || String(item.productType || '').toLowerCase() === 'fcfs');
-  const cartHasMixedModes = hasRaffleItems && hasFcfsItems;
-  const raffleOnlyCart = hasRaffleItems && !hasFcfsItems;
-  const checkoutLabel = raffleOnlyCart ? 'Secure entry' : 'Checkout now';
+  const checkoutLabel = hasRaffleItems ? (hasFcfsItems ? 'Secure entries & pay' : 'Secure entries') : 'Checkout now';
 
   const checkoutCart = async () => {
     if (!hasItems) return;
-    if (cartHasMixedModes) {
-      setCartMsg('Separate raffle entries from direct-purchase items so checkout stays simple and secure.');
-      showNotice({ type: 'alert', message: 'Separate raffle entries from direct purchases.' });
-      return;
-    }
-    if (raffleOnlyCart) {
-      setCartMsg(`Your prepared entries are secured from each product page — open a release and tap “Enter allocation” to complete card setup.`);
-      showNotice({ id: 'cart-raffle-help', type: 'info', message: `Prepared entries are locked in from each product page — no action needed here.`, persist: false });
-      return;
-    }
     if (!checkoutEmail) {
       setCartMsg('Enter your email to continue.');
       showNotice({ type: 'alert', message: 'Add your email first.' });
@@ -582,10 +570,18 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (res.ok && data.url) {
         setEncryptionHealthy(true);
         showNotice({ id: 'cart-checkout', type: 'success', message: 'Checkout is ready.' });
+        // Mixed carts (raffle entries + direct items) create two sessions: first
+        // the raffle card-setup (secures the entries), then the FCFS payment.
+        // Remember the follow-up payment URL so the confirm-setup flow can pick
+        // it up when the customer returns from Stripe.
+        if (data.paymentUrl) {
+          try {
+            window.sessionStorage.setItem('goyunir-pending-payment-url', data.paymentUrl);
+          } catch {}
+        }
         window.location.assign(data.url);
         return;
       }
-      setEncryptionHealthy(false);
       setCartMsg(data.error || 'Unable to start checkout.');
       showNotice({ id: 'cart-checkout', type: 'error', message: data.error || 'Unable to start checkout.' });
     } catch {
@@ -617,6 +613,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
   const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
   const brandFont = String(branding?.brandFontFamily || '').trim() || undefined;
+  // Admin-configurable logo size. When the top bar shows ONLY the logo we use a
+  // larger default so it reads like a proper wordmark instead of a favicon.
+  const logoWidth = Number(branding?.logoWidth) > 0 ? Number(branding.logoWidth) : headerMode === 'logo' ? 44 : 28;
+  const logoHeight = Number(branding?.logoHeight) > 0 ? Number(branding.logoHeight) : headerMode === 'logo' ? 44 : 28;
+  const logoTransparent =
+    branding?.logoTransparent === true || String(branding?.logoTransparent || '').toLowerCase() === 'true';
   const totalPrepared = cart.length;
   const rafflePrepared = cart.filter(
     (item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle',
@@ -715,7 +717,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             title="Catalog & search"
             style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
           >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /><path d="M4.5 3.5 3 5l2.2 1.6M19.5 3.5 21 5l-2.2 1.6M4.5 14.5 3 13l2.2-1.6M19.5 14.5 21 13l-2.2-1.6" /></svg>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             Browse
           </Link>
         </div>
@@ -743,7 +745,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           }}
         >
           {showBrandLogo && (branding?.logoUrl ? (
-            <img src={branding.logoUrl} alt={brandName} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
+            <img src={branding.logoUrl} alt={brandName} style={{ width: logoWidth, height: logoHeight, borderRadius: logoTransparent ? 0 : 6, objectFit: logoTransparent ? 'contain' : 'cover', display: 'block' }} />
           ) : null)}
           {showBrandText ? <span style={{ fontFamily: brandFont }}>{brandName}</span> : null}
         </Link>

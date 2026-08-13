@@ -10,6 +10,8 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [termsAgreed, setTermsAgreed] = useState(false);
+  const [emailOptIn, setEmailOptIn] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   // Live theme palette — starts at the build-time config and upgrades to the
@@ -43,6 +45,11 @@ export default function SignupPage() {
       notify({ type: 'alert', message: 'Password must be at least 6 characters.' });
       return;
     }
+    if (!termsAgreed) {
+      setError('Please agree to the Terms of Service and Privacy Policy to continue.');
+      notify({ type: 'alert', message: 'Please agree to the Terms of Service and Privacy Policy.' });
+      return;
+    }
     setError('');
     setLoading(true);
     notify({ id: 'auth-signup', type: 'loading', message: 'Creating your account...', persist: true });
@@ -50,7 +57,7 @@ export default function SignupPage() {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, termsAgreed, emailOptIn }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -81,6 +88,29 @@ export default function SignupPage() {
             <span style={{ width: 7, height: 7, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.16)' }} />
             Encrypted credential handoff
           </div>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.45, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={termsAgreed}
+              onChange={(e) => setTermsAgreed(e.target.checked)}
+              style={{ marginTop: 1, accentColor: configPalette.checkoutCtaButton }}
+            />
+            <span>
+              I agree to the{' '}
+              <Link href="/terms" target="_blank" style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Terms of Service</Link>{' '}
+              and{' '}
+              <Link href="/privacy" target="_blank" style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Privacy Policy</Link>.
+            </span>
+          </label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.45, cursor: 'pointer', marginTop: -8 }}>
+            <input
+              type="checkbox"
+              checked={emailOptIn}
+              onChange={(e) => setEmailOptIn(e.target.checked)}
+              style={{ marginTop: 1, accentColor: configPalette.checkoutCtaButton }}
+            />
+            <span>Email me updates about upcoming drops, releases, and rewards. (Unsubscribe anytime.)</span>
+          </label>
           {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
           <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 10, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Signing up…' : 'Sign Up'}</button>
         </form>

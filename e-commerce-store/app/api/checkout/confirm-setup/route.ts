@@ -35,6 +35,196 @@ function siteUrlFromRequest(request: Request) {
   }
 }
 
+async function resolvePromo(redis: any, rawCode: string, email: string) {
+  const promoCode = String(rawCode || '').trim().toUpperCase();
+  if (!promoCode) return { appliedPromo: undefined as string | undefined, discountPercent: 0 };
+  try {
+    const raw = await redis.hget(PROMOS_KEY, promoCode);
+    const promo = safeParseRedisItem<any>(raw);
+    if (!promo || promo.active === false) {
+      return { appliedPromo: undefined, discountPercent: 0 };
+    }
+    const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
+    const self = promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
+    if (self) {
+      return { appliedPromo: undefined, discountPercent: 0 };
+    }
+    if (maxPer > 0) {
+      const used = await redis.sismember(usedEmailsKey(promoCode), email);
+      if (used === 1) {
+        return { appliedPromo: undefined, discountPercent: 0 };
+      }
+    }
+    const discountPercent = Math.min(
+      50,
+      Math.max(0, Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0),
+    );
+    return { appliedPromo: promoCode, discountPercent };
+  } catch {
+    return { appliedPromo: undefined, discountPercent: 0 };
+  }
+}
+
+async function countActivePoolEntries(redis: any, variant: string, size: string, email: string) {
+  try {
+    const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+    let count = 0;
+    for (const row of poolItems) {
+      const parsed = safeParseRedisItem<any>(row);
+      if (parsed && String(parsed.email || '').toLowerCase() === email.toLowerCase()) count += 1;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+
+
+/**
+ * Lock a single raffle/waitlist entry into its pool using an already-completed
+ * Stripe SETUP session. Shared by the single-product flow and the multi-item
+ * raffle-cart flow (one setup session can secure several entries).
+ */
+async function lockOneEntry(opts: {
+  redis: any;
+  stripe: any;
+  request: Request;
+  email: string;
+  variant: string;
+  size: string;
+  shippingAddress: string;
+  orderRef: string;
+  promoCode: string;
+  customerId: string;
+  paymentMethodId: string | null;
+  cardLast4: string;
+  cardFingerprint: string;
+  entryType?: string;
+  productId?: string;
+  maxPerEmail: number;
+}) {
+  const {
+    redis,
+    request,
+    email,
+    variant,
+    size,
+    shippingAddress,
+    orderRef,
+    promoCode,
+    customerId,
+    paymentMethodId,
+    cardLast4,
+    cardFingerprint,
+    entryType,
+    productId,
+    maxPerEmail,
+  } = opts;
+
+  const activeCount = await countActivePoolEntries(redis, variant, size, email);
+  const blocked = await redis.sismember(emailBlockKey(variant, size), email);
+  if ((blocked === 1 && activeCount > 0) || activeCount >= maxPerEmail) {
+    return { created: false, duplicate: true, appliedPromo: undefined as string | undefined, discountPercent: 0, orderRef };
+  }
+
+  const { appliedPromo, discountPercent } = await resolvePromo(redis, promoCode, email);
+
+  const entry: any = {
+    email,
+    variant,
+    size,
+    shippingAddress,
+    address: shippingAddress,
+    customerId,
+    stripeCustomerId: customerId,
+    paymentMethodId,
+    cardLast4,
+    cardFingerprint,
+    promoCode: appliedPromo || undefined,
+    discountPercent: appliedPromo && discountPercent > 0 ? discountPercent : undefined,
+    registeredAt: new Date().toISOString(),
+  };
+
+  if (entryType === 'waitlist') {
+    await redis.rpush(`waitlist:${variant}:${size}`, JSON.stringify({ ...entry, registrationType: 'waitlist' }));
+    await archiveEntry(redis, {
+      email,
+      variant,
+      size,
+      shippingAddress,
+      id: customerId || 'n/a',
+      registeredAt: entry.registeredAt,
+      type: 'WAITLIST_JOINED',
+      orderRef,
+    } as any);
+  } else {
+    await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+  }
+  await redis.sadd(emailBlockKey(variant, size), email);
+  if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
+  await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
+  await cleanupMatchingIntent(redis, variant, size, email);
+
+  await archiveEntry(redis, {
+    email,
+    variant,
+    size,
+    shippingAddress,
+    id: customerId || 'n/a',
+    registeredAt: entry.registeredAt,
+    type: 'ENTERED',
+    orderRef,
+    ...(appliedPromo ? { promoCode: appliedPromo, discountPercent: discountPercent || undefined } : {}),
+  } as any);
+
+  if (appliedPromo) {
+    try {
+      await redis.sadd(usedEmailsKey(appliedPromo), email);
+      const raw = await redis.hget(PROMOS_KEY, appliedPromo);
+      const promo = safeParseRedisItem<any>(raw);
+      if (promo) {
+        promo.uses = (promo.uses || 0) + 1;
+        await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
+      }
+    } catch {}
+  }
+
+  const emailDedupe = `${variant}:${size}:${email}`;
+  let emailSent = false;
+  try {
+    const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+    if (sent !== 1) {
+      const liveProducts = await loadProducts(redis);
+      const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === productId) as any;
+      const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
+      const emailResult = await sendEntryConfirmedEmail({
+        to: email,
+        product: variant,
+        size,
+        address: shippingAddress,
+        promoCode: appliedPromo,
+        discountPercent: discountPercent || undefined,
+        listPrice: listPrice > 0 ? listPrice : undefined,
+        orderRef,
+        siteUrl: siteUrlFromRequest(request),
+      });
+      if ((emailResult as any)?.ok) {
+        emailSent = true;
+        await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+      } else {
+        console.error('[confirm-setup] entry email failed', email, emailResult);
+      }
+      } else {
+        emailSent = true;
+      }
+    } catch (e) {
+      console.error('[confirm-setup] entry email error', e);
+    }
+
+    return { created: true, duplicate: false, appliedPromo, discountPercent, orderRef, emailSent };
+  }
+
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -49,10 +239,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
 
-    // Check if already processed
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
-      // Try to get the promo from the session metadata
       let existingPromo = null;
       let existingDiscount = 0;
       try {
@@ -63,11 +251,10 @@ export async function POST(request: Request) {
           existingDiscount = Number(meta.discountPercent) || 0;
         }
       } catch {}
-      
       return NextResponse.json({
         success: true,
         entryCreated: false,
-        message: existingPromo 
+        message: existingPromo
           ? `🎉 You're already locked in! Promo ${existingPromo} applied${existingDiscount > 0 ? ` (${existingDiscount}% off if selected)` : ''}. Good luck!`
           : "🎉 You're already locked in! Good luck with the allocation.",
         alreadyEntered: true,
@@ -85,28 +272,19 @@ export async function POST(request: Request) {
     }
 
     const meta = session.metadata || {};
-    const email = String(meta.email || session.customer_email || '')
-      .trim()
-      .toLowerCase();
-    const variant = String(meta.variant || '');
-    const size = String(meta.size || 'Standard');
+    const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
     const shippingAddress = String(meta.address || '');
-    const promoCode = String(meta.promoCode || meta.ref || '')
-      .trim()
-      .toUpperCase();
-    const entryType = String(meta.entryType || '').toLowerCase();
-    const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+    const promoCode = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
+    const checkoutType = String(meta.checkoutType || 'single');
 
-    if (!email || !variant) {
+    if (!email) {
       return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
     }
 
-    // Get payment method details
     const setupIntent = session.setup_intent as any;
     let paymentMethodId: string | null = null;
     let cardLast4 = '';
     let cardFingerprint = '';
-
     if (typeof setupIntent === 'object' && setupIntent) {
       const pm = setupIntent.payment_method;
       if (typeof pm === 'string') {
@@ -117,10 +295,7 @@ export async function POST(request: Request) {
         cardFingerprint = String(pm.card?.fingerprint || '');
       }
     }
-
-    const customerId =
-      typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id || '';
-
+    const customerId = typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id || '';
     if (paymentMethodId && !cardLast4) {
       try {
         const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
@@ -128,10 +303,6 @@ export async function POST(request: Request) {
         cardFingerprint = String(pm.card?.fingerprint || cardFingerprint);
       } catch {}
     }
-
-    // Make the saved card + shipping address visible inside the Stripe Customer
-    // Portal (and reusable for the draw's off-session charge) by attaching the
-    // payment method to the customer and writing the address onto the customer.
     if (paymentMethodId && customerId) {
       try {
         await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
@@ -140,10 +311,7 @@ export async function POST(request: Request) {
           ...(shippingAddress
             ? {
                 address: { line1: shippingAddress },
-                shipping: {
-                  name: email,
-                  address: { line1: shippingAddress },
-                },
+                shipping: { name: email, address: { line1: shippingAddress } },
               }
             : {}),
         });
@@ -152,32 +320,122 @@ export async function POST(request: Request) {
       }
     }
 
-    // Check if email is already entered
-    const blocked = await redis.sismember(emailBlockKey(variant, size), email);
-    if (blocked === 1) {
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
-      // Reuse the original entry's order ref so the ledger REF stays consistent.
-      let originalRef = '';
+    const allProducts = await loadProducts(redis);
+    const maxPerEmailFor = (productId: string, size: string) => {
+      const p = allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === String(meta.variant || ''));
+      return Math.max(1, Number((p as any)?.maxPerEmail || 1));
+    };
+
+    // ── Multi-item raffle cart: one setup session secures every entry ────────
+    if (checkoutType === 'raffle_cart') {
+      let cartItems: Array<{ productId: string; variant: string; size: string; quantity: number; priceCents: number }> = [];
       try {
-        const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
-        for (const row of poolItems) {
-          const parsed = safeParseRedisItem<any>(row);
-          if (parsed && String(parsed.email || '').toLowerCase() === email) {
-            originalRef = formatOrderRef(String(parsed.orderRef || '')) || originalRef;
-            break;
+        cartItems = JSON.parse(String(meta.cartItems || '[]'));
+      } catch {}
+      if (cartItems.length === 0) {
+        return NextResponse.json({ error: 'Missing cart entry information.' }, { status: 400 });
+      }
+
+      const locked: string[] = [];
+      const duplicates: string[] = [];
+      let firstPromo: string | null = null;
+      let firstDiscount = 0;
+      let orderRefIndex = 0;
+
+      for (const line of cartItems) {
+        const variant = String(line.variant || allProducts[line.productId]?.name || '');
+        const size = String(line.size || 'Standard');
+        if (!variant) continue;
+        const qty = Math.max(1, Math.floor(Number(line.quantity || 1) || 1));
+        const maxPerEmail = maxPerEmailFor(String(line.productId || ''), size);
+        for (let i = 0; i < qty; i += 1) {
+          orderRefIndex += 1;
+          const lineOrderRef = formatOrderRef(String(meta.orderRef || ''))
+            ? `${formatOrderRef(String(meta.orderRef || ''))}-${orderRefIndex}`
+            : buildOrderRef(email, String(line.productId || variant), size);
+          const result = await lockOneEntry({
+            redis,
+            stripe,
+            request,
+            email,
+            variant,
+            size,
+            shippingAddress,
+            orderRef: lineOrderRef,
+            promoCode,
+            customerId,
+            paymentMethodId,
+            cardLast4,
+            cardFingerprint,
+            entryType: String(meta.entryType || '').toLowerCase(),
+            productId: String(line.productId || ''),
+            maxPerEmail,
+          });
+          if (result.created) {
+            locked.push(`${variant} (${size})`);
+            if (result.appliedPromo) {
+              firstPromo = result.appliedPromo;
+              firstDiscount = result.discountPercent || firstDiscount;
+            }
+          } else if (result.duplicate) {
+            duplicates.push(`${variant} (${size})`);
           }
         }
-      } catch {}
-      await archiveEntry(redis, {
+      }
+
+      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+
+      let message = '🎉 Your entries are locked in!';
+      if (locked.length > 0) message = `🎉 ${locked.length} entr${locked.length === 1 ? 'y' : 'ies'} locked in for the allocation. Good luck!`;
+      if (firstPromo) message += ` Promo ${firstPromo} applied${firstDiscount > 0 ? ` (${firstDiscount}% off if selected)` : ''}.`;
+      if (duplicates.length > 0) message += ` Already entered: ${duplicates.join(', ')}.`;
+      if (locked.length === 0 && duplicates.length > 0) message = `You're already entered for ${duplicates.join(', ')}. Pro tip: you can enter a different raffle.`;
+
+      return NextResponse.json({
+        success: true,
+        entryCreated: locked.length > 0,
+        message,
         email,
-        variant,
-        size,
-        shippingAddress,
-        id: customerId || 'n/a',
-        registeredAt: new Date().toISOString(),
-        type: 'DUPLICATE_BLOCKED',
-        ...(originalRef ? { orderRef: originalRef } : {}),
+        address: shippingAddress,
+        promoCode: firstPromo,
+        discountPercent: firstDiscount,
+        lockedCount: locked.length,
+        duplicateCount: duplicates.length,
       });
+    }
+
+    // ── Single-product setup (legacy flow) ───────────────────────────────────
+    const variant = String(meta.variant || '');
+    const size = String(meta.size || 'Standard');
+    const entryType = String(meta.entryType || '').toLowerCase();
+    const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+
+    if (!variant) {
+      return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
+    }
+
+    const maxPerEmail = maxPerEmailFor(String(meta.productId || ''), size);
+    const result = await lockOneEntry({
+      redis,
+      stripe,
+      request,
+      email,
+      variant,
+      size,
+      shippingAddress,
+      orderRef,
+      promoCode,
+      customerId,
+      paymentMethodId,
+      cardLast4,
+      cardFingerprint,
+      entryType,
+      productId: String(meta.productId || ''),
+      maxPerEmail,
+    });
+
+    if (result.duplicate) {
+      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
       return NextResponse.json({
         success: true,
         entryCreated: false,
@@ -186,156 +444,15 @@ export async function POST(request: Request) {
       });
     }
 
-    // Validate and apply promo code
-    let appliedPromo: string | undefined = promoCode || undefined;
-    let discountPercent = 0;
-    if (promoCode) {
-      try {
-        const raw = await redis.hget(PROMOS_KEY, promoCode);
-        const promo = safeParseRedisItem<any>(raw);
-        if (!promo || promo.active === false) {
-          console.warn('[confirm-setup] promo not found or inactive', promoCode);
-          appliedPromo = undefined;
-        } else {
-          const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
-          const self = promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
-          if (self) {
-            console.warn('[confirm-setup] self-promo blocked', promoCode, email);
-            appliedPromo = undefined;
-          } else if (maxPer > 0) {
-            const used = await redis.sismember(usedEmailsKey(promoCode), email);
-            if (used === 1) {
-              console.warn('[confirm-setup] promo already used by email', promoCode, email);
-              appliedPromo = undefined;
-            }
-          }
-          if (appliedPromo) {
-            discountPercent = Math.min(
-              50,
-              Math.max(
-                0,
-                Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0,
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        console.error('[confirm-setup] promo lookup failed', e);
-        appliedPromo = undefined;
-      }
-    }
-
-    // Create the entry
-    const entry = {
-      email,
-      variant,
-      size,
-      shippingAddress,
-      address: shippingAddress,
-      customerId,
-      stripeCustomerId: customerId,
-      paymentMethodId,
-      cardLast4,
-      cardFingerprint,
-      promoCode: appliedPromo || undefined,
-      discountPercent: appliedPromo && discountPercent > 0 ? discountPercent : undefined,
-      registeredAt: new Date().toISOString(),
-    };
-
-    // Save to Redis
-    if (entryType === 'waitlist') {
-      await redis.rpush(`waitlist:${variant}:${size}`, JSON.stringify({ ...entry, registrationType: 'waitlist' }));
-      await archiveEntry(redis, {
-        email,
-        variant,
-        size,
-        shippingAddress,
-        id: customerId || 'n/a',
-        registeredAt: entry.registeredAt,
-        type: 'WAITLIST_JOINED',
-        orderRef,
-      } as any);
-    } else {
-      await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
-    }
-    await redis.sadd(emailBlockKey(variant, size), email);
-    if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
-    await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
-    await cleanupMatchingIntent(redis, variant, size, email);
-
-    await archiveEntry(redis, {
-      email,
-      variant,
-      size,
-      shippingAddress,
-      id: customerId || 'n/a',
-      registeredAt: entry.registeredAt,
-      type: 'ENTERED',
-      orderRef,
-      ...(appliedPromo
-        ? { promoCode: appliedPromo, discountPercent: discountPercent || undefined }
-        : {}),
-    } as any);
-
-    // Track promo usage
-    if (appliedPromo) {
-      try {
-        await redis.sadd(usedEmailsKey(appliedPromo), email);
-        const raw = await redis.hget(PROMOS_KEY, appliedPromo);
-        const promo = safeParseRedisItem<any>(raw);
-        if (promo) {
-          promo.uses = (promo.uses || 0) + 1;
-          await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
-        }
-      } catch {}
-    }
-
     await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
 
-    // Send confirmation email
-    const emailDedupe = `${variant}:${size}:${email}`;
-    let emailSent = false;
-    try {
-      const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
-      if (sent !== 1) {
-        const liveProducts = await loadProducts(redis);
-        const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === meta.productId) as any;
-        const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
-        const emailResult = await sendEntryConfirmedEmail({
-          to: email,
-          product: variant,
-          size,
-          address: shippingAddress,
-          promoCode: appliedPromo,
-          discountPercent: discountPercent || undefined,
-          listPrice: listPrice > 0 ? listPrice : undefined,
-          orderRef,
-          siteUrl: siteUrlFromRequest(request),
-        });
-        if ((emailResult as any)?.ok) {
-          emailSent = true;
-          await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
-        } else {
-          console.error('[confirm-setup] entry email failed', email, emailResult);
-        }
-      } else {
-        emailSent = true;
-      }
-    } catch (e) {
-      console.error('[confirm-setup] entry email error', e);
+    let successMessage = "🎉 You're in! Your entry is locked for the allocation. Good luck!";
+    if (result.appliedPromo) {
+      successMessage += ` Promo ${result.appliedPromo} applied${result.discountPercent > 0 ? ` (${result.discountPercent}% off if selected)` : ''}.`;
     }
-
-    // Build success message
-    let successMessage = '🎉 You\'re in! Your entry is locked for the allocation. Good luck!';
-    if (appliedPromo) {
-      successMessage += ` Promo ${appliedPromo} applied${discountPercent > 0 ? ` (${discountPercent}% off if selected)` : ''}.`;
+    if (!result.emailSent) {
+      successMessage += " (We couldn't send a confirmation email, but your entry is saved.)";
     }
-    if (!emailSent) {
-      successMessage += ' (We couldn\'t send a confirmation email, but your entry is saved.)';
-    }
-
-    // Clear the promo from session storage (will be handled client-side)
-    // We return the promo info so the client can clear it
 
     return NextResponse.json({
       success: true,
@@ -343,9 +460,9 @@ export async function POST(request: Request) {
       message: successMessage,
       email,
       address: shippingAddress,
-      promoCode: appliedPromo || null,
-      discountPercent: discountPercent || 0,
-      clearPromo: !!appliedPromo, // Tell client to clear the promo display
+      promoCode: result.appliedPromo || null,
+      discountPercent: result.discountPercent || 0,
+      clearPromo: !!result.appliedPromo,
     });
   } catch (err: any) {
     console.error('confirm-setup', err);

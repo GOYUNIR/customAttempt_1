@@ -51,8 +51,9 @@ export default function TermsPage() {
       <h2 style={{ fontSize: 16, marginTop: 28 }}>4. All sales final</h2>
       <p>Allocated products are final sale. No returns, refunds, or exchanges, except where required by law.</p>
 
-      <h2 style={{ fontSize: 16, marginTop: 28 }}>5. Communications</h2>
-      <p>We may email you about entry status, allocation results, shipping, and operational notices. Transactional messages are required to run the service.</p>
+      <h2 style={{ fontSize: 16, marginTop: 28 }}>5. Communications &amp; consent</h2>
+      <p>By creating an account you agree to the Terms of Service and Privacy Policy. We may email you about entry status, allocation results, shipping, and other operational notices — these transactional messages are required to run the service.</p>
+      <p style={{ marginTop: 12 }}>Marketing messages (drop announcements, release previews, and reward updates) are only sent if you opted in during signup or later through your account settings. You can unsubscribe at any time using the unsubscribe link in any marketing email, or by contacting support.</p>
 
       <h2 style={{ fontSize: 16, marginTop: 28 }}>6. Limitation of liability</h2>
       <p>To the fullest extent permitted by law, GOYUNIR is not liable for indirect or consequential damages arising from use of the site or allocation process. Total liability for any claim is limited to the amount you paid for the specific allocation at issue.</p>

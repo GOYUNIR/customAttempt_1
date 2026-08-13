@@ -13,6 +13,12 @@ export const dynamic = 'force-dynamic';
 
 const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER', 'CANCELLED_BY_ADMIN'];
 
+// Ledger rows that are bookkeeping, not actual entries. INTENT_STARTED means the
+// customer opened card setup but never finished; INTENT_EXPIRED means they never
+// completed it; DUPLICATE_BLOCKED is a rejected re-entry attempt; ADMIN_NOTE is
+// internal. None of these should ever show up as "entries" in the account page.
+const SKIP_TYPES = ['INTENT_STARTED', 'INTENT_EXPIRED', 'DUPLICATE_BLOCKED', 'ADMIN_NOTE'];
+
 export async function POST(request: Request) {
   try {
     const sessionUser = await getSessionUser(request);
@@ -51,6 +57,7 @@ export async function POST(request: Request) {
         const e = safeParseRedisItem<any>(raw);
         if (!e) continue;
         if (String(e.email || '').toLowerCase() !== email) continue;
+        if (SKIP_TYPES.includes(String(e.type || ''))) continue;
         const key = `${e.variant}|${e.size}`;
         const existing = statusByKey[key];
         if (!existing || new Date(e.registeredAt).getTime() >= new Date(existing.registeredAt).getTime()) {

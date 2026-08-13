@@ -126,6 +126,8 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
         : defaults.catalogPreview?.archiveScents || [],
     },
     branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
+    rewards: { ...(defaults.rewards || {}), ...(redisConfig.rewards || {}) },
+    gallery: { ...(defaults.gallery || {}), ...(redisConfig.gallery || {}) },
     orbs: mergeOrbsConfig(redisConfig?.orbs || (defaults as any).orbs),
   };
 }

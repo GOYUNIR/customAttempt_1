@@ -122,6 +122,9 @@ const DEFAULT_CONFIG = {
   // favicon, share card and header look intentional out of the box.
   branding: {
     logoUrl: '',
+    logoWidth: 28,
+    logoHeight: 28,
+    logoTransparent: false,
     brandName: 'GOYUNIR',
     brandFontFamily: '',
     headerMode: 'both',
@@ -134,6 +137,20 @@ const DEFAULT_CONFIG = {
     shareText: '#F5F2E9',
     iconBackground: '#0B0B0F',
     iconText: '#D4AF37',
+  },
+  // Rewards & points: earn on purchases, redeem for store credit.
+  rewards: {
+    pointsPerDollar: 100,
+    minRedeemPoints: 100,
+    maxRedeemPoints: 0,
+    purchasePointsPerDollar: 10,
+  },
+  // Product gallery: auto-advancing photos with a slow cinematic zoom.
+  gallery: {
+    autoPlay: true,
+    intervalSeconds: 4,
+    zoom: true,
+    zoomDurationSeconds: 14,
   },
   availableSizes: ['Standard'],
   homeRedirectSlug: 'elysian-white-launch-draw',

@@ -492,8 +492,8 @@ function handleRetrieve(event: any): void {
   const input = event && (event.target as HTMLInputElement | undefined);
   // The SDK fires `retrieve` just before it fills the address fields. It only
   // writes the street components into a single `street-address` box (city,
-  // state, zip are skipped when the form has no fields for them), so we defer
-  // by one tick and then overwrite the box with the full composed address.
+  // state, zip are skipped when the form has no fields for them), and its own
+  // form-fill runs ASYNC after the event — so a single tick isn't enough.
   // NOTE: the SDK's `MapboxHTMLEvent` puts the payload in `event.detail`, so
   // the retrieved FeatureCollection is `event.detail.features` (we also accept
   // `event.features` for forward-compatibility).
@@ -501,20 +501,37 @@ function handleRetrieve(event: any): void {
     event?.detail?.features?.[0]?.properties ||
     event?.features?.[0]?.properties;
   const composed = composeFullAddress(props);
-  window.setTimeout(() => {
+  if (!composed) return;
+
+  // Apply the full address over several ticks. The SDK's own form-fill can land
+  // at any moment, so we keep re-writing our (longer, complete) value until the
+  // SDK is done. If the box ends up with just the street, the last write wins.
+  let attempts = 0;
+  const writeFull = () => {
+    attempts += 1;
     const el = input && typeof input.value === 'string' ? input : null;
-    if (!el) return;
-    const filled = (composed || el.value || '').trim();
-    if (!filled) return;
-    // Programmatic write mirrors how the SDK itself fills the field (React's
-    // onChange does not fire — submit handlers read the DOM via
-    // getAutofillAddressValue(), so the full address is still what ships).
-    if (el.value !== filled) el.value = filled;
-    verifiedAddresses.add(filled);
-    el.setAttribute('data-mapbox-verified', 'true');
-    el.setAttribute('data-mapbox-verified-value', filled);
-    if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
-  }, 0);
+    if (!el || !el.isConnected) return;
+    const current = String(el.value || '').trim();
+    // Only override when our composed address is strictly richer than what's in
+    // the box (covers the "SDK wrote street only" case) or identical to it.
+    if (current.length < composed.length) {
+      el.value = composed;
+    }
+    // Mark as verified once the box actually contains the full address.
+    if (String(el.value || '').trim() === composed) {
+      verifiedAddresses.add(composed);
+      el.setAttribute('data-mapbox-verified', 'true');
+      el.setAttribute('data-mapbox-verified-value', composed);
+      if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
+      return;
+    }
+    if (attempts < 6) {
+      // 0ms, 25ms, 75ms, 175ms, 375ms, 750ms — long enough to outlast the SDK's
+      // async form-fill even on slow devices.
+      window.setTimeout(writeFull, Math.min(750, attempts * attempts * 25 + 25));
+    }
+  };
+  writeFull();
 }
 
 function watchManualEdits(): void {
