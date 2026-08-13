@@ -3,7 +3,7 @@
  * inject-mapbox-token.mjs
  *
  * Build-time step that maps the NEXT_PUBLIC_MAPBOX_TOKEN environment variable
- * into the standalone HTML checkout files by replacing the dedicated
+ * into the standalone HTML address form by replacing the dedicated
  * fallback attribute placeholder:
  *
  *     data-mapbox-token="__NEXT_PUBLIC_MAPBOX_TOKEN__"
@@ -42,7 +42,7 @@ const projectRoot = path.resolve(__dirname, '..');
 // with the <script id="search-js"> tag in the target HTML files.
 const ATTRIBUTE_NAME = 'data-mapbox-token';
 const PLACEHOLDER = '__NEXT_PUBLIC_MAPBOX_TOKEN__';
-const TARGET_FILES = ['public/checkout.html', 'public/address-checkout-form.html'];
+const TARGET_FILES = ['public/address-checkout-form.html'];
 
 const token = (process.env.NEXT_PUBLIC_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '').trim();
 

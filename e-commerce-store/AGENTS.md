@@ -26,10 +26,10 @@ store:product_images - Product 360° rotation images
 store:config - Site configuration (colors, hero, footer, etc.)
 drop_pool:* - Entry pools for each product/size
 archive:ledger - Permanent entry history
-address:submissions - Addresses captured by the standalone checkout pages (`/checkout.html`, `/address-checkout-form.html`)
+address:submissions - Addresses captured by the standalone address form (`/address-checkout-form.html`)
 
 ### Address Capture Pages
-- **`public/checkout.html`** and **`public/address-checkout-form.html`** are standalone address forms served at `/checkout.html` and `/address-checkout-form.html`.
+- **`public/address-checkout-form.html`** is a standalone address form served at `/address-checkout-form.html`.
 - Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` (or the `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` alias) is configured, or `window.ENV_MAPBOX_TOKEN` is injected at runtime. **If the token is missing the dropdown simply does not exist** — that is the #1 reason autofill "isn't working". The page shows an explicit "Address autofill is unavailable (Mapbox token not configured)" note and console logs explain the state (`[mapbox-autofill]`). Set the var in Vercel (Project Settings → Environment Variables, Production + Preview) **and redeploy** — it is baked in at build time. For local dev add it to `.env.local`, or use the localhost-only overrides `?mapbox_token=pk.…` / `localStorage "mapbox_dev_token"` (never read in production).
 - Submitting posts to **`/api/address/save`**: the address is logged to `address:submissions`, and when the URL carries `?variant=&size=&email=` (and optionally `?orderRef=`) it is attached to the matching open entry. An already-set entry address is only overwritten when the matching `orderRef` is supplied.
 - The token placeholder is mapped into `data-mapbox-token` at build time by `scripts/inject-mapbox-token.mjs` (targets `public/` files).

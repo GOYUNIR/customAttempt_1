@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
+import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
@@ -507,6 +508,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   if (loading) return <div style={{ padding: 40, color: '#888' }}>Loading...</div>;
+  // An unknown/typo'd product URL renders the same friendly 404 page as any
+  // other unmatched route. Network failures and the empty-store home state
+  // keep their distinct messages below.
+  if (error === 'Product not found') return <NotFoundView />;
   if (error || !product) return <div style={{ padding: 40, color: '#f87171' }}>{error || 'Product not found'}</div>;
 
   const priceCat = getProductPriceCategory(product, selectedSize);

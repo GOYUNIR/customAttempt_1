@@ -21,8 +21,8 @@ function isBlankAddress(value: string): boolean {
 }
 
 /**
- * Public address-capture endpoint used by the standalone checkout pages
- * (public/checkout.html, public/address-checkout-form.html).
+ * Public address-capture endpoint used by the standalone address page
+ * (public/address-checkout-form.html).
  *
  * - Always logs the raw submission to Redis (address:submissions) so no
  *   address is ever lost.
