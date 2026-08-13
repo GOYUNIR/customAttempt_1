@@ -50,7 +50,17 @@ declare global {
   interface Window {
     ENV_MAPBOX_TOKEN?: string;
     mapboxsearch?: {
-      autofill: (options: { accessToken: string; options?: Record<string, unknown> }) => AddressAutofillCollection;
+      autofill: (options: {
+        accessToken: string;
+        options?: Record<string, unknown>;
+        /**
+         * REQUIRED for Mapbox search-js v1.6.0: when false (the SDK default) it
+         * renames an attached input's `autocomplete` to "new-password" on
+         * focus/typing, which makes the field invisible to both our selector and
+         * the SDK's own re-scan, so the next update() tears the dropdown down.
+         */
+        browserAutofillEnabled?: boolean;
+      }) => AddressAutofillCollection;
     };
     __GOYUNIR_MAPBOX__?: GoyunirMapboxStatus;
   }
@@ -467,15 +477,63 @@ function watchManualEdits(): void {
   );
 }
 
+/** The address `autocomplete` value every storefront shipping input starts with. */
+const ADDRESS_AUTOCOMPLETE = 'shipping street-address';
+
+/**
+ * Mapbox search-js v1.6.0 renames an attached input's `autocomplete` attribute
+ * to "new-password" on focus and on every keystroke when `browserAutofillEnabled`
+ * is false (its default). That makes BOTH our selector AND the SDK's own re-scan
+ * (`Hi()` / `update()`) stop recognizing the field, so a later
+ * `collection.update()` tears the dropdown down and it never comes back (and the
+ * UI hint flips to "could not attach" even though attach was verified). Restore
+ * the address value on any input the SDK attached to so the field stays eligible.
+ */
+function restoreAddressAutocomplete(): void {
+  if (typeof document === 'undefined') return;
+  const candidates = new Set<HTMLInputElement>();
+  try {
+    document
+      .querySelectorAll<HTMLInputElement>(
+        'input[autocomplete~="street-address"], input[autocomplete~="address-line1"]'
+      )
+      .forEach((el) => candidates.add(el));
+  } catch {
+    /* ignore */
+  }
+  // Inputs the SDK is currently attached to (its listbox `.input` pointers) may
+  // have been renamed to "new-password" and no longer match the selector.
+  listboxElements().forEach((lb) => {
+    const input = (lb as Element & { input?: HTMLInputElement }).input;
+    if (input instanceof HTMLInputElement) candidates.add(input);
+  });
+  for (const el of candidates) {
+    if ((el.getAttribute('autocomplete') || '') === 'new-password') {
+      el.setAttribute('autocomplete', ADDRESS_AUTOCOMPLETE);
+    }
+  }
+}
+
 /** Street-address inputs the SDK attaches to (same selector the SDK uses). */
 function findAddressInputs(): HTMLInputElement[] {
   if (typeof window === 'undefined' || typeof document === 'undefined') return [];
   try {
-    return Array.from(
-      document.querySelectorAll<HTMLInputElement>(
+    const found = new Map<HTMLInputElement, boolean>();
+    document
+      .querySelectorAll<HTMLInputElement>(
         'input[autocomplete~="street-address"], input[autocomplete~="address-line1"]'
       )
-    );
+      .forEach((el) => found.set(el, true));
+    // The SDK renames an attached input's `autocomplete` to "new-password" on
+    // focus/typing (browser-autofill prevention), so the selector above can stop
+    // matching a field that still has a live dropdown attached. Treat inputs the
+    // SDK is currently attached to (its listbox `.input` pointers) as eligible
+    // too, so a rename can never make the status/hint flap to "could not attach".
+    listboxElements().forEach((lb) => {
+      const input = (lb as Element & { input?: HTMLInputElement }).input;
+      if (input instanceof HTMLInputElement && input.isConnected) found.set(input, true);
+    });
+    return Array.from(found.keys());
   } catch {
     return [];
   }
@@ -500,6 +558,10 @@ function inputsEqual(a: HTMLInputElement[], b: HTMLInputElement[]): boolean {
  */
 export function resyncMapboxAutofill(): void {
   if (!collection || typeof collection.update !== 'function') return;
+  // Mapbox renames attached inputs to "new-password" on focus/typing; restore
+  // before the SDK's re-scan so update() sees the address field as eligible and
+  // (re)attaches it instead of tearing the dropdown down.
+  restoreAddressAutocomplete();
   const current = findAddressInputs();
   const info = verifyMapboxAttachment();
   const inputsChanged = !inputsEqual(current, attachedInputs);
@@ -524,10 +586,21 @@ function startAutofillObserver(): void {
     return;
   }
   autofillObserver = new MutationObserver(() => {
+    // Keep the SDK from permanently renaming our address fields to
+    // "new-password" (which would make the next update() tear the dropdown down).
+    restoreAddressAutocomplete();
     resyncMapboxAutofill();
   });
-  autofillObserver.observe(document, { subtree: true, childList: true });
+  autofillObserver.observe(document, {
+    subtree: true,
+    childList: true,
+    // Watch autocomplete changes too so we can immediately undo the SDK's
+    // "new-password" rename before any other code re-scans the DOM.
+    attributes: true,
+    attributeFilter: ['autocomplete'],
+  });
   // Attach to anything already in the DOM (no-op if the constructor did it).
+  restoreAddressAutocomplete();
   resyncMapboxAutofill();
 }
 
@@ -657,7 +730,14 @@ export async function ensureMapboxAutofill(): Promise<void> {
     // Capture the inputs the SDK constructor is about to attach to, so our own
     // resync below doesn't re-attach (and re-name) the same elements.
     attachedInputs = findAddressInputs();
-    collection = mapbox.autofill({ accessToken: token });
+    // NOTE: `browserAutofillEnabled: true` is REQUIRED. With the SDK default
+    // (false) it renames an attached input's `autocomplete` to "new-password"
+    // on focus/typing, which makes both our selector and the SDK's own re-scan
+    // stop recognizing the field — the next collection.update() then tears the
+    // dropdown down and it never comes back. With this option the SDK keeps the
+    // original address autocomplete while the field is empty/short, and our
+    // restoreAddressAutocomplete() guard covers the longer-typing case.
+    collection = mapbox.autofill({ accessToken: token, browserAutofillEnabled: true });
     if (collection && typeof collection.addEventListener === 'function') {
       collection.addEventListener('retrieve', handleRetrieve);
       collection.addEventListener('suggest', () => {

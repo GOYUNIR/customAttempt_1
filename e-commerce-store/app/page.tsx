@@ -99,22 +99,24 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
+          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
           <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
             Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {primaryProduct?.slug ? (
-              <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
                 Browse drops
               </button>
             ) : (
-              <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
-                Browse catalog
-              </Link>
+              activeProducts.length > 0 && (
+                <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                  Browse catalog
+                </Link>
+              )
             )}
-            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.textMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
               Our Story
             </Link>
             <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Low supply. Fast conversion. Quiet exclusivity.</span>
@@ -124,7 +126,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {activeProducts.length > 0 ? (
+        {activeProducts.length > 0 && (
           <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Priority drops</div>
@@ -152,13 +154,14 @@ export default function HomePage() {
               ))}
             </div>
           </section>
-        ) : (
-          <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '20px 18px', background: '#0e0e10' }}>
-            <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue, marginBottom: 8 }}>Release feed</div>
-            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px', color: configPalette.cardTextMain }}>No live release this second.</h2>
-            <p style={{ color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Upcoming and archived pieces still carry the release story, countdowns, and collector context while the next allocation warms up.</p>
-            <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>See upcoming and archive</Link>
-          </section>
+        )}
+
+        {activeProducts.length === 0 && (
+          <ReleaseWaitlist
+            source="home"
+            headline="Get notified the moment the next release goes live."
+            body="Join the alert list and we will send the drop as soon as it opens."
+          />
         )}
 
         {soldOutProducts.length > 0 && (
@@ -183,7 +186,7 @@ export default function HomePage() {
           </section>
         )}
 
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: 'rgba(255,255,255,0.03)', animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: '#0e0e10', color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Member perk</div>
@@ -192,14 +195,6 @@ export default function HomePage() {
             <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
           </div>
         </section>
-
-        {activeProducts.length === 0 && (
-          <ReleaseWaitlist
-            source="home"
-            headline="Get notified the moment the next release goes live."
-            body="Join the alert list and we will send the drop as soon as it opens."
-          />
-        )}
       </div>
     </main>
   );

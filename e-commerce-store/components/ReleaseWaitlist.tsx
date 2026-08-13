@@ -45,9 +45,9 @@ export default function ReleaseWaitlist({
   };
 
   return (
-    <section style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 24, padding: '18px 16px', background: 'linear-gradient(180deg, rgba(18,18,23,0.96), rgba(10,10,12,0.96))', boxShadow: '0 18px 50px rgba(0,0,0,0.24)' }}>
+    <section style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 24, padding: '18px 16px', background: 'linear-gradient(180deg, rgba(18,18,23,0.96), rgba(10,10,12,0.96))', boxShadow: '0 18px 50px rgba(0,0,0,0.24)', color: '#ffffff' }}>
       <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: '#7dd3fc', marginBottom: 8 }}>Private release list</div>
-      <h3 style={{ margin: '0 0 8px', fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', lineHeight: 1.1 }}>{headline}</h3>
+      <h3 style={{ margin: '0 0 8px', fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', lineHeight: 1.1, color: '#ffffff' }}>{headline}</h3>
       <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.65, color: '#c8c8cf' }}>{body}</p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input

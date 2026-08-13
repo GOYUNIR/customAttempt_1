@@ -324,7 +324,22 @@
         sdk.onload = function () {
           if (window.mapboxsearch && typeof window.mapboxsearch.autofill === 'function') {
             try {
-              var collection = window.mapboxsearch.autofill({ accessToken: token });
+              var collection = window.mapboxsearch.autofill({ accessToken: token, browserAutofillEnabled: true });
+              // Mapbox renames an attached input's `autocomplete` to
+              // "new-password" on focus/typing (browser-autofill prevention),
+              // which makes its own observe()/update() re-scan drop the field
+              // and tear the dropdown down. Watch the form and restore the
+              // address value so the dropdown survives typing.
+              var autocompleteGuard = null;
+              if (typeof MutationObserver === 'function') {
+                autocompleteGuard = new MutationObserver(function () {
+                  var inputs = document.querySelectorAll('#checkout-form input[autocomplete="new-password"]');
+                  for (var g = 0; g < inputs.length; g++) {
+                    inputs[g].setAttribute('autocomplete', 'shipping street-address');
+                  }
+                });
+                autocompleteGuard.observe(document, { subtree: true, attributes: true, attributeFilter: ['autocomplete'] });
+              }
               if (collection && typeof collection.observe === 'function') {
                 collection.observe();
               }
