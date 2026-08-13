@@ -170,7 +170,7 @@ export default function CatalogPage() {
     <main
       style={{
         minHeight: 'calc(100vh - 56px)',
-        background: 'radial-gradient(circle at top, rgba(59,130,246,0.1), transparent 36%), radial-gradient(circle at 80% 0%, rgba(168,85,247,0.12), transparent 32%), #07070a',
+        background: '#07070a',
         color: configPalette.textMain,
         padding: '24px 20px 60px',
         boxSizing: 'border-box',

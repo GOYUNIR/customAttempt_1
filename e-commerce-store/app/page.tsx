@@ -90,7 +90,7 @@ export default function HomePage() {
   };
 
   return (
-    <main style={{ minHeight: '100vh', background: 'radial-gradient(circle at top, rgba(59,130,246,0.14), transparent 36%), radial-gradient(circle at 20% 20%, rgba(168,85,247,0.16), transparent 28%), #07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
+    <main style={{ minHeight: '100vh', background: '#07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
@@ -101,9 +101,9 @@ export default function HomePage() {
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {primaryProduct?.slug ? (
-              <Link href={`/${primaryProduct.slug}`} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
-                Enter live drop
-              </Link>
+              <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                Browse drops
+              </button>
             ) : (
               <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
                 Browse catalog
@@ -115,12 +115,12 @@ export default function HomePage() {
             <span style={{ fontSize: 11, color: '#9ca3af' }}>Low supply. Fast conversion. Quiet exclusivity.</span>
           </div>
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
-            Live raffle entries signal: <strong>{socialProofDisplay.toLocaleString()}</strong>
+            Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
         </section>
 
         {activeProducts.length > 0 ? (
-          <section style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
+          <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Priority drops</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>Sorted by admin order</div>

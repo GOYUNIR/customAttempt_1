@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
+
+const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 export async function POST(request: Request) {
   try {
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
         if (!customerId || !paymentMethodId) {
           declinedEntries.push(winnerStr);
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });
-          results.push({ email: entry.email, status: 'declined (no payment method)' });
+          results.push({ email: entry.email, status: 'declined (no payment method)', product: productName, size });
           continue;
         }
 
@@ -98,11 +100,11 @@ export async function POST(request: Request) {
             orderRef,
             shippingStatus: 'PENDING_FULFILLMENT',
           });
-          results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, orderRef });
+          results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, orderRef, product: productName, size, amountCents: priceCents });
         } catch (err: any) {
           declinedEntries.push(winnerStr);
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });
-          results.push({ email: entry.email, status: 'declined', error: err.message });
+          results.push({ email: entry.email, status: 'declined', error: err.message, product: productName, size });
         }
       }
 
@@ -133,8 +135,10 @@ export async function POST(request: Request) {
             totalCharged++;
             totalRevenueCents += priceCents;
             await archiveEntry(redis, { ...entry, type: 'WAITLIST_CHARGED', amountCents: priceCents, shippingStatus: 'PENDING_FULFILLMENT' });
+            results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, product: productName, size, amountCents: priceCents });
           } catch (err: any) {
             await archiveEntry(redis, { ...entry, type: 'WAITLIST_DECLINED' });
+            results.push({ email: entry.email, status: 'declined', error: err.message, product: productName, size });
           }
         }
         const remainingWaitlist = waitlistEntries.slice(pendingWaitlist.length);
@@ -150,12 +154,49 @@ export async function POST(request: Request) {
         await redis.rpush(poolKey, item);
       }
       await saveLiveState(redis, live);
+
+      // Recompute pool stats so the Overview no longer shows stale "entered"
+      // counts after the draw (the old code never reset POOL_STATS_KEY here).
+      try {
+        const remainingList = await redis.lrange(poolKey, 0, -1);
+        const intentList = await redis.lrange(`intent_pool:${productName}:${size}`, 0, -1);
+        await redis.hset(POOL_STATS_KEY, {
+          [poolStatField('sub', productName, size)]: String(remainingList.length),
+          [poolStatField('int', productName, size)]: String(intentList.length),
+        });
+      } catch {}
     }
+
+    // Build a summary that both the admin UI (drawSummary.processedWinners) and
+    // the draw-history screen can consume.
+    const processedWinners = results.map((r: any) => ({
+      email: r.email,
+      product: r.product,
+      size: r.size,
+      status: r.status === 'charged' ? 'SUCCESS_CHARGED' : r.status,
+      amountCents: r.amountCents || Math.round((Number(r.amount) || 0) * 100),
+      orderRef: r.orderRef,
+      promoCode: r.promoCode,
+    }));
+    const drawSummary = {
+      executionTime: new Date().toLocaleString(),
+      processedWinners,
+      totalSuccessfulCharges: totalCharged,
+      totalRevenueCents,
+    };
+
+    try {
+      await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({ ...drawSummary, timestamp: new Date().toISOString() }));
+      const historyLen = await redis.llen(DRAW_HISTORY_KEY);
+      if (historyLen > 100) await redis.ltrim(DRAW_HISTORY_KEY, historyLen - 100, -1);
+      await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
+    } catch {}
 
     return NextResponse.json({
       success: true,
       results,
-      summary: { totalCharged, totalRevenueCents: totalRevenueCents },
+      summary: { totalCharged, totalRevenueCents },
+      drawSummary,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

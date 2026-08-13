@@ -129,10 +129,45 @@ export async function POST(request: Request) {
       } catch {}
     }
 
+    // Make the saved card + shipping address visible inside the Stripe Customer
+    // Portal (and reusable for the draw's off-session charge) by attaching the
+    // payment method to the customer and writing the address onto the customer.
+    if (paymentMethodId && customerId) {
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+        await stripe.customers.update(customerId, {
+          invoice_settings: { default_payment_method: paymentMethodId },
+          ...(shippingAddress
+            ? {
+                address: { line1: shippingAddress },
+                shipping: {
+                  name: email,
+                  address: { line1: shippingAddress },
+                },
+              }
+            : {}),
+        });
+      } catch (e) {
+        console.error('[confirm-setup] attach payment method failed', e);
+      }
+    }
+
     // Check if email is already entered
     const blocked = await redis.sismember(emailBlockKey(variant, size), email);
     if (blocked === 1) {
       await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      // Reuse the original entry's order ref so the ledger REF stays consistent.
+      let originalRef = '';
+      try {
+        const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+        for (const row of poolItems) {
+          const parsed = safeParseRedisItem<any>(row);
+          if (parsed && String(parsed.email || '').toLowerCase() === email) {
+            originalRef = formatOrderRef(String(parsed.orderRef || '')) || originalRef;
+            break;
+          }
+        }
+      } catch {}
       await archiveEntry(redis, {
         email,
         variant,
@@ -141,12 +176,13 @@ export async function POST(request: Request) {
         id: customerId || 'n/a',
         registeredAt: new Date().toISOString(),
         type: 'DUPLICATE_BLOCKED',
+        ...(originalRef ? { orderRef: originalRef } : {}),
       });
       return NextResponse.json({
         success: true,
         entryCreated: false,
         alreadyEntered: true,
-        message: "🎉 You're already locked in for this drop — sit tight, we'll email you if you're selected.",
+        message: "🎉 You're already locked in for this drop — sit tight, we'll email you if you're selected. Good luck! Pro tip: you can enter a different raffle.",
       });
     }
 

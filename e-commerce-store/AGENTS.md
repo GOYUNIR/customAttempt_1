@@ -34,6 +34,7 @@ archive:ledger - Permanent entry history
 - Draw trigger and history
 - Entry management and ledger search
 - **ALL configuration** (sizes, prices, Stripe IDs, inventory, schedule, social proof, etc.) is editable live – no redeploy required.
+- **Design Presets** (`/admin` → Settings → Design Presets) – one-click market skins (Luxury / Hype Culture / Wellness) that fill `themeColors` (+ `fontFamily`, `borderRadius`) and the glow orbs. Defined in `lib/theme-presets.ts`; colors are baked into static pages at build time, while `SiteChrome` applies the saved font/background/`--ui-radius` token to the live page shell.
 
 ## CRITICAL RULES FOR AI AGENTS
 

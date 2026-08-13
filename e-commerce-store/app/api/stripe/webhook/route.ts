@@ -146,6 +146,24 @@ export async function POST(request: Request) {
           }
         } catch {}
 
+        // Surface the saved card + address in the Stripe Customer Portal.
+        if (paymentMethodId && customerId) {
+          try {
+            await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+            await stripe.customers.update(customerId, {
+              invoice_settings: { default_payment_method: paymentMethodId },
+              ...(shippingAddress
+                ? {
+                    address: { line1: shippingAddress },
+                    shipping: { name: email, address: { line1: shippingAddress } },
+                  }
+                : {}),
+            });
+          } catch (e) {
+            console.error('[webhook] attach payment method failed', e);
+          }
+        }
+
         const poolKey = `drop_pool:${variant}:${size}`;
         const existingEntries = await redis.lrange(poolKey, 0, -1);
         const activeCountForEmail = existingEntries.reduce((count: number, row: any) => {

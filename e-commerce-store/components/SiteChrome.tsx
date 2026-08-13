@@ -21,10 +21,11 @@ const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 // the orbs feel heavy and keep momentum instead of snapping to the cursor.
 const DEFAULT_ORBS: any = {
   enabled: true,
-  topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
   primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
   secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
   tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+  fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
+  fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -127,7 +128,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const orbPrimaryRef = useRef<HTMLDivElement | null>(null);
   const orbSecondaryRef = useRef<HTMLDivElement | null>(null);
   const orbTertiaryRef = useRef<HTMLDivElement | null>(null);
-  const headerOrbRef = useRef<HTMLDivElement | null>(null);
+  const orbFourthRef = useRef<HTMLDivElement | null>(null);
+  const orbFifthRef = useRef<HTMLDivElement | null>(null);
+  // Tracks whether a finger is actively on the screen. While touching, scroll
+  // motion is paused so the orbs keep following the finger instead of being
+  // yanked around by the page scroll on mobile.
+  const touchingRef = useRef(false);
 
   const showNotice = (next: { id?: string; type: string; message: string; persist?: boolean }) => {
     setNotice({ id: next.id, type: next.type, message: next.message });
@@ -135,8 +141,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       window.clearTimeout(noticeTimerRef.current);
       noticeTimerRef.current = null;
     }
-    if (!next.persist && next.type !== 'loading') {
-      noticeTimerRef.current = window.setTimeout(() => setNotice((current) => (current?.id === next.id || !next.id ? null : current)), 2400);
+    // Regular notices hide quickly; persisted alerts (Stripe success/fail etc.)
+    // stay up much longer so the customer can't miss them, then auto-dismiss.
+    if (next.type !== 'loading') {
+      const duration = next.persist ? 10000 : 2400;
+      noticeTimerRef.current = window.setTimeout(() => setNotice((current) => (current?.id === next.id || !next.id ? null : current)), duration);
     }
   };
 
@@ -168,7 +177,23 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       targetYRef.current = clamp(event.clientY / height, 0.06, 0.94);
       lastInteraction = Date.now();
     };
+    const onTouchStart = (event: TouchEvent) => {
+      touchingRef.current = true;
+      const cfg = orbsRef.current;
+      if (cfg?.motion?.pointerEnabled === false) return;
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      const width = window.innerWidth || 1;
+      const height = window.innerHeight || 1;
+      targetXRef.current = clamp(touch.clientX / width, 0.04, 0.96);
+      targetYRef.current = clamp(touch.clientY / height, 0.06, 0.94);
+      lastInteraction = Date.now();
+    };
+    const onTouchEnd = () => {
+      touchingRef.current = false;
+    };
     const onTouchMove = (event: TouchEvent) => {
+      touchingRef.current = true;
       const cfg = orbsRef.current;
       if (cfg?.motion?.pointerEnabled === false) return;
       const touch = event.touches?.[0];
@@ -193,7 +218,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const primary = orbPrimaryRef.current;
       const secondary = orbSecondaryRef.current;
       const tertiary = orbTertiaryRef.current;
-      const headerOrb = headerOrbRef.current;
+      const fourth = orbFourthRef.current;
+      const fifth = orbFifthRef.current;
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
       if (primary) {
@@ -205,11 +231,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (tertiary) {
         tertiary.style.transform = `translate3d(${((18 + x * 24 * intensity) / 100) * vw}px, ${((62 - y * 18 * intensity) / 100) * vh}px, 0)`;
       }
-      if (headerOrb) {
-        // The top-bar orb stays centered and drifts a short, smooth distance.
-        const hx = (x - 0.5) * 34 * intensity;
-        const hy = (y - 0.5) * 18 * intensity;
-        headerOrb.style.transform = `translate3d(calc(-50% + ${hx.toFixed(2)}px), calc(-50% + ${hy.toFixed(2)}px), 0)`;
+      if (fourth) {
+        fourth.style.transform = `translate3d(${((-32 - x * 18 * intensity) / 100) * vw}px, ${((76 + y * 22 * intensity) / 100) * vh}px, 0)`;
+      }
+      if (fifth) {
+        fifth.style.transform = `translate3d(${((82 + x * 16 * intensity) / 100) * vw}px, ${((18 - y * 30 * intensity) / 100) * vh}px, 0)`;
       }
     };
 
@@ -218,8 +244,22 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     let idleTargetY = 0.42;
     let nextIdleRetargetAt = Date.now() + 2300;
     let running = true;
+    // Compositor throttle: the physics runs every rAF, but we only write orb
+    // transforms every other frame (~30fps). Ambient glow reads smooth at 30fps
+    // and this halves the per-frame compositor work — a meaningful lag fix on
+    // seeded stores with product imagery layered over the glow.
+    let glowFrameCount = 0;
+    const reducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const animateIdle = () => {
       if (!running) return;
+      const cfg = orbsRef.current;
+      // When orbs are switched off from /admin, stop the loop entirely so
+      // it never wastes GPU/CPU on hidden elements (this was a lag source on
+      // seeded stores). The loop only runs again after a full page reload.
+      if (cfg && cfg.enabled === false) {
+        running = false;
+        return;
+      }
       const nowPerf = performance.now();
       const lastFrame = lastFrameAtRef.current || nowPerf;
       const dt = Math.min(34, Math.max(8, nowPerf - lastFrame));
@@ -227,10 +267,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const frame = dt / 16.667;
 
       const now = Date.now();
-      const cfg = orbsRef.current;
       const motion = cfg?.motion || DEFAULT_ORBS.motion;
-      const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, 2.5);
-      const speedFactor = clamp((motion.speed ?? 100) / 100, 0.3, 2.2);
+      const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, reducedMotion ? 0.5 : 2.5);
+      const speedFactor = clamp((motion.speed ?? 100) / 100, 0.3, reducedMotion ? 0.7 : 2.2);
       const momentumFactor = clamp((motion.momentum ?? 40) / 100, 0, 1);
 
       const idleFor = now - lastInteraction;
@@ -289,13 +328,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const easedY = clamp(easedYRef.current + orbVYRef.current * frame, 0.05, 0.95);
       easedXRef.current = easedX;
       easedYRef.current = easedY;
-      applyGlow(easedX, easedY);
+      glowFrameCount += 1;
+      if (glowFrameCount % 2 === 0) {
+        applyGlow(easedX, easedY);
+      }
       rafId = window.requestAnimationFrame(animateIdle);
     };
 
     const onScrollMotion = () => {
       const cfg = orbsRef.current;
       if (cfg?.motion?.scrollEnabled === false) return;
+      // While a finger is down on a touch device the orbs follow the touch, not
+      // the scroll — otherwise the scroll event fights the touch position and
+      // the orbs appear to only react to the very first touch.
+      if (touchingRef.current) return;
       const maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
       const progress = (window.scrollY || 0) / maxScroll;
       const now = Date.now();
@@ -378,7 +424,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('scroll', onScrollMotion, { passive: true });
     window.addEventListener('pointermove', onPointer, { passive: true });
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: true });
     lastFrameAtRef.current = performance.now();
     rafId = window.requestAnimationFrame(animateIdle);
     applyGlow(easedXRef.current, easedYRef.current);
@@ -393,12 +442,31 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('scroll', onScrollMotion);
       window.removeEventListener('pointermove', onPointer);
+      window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
       window.cancelAnimationFrame(rafId);
       window.clearTimeout(cueTimer);
       if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
+
+  // Apply the admin-configured theme (design presets) to the live page shell.
+  // Colors are consumed at build time by static pages, but this keeps the body
+  // background/color/font and the design tokens (--background/--foreground/
+  // --ui-radius) instantly in sync with whatever is saved in /admin → Settings.
+  useEffect(() => {
+    if (!theme) return;
+    const root = document.documentElement;
+    const radius = Number(theme.borderRadius) >= 0 ? `${Number(theme.borderRadius)}px` : '12px';
+    root.style.setProperty('--ui-radius', radius);
+    root.style.setProperty('--background', theme.primaryBackground || '#0a0a0a');
+    root.style.setProperty('--foreground', theme.textMain || '#ffffff');
+    document.body.style.background = theme.primaryBackground || '#0a0a0a';
+    document.body.style.color = theme.textMain || '#ffffff';
+    if (theme.fontFamily) document.body.style.fontFamily = theme.fontFamily;
+  }, [theme]);
 
   useEffect(() => {
     writeCheckoutDetails(checkoutEmail, checkoutAddress);
@@ -463,7 +531,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const headerAccent = theme?.accentBlue || '#7dd3fc';
   const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.94)';
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
@@ -475,10 +542,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // Resolve admin-configurable orb settings (falls back to built-in defaults).
   const resolvedOrbs = orbs || DEFAULT_ORBS;
   const orbsEnabled = resolvedOrbs.enabled !== false;
-  const topBarOrb = { ...DEFAULT_ORBS.topBar, ...(resolvedOrbs.topBar || {}) };
   const primaryOrb = { ...DEFAULT_ORBS.primary, ...(resolvedOrbs.primary || {}) };
   const secondaryOrb = { ...DEFAULT_ORBS.secondary, ...(resolvedOrbs.secondary || {}) };
   const tertiaryOrb = { ...DEFAULT_ORBS.tertiary, ...(resolvedOrbs.tertiary || {}) };
+  const fourthOrb = { ...DEFAULT_ORBS.fourth, ...(resolvedOrbs.fourth || {}) };
+  const fifthOrb = { ...DEFAULT_ORBS.fifth, ...(resolvedOrbs.fifth || {}) };
 
   // Keep the resolved header action mode ("bag" vs "cart") in sync so the
   // storefront can read it on render. Without this, the value was only ever
@@ -491,15 +559,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />
+        {orbsEnabled && <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />}
         {orbsEnabled && primaryOrb.enabled !== false && (
-          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(primaryOrb.size) || 58}vw`, height: `${Number(primaryOrb.size) || 58}vw`, minWidth: 160, minHeight: 160, maxWidth: 780, maxHeight: 780, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, primaryOrb.opacity, '#3b82f6'), willChange: 'transform' }} />
+          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(primaryOrb.size) || 58}vw`, height: `${Number(primaryOrb.size) || 58}vw`, minWidth: 160, minHeight: 160, maxWidth: 720, maxHeight: 720, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, primaryOrb.opacity, '#3b82f6'), willChange: 'transform' }} />
         )}
         {orbsEnabled && secondaryOrb.enabled !== false && (
-          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(secondaryOrb.size) || 44}vw`, height: `${Number(secondaryOrb.size) || 44}vw`, minWidth: 120, minHeight: 120, maxWidth: 560, maxHeight: 560, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, secondaryOrb.opacity, '#a855f7'), willChange: 'transform' }} />
+          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(secondaryOrb.size) || 44}vw`, height: `${Number(secondaryOrb.size) || 44}vw`, minWidth: 120, minHeight: 120, maxWidth: 540, maxHeight: 540, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, secondaryOrb.opacity, '#a855f7'), willChange: 'transform' }} />
         )}
         {orbsEnabled && tertiaryOrb.enabled !== false && (
           <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(tertiaryOrb.size) || 28}vw`, height: `${Number(tertiaryOrb.size) || 28}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, tertiaryOrb.opacity, '#ffd79b'), willChange: 'transform' }} />
+        )}
+        {orbsEnabled && fourthOrb.enabled !== false && (
+          <div ref={orbFourthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(fourthOrb.size) || 36}vw`, height: `${Number(fourthOrb.size) || 36}vw`, minWidth: 90, minHeight: 90, maxWidth: 420, maxHeight: 420, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fourthOrb.color, fourthOrb.opacity, '#7dd3fc'), willChange: 'transform' }} />
+        )}
+        {orbsEnabled && fifthOrb.enabled !== false && (
+          <div ref={orbFifthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(fifthOrb.size) || 24}vw`, height: `${Number(fifthOrb.size) || 24}vw`, minWidth: 70, minHeight: 70, maxWidth: 300, maxHeight: 300, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fifthOrb.color, fifthOrb.opacity, '#f472b6'), willChange: 'transform' }} />
         )}
       </div>
       {bannerMessage && (
@@ -508,8 +582,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </div>
       )}
       {notice && (
-        <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', zIndex: 170, pointerEvents: 'none' }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '9px 13px', borderRadius: 999, background: 'rgba(10,10,12,0.94)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.28)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.24)' : notice.type === 'loading' ? 'rgba(125,211,252,0.24)' : 'rgba(255,255,255,0.1)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.34)' }}>
+        <div style={{ position: 'fixed', top: 66, left: '50%', transform: 'translateX(-50%)', zIndex: 170, maxWidth: 'calc(100vw - 24px)' }}>
+          <div
+            onClick={() => setNotice(null)}
+            role="alert"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 999, background: 'rgba(10,10,12,0.96)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.45)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.45)' : notice.type === 'loading' ? 'rgba(125,211,252,0.45)' : 'rgba(255,255,255,0.18)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.5)', cursor: 'pointer' }}>
             <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
               {notice.type === 'loading' ? (
                 <>
@@ -518,10 +595,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   <span style={{ width: 5, height: 5, borderRadius: 999, background: '#7dd3fc', opacity: 1, animation: 'goyunirPulse 0.9s ease-in-out 0.3s infinite' }} />
                 </>
               ) : (
-                <span style={{ width: 7, height: 7, borderRadius: 999, background: notice.type === 'error' ? '#f87171' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? '#34d399' : notice.type === 'alert' ? '#facc15' : '#d4d4d8', boxShadow: `0 0 0 2px ${notice.type === 'error' ? 'rgba(248,113,113,0.16)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.16)' : notice.type === 'alert' ? 'rgba(250,204,21,0.14)' : 'rgba(255,255,255,0.08)'}` }} />
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: notice.type === 'error' ? '#f87171' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? '#34d399' : notice.type === 'alert' ? '#facc15' : '#d4d4d8', boxShadow: `0 0 0 3px ${notice.type === 'error' ? 'rgba(248,113,113,0.2)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.2)' : notice.type === 'alert' ? 'rgba(250,204,21,0.18)' : 'rgba(255,255,255,0.1)'}` }} />
               )}
             </span>
             <span>{notice.message}</span>
+            <span style={{ color: '#71717a', fontSize: 11, fontWeight: 700, paddingLeft: 4 }}>✕</span>
           </div>
         </div>
       )}
@@ -544,27 +622,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           transform: 'translateY(0)',
           transition: 'transform 160ms ease',
           overflow: 'hidden',
-          backgroundImage: `radial-gradient(circle at 50% -20%, ${headerAccent}33, transparent 35%)`,
           boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
         }}
       >
-        {orbsEnabled && topBarOrb.enabled !== false && (
-          <div
-            ref={headerOrbRef}
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              width: `${Number(topBarOrb.size) || 210}px`,
-              height: `${Number(topBarOrb.size) || 210}px`,
-              transform: 'translate3d(-50%, -50%, 0)',
-              borderRadius: '999px',
-              pointerEvents: 'none',
-              background: orbGradient(topBarOrb.color, topBarOrb.opacity, '#7dd3fc', 0.45),
-              willChange: 'transform',
-            }}
-          />
-        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
           <Link href="/catalog" aria-label="Catalog" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>
@@ -697,14 +757,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
               </div>
               {hasItems && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
-                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
                   <input
                     type="email"
+                    autoComplete="email"
                     value={checkoutEmail}
                     onChange={(e) => setCheckoutEmail(e.target.value)}
-                    placeholder="Email"
+                    placeholder="name@example.com"
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
                   />
+                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
                   {!showPromoField ? (
                     <button onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
                   ) : (

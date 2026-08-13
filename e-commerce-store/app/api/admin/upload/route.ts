@@ -26,14 +26,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing productId or file' }, { status: 400 });
     }
 
-    if (file.size > 3 * 1024 * 1024) {
-      return NextResponse.json({ error: 'Image is too large. Keep uploads under 3MB after compression.' }, { status: 413 });
+    if (file.size > 6 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Image is too large. Keep uploads under 6MB (the admin form compresses images automatically).' }, { status: 413 });
     }
 
     // Read the file as base64 data URL
     const buffer = await file.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
-    const mimeType = file.type || 'image/jpeg';
+    const mimeType = (file.type || 'image/jpeg').toLowerCase();
     const dataUrl = `data:${mimeType};base64,${base64}`;
 
     // Get the current product from Redis

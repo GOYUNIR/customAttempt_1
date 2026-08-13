@@ -19,10 +19,11 @@ export interface OrbMotionConfig {
 
 export interface OrbsConfig {
   enabled: boolean;
-  topBar: OrbVisualConfig;
   primary: OrbVisualConfig;
   secondary: OrbVisualConfig;
   tertiary: OrbVisualConfig;
+  fourth: OrbVisualConfig;
+  fifth: OrbVisualConfig;
   motion: OrbMotionConfig;
 }
 
@@ -36,6 +37,8 @@ export interface StoreConfig {
     textMain: string;
     textMuted: string;
     checkoutCtaButton: string;
+    fontFamily?: string;
+    borderRadius?: number;
   };
   availableSizes: string[];
   homeRedirectSlug?: string;
@@ -112,6 +115,8 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     textMain: '#ffffff',
     textMuted: '#888888',
     checkoutCtaButton: '#635bff',
+    fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+    borderRadius: 12,
   },
   availableSizes: ['Standard'],
   dropSchedule: {
@@ -175,10 +180,11 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   },
   orbs: {
     enabled: true,
-    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
     primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
     secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
     tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
+    fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
     motion: {
       idleEnabled: true,
       pointerEnabled: true,

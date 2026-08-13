@@ -217,8 +217,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const setupState = params.get('setup');
     const purchaseState = params.get('purchase');
     if (!sessionId) {
-      if (setupState === 'cancel') setMessage('Card setup was cancelled before the entry was secured.');
-      if (purchaseState === 'cancel') setMessage('Checkout was cancelled before payment completed.');
+      if (setupState === 'cancel') {
+        setMessage('Card setup was cancelled before the entry was secured.');
+        notify({ id: 'stripe-cancel', type: 'error', message: 'Card setup was cancelled before the entry was secured.' });
+      }
+      if (purchaseState === 'cancel') {
+        setMessage('Checkout was cancelled before payment completed.');
+        notify({ id: 'stripe-cancel', type: 'error', message: 'Checkout was cancelled before payment completed.' });
+      }
       return;
     }
 
@@ -235,10 +241,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       })
         .then((res) => res.json())
         .then((data) => {
-          setMessage(data.message || 'Your entry is locked in.');
+          const msg = data.message || 'Your entry is locked in.';
+          setMessage(msg);
+          if (data.alreadyEntered) {
+            notify({ id: 'entry-locked', type: 'info', message: msg, persist: true });
+          } else {
+            notify({ id: 'entry-locked', type: 'success', message: msg, persist: true });
+          }
           clearQuery();
         })
-        .catch(() => setMessage('We could not verify the completed setup, but it may still have succeeded.'));
+        .catch(() => {
+          setMessage('We could not verify the completed setup, but it may still have succeeded.');
+          notify({ id: 'entry-locked', type: 'error', message: 'We could not verify the completed setup, but it may still have succeeded.', persist: true });
+        });
       return;
     }
 
@@ -246,6 +261,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setCart([]);
       writeStoredCart([]);
       setMessage('Purchase complete. Your order is now being prepared.');
+      notify({ id: 'purchase-complete', type: 'success', message: 'Purchase complete. Your order is now being prepared.', persist: true });
       clearQuery();
     }
   }, [initialSlug]);
@@ -323,7 +339,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'raffle', promoCode }),
       });
       const data = await res.json();
-      if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+      if (data.alreadyEntered) {
+        // Already in the pool — no Stripe session was launched, so this is a
+        // friendly heads-up, not a failure.
+        setMessage(data.error || "You're already entered. Good luck!");
+        notify({ id: 'product-submit', type: 'info', message: data.error || "You're already entered. Good luck!", persist: true });
+      } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         setEncryptionHealthy(true);
         notify({ id: 'product-submit', type: 'entered', message: 'Entry handoff is ready.' });
         window.location.href = data.url;
@@ -391,7 +412,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         body: JSON.stringify({ productId: product.id, size: selectedSize, email, address, mode: 'waitlist', promoCode }),
       });
       const data = await res.json();
-      if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
+      if (data.alreadyEntered) {
+        setMessage(data.error || "You're already on the list. Good luck!");
+        notify({ id: 'product-submit', type: 'info', message: data.error || "You're already on the list. Good luck!", persist: true });
+      } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
         setEncryptionHealthy(true);
         notify({ id: 'product-submit', type: 'success', message: 'Card is ready for the release window.' });
         window.location.href = data.url;
@@ -499,12 +523,21 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-              {(product.priceCategories || []).map((cat: any) => (
-                <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? configPalette.textMain : 'transparent', color: selectedSize === cat.size ? configPalette.primaryBackground : configPalette.textMain, cursor: 'pointer', fontSize: 12 }}>
-                  {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
-                </button>
-              ))}
+              {(product.priceCategories || []).map((cat: any) => {
+                const isSample = product.deliveryIncentiveEnabled === true && Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.includes(cat.size);
+                return (
+                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? configPalette.textMain : 'transparent', color: selectedSize === cat.size ? configPalette.primaryBackground : configPalette.textMain, cursor: 'pointer', fontSize: 12 }}>
+                    {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+                    {isSample ? ' · Sample' : ''}
+                  </button>
+                );
+              })}
             </div>
+            {product.deliveryIncentiveEnabled === true && Number(product.deliveryIncentiveCreditCents || 0) > 0 && (
+              <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)', fontSize: 11, color: '#86efac', lineHeight: 1.5 }}>
+                🧪 Try a sample first: every sample order includes a ${(Number(product.deliveryIncentiveCreditCents) / 100).toFixed(0)} credit toward the full-size bottle after delivery.
+              </div>
+            )}
           </div>
 
           {isRaffleProduct && !product.isArchived && countdownLabel && (
@@ -515,8 +548,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           )}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" placeholder="Email for release updates and fulfillment" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
-            <input type="text" placeholder="Shipping address for delivery" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
           </div>
 
           <div style={{ marginBottom: 8 }}>

@@ -107,6 +107,12 @@ export async function sendEntryConfirmedEmail(opts: {
           
           <p style="margin:16px 0 8px;font-size:14px;color:#374151;">After the draw, check this inbox — if you're selected, you'll receive a confirmation and shipping details.</p>
           
+          <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
+            <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to redeem your points and track this entry.</p>
+            <a href="${(opts.siteUrl || '').replace(/\/$/, '') || 'https://goyunir.com'}/auth/signup" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to redeem</a>
+          </div>
+          
           <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
             <p style="margin:0;font-size:13px;color:#6b7280;">📧 Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#3b82f6;text-decoration:none;">goyunir.support@gmail.com</a></p>
             ${manage}
@@ -477,6 +483,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
           ${eligibleProducts ? `<p style="margin:0 0 8px">Eligible release(s): <strong>${eligibleProducts}</strong></p>` : ''}
           ${eligibleSizes ? `<p style="margin:0 0 14px">Eligible size(s): <strong>${eligibleSizes}</strong></p>` : ''}
           <p style="margin:0 0 14px;color:#4b5563">This code is linked to your email, limited to one use, and cannot be transferred or stacked.</p>
+          <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="https://goyunir.com/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
           <p style="margin:0;color:#666;font-size:13px">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
         </div>
       `,

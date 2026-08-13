@@ -43,6 +43,8 @@ const DEFAULT_CONFIG = {
     textMain: '#ffffff',
     textMuted: '#888888',
     checkoutCtaButton: '#635bff',
+    fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+    borderRadius: 12,
   },
   availableSizes: ['Standard'],
   homeRedirectSlug: 'elysian-white-launch-draw',

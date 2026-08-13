@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog';
@@ -98,10 +99,11 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 // the storefront defaults so a fresh portal has sane values before any save.
 const DEFAULT_ORBS: any = {
   enabled: true,
-  topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
   primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
   secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
   tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+  fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
+  fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -116,10 +118,11 @@ function mergeOrbSettings(base: any, incoming: any): any {
   if (!incoming) return base;
   return {
     enabled: typeof incoming.enabled === 'boolean' ? incoming.enabled : base.enabled,
-    topBar: { ...(base.topBar || {}), ...(incoming.topBar || {}) },
     primary: { ...(base.primary || {}), ...(incoming.primary || {}) },
     secondary: { ...(base.secondary || {}), ...(incoming.secondary || {}) },
     tertiary: { ...(base.tertiary || {}), ...(incoming.tertiary || {}) },
+    fourth: { ...(base.fourth || {}), ...(incoming.fourth || {}) },
+    fifth: { ...(base.fifth || {}), ...(incoming.fifth || {}) },
     motion: { ...(base.motion || {}), ...(incoming.motion || {}) },
   };
 }
@@ -135,7 +138,10 @@ function fileToDataURL(file: File): Promise<string> {
 }
 
 async function compressImageFile(file: File, maxSize = 1440, quality = 0.82): Promise<File> {
-  if (typeof window === 'undefined' || !file.type.startsWith('image/')) return file;
+  if (typeof window === 'undefined') return file;
+  // Accept files even when the browser reports an empty/odd MIME type (some
+  // .jpeg exports do) — the file picker is already restricted to image/*.
+  if (file.type && !file.type.startsWith('image/')) return file;
   const imageUrl = URL.createObjectURL(file);
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -199,6 +205,9 @@ export default function AdminPortal() {
   const [shipMsg, setShipMsg] = useState('');
   const [editingAddressEntry, setEditingAddressEntry] = useState<string | null>(null);
   const [addressDraft, setAddressDraft] = useState('');
+  const [editingShippingEntry, setEditingShippingEntry] = useState<string | null>(null);
+  const [shippingStatusDraft, setShippingStatusDraft] = useState('PENDING_FULFILLMENT');
+  const [trackingDraft, setTrackingDraft] = useState('');
 
   const [recovery, setRecovery] = useState({ enabled: true, earlyDelayHours: 3, preDrawHours: 6, preDrawEnabled: true });
   const [recoveryMsg, setRecoveryMsg] = useState('');
@@ -282,6 +291,7 @@ export default function AdminPortal() {
   const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [themeSettings, setThemeSettings] = useState(GOYUNIR_STORE_SUITE.themeColors);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
   const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
@@ -438,7 +448,7 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/settings');
       const data = await res.json();
       if (data.settings) {
-        if (data.settings.themeColors) setThemeSettings(data.settings.themeColors);
+        if (data.settings.themeColors) setThemeSettings({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.settings.themeColors });
         if (data.settings.heroContent) setHeroSettings(data.settings.heroContent);
         if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
@@ -596,6 +606,7 @@ export default function AdminPortal() {
     }
     const fileArray = Array.from(files);
     let uploaded = 0;
+    let failed = 0;
     for (const file of fileArray) {
       const compressed = await compressImageFile(file);
       const previewUrl = await fileToDataURL(compressed);
@@ -610,18 +621,20 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/upload', { method: 'POST', body: uploadData });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setProductForm((prev: any) => ({
-          ...prev,
-          images: (prev.images || []).filter((image: string) => image !== previewUrl),
-        }));
-        setProductMsg(`❌ Upload failed: ${data.error || file.name}`);
-        return;
+        failed += 1;
+        setProductMsg(`⚠ Upload to store failed for ${file.name}: ${data.error || 'unknown error'}. The image stays in this form — press Save Product to store it directly.`);
+        // NOTE: we intentionally do NOT remove the preview. The data URL stays
+        // in productForm.images so clicking "Save Product" persists it to Redis
+        // even if the separate upload endpoint was blocked (e.g. size limits).
+        continue;
       }
       uploaded += 1;
     }
     await fetchProducts();
-    setProductMsg(`✅ Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}.`);
-    showToast(`Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}`);
+    if (failed === 0) {
+      setProductMsg(`✅ Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}.`);
+    }
+    showToast(`Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}${failed ? ` · ${failed} kept locally` : ''}`);
   };
 
   // ===== Save product (UPDATED to send priceCategories) =====
@@ -1192,6 +1205,36 @@ export default function AdminPortal() {
     }
   };
 
+  // Update shipping status + tracking for a Won & Charged ledger entry. The
+  // /api/admin/update-shipping route persists it on the ledger entry AND emails
+  // the customer (and issues any configured post-delivery credit on DELIVERED).
+  const updateShipping = async (entry: any) => {
+    if (!password) return alert('Enter password');
+    setShipMsg('Updating shipping…');
+    try {
+      const res = await adminFetch('/api/admin/update-shipping', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          email: entry.email,
+          variant: entry.variant,
+          size: entry.size,
+          shippingStatus: shippingStatusDraft,
+          trackingNumber: trackingDraft.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setShipMsg(`Shipping updated to ${shippingStatusDraft.replace(/_/g, ' ')} — customer notified.`);
+        showToast('UPDATED · Shipping');
+        await fetchStatus();
+        setEditingShippingEntry(null);
+      } else setShipMsg(data.error || 'Failed to update shipping.');
+    } catch (err: any) {
+      setShipMsg('Failed: ' + err.message);
+    }
+  };
+
   const saveRecovery = async () => {
     if (!password) return alert('Enter password');
     try {
@@ -1268,6 +1311,22 @@ export default function AdminPortal() {
       setSettingsMsg('Connection failed: ' + err.message);
     }
     setSettingsLoading(false);
+  };
+
+  const applyThemePreset = (presetId: string) => {
+    const preset = THEME_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    setThemeSettings({ ...GOYUNIR_STORE_SUITE.themeColors, ...preset.themeColors });
+    // Match the glow orbs to the new accent so the storefront glow reads on-brand.
+    setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, {
+      primary: preset.orbs.primary,
+      secondary: preset.orbs.secondary,
+      tertiary: preset.orbs.tertiary,
+      fourth: preset.orbs.fourth,
+      fifth: preset.orbs.fifth,
+    }));
+    setActivePreset(presetId);
+    showToast(`PRESET · ${preset.name} applied — press Save to publish`);
   };
 
   const notifyReleaseList = async () => {
@@ -1736,6 +1795,7 @@ export default function AdminPortal() {
               {currentEntries.map((e: any, i: number) => {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
                 const isEditingAddress = editingAddressEntry === entryKey;
+                const isEditingShipping = editingShippingEntry === entryKey;
                 const orderRef = e.orderRef || stableOrderRef(e, i);
                 const displayPrice = e.amountCents ? (e.amountCents / 100).toFixed(2) : (e.listPrice || 0).toFixed(2);
                 
@@ -1753,6 +1813,12 @@ export default function AdminPortal() {
                     <div style={{ color: '#666', marginTop: 4 }}>
                       📍 {revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}
                       {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 ••{e.cardLast4}</span>}
+                      {e.type === 'WINNER_CHARGED' && (
+                        <span style={{ marginLeft: 6 }}>
+                          · {e.shippingStatus ? e.shippingStatus.replace(/_/g, ' ').toLowerCase() : 'pending fulfillment'}
+                          {e.trackingNumber ? ` · 📦 ${e.trackingNumber}` : ''}
+                        </span>
+                      )}
                     </div>
                     {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1770,6 +1836,26 @@ export default function AdminPortal() {
                             </button>
                             <button onClick={() => cancelOrder(e)} style={{ ...buttonGhost, border: '1px solid #f87171', color: '#f87171' }}>Cancel Entry</button>
                           </>
+                        )}
+                      </div>
+                    )}
+                    {e.type === 'WINNER_CHARGED' && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
+                        {isEditingShipping ? (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <select value={shippingStatusDraft} onChange={(ev) => setShippingStatusDraft(ev.target.value)}
+                              style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1, minWidth: 130 }}>
+                              {SHIP_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                            </select>
+                            <input type="text" value={trackingDraft} onChange={(ev) => setTrackingDraft(ev.target.value)}
+                              placeholder="Tracking number" style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1, minWidth: 130 }} />
+                            <button onClick={() => updateShipping(e)} style={{ ...buttonPrimary, padding: '6px 10px', fontSize: 11 }}>Save & email</button>
+                            <button onClick={() => setEditingShippingEntry(null)} style={{ ...buttonGhost, padding: '6px 10px', fontSize: 11 }}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingShippingEntry(entryKey); setShippingStatusDraft(e.shippingStatus || 'PENDING_FULFILLMENT'); setTrackingDraft(e.trackingNumber || ''); }} style={{ ...buttonGhost, fontSize: 11 }}>
+                            Update shipping & tracking
+                          </button>
                         )}
                       </div>
                     )}
@@ -2503,18 +2589,94 @@ export default function AdminPortal() {
               </p>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
               
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Design Presets</h4>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
+                One-click market skins for client onboarding. Applying a preset fills the theme colors, font, border treatment and glow below — then press <strong style={{ color: '#ccc' }}>Save Settings</strong>.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                {THEME_PRESETS.map((preset) => {
+                  const isActive = activePreset === preset.id;
+                  return (
+                    <div
+                      key={preset.id}
+                      onClick={() => applyThemePreset(preset.id)}
+                      style={{
+                        padding: 14,
+                        borderRadius: 12,
+                        background: '#111',
+                        border: `1px solid ${isActive ? preset.accent : '#27272a'}`,
+                        cursor: 'pointer',
+                        boxShadow: isActive ? `0 0 0 1px ${preset.accent}, 0 14px 30px rgba(0,0,0,0.25)` : 'none',
+                        transition: 'border-color 160ms ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                        <div style={{ flex: 1, height: 34, borderRadius: 8, background: preset.background, border: '1px solid rgba(255,255,255,0.14)' }} />
+                        <div style={{ flex: 1, height: 34, borderRadius: 8, background: preset.container }} />
+                        <div style={{ flex: 1, height: 34, borderRadius: 8, background: preset.accent }} />
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{preset.name}</div>
+                      <div style={{ fontSize: 10, color: preset.accent, margin: '2px 0 6px', letterSpacing: 1, textTransform: 'uppercase' }}>
+                        {preset.fontLabel} · {preset.radiusLabel}
+                      </div>
+                      <p style={{ fontSize: 11, color: '#a1a1aa', margin: 0, lineHeight: 1.5 }}>{preset.tagline}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); applyThemePreset(preset.id); }}
+                        style={{
+                          ...buttonGhost,
+                          marginTop: 10,
+                          width: '100%',
+                          borderColor: isActive ? preset.accent : '#27272a',
+                          color: isActive ? preset.accent : '#ccc',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {isActive ? '✓ Applied — save' : 'Apply preset'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                {Object.entries(themeSettings).map(([key, value]) => (
+                {Object.entries(themeSettings)
+                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius')
+                  .map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
                     {key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="color" 
-                      value={value} 
+                      value={String(value || '#000000')} 
                       onChange={(e) => setThemeSettings({ ...themeSettings, [key]: e.target.value })}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                   </label>
                 ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  Font Family
+                  <input
+                    type="text"
+                    value={String(themeSettings.fontFamily || '')}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, fontFamily: e.target.value })}
+                    placeholder="e.g. Georgia, serif"
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Border Radius
+                  <select
+                    value={String(themeSettings.borderRadius ?? 12)}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, borderRadius: Number(e.target.value) })}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
+                  >
+                    <option value="0">Square (0px)</option>
+                    <option value="8">Subtle (8px)</option>
+                    <option value="12">Default (12px)</option>
+                    <option value="999">Fully rounded</option>
+                  </select>
+                </label>
               </div>
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
@@ -2633,33 +2795,7 @@ export default function AdminPortal() {
 
               {orbSettings.enabled && (
                 <>
-                  <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 12, padding: 12, marginBottom: 10, background: 'rgba(255,255,255,0.02)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700 }}>Top bar orb</div>
-                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={Boolean(orbSettings.topBar?.enabled)} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, enabled: e.target.checked } }))} /> Enabled
-                      </label>
-                    </div>
-                    {orbSettings.topBar?.enabled && (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                        <label style={{ fontSize: 11 }}>
-                          Color
-                          <input type="color" value={orbSettings.topBar.color || '#7dd3fc'} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, color: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
-                        </label>
-                        <label style={{ fontSize: 11 }}>
-                          Opacity
-                          <input type="range" min={0} max={100} value={Number(orbSettings.topBar.opacity) || 0} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, opacity: Number(e.target.value) } }))} style={{ display: 'block', width: '100%', marginTop: 10 }} />
-                          <span style={{ fontSize: 10, color: '#888' }}>{Number(orbSettings.topBar.opacity) || 0}%</span>
-                        </label>
-                        <label style={{ fontSize: 11 }}>
-                          Size (px)
-                          <input type="number" min={40} max={420} value={Number(orbSettings.topBar.size) || 210} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, size: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-
-                  {(['primary', 'secondary', 'tertiary'] as const).map((key) => {
+                  {(['primary', 'secondary', 'tertiary', 'fourth', 'fifth'] as const).map((key) => {
                     const orb = orbSettings[key] || {};
                     return (
                       <div key={key} style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 12, padding: 12, marginBottom: 10, background: 'rgba(255,255,255,0.02)' }}>

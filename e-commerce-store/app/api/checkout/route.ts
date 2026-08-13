@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem } from '@/lib/server-config';
-import { buildOrderRef } from '@/lib/order-ref';
+import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey } from '@/lib/server-config';
+import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -70,9 +70,57 @@ export async function POST(request: Request) {
     const checkoutMode = getCheckoutMode(product);
     const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && (product.isArchived === true || product.isUpcoming === true));
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
-    const orderRef = buildOrderRef(normalizedEmail, String(productId), String(size));
+    const orderRef = buildOrderRef(normalizedEmail, variant, String(size));
     let priceCents = basePriceCents;
     const normalizedPromo = String(promoCode || ref || '').trim().toUpperCase();
+
+    // ── Block duplicate raffle/waitlist entries BEFORE Stripe is launched ─────
+    // Previously a customer could complete a second card setup in Stripe and
+    // only get told they were already entered afterwards. Now we check the pool
+    // up-front and return a clear "you're already in" message without ever
+    // creating a Stripe session or showing a false success.
+    if (checkoutMode === 'RAFFLE' || usesWaitlist) {
+      let alreadyEnteredCount = 0;
+      try {
+        const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+        for (const row of poolItems) {
+          const parsed = safeParseRedisItem<any>(row);
+          if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail) alreadyEnteredCount += 1;
+        }
+      } catch {}
+      const blocked = await redis.sismember(emailBlockKey(variant, size), normalizedEmail);
+      if (blocked === 1 || alreadyEnteredCount >= maxPerEmail) {
+        // Reuse the ORIGINAL entry's order ref (if any) so the ledger REF for
+        // the DUPLICATE_BLOCKED row matches the original entry instead of a
+        // newly generated one.
+        let originalRef = orderRef;
+        try {
+          const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+          for (const row of poolItems) {
+            const parsed = safeParseRedisItem<any>(row);
+            if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail && formatOrderRef(String(parsed.orderRef || ''))) {
+              originalRef = formatOrderRef(String(parsed.orderRef || '')) || originalRef;
+              break;
+            }
+          }
+        } catch {}
+        await archiveEntry(redis, {
+          email: normalizedEmail,
+          variant,
+          size: String(size),
+          shippingAddress: String(address || '').trim(),
+          id: 'n/a',
+          registeredAt: new Date().toISOString(),
+          type: 'DUPLICATE_BLOCKED',
+          orderRef: originalRef,
+        } as any);
+        return NextResponse.json({
+          error: `You're already entered for ${variant} (${size}). Good luck! Pro tip: you can enter a different raffle.`,
+          alreadyEntered: true,
+          code: 'DUPLICATE_BLOCKED',
+        }, { status: 409 });
+      }
+    }
 
     if (normalizedPromo && checkoutMode === 'FCFS') {
       const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);

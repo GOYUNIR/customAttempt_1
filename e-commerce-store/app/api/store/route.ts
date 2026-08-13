@@ -44,6 +44,9 @@ type PublicStoreProduct = {
   soldOutBehavior?: string;
   soldOutArchiveDelayHours?: number;
   soldOutAt?: string;
+  deliveryIncentiveEnabled?: boolean;
+  deliveryIncentiveTriggerSizes?: string[];
+  deliveryIncentiveCreditCents?: number;
 };
 
 function toMs(value: unknown) {
@@ -92,6 +95,9 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     soldOutBehavior: String(raw?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: Math.max(0, Number(raw?.soldOutArchiveDelayHours || 0)),
     soldOutAt: String(raw?.soldOutAt || ''),
+    deliveryIncentiveEnabled: raw?.deliveryIncentiveEnabled === true,
+    deliveryIncentiveTriggerSizes: Array.isArray(raw?.deliveryIncentiveTriggerSizes) ? raw.deliveryIncentiveTriggerSizes.map(String) : [],
+    deliveryIncentiveCreditCents: Math.max(0, Number(raw?.deliveryIncentiveCreditCents || 0)),
   };
 }
 
