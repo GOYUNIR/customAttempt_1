@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress, loadProducts } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,11 @@ export async function POST(request: Request) {
 
     if (!email || !variant || !size || !newAddress) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
+    }
+
+    const addrError = validateShippingAddress(newAddress);
+    if (addrError) {
+      return NextResponse.json({ error: addrError }, { status: 400 });
     }
 
     const liveProducts = await loadProducts(redis);

@@ -3,10 +3,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { ensureMapboxAutofill } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
+
+/**
+ * Address quality gate for checkout. When Mapbox autofill is live the address
+ * must have been picked from the dropdown suggestions (so it is a real,
+ * deliverable address); otherwise structural checks still block garbage like
+ * "asdf" or "1234567890".
+ */
+function addressValidationError(address: string): string | null {
+  const base = validateShippingAddress(address);
+  if (base) return base;
+  if (getMapboxStatus().status === 'active' && !isMapboxVerifiedAddress(address)) {
+    return 'Choose your shipping address from the autofill suggestions so we can verify it.';
+  }
+  return null;
+}
 
 function getProductPriceCategory(product: any, size: string) {
   const cats = product.priceCategories || [];
@@ -333,9 +349,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   }, [raffleEndsAt]);
 
   const handleRaffleSubmit = async () => {
-    if (!email || !address || !selectedSize) {
+    if (!email || !selectedSize) {
       setMessage('Please fill in all fields and select a size.');
       notify({ type: 'alert', message: 'Complete your details before entering.' });
+      return;
+    }
+    const addrErr = addressValidationError(address);
+    if (addrErr) {
+      setMessage(addrErr);
+      notify({ type: 'alert', message: addrErr });
       return;
     }
     setIsSubmitting(true);
@@ -372,9 +394,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   const handleDirectCheckout = async () => {
-    if (!email || !address || !selectedSize) {
+    if (!email || !selectedSize) {
       setMessage('Please fill in all fields and select a size.');
       notify({ type: 'alert', message: 'Complete your details before checkout.' });
+      return;
+    }
+    const addrErr = addressValidationError(address);
+    if (addrErr) {
+      setMessage(addrErr);
+      notify({ type: 'alert', message: addrErr });
       return;
     }
     setIsSubmitting(true);
@@ -406,9 +434,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   const handleWaitlistSubmit = async () => {
-    if (!email || !address || !selectedSize) {
+    if (!email || !selectedSize) {
       setMessage('Please fill in all fields and select a size.');
       notify({ type: 'alert', message: 'Complete your details before joining the waitlist.' });
+      return;
+    }
+    const addrErr = addressValidationError(address);
+    if (addrErr) {
+      setMessage(addrErr);
+      notify({ type: 'alert', message: addrErr });
       return;
     }
     setIsSubmitting(true);

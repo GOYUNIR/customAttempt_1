@@ -6,6 +6,7 @@ import {
   loadProducts,
 } from '@/lib/server-config';
 import { formatOrderRef } from '@/lib/order-ref';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,12 +47,17 @@ export async function POST(request: Request) {
     const name = String(body?.name || '').trim();
     const phone = String(body?.phone || '').trim();
     const source = String(body?.source || 'checkout-form').trim();
+    const verified = body?.verified === true || body?.verified === 'true';
 
     if (!EMAIL_RE.test(email)) {
       return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
     }
-    if (address.length < 8 || address.length > MAX_ADDRESS_LENGTH) {
-      return NextResponse.json({ error: 'A complete shipping address is required.' }, { status: 400 });
+    const addrError = validateShippingAddress(address);
+    if (addrError) {
+      return NextResponse.json({ error: addrError }, { status: 400 });
+    }
+    if (address.length > MAX_ADDRESS_LENGTH) {
+      return NextResponse.json({ error: 'Shipping address is too long.' }, { status: 400 });
     }
 
     // Always capture the raw submission so nothing is ever lost.
@@ -60,6 +66,7 @@ export async function POST(request: Request) {
       address,
       name: name || undefined,
       phone: phone || undefined,
+      verified: verified || undefined,
       variant: variant || undefined,
       size: size || undefined,
       orderRef: orderRef || undefined,

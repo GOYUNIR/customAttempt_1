@@ -30,10 +30,11 @@ address:submissions - Addresses captured by the standalone checkout pages (`/che
 
 ### Address Capture Pages
 - **`public/checkout.html`** and **`public/address-checkout-form.html`** are standalone address forms served at `/checkout.html` and `/address-checkout-form.html`.
-- Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` is configured (or `window.ENV_MAPBOX_TOKEN` is injected at runtime). Without a token the forms still work via native browser autofill + manual entry.
+- Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` (or the `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` alias) is configured, or `window.ENV_MAPBOX_TOKEN` is injected at runtime. **If the token is missing the dropdown simply does not exist** — that is the #1 reason autofill "isn't working". The page shows an explicit "Address autofill is unavailable (Mapbox token not configured)" note and console logs explain the state (`[mapbox-autofill]`). Set the var in Vercel (Project Settings → Environment Variables, Production + Preview) **and redeploy** — it is baked in at build time. For local dev add it to `.env.local`, or use the localhost-only overrides `?mapbox_token=pk.…` / `localStorage "mapbox_dev_token"` (never read in production).
 - Submitting posts to **`/api/address/save`**: the address is logged to `address:submissions`, and when the URL carries `?variant=&size=&email=` (and optionally `?orderRef=`) it is attached to the matching open entry. An already-set entry address is only overwritten when the matching `orderRef` is supplied.
 - The token placeholder is mapped into `data-mapbox-token` at build time by `scripts/inject-mapbox-token.mjs` (targets `public/` files).
-- The **React storefront** (item-page entry form in `components/Storefront.tsx` + cart drawer in `components/SiteChrome.tsx`) wires the same autofill through `lib/mapbox-autofill.ts`: token resolved from `window.ENV_MAPBOX_TOKEN` → `NEXT_PUBLIC_MAPBOX_TOKEN`, SDK loaded lazily once, and a single autofill collection `observe()`s the document so inputs mounted later (cart drawer) attach automatically. Those address inputs must stay **inside a `<form>`** with `autocomplete="shipping street-address"` — Mapbox only attaches to eligible inputs that are descendants of a `<form>`. No token → native browser autofill fallback (no dropdown).
+- The **React storefront** (item-page entry form in `components/Storefront.tsx` + cart drawer in `components/SiteChrome.tsx`) wires the same autofill through `lib/mapbox-autofill.ts`: token resolved from `window.ENV_MAPBOX_TOKEN` → `data-mapbox-token` attr → `NEXT_PUBLIC_MAPBOX_TOKEN` → `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`, SDK loaded lazily once, and a single autofill collection `observe()`s the document so inputs mounted later (cart drawer) attach automatically. Those address inputs must stay **inside a `<form>`** with `autocomplete="shipping street-address"` — Mapbox only attaches to eligible inputs that are descendants of a `<form>`. No token → native browser autofill fallback (no dropdown).
+- **Address validation (you can no longer type anything):** when autofill is live, checkout/address forms require the address to have been **picked from the Mapbox suggestions** (tracked via the SDK's `retrieve` event; the collection API is `addEventListener('retrieve', …)` — there is no `.on()`). When autofill is unavailable, shared structural checks in `lib/address-validation.ts` still reject garbage (missing street number, missing letters, too short) on the client and on the server (`/api/address/save`, `/api/checkout`, `/api/checkout/cart`, `/api/account/update-address`). `/api/address/save` records a `verified` flag on the submission when it came from a Mapbox suggestion.
 
 
 ### Admin Portal (`/admin`)
@@ -90,6 +91,7 @@ ADMIN_BASIC_AUTH_PASSWORD
 CRON_SECRET
 RESEND_API_KEY (optional)
 RESEND_FROM (optional)
+NEXT_PUBLIC_MAPBOX_TOKEN (required for Mapbox address autofill dropdowns; must be set in the SAME environment(s) you deploy and the site must be redeployed after setting it — it is baked into the client at build time. `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is accepted as an alias.)
 
 
 ## When to Update This File

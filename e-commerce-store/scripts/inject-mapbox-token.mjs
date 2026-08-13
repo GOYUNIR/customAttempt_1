@@ -18,7 +18,8 @@
  *
  * Each page's inline script resolves the token at runtime from:
  *   1. window.ENV_MAPBOX_TOKEN                 (runtime injection)
- *   2. process.env.NEXT_PUBLIC_MAPBOX_TOKEN    (Next.js build-time inline)
+ *   2. process.env.NEXT_PUBLIC_MAPBOX_TOKEN    (Next.js build-time inline;
+ *      NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN is accepted as an alias)
  *   3. the data-mapbox-token fallback attribute (mapped here by Vercel)
  *
  * Behavior:
@@ -43,7 +44,7 @@ const ATTRIBUTE_NAME = 'data-mapbox-token';
 const PLACEHOLDER = '__NEXT_PUBLIC_MAPBOX_TOKEN__';
 const TARGET_FILES = ['public/checkout.html', 'public/address-checkout-form.html'];
 
-const token = (process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '').trim();
+const token = (process.env.NEXT_PUBLIC_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '').trim();
 
 if (!token) {
   console.warn(

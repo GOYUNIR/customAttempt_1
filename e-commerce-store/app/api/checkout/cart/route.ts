@@ -8,6 +8,7 @@ import {
   safeParseRedisItem,
 } from '@/lib/server-config';
 import { buildOrderRef } from '@/lib/order-ref';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -68,6 +69,11 @@ export async function POST(request: Request) {
 
     if (!email || !address || cart.length === 0) {
       return NextResponse.json({ error: 'Missing checkout details.' }, { status: 400 });
+    }
+
+    const addrError = validateShippingAddress(address);
+    if (addrError) {
+      return NextResponse.json({ error: addrError }, { status: 400 });
     }
 
     const allProducts = await loadProducts(redis);

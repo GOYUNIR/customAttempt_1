@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -53,6 +54,11 @@ export async function POST(request: Request) {
 
     if (!productId || !size || !email || !address) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+    }
+
+    const addrError = validateShippingAddress(String(address || ''));
+    if (addrError) {
+      return NextResponse.json({ error: addrError }, { status: 400 });
     }
 
     const allProducts = await loadProducts(redis);

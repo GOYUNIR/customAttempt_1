@@ -315,11 +315,13 @@
       // The SDK only loads when a token is configured. Without one the form
       // still works via native browser autofill (autocomplete attributes).
       // Token resolution order:
-      //   1. window.ENV_MAPBOX_TOKEN   — runtime injection by the hosting layer.
-      //   2. data-mapbox-token attr    — injected at build time by
-      //      scripts/inject-mapbox-token.mjs from NEXT_PUBLIC_MAPBOX_TOKEN.
-      //   3. localhost fallback        — hardcoded YOUR_MAPBOX_ACCESS_TOKEN
-      //      (see below), used only when running on localhost.
+      //   1. window.ENV_MAPBOX_TOKEN    — runtime injection by the hosting layer.
+      //   2. data-mapbox-token attr     — injected at build time by
+      //      scripts/inject-mapbox-token.mjs from NEXT_PUBLIC_MAPBOX_TOKEN
+      //      (or the NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN alias).
+      //   3. localhost dev override     — ?mapbox_token=… or localStorage
+      //      "mapbox_dev_token" (localhost only — great for testing).
+      //   4. hardcoded local fallback   — YOUR_MAPBOX_ACCESS_TOKEN (localhost only).
       function isLocalhost() {
         var host = window.location.hostname;
         return host === 'localhost' || host === '127.0.0.1' || host === '::1';
@@ -333,6 +335,14 @@
         var attr = el ? el.getAttribute('data-mapbox-token') : '';
         if (attr && attr !== MAPBOX_PLACEHOLDER) {
           return attr;
+        }
+        if (isLocalhost()) {
+          try {
+            var qsToken = new URLSearchParams(window.location.search).get('mapbox_token');
+            if (qsToken) return qsToken.trim();
+            var lsToken = window.localStorage.getItem('mapbox_dev_token');
+            if (lsToken) return lsToken.trim();
+          } catch (e) { /* ignore */ }
         }
         // Local fallback: YOUR_MAPBOX_ACCESS_TOKEN is missing or undefined.
         // If we're on localhost, dynamically load the hardcoded token string
@@ -354,29 +364,65 @@
         el.classList.toggle('error', !!isError);
       }
 
-      var token = resolveToken();
-      var note = document.getElementById('autofill-note');
-      if (note) {
-        note.textContent = token
-          ? 'Start typing in the street address to autofill.'
-          : 'Autofill is enabled in your browser.';
+      function validateAddress(value) {
+        var v = String(value || '').trim();
+        if (!v) return 'Enter a shipping address.';
+        if (v.length < 10) return 'Enter a complete shipping address (street, city, state and ZIP).';
+        if (!/\d/.test(v)) return 'Shipping address needs a street number (e.g. "123 Main Street").';
+        if (!/[a-zA-Z]/.test(v)) return 'Shipping address needs street or city names.';
+        return null;
       }
 
-      if (token) {
+      var token = resolveToken();
+      var note = document.getElementById('autofill-note');
+      var autofillReady = false;  // SDK loaded AND autofill is observing the page
+      var mapboxVerified = false; // customer picked an address from the dropdown
+
+      function setNote(text, isError) {
+        if (!note) return;
+        note.textContent = text || '';
+        note.style.color = isError ? '#b00020' : '#8a8a8a';
+      }
+
+      if (!token) {
+        // No token configured anywhere (missing NEXT_PUBLIC_MAPBOX_TOKEN in
+        // Vercel / .env.local). Be explicit so this is never a silent mystery.
+        setNote('Address autofill is unavailable (Mapbox token not configured). Enter your address manually.');
+      } else {
+        setNote('Loading address autofill…');
         var sdk = document.createElement('script');
         sdk.src = MAPBOX_SDK_URL;
         sdk.async = true;
         sdk.onload = function () {
           if (window.mapboxsearch && typeof window.mapboxsearch.autofill === 'function') {
             try {
-              window.mapboxsearch.autofill({ accessToken: token });
+              var collection = window.mapboxsearch.autofill({ accessToken: token });
+              if (collection && typeof collection.observe === 'function') {
+                collection.observe();
+              }
+              if (collection && typeof collection.addEventListener === 'function') {
+                collection.addEventListener('retrieve', function () {
+                  // The SDK fills the address fields right after 'retrieve', so
+                  // defer one tick before marking the form as verified.
+                  setTimeout(function () {
+                    mapboxVerified = true;
+                    var f = document.getElementById('checkout-form');
+                    if (f) f.setAttribute('data-mapbox-verified', 'true');
+                  }, 0);
+                });
+              }
+              autofillReady = true;
+              setNote('Start typing in the street address to autofill the rest.');
             } catch (err) {
               console.error('[autofill] init failed', err);
+              setNote('Address autofill could not start — enter your address manually.', true);
             }
+          } else {
+            setNote('Address autofill could not start — enter your address manually.', true);
           }
         };
         sdk.onerror = function () {
-          if (note) note.textContent = 'Autofill is enabled in your browser.';
+          setNote('Address autofill could not start — enter your address manually.', true);
         };
         document.head.appendChild(sdk);
       }
@@ -426,8 +472,15 @@
           setFeedback('Please enter a valid email address.', true);
           return;
         }
-        if (address.length < 8) {
-          setFeedback('Please enter a complete shipping address.', true);
+        var addrErr = validateAddress(address);
+        if (addrErr) {
+          setFeedback(addrErr, true);
+          return;
+        }
+        // When autofill is live, the address must have been picked from the
+        // dropdown suggestions so it is a real, deliverable address.
+        if (autofillReady && !mapboxVerified) {
+          setFeedback('Choose your address from the autofill suggestions so we can verify it.', true);
           return;
         }
 
@@ -441,6 +494,7 @@
               email: email,
               name: name || undefined,
               address: address,
+              verified: mapboxVerified ? true : undefined,
               variant: data.get('variant') || undefined,
               size: data.get('size') || undefined,
               orderRef: data.get('orderRef') || undefined,

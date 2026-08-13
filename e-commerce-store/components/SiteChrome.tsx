@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
-import { ensureMapboxAutofill } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 type CartItem = {
   productId: string;
@@ -13,6 +14,20 @@ type CartItem = {
   productType?: string;
   checkoutMode?: 'RAFFLE' | 'FCFS';
 };
+
+/**
+ * Address quality gate for checkout. When Mapbox autofill is live the address
+ * must have been picked from the dropdown suggestions; otherwise structural
+ * checks still block garbage like "asdf" or "1234567890".
+ */
+function addressValidationError(address: string): string | null {
+  const base = validateShippingAddress(address);
+  if (base) return base;
+  if (getMapboxStatus().status === 'active' && !isMapboxVerifiedAddress(address)) {
+    return 'Choose your shipping address from the autofill suggestions so we can verify it.';
+  }
+  return null;
+}
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
@@ -500,9 +515,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       showNotice({ type: 'alert', message: `Use the product page to secure raffle entries in your ${actionTitle.toLowerCase()}.` });
       return;
     }
-    if (!checkoutEmail || !checkoutAddress) {
-      setCartMsg('Enter your email and shipping address to continue.');
-      showNotice({ type: 'alert', message: 'Add your email and shipping address first.' });
+    if (!checkoutEmail) {
+      setCartMsg('Enter your email to continue.');
+      showNotice({ type: 'alert', message: 'Add your email first.' });
+      return;
+    }
+    const addrErr = addressValidationError(checkoutAddress);
+    if (addrErr) {
+      setCartMsg(addrErr);
+      showNotice({ type: 'alert', message: addrErr });
       return;
     }
     setCheckoutBusy(true);
