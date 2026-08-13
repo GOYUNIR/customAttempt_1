@@ -44,6 +44,13 @@
  * `isMapboxVerifiedAddress()` lets the checkout submit handlers require a
  * real, Mapbox-verified address whenever autofill is live — so customers can
  * no longer type any random string into the shipping field.
+ *
+ * Full-address fill: the SDK's built-in form-fill only writes the STREET
+ * components into a `street-address` input — city/state/zip are dropped unless
+ * the form has separate `address-level2` / `address-level1` / `postal-code`
+ * fields. Our storefront forms use a single shipping box, so `handleRetrieve`
+ * composes the FULL formatted address from the retrieved feature and writes it
+ * into the box (see `composeFullAddress`).
  */
 
 declare global {
@@ -133,6 +140,11 @@ let suggestErrors: string[] = [];
 let suggestCount = 0;
 let resolvedTokenPrefix = '';
 let tokenRejected = false;
+
+/** One-time latch so the noisy "Attach verified" info line only logs once per
+ * page-load instead of on every attach re-verify (SiteChrome + Storefront both
+ * poll, which previously logged it repeatedly in the console). */
+let attachLogFired = false;
 
 /**
  * True once the SDK successfully attached to at least one input this page-load.
@@ -444,20 +456,64 @@ function loadMapboxSdk(): Promise<void> {
   return sdkLoadPromise;
 }
 
+/**
+ * Build the FULL formatted address from a retrieved Mapbox feature.
+ *
+ * Mapbox's SDK only writes the STREET components (address_line1/2/3) into a
+ * `street-address` input, and it only fills city/state/zip when the form has
+ * separate `address-level2` / `address-level1` / `postal-code` fields. Our
+ * storefront forms use a SINGLE shipping box, so without this the box ends up
+ * with just "1600 Pennsylvania Ave NW" and the city/state/zip are dropped.
+ * Prefer Mapbox's own `full_address` when present, otherwise compose from the
+ * address components the same way the SDK's `getAutofillSearchText` does.
+ */
+function composeFullAddress(props: Record<string, unknown> | null | undefined): string {
+  if (!props || typeof props !== 'object') return '';
+  const s = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  if (s(props.full_address)) return s(props.full_address);
+
+  const street = [props.address_line1, props.address_line2, props.address_line3].map(s).filter(Boolean);
+  const city = s(props.address_level2) || s(props.locality) || s(props.place);
+  const region = s(props.address_level1) || s(props.region);
+  const postcode = s(props.postcode) || s(props.postal_code);
+  const country = s(props.country) || s(props.country_name);
+  const locality = [city, region, postcode].filter(Boolean).join(', ');
+
+  const parts = [
+    ...(street.length > 0 ? [street.join(', ')] : []),
+    ...(locality ? [locality] : []),
+    ...(country ? [country] : []),
+  ];
+  if (parts.length > 0) return parts.join(', ');
+  return s(props.name);
+}
+
 function handleRetrieve(event: any): void {
   const input = event && (event.target as HTMLInputElement | undefined);
-  // The SDK fires `retrieve` just before it fills the address fields, so defer
-  // the capture by one tick to read the final filled street value.
+  // The SDK fires `retrieve` just before it fills the address fields. It only
+  // writes the street components into a single `street-address` box (city,
+  // state, zip are skipped when the form has no fields for them), so we defer
+  // by one tick and then overwrite the box with the full composed address.
+  // NOTE: the SDK's `MapboxHTMLEvent` puts the payload in `event.detail`, so
+  // the retrieved FeatureCollection is `event.detail.features` (we also accept
+  // `event.features` for forward-compatibility).
+  const props =
+    event?.detail?.features?.[0]?.properties ||
+    event?.features?.[0]?.properties;
+  const composed = composeFullAddress(props);
   window.setTimeout(() => {
     const el = input && typeof input.value === 'string' ? input : null;
-    const filled = el ? el.value.trim() : '';
+    if (!el) return;
+    const filled = (composed || el.value || '').trim();
     if (!filled) return;
+    // Programmatic write mirrors how the SDK itself fills the field (React's
+    // onChange does not fire — submit handlers read the DOM via
+    // getAutofillAddressValue(), so the full address is still what ships).
+    if (el.value !== filled) el.value = filled;
     verifiedAddresses.add(filled);
-    if (el) {
-      el.setAttribute('data-mapbox-verified', 'true');
-      el.setAttribute('data-mapbox-verified-value', filled);
-      if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
-    }
+    el.setAttribute('data-mapbox-verified', 'true');
+    el.setAttribute('data-mapbox-verified-value', filled);
+    if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
   }, 0);
 }
 
@@ -633,9 +689,12 @@ function startAttachLoop(): void {
     if (info.attachedInputs > 0) {
       attachedEver = true;
       stopAttachLoop();
-      console.info(
-        `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
-      );
+      if (!attachLogFired) {
+        attachLogFired = true;
+        console.info(
+          `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
+        );
+      }
       refreshActiveStatus();
       return true;
     }

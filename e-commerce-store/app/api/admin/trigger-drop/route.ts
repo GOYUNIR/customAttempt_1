@@ -2,10 +2,17 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { sendWinnerEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
 const DRAW_HISTORY_KEY = 'admin:draw_history';
+
+function siteUrlFromEnv() {
+  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (env) return env.replace(/\/$/, '');
+  return 'https://goyunir.com';
+}
 
 export async function POST(request: Request) {
   try {
@@ -102,6 +109,23 @@ export async function POST(request: Request) {
             shippingStatus: 'PENDING_FULFILLMENT',
           });
           results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, orderRef, product: productName, size, amountCents: priceCents });
+
+          // Notify the winner. This is the primary channel for telling
+          // customers they won — without it, an admin-triggered draw is silent.
+          try {
+            await sendWinnerEmail({
+              to: entry.email,
+              product: product.name,
+              size,
+              amountLabel: `$${(priceCents / 100).toFixed(2)}`,
+              promoCode: entry.promoCode || undefined,
+              shippingAddress: entry.shippingAddress || entry.address || undefined,
+              orderRef,
+              siteUrl: siteUrlFromEnv(),
+            });
+          } catch (emailErr) {
+            console.error('[trigger-drop] winner email failed', emailErr);
+          }
         } catch (err: any) {
           declinedEntries.push(winnerStr);
           await archiveEntry(redis, { ...entry, type: 'WINNER_DECLINED' });

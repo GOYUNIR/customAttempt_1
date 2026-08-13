@@ -9,7 +9,8 @@ export default async function OpenGraphImage() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
-  const title = String(branding.shareTitle || 'GOYUNIR');
+  const brandName = String(branding.brandName || branding.shareTitle || 'GOYUNIR');
+  const title = String(branding.shareTitle || brandName);
   const description = String(branding.shareDescription || 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.');
   const shareImageUrl = String(branding.shareImageUrl || '').trim();
   const background = String(branding.shareBackground || '#0B0B0F');
@@ -37,7 +38,7 @@ export default async function OpenGraphImage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {logoUrl ? <img src={logoUrl} alt={title} style={{ width: 68, height: 68, borderRadius: 16, objectFit: 'cover', border: `1px solid ${accent}55` }} /> : null}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ letterSpacing: 6, fontSize: 24, fontWeight: 700 }}>GOYUNIR</div>
+              <div style={{ letterSpacing: 6, fontSize: 24, fontWeight: 700 }}>{brandName.toUpperCase()}</div>
               <div style={{ fontSize: 16, opacity: 0.8, marginTop: 4 }}>Luxury releases, handled cleanly.</div>
             </div>
           </div>

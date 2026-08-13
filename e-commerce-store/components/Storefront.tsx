@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
@@ -12,18 +12,12 @@ const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 
 /**
- * Address quality gate for checkout. When Mapbox autofill is live the address
- * must have been picked from the dropdown suggestions (so it is a real,
- * deliverable address); otherwise structural checks still block garbage like
- * "asdf" or "1234567890".
+ * Address quality gate for checkout. Structural checks block garbage like
+ * "asdf" or "1234567890". Autofill suggestions are the fastest way to enter a
+ * verified address, but customers can always type a complete address manually.
  */
 function addressValidationError(address: string): string | null {
-  const base = validateShippingAddress(address);
-  if (base) return base;
-  if (isMapboxAutofillActive() && !isMapboxVerifiedAddress(address)) {
-    return 'Choose your shipping address from the autofill suggestions so we can verify it.';
-  }
-  return null;
+  return validateShippingAddress(address);
 }
 
 function getProductPriceCategory(product: any, size: string) {
@@ -645,7 +639,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {mapboxHint === 'autofill-on' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing in the shipping field to pick your address.</div>
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion to fill it instantly, or type your address manually.</div>
           )}
           {mapboxHint === 'autofill-off' && (
             <div style={{ marginBottom: 10, fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>

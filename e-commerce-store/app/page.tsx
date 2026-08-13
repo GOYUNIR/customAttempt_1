@@ -11,11 +11,15 @@ export default function HomePage() {
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
   const [nowTick, setNowTick] = useState(Date.now());
+  const [authUser, setAuthUser] = useState<any>(null);
+  const [branding, setBranding] = useState<any>(null);
   // Live theme palette. Starts at the build-time config and upgrades to whatever
   // is saved in /admin → Settings (served through `/api/store` → config →
   // themeColors) so design presets (e.g. a white Luxury background) apply to the
   // static home shell without a redeploy.
   const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+
+  const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
 
   // Only tick the clock while at least one release shows a live countdown —
   // otherwise the whole page re-renders every second for nothing.
@@ -35,6 +39,7 @@ export default function HomePage() {
       try {
         const data = await fetchStoreJson('/api/store');
         if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        if (data?.config?.branding) setBranding(data.config.branding);
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
@@ -47,6 +52,11 @@ export default function HomePage() {
     }
 
     checkProducts();
+
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => setAuthUser(data?.user || null))
+      .catch(() => setAuthUser(null));
 
     const visitorId = typeof window !== 'undefined'
       ? (window.localStorage.getItem('goyunir-visitor-id') || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
@@ -99,7 +109,7 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
+          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / HIGH-CADENCE RELEASES</div>
           <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
             Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
@@ -130,7 +140,7 @@ export default function HomePage() {
           <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Priority drops</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>Sorted by admin order</div>
+              <div style={{ fontSize: 11, color: configPalette.textMuted }}>Curated by our team — refreshed as releases move</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeProducts.map((product: any, index: number) => (
@@ -147,6 +157,12 @@ export default function HomePage() {
                       <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? '#dbeafe' : '#e7e7eb', fontWeight: 700, border: product.isUpcoming ? '1px solid rgba(59,130,246,0.24)' : '1px solid rgba(255,255,255,0.08)' }}>
                         <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? '#60a5fa' : (product.soldOut ? '#fbbf24' : '#7dd3fc'), animation: 'goyunirPulse 1s ease-in-out infinite' }} />
                         {product.isUpcoming ? `Release opens: ${formatCountdown(product)}` : formatCountdown(product)}
+                      </div>
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: configPalette.accentBlue }}>
+                          {product.soldOut ? 'Sold out — proof of demand' : product.isUpcoming ? 'Reserve your place' : 'Enter allocation'}
+                        </span>
+                        <span style={{ fontSize: 13, color: configPalette.accentBlue }}>→</span>
                       </div>
                     </div>
                   </div>
@@ -189,10 +205,20 @@ export default function HomePage() {
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: '#0e0e10', color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Member perk</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4 }}>Get 10% off your first release and private updates.</div>
+              <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>
+                {authUser ? 'Member account' : 'Member perk'}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4 }}>
+                {authUser
+                  ? `You have ${Number(authUser.rewards || 0).toLocaleString()} points${authUser.welcomePromoCode ? ' · 10% welcome credit is ready at checkout' : ' · claim your 10% welcome credit in your account'}.`
+                  : 'Get 10% off your first release and private updates.'}
+              </div>
             </div>
-            <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
+            {authUser ? (
+              <Link href="/account" style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.accentBlue, color: '#04101f', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>My account</Link>
+            ) : (
+              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
+            )}
           </div>
         </section>
       </div>

@@ -438,12 +438,9 @@
           setFeedback(addrErr, true);
           return;
         }
-        // When autofill is live, the address must have been picked from the
-        // dropdown suggestions so it is a real, deliverable address.
-        if (autofillReady && !mapboxVerified) {
-          setFeedback('Choose your address from the autofill suggestions so we can verify it.', true);
-          return;
-        }
+        // Autofill is a convenience, not a lock-in — structural validation above
+        // already blocks garbage addresses. Customers can pick a suggestion for
+        // a pre-verified fill, or type a complete address manually.
 
         setFeedback('Saving…');
         submit.disabled = true;

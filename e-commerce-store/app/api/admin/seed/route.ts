@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , getAdminPassword, defaultStripePriceId} from '@/lib/server-config';
+import { createRedisClient , getAdminPassword, defaultStripePriceId, getLiveProductState} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,6 +122,8 @@ const DEFAULT_CONFIG = {
   // favicon, share card and header look intentional out of the box.
   branding: {
     logoUrl: '',
+    brandName: 'GOYUNIR',
+    brandFontFamily: '',
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
@@ -254,13 +256,35 @@ export async function GET(request: Request) {
 
     await redis.set(CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
 
+    // Seed live states for every product/size so a fresh store is immediately
+    // ready (the storefront + self-test expect active products to have live
+    // states). getLiveProductState is idempotent and mirrors product stock.
+    let liveSeeded = 0;
+    for (const product of DEFAULT_PRODUCTS) {
+      const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
+      const stock = Math.max(0, Number(product.totalInventory) || 0);
+      if (raffleLimit <= 0 && stock <= 0) continue; // intentional sold-out placeholder
+      const categories = Array.isArray(product.priceCategories) && product.priceCategories.length > 0
+        ? product.priceCategories
+        : [{ size: 'Standard' }];
+      for (const cat of categories) {
+        try {
+          await getLiveProductState(redis, product, String(cat.size || 'Standard'));
+          liveSeeded++;
+        } catch (err: any) {
+          console.warn(`[seed] Could not seed live state for ${product.name} (${cat.size}):`, err);
+        }
+      }
+    }
+
     const verify = await redis.hgetall(PRODUCTS_KEY);
     const verifyCount = verify ? Object.keys(verify).length : 0;
 
     return NextResponse.json({
       success: true,
-      message: `Seeded ${seeded} products to Redis. Verified: ${verifyCount} products exist.`,
+      message: `Seeded ${seeded} products to Redis. Verified: ${verifyCount} products exist. Live states: ${liveSeeded}.`,
       products: DEFAULT_PRODUCTS.map((p) => ({ id: p.id, name: p.name, slug: p.slug })),
+      liveStatesSeeded: liveSeeded,
       verified: verifyCount,
     });
   } catch (err: any) {

@@ -9,6 +9,7 @@ export default async function Icon() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
+  const brandName = String(branding.brandName || branding.shareTitle || 'GOYUNIR');
   const background = String(branding.iconBackground || branding.shareBackground || '#0B0B0F');
   const textColor = String(branding.iconText || branding.shareText || '#D4AF37');
 
@@ -31,10 +32,10 @@ export default async function Icon() {
       >
         {logoUrl ? (
           <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-            <img src={logoUrl} alt="GOYUNIR" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={logoUrl} alt={brandName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
         ) : (
-          <div style={{ display: 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>G</div>
+          <div style={{ display: 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>{String(brandName).trim().charAt(0).toUpperCase() || 'G'}</div>
         )}
       </div>
     ),

@@ -1,7 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress, loadProducts } from '@/lib/server-config';
+import {
+  createRedisClient,
+  findAllOpenOrders,
+  adminUpdateOrderAddress,
+  findLedgerEntriesByEmailVariant,
+  ARCHIVE_LEDGER_KEY,
+  archiveEntry,
+  loadProducts,
+} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,19 +42,60 @@ export async function POST(request: Request) {
     const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const orders = await findAllOpenOrders(redis, productNames);
     const target = orders.find(
-      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email
+      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,
     );
-    if (!target) {
+
+    if (target) {
+      // Also verify last4 if provided (optional)
+      if (last4 && String(target.parsed.cardLast4 || '') !== last4) {
+        return NextResponse.json({ error: 'Card last4 does not match.' }, { status: 403 });
+      }
+      await adminUpdateOrderAddress(redis, target, newAddress);
+      await sendAccountUpdateEmail({
+        to: email,
+        product: variant,
+        size,
+        changeType: 'address',
+        newAddress,
+      }).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Shipping address updated.' });
+    }
+
+    // The live pool may have been reset by a draw — fall back to the durable
+    // ledger so customers can still fix their address on an entry or a won order.
+    const ledgerRefs = await findLedgerEntriesByEmailVariant(redis, email, variant, size, ['ENTERED', 'WINNER_CHARGED']);
+    if (ledgerRefs.length === 0) {
       return NextResponse.json({ error: 'Entry not found.' }, { status: 404 });
     }
-
-    // Also verify last4 if provided (optional)
-    if (last4 && String(target.parsed.cardLast4 || '') !== last4) {
+    ledgerRefs.sort(
+      (a, b) => new Date(b.record.registeredAt).getTime() - new Date(a.record.registeredAt).getTime(),
+    );
+    const latest = ledgerRefs[0];
+    if (last4 && String(latest.record.cardLast4 || '') !== last4) {
       return NextResponse.json({ error: 'Card last4 does not match.' }, { status: 403 });
     }
-
-    await adminUpdateOrderAddress(redis, target, newAddress);
-    return NextResponse.json({ success: true, message: 'Address updated.' });
+    await redis.lset(ARCHIVE_LEDGER_KEY, latest.index, JSON.stringify({
+      ...latest.record,
+      shippingAddress: newAddress,
+      address: newAddress,
+    }));
+    await archiveEntry(redis, {
+      email,
+      variant,
+      size,
+      shippingAddress: newAddress,
+      id: String(latest.record.customerId || latest.record.id || 'n/a'),
+      registeredAt: new Date().toISOString(),
+      type: 'ADDRESS_UPDATED',
+    } as any);
+    await sendAccountUpdateEmail({
+      to: email,
+      product: variant,
+      size,
+      changeType: 'address',
+      newAddress,
+    }).catch(() => {});
+    return NextResponse.json({ success: true, message: 'Shipping address updated.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

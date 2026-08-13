@@ -201,7 +201,7 @@ export default function CatalogPage() {
           </Link>
         </div>
         <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8', lineHeight: 1.6 }}>
-          Upcoming and archived raffle pages can still carry countdown context, collector narrative, and private-entry energy when a brand wants the release story to stay alive.
+          Live releases are open for entry right now. Upcoming and archived drops stay on the record so collectors can see the full story and get ahead of the next opening.
         </div>
 
         <motion.div
@@ -258,6 +258,9 @@ export default function CatalogPage() {
                     <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
                     <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
                     <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : 'Limited handmade supply. Open while allocation remains.'}</div>
+                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
+                      {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                    </div>
                   </div>
                 </Link>
               ))}

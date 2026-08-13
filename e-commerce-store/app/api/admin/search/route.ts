@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY, getAdminPassword } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  // Defense-in-depth: the middleware already gates /api/admin with Basic Auth,
+  // but this endpoint exposes the full customer ledger, so it also verifies the
+  // admin password directly.
+  const url = new URL(request.url);
+  const password = String(url.searchParams.get('password') || '');
+  const master = getAdminPassword() || '';
+  if (!master || password !== master) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
+
   try {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ results: [] });
-    const url = new URL(request.url);
     const query = (url.searchParams.get('q') || '').trim().toLowerCase();
     if (!query) return NextResponse.json({ results: [] });
 

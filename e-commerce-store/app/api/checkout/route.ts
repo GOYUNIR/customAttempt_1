@@ -125,7 +125,7 @@ export async function POST(request: Request) {
           error: `You're already entered for ${variant} (${size}). Good luck! Pro tip: you can enter a different raffle.`,
           alreadyEntered: true,
           code: 'DUPLICATE_BLOCKED',
-        }, { status: 409 });
+        });
       }
     }
 

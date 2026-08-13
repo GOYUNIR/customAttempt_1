@@ -7,6 +7,9 @@ import {
   safeParseRedisItem,
   PROMOS_KEY,
   listLiveStates,
+  getLiveProductState,
+  liveStateField,
+  type LiveStateRecord,
 } from '@/lib/server-config';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -286,11 +289,61 @@ export async function GET(request: Request) {
     // Live states + drop pools (entry health)
     try {
       const liveStates = await listLiveStates(redis);
-      const activeCount = productList.filter((p: any) => p?.isActive === true || p?.isActive === 'true').length;
+      const activeProducts = productList.filter((p: any) => p?.isActive === true || p?.isActive === 'true');
+
+      // Every active product with real stock should have a live-state record
+      // for each of its sizes. Products with 0 configured stock are skipped —
+      // they are intentional sold-out/social-proof placeholders and seeding a
+      // live state would make them look available.
+      const expected: { product: any; size: string }[] = [];
+      for (const product of activeProducts) {
+        const raffleLimit = Math.max(0, Number(product?.maxRaffleAllocationLimit) || 0);
+        const stock = Math.max(0, Number(product?.totalInventory) || 0);
+        if (raffleLimit <= 0 && stock <= 0) continue;
+        const categories =
+          Array.isArray(product?.priceCategories) && product.priceCategories.length > 0
+            ? product.priceCategories
+            : [{ size: 'Standard' }];
+        for (const cat of categories) {
+          expected.push({ product, size: String(cat?.size || 'Standard') });
+        }
+      }
+
+      const existingByField = new Map<string, LiveStateRecord>();
+      for (const state of liveStates) existingByField.set(String(state.productId), state);
+
+      const missing = expected.filter(({ product, size }) => {
+        const field = liveStateField(product.id, product.slug, size);
+        return !existingByField.has(field);
+      });
+
+      // Repair: seed missing live states exactly the way the checkout/draw
+      // paths would (getLiveProductState is idempotent — an existing record is
+      // never overwritten, only a truly missing one is created). Live states
+      // are lazily created on first checkout, so a freshly seeded store with no
+      // traffic yet legitimately has none — running this self-test backfills
+      // them so the store is ready for a drop.
+      let seededCount = 0;
+      let repairFailed = false;
+      for (const { product, size } of missing) {
+        try {
+          await getLiveProductState(redis, product, size);
+          seededCount += 1;
+        } catch (err: any) {
+          repairFailed = true;
+          console.warn(`[self-test] Could not seed live state for ${product?.name} (${size}):`, err);
+        }
+      }
+
+      const ok = !repairFailed;
       push(
         'Live states seeded',
-        activeCount === 0 || liveStates.length > 0,
-        activeCount === 0 ? 'no active products to seed' : `${liveStates.length} live state(s) for ${activeCount} active product(s)`
+        ok,
+        activeProducts.length === 0
+          ? 'no active products to seed'
+          : `${existingByField.size + seededCount} live state(s) for ${activeProducts.length} active product(s)` +
+            (seededCount > 0 ? ` (seeded ${seededCount} missing)` : '') +
+            (repairFailed ? ' — some could not be seeded' : '')
       );
     } catch (e: any) {
       push('Live states seeded', false, e.message || 'read failed');

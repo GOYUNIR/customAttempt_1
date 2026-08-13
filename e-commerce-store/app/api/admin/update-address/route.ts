@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findAllOpenOrders, adminUpdateOrderAddress, loadProducts , getAdminPassword} from '@/lib/server-config';
+import {
+  createRedisClient,
+  findAllOpenOrders,
+  adminUpdateOrderAddress,
+  findLedgerEntriesByEmailVariant,
+  ARCHIVE_LEDGER_KEY,
+  archiveEntry,
+  loadProducts,
+  getAdminPassword,
+} from '@/lib/server-config';
+import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,13 +38,53 @@ export async function POST(request: Request) {
     const productNames = Object.values(liveProducts).map((p: any) => p.name);
     const orders = await findAllOpenOrders(redis, productNames);
     const target = orders.find(
-      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email
+      (o) => o.variant === variant && o.size === size && String(o.parsed.email || '').toLowerCase() === email,
     );
-    if (!target) {
-      return NextResponse.json({ error: 'Entry not found.' }, { status: 404 });
+
+    if (target) {
+      await adminUpdateOrderAddress(redis, target, newAddress);
+      await sendAccountUpdateEmail({
+        to: email,
+        product: variant,
+        size,
+        changeType: 'address',
+        newAddress,
+      }).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Address updated.' });
     }
 
-    await adminUpdateOrderAddress(redis, target, newAddress);
+    // After a draw the live pool resets, so the entry may only exist on the
+    // permanent ledger (ENTERED / WINNER_CHARGED). Keep admin edits working by
+    // updating the durable record there instead of failing with "Entry not found".
+    const ledgerRefs = await findLedgerEntriesByEmailVariant(redis, email, variant, size, ['ENTERED', 'WINNER_CHARGED']);
+    if (ledgerRefs.length === 0) {
+      return NextResponse.json({ error: 'Entry not found.' }, { status: 404 });
+    }
+    ledgerRefs.sort(
+      (a, b) => new Date(b.record.registeredAt).getTime() - new Date(a.record.registeredAt).getTime(),
+    );
+    const latest = ledgerRefs[0];
+    await redis.lset(ARCHIVE_LEDGER_KEY, latest.index, JSON.stringify({
+      ...latest.record,
+      shippingAddress: newAddress,
+      address: newAddress,
+    }));
+    await archiveEntry(redis, {
+      email,
+      variant,
+      size,
+      shippingAddress: newAddress,
+      id: String(latest.record.customerId || latest.record.id || 'n/a'),
+      registeredAt: new Date().toISOString(),
+      type: 'ADDRESS_UPDATED',
+    } as any);
+    await sendAccountUpdateEmail({
+      to: email,
+      product: variant,
+      size,
+      changeType: 'address',
+      newAddress,
+    }).catch(() => {});
     return NextResponse.json({ success: true, message: 'Address updated.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

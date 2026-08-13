@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -11,7 +12,19 @@ export default function SignupPage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — starts at the build-time config and upgrades to the
+  // /admin → Settings theme so design presets apply to the auth pages too.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+
+  useEffect(() => {
+    fetchStoreJson('/api/store')
+      .then((data) => {
+        if (data?.config?.themeColors) {
+          setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
     if (typeof window === 'undefined') return;
@@ -59,11 +72,11 @@ export default function SignupPage() {
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 20, padding: 32, maxWidth: 400, width: '100%' }}>
         <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: '0 0 8px', color: configPalette.cardTextMain }}>Sign Up</h1>
-        <p style={{ color: configPalette.cardTextMuted, fontSize: 13, margin: '0 0 24px' }}>Create your account to track entries and earn rewards.</p>
+        <p style={{ color: configPalette.cardTextMuted, fontSize: 13, margin: '0 0 24px' }}>Create your account to track entries and earn rewards. New accounts get 250 welcome points and a one-time 10% credit on your first release.</p>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
-          <input type="password" placeholder="Password (min 6 chars)" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
-          <input type="password" placeholder="Confirm Password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
+          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
+          <input type="password" placeholder="Password (min 6 chars)" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
+          <input type="password" placeholder="Confirm Password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#34d399', marginTop: -6 }}>
             <span style={{ width: 7, height: 7, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.16)' }} />
             Encrypted credential handoff

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, getAdminPassword } from '@/lib/server-config';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +15,22 @@ function generatePromoCode(prefix: string) {
   const root = (prefix || 'GOY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'GOY';
   return `${root}-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 }
+
+/** Human-friendly status line for the customer email. */
+function statusMessage(shippingStatus: string, trackingNumber?: string) {
+  const tracking = trackingNumber ? ` Tracking number: ${trackingNumber}.` : '';
+  switch (shippingStatus) {
+    case 'LABEL_CREATED':
+      return `Your shipping label has been created and your order is being prepared for dispatch.${tracking}`;
+    case 'SHIPPED':
+      return `Your order is on the way!${tracking}`;
+    case 'DELIVERED':
+      return `Your order has been delivered!${tracking}`;
+    default:
+      return `Your order status was updated to ${shippingStatus.replace(/_/g, ' ').toLowerCase()}.${tracking}`;
+  }
+}
+
 
 export async function POST(request: Request) {
   try {
@@ -32,7 +48,7 @@ export async function POST(request: Request) {
     const size = String(body?.size || '');
     const shippingStatus = String(body?.shippingStatus || '');
     const trackingNumber = String(body?.trackingNumber || '').trim();
-    
+
     if (!email || !variant || !ALLOWED.includes(shippingStatus)) {
       return NextResponse.json({ error: 'Bad payload' }, { status: 400 });
     }
@@ -40,8 +56,8 @@ export async function POST(request: Request) {
     const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     const liveProducts = await loadProducts(redis);
     let updated = 0;
-    let updatedEntry: any = null;
-    
+    let notified = false;
+
     for (let i = 0; i < all.length; i++) {
       const e = safeParseRedisItem<any>(all[i]);
       if (!e) continue;
@@ -51,29 +67,35 @@ export async function POST(request: Request) {
         e.variant === variant &&
         (!size || e.size === size)
       ) {
-        const updatedEntryData = { 
-          ...e, 
+        const updatedEntryData = {
+          ...e,
           shippingStatus,
           ...(trackingNumber ? { trackingNumber } : {}),
         };
         await redis.lset(ARCHIVE_LEDGER_KEY, i, JSON.stringify(updatedEntryData));
         updated++;
-        updatedEntry = updatedEntryData;
-        
-        // If status is DELIVERED, send final delivery email
-        if (shippingStatus === 'DELIVERED') {
+
+        // Email the customer on any meaningful fulfilment movement. The initial
+        // PENDING_FULFILLMENT state is set automatically at charge time, so we
+        // only notify when the status actually moves forward (or when an admin
+        // explicitly saves a label/shipped/delivered update).
+        if (shippingStatus !== 'PENDING_FULFILLMENT') {
           try {
             await sendAccountUpdateEmail({
               to: email,
               product: variant,
               size: size || undefined,
               changeType: 'shipping',
-              newAddress: `Delivered!${trackingNumber ? ` Tracking: ${trackingNumber}` : ''}`,
+              newAddress: statusMessage(shippingStatus, trackingNumber),
             });
-          } catch (e) {
-            console.error('[shipping] delivery email failed', e);
+            notified = true;
+          } catch (emailErr) {
+            console.error('[shipping] customer email failed', emailErr);
           }
+        }
 
+        // Issue the post-delivery incentive credit once per order.
+        if (shippingStatus === 'DELIVERED') {
           try {
             const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === e.productId) as any;
             const triggerSizes = Array.isArray(product?.deliveryIncentiveTriggerSizes) ? product.deliveryIncentiveTriggerSizes.map(String) : [];
@@ -146,8 +168,9 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    return NextResponse.json({ success: true, updated });
+    return NextResponse.json({ success: true, updated, notified });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+

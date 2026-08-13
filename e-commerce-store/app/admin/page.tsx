@@ -311,6 +311,8 @@ export default function AdminPortal() {
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
   const [brandingSettings, setBrandingSettings] = useState({
     logoUrl: '',
+    brandName: 'GOYUNIR',
+    brandFontFamily: '',
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
@@ -1240,7 +1242,11 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setShipMsg(`Shipping updated to ${shippingStatusDraft.replace(/_/g, ' ')} — customer notified.`);
+        const notified = data.notified === true;
+        const matched = Number(data.updated || 0) > 0;
+        setShipMsg(matched
+          ? `Shipping updated to ${shippingStatusDraft.replace(/_/g, ' ')}${notified ? ' — customer notified by email.' : ' — saved.'}`
+          : `No WINNER_CHARGED record matched ${entry.email} · ${entry.variant} ${entry.size} — nothing was changed.`);
         showToast('UPDATED · Shipping');
         await fetchStatus();
         setEditingShippingEntry(null);
@@ -1409,7 +1415,7 @@ export default function AdminPortal() {
     setIsSearching(true);
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
+        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}&password=${encodeURIComponent(password)}`);
         const data = await res.json();
         setSearchResults(Array.isArray(data.results) ? data.results : []);
       } catch {
@@ -2765,6 +2771,34 @@ export default function AdminPortal() {
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
+                  Brand name (top bar / footer / emails)
+                  <input
+                    type="text"
+                    value={brandingSettings.brandName || ''}
+                    onChange={(e) => setBrandingSettings((prev) => ({ ...prev, brandName: e.target.value }))}
+                    placeholder="GOYUNIR"
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  />
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Top bar shows
+                  <select value={brandingSettings.headerMode || 'both'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, headerMode: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
+                    <option value="both">Logo + name</option>
+                    <option value="logo">Logo only</option>
+                    <option value="text">Name only</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Top-bar name font (optional)
+                  <input
+                    type="text"
+                    value={brandingSettings.brandFontFamily || ''}
+                    onChange={(e) => setBrandingSettings((prev) => ({ ...prev, brandFontFamily: e.target.value }))}
+                    placeholder="e.g. Georgia, serif (leave empty to inherit the site font)"
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  />
+                </label>
+                <label style={{ fontSize: 11 }}>
                   Top-right action label
                   <select value={brandingSettings.headerActionMode || 'cart'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, headerActionMode: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
                     <option value="cart">Cart</option>
@@ -2818,7 +2852,7 @@ export default function AdminPortal() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   {brandingSettings.logoUrl ? <img src={brandingSettings.logoUrl} alt="Brand preview" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover' }} /> : <div style={{ width: 40, height: 40, borderRadius: 10, background: brandingSettings.shareAccent || '#3b82f6' }} />}
                   <div>
-                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>GOYUNIR</div>
+                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>{brandingSettings.brandName || brandingSettings.shareTitle || 'GOYUNIR'}</div>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{brandingSettings.shareTitle}</div>
                   </div>
                 </div>

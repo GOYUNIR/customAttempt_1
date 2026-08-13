@@ -15,3 +15,16 @@ Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
 Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
  GET /elysian-white-launch-draw 200 in 651ms (next.js: 597ms, application-code: 54ms)
  GET /api/store 200 in 496ms (next.js: 114ms, application-code: 382ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET /elysian-white-launch-draw 200 in 1707ms (next.js: 269ms, application-code: 1439ms)
+ GET /api/admin/self-test?password=goyunir-admin-dev 200 in 2.7s (next.js: 827ms, proxy.ts: 155ms, application-code: 1670ms)
+ GET /api/admin/self-test?password=goyunir-admin-dev 200 in 1213ms (next.js: 5ms, proxy.ts: 7ms, application-code: 1201ms)
+✓ Compiled in 292ms
+✓ Compiled in 180ms
+✓ Compiled in 229ms
+✓ Compiled in 94ms
+✓ Compiled in 98ms
+✓ Compiled in 93ms
+✓ Compiled in 103ms
+✓ Compiled in 99ms

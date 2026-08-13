@@ -8,6 +8,15 @@ export const STORE_CONFIG_KEY = 'store:config';
 
 export type StoreBrandingConfig = {
   logoUrl?: string;
+  /** Public brand name shown in the top bar, footer, titles and emails.
+   * Falls back to `shareTitle`, then `GOYUNIR`. Set from /admin → Settings. */
+  brandName?: string;
+  /** CSS font stack for the brand name in the top bar only. Leave empty to
+   * inherit the storefront font (themeColors.fontFamily). */
+  brandFontFamily?: string;
+  /** Top-bar display mode: 'both' (logo + name), 'logo' (logo only) or
+   * 'text' (name only). */
+  headerMode?: string;
   shareImageUrl?: string;
   shareTitle?: string;
   shareDescription?: string;
@@ -367,6 +376,43 @@ export interface FoundPoolEntry {
   poolKey: string; variant: string; size: string; index: number; parsed: any;
 }
 
+/** A single row inside the permanent `archive:ledger` list. */
+export interface LedgerRef {
+  index: number;
+  record: any;
+}
+
+/**
+ * Find permanent-ledger rows for a customer + product. Used so address and
+ * shipping edits keep working even after a draw resets the live pools — the
+ * ledger is the durable source of truth for entries and won orders.
+ */
+export async function findLedgerEntriesByEmailVariant(
+  redis: Redis,
+  email: string,
+  variant: string,
+  size?: string,
+  types?: string[],
+): Promise<LedgerRef[]> {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  try {
+    const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
+    const refs: LedgerRef[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const record = safeParseRedisItem<any>(all[i]);
+      if (!record) continue;
+      if (String(record.email || '').toLowerCase() !== normalizedEmail) continue;
+      if (String(record.variant || '') !== variant) continue;
+      if (size && String(record.size || '') !== size) continue;
+      if (Array.isArray(types) && types.length > 0 && !types.includes(record.type)) continue;
+      refs.push({ index: i, record });
+    }
+    return refs;
+  } catch {
+    return [];
+  }
+}
+
 async function listPoolKeysForProduct(redis: Redis, prefix: 'drop_pool' | 'intent_pool', productName: string): Promise<string[]> {
   try {
     const keys = await redis.keys(`${prefix}:${productName}:*`);
@@ -467,8 +513,19 @@ export async function adminCancelOrder(redis: Redis, order: FoundPoolEntry, reas
 export async function adminUpdateOrderAddress(redis: Redis, order: FoundPoolEntry, newAddress: string) {
   const updated = { ...order.parsed, shippingAddress: newAddress, address: newAddress };
   await redis.lset(order.poolKey, order.index, JSON.stringify(updated));
+  // Also persist the change on the permanent ledger's matching entry/winner rows
+  // so it survives pool resets and shows up in /account and the admin ledger.
+  const email = String(order.parsed.email || '').toLowerCase();
+  const refs = await findLedgerEntriesByEmailVariant(redis, email, order.variant, order.size, ['ENTERED', 'WINNER_CHARGED']);
+  for (const ref of refs) {
+    await redis.lset(ARCHIVE_LEDGER_KEY, ref.index, JSON.stringify({
+      ...ref.record,
+      shippingAddress: newAddress,
+      address: newAddress,
+    }));
+  }
   await archiveEntry(redis, {
-    email: String(order.parsed.email || '').toLowerCase(),
+    email,
     variant: order.variant,
     size: order.size,
     shippingAddress: newAddress,

@@ -249,7 +249,7 @@ async function runAutoDraw(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined });
+              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined, shippingAddress: shippingAddress || undefined, siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com' });
               if (!(emailResult as any)?.ok) {
                 console.error('[auto-draw] winner email failed', winnerEmail, emailResult);
               }

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 
 type CartItem = {
@@ -17,17 +17,13 @@ type CartItem = {
 };
 
 /**
- * Address quality gate for checkout. When Mapbox autofill is live the address
- * must have been picked from the dropdown suggestions; otherwise structural
- * checks still block garbage like "asdf" or "1234567890".
+ * Address quality gate for checkout. Structural checks block garbage like
+ * "asdf" or "1234567890". Customers can either pick from the Mapbox autofill
+ * suggestions (fastest, pre-verified) or type a complete address manually —
+ * autofill is an accelerator, never a lock-in.
  */
 function addressValidationError(address: string): string | null {
-  const base = validateShippingAddress(address);
-  if (base) return base;
-  if (isMapboxAutofillActive() && !isMapboxVerifiedAddress(address)) {
-    return 'Choose your shipping address from the autofill suggestions so we can verify it.';
-  }
-  return null;
+  return validateShippingAddress(address);
 }
 
 const CART_KEY = 'goyunir-cart';
@@ -551,8 +547,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       return;
     }
     if (raffleOnlyCart) {
-      setCartMsg(`Raffle entries are prepared in your ${actionTitle.toLowerCase()} and secured from the product page.`);
-      showNotice({ type: 'alert', message: `Use the product page to secure raffle entries in your ${actionTitle.toLowerCase()}.` });
+      setCartMsg(`Your prepared entries are secured from each product page — open a release and tap “Enter allocation” to complete card setup.`);
+      showNotice({ id: 'cart-raffle-help', type: 'info', message: `Prepared entries are locked in from each product page — no action needed here.`, persist: false });
       return;
     }
     if (!checkoutEmail) {
@@ -619,7 +615,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const showBrandLogo = headerMode !== 'text';
   const headerActionMode = String(branding?.headerActionMode || 'cart').toLowerCase();
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
-  const actionVerb = headerActionMode === 'bag' ? 'bag' : 'cart';
+  const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
+  const brandFont = String(branding?.brandFontFamily || '').trim() || undefined;
+  const totalPrepared = cart.length;
+  const rafflePrepared = cart.filter(
+    (item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle',
+  ).length;
 
   // Resolve admin-configurable orb settings (falls back to built-in defaults).
   const resolvedOrbs = orbs || DEFAULT_ORBS;
@@ -708,11 +709,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         }}
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
-          <Link href="/catalog" aria-label="Catalog" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>
-          </Link>
-          <Link href="/catalog" aria-label="Search" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /></svg>
+          <Link
+            href="/catalog"
+            aria-label="Browse catalog & search"
+            title="Catalog & search"
+            style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.2-4.2" /><path d="M4.5 3.5 3 5l2.2 1.6M19.5 3.5 21 5l-2.2 1.6M4.5 14.5 3 13l2.2-1.6M19.5 14.5 21 13l-2.2-1.6" /></svg>
+            Browse
           </Link>
         </div>
 
@@ -739,12 +743,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           }}
         >
           {showBrandLogo && (branding?.logoUrl ? (
-            <img src={branding.logoUrl} alt={branding?.shareTitle || 'GOYUNIR'} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
+            <img src={branding.logoUrl} alt={brandName} style={{ width: 24, height: 24, borderRadius: 6, objectFit: 'cover', display: 'block' }} />
           ) : null)}
-          {showBrandText ? <span>{branding?.shareTitle || 'GOYUNIR'}</span> : null}
+          {showBrandText ? <span style={{ fontFamily: brandFont }}>{brandName}</span> : null}
         </Link>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: 1 }}>
+          {hasItems && (
+            <span
+              title={rafflePrepared > 0 ? `${rafflePrepared} entry allocation${rafflePrepared === 1 ? '' : 's'} ready` : `${totalPrepared} prepared item${totalPrepared === 1 ? '' : 's'}`}
+              style={{ height: 28, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, background: 'rgba(125,211,252,0.12)', border: '1px solid rgba(125,211,252,0.28)', color: '#bfe6ff', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: '#7dd3fc', boxShadow: '0 0 0 3px rgba(125,211,252,0.18)' }} />
+              {rafflePrepared > 0 ? `${rafflePrepared} ${rafflePrepared === 1 ? 'entry' : 'entries'}` : `${totalPrepared} prepared`}
+            </span>
+          )}
           <Link href="/account" aria-label="Account" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
           </Link>
@@ -784,7 +797,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             <a href="mailto:goyunir.support@gmail.com" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>goyunir.support@gmail.com</a>
           </div>
           <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
-            © {new Date().getFullYear()} GOYUNIR ALL RIGHTS RESERVED.
+            © {new Date().getFullYear()} {String(branding?.brandName || branding?.shareTitle || 'GOYUNIR').toUpperCase()} ALL RIGHTS RESERVED.
           </div>
         </div>
       </footer>
@@ -849,7 +862,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   />
                   <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
                   {mapboxHint === 'autofill-on' && (
-                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing to pick your address.</div>
+                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion to fill it instantly, or type your address manually.</div>
                   )}
                   {mapboxHint === 'autofill-off' && (
                     <div style={{ fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>
@@ -883,7 +896,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 </form>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems || raffleOnlyCart} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: liveTheme.textMain || '#f3f4f6', color: liveTheme.primaryBackground || '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems || raffleOnlyCart ? 'not-allowed' : 'pointer' }}>
+                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: liveTheme.textMain || '#f3f4f6', color: liveTheme.primaryBackground || '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems ? 'not-allowed' : 'pointer' }}>
                   {checkoutBusy ? 'Starting…' : checkoutLabel}
                 </button>
                 <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: drawerTextMuted, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>

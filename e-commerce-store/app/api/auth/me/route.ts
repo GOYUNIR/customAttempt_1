@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   if (!cookie) {
     return NextResponse.json({ user: null });
   }
-  
+
   // Parse cookies manually
   const cookiePairs = cookie.split(';').map(c => c.trim().split('='));
   const cookieMap: Record<string, string> = {};
@@ -16,33 +16,49 @@ export async function GET(request: Request) {
     cookieMap[key] = value;
   }
   const token = cookieMap['goyunir_session'];
-  
+
   if (!token) {
     return NextResponse.json({ user: null });
   }
-  
+
   const redis = createRedisClient();
   if (!redis) {
     return NextResponse.json({ error: 'System error' }, { status: 500 });
   }
-  
+
   const sessionData = await redis.get(`session:${token}`);
   if (!sessionData) {
     return NextResponse.json({ user: null });
   }
-  
+
   const session = safeParseRedisItem<any>(sessionData);
   if (!session || Date.now() > session.expiresAt) {
     await redis.del(`session:${token}`);
     return NextResponse.json({ user: null });
   }
-  
-  return NextResponse.json({ 
-    user: { 
-      id: session.userId, 
-      email: session.email, 
-      role: session.role, 
-      rewards: session.rewards || 0 
-    } 
+
+  // Pull the live user record so rewards/credits shown in /account are fresh
+  // even when the admin adjusts points from /admin → Users.
+  let rewards = Number(session.rewards || 0);
+  let welcomePromoCode: string | null = null;
+  if (session.userId) {
+    try {
+      const rawUser = await redis.hget('store:users', session.userId);
+      const user = safeParseRedisItem<any>(rawUser);
+      if (user) {
+        rewards = Number(user.rewards ?? rewards) || 0;
+        welcomePromoCode = typeof user.welcomePromoCode === 'string' ? user.welcomePromoCode : null;
+      }
+    } catch {}
+  }
+
+  return NextResponse.json({
+    user: {
+      id: session.userId,
+      email: session.email,
+      role: session.role,
+      rewards,
+      welcomePromoCode,
+    },
   });
 }

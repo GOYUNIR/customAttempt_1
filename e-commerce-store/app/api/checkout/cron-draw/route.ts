@@ -210,7 +210,7 @@ async function runAutoDraw(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents, orderRef,
               });
 
-              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}`, orderRef });
+              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}`, orderRef, shippingAddress: shippingAddress || undefined, siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com' });
 
               processedWinners.push({
                 email: winnerEmail, product: productName, size: productSize, shippingAddress,

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
@@ -66,6 +66,7 @@ export default function AccountPage() {
   const [paymentPortalFor, setPaymentPortalFor] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const didAutoLookup = useRef(false);
 
   // Check if user is logged in via session
   useEffect(() => {
@@ -93,8 +94,19 @@ export default function AccountPage() {
     }
   }, [isLoggedIn, user]);
 
-  const lookup = async () => {
-    if (!email) {
+  // Logged-in accounts get their entries loaded automatically — no need to
+  // hunt for a "find my entries" button.
+  useEffect(() => {
+    if (isLoggedIn && user?.email && !didAutoLookup.current) {
+      didAutoLookup.current = true;
+      lookup(user.email);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, user]);
+
+  const lookup = async (emailArg?: string) => {
+    const lookupEmail = String(emailArg || email || '').trim().toLowerCase();
+    if (!lookupEmail) {
       setMessage('Please enter your email address.');
       notify({ type: 'alert', message: 'Enter your email address first.' });
       return;
@@ -107,7 +119,7 @@ export default function AccountPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          email, 
+          email: lookupEmail, 
           last4: last4 || undefined 
         }),
       });
@@ -239,6 +251,31 @@ export default function AccountPage() {
     window.location.href = '/';
   };
 
+  const [claimingWelcome, setClaimingWelcome] = useState(false);
+
+  const claimWelcome = async () => {
+    setClaimingWelcome(true);
+    notify({ id: 'account-welcome', type: 'loading', message: 'Issuing your welcome credit...', persist: true });
+    try {
+      const res = await fetch('/api/account/claim-welcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.promoCode) {
+        setUser((prev: any) => ({ ...(prev || {}), welcomePromoCode: data.promoCode, rewards: data.points }));
+        notify({ id: 'account-welcome', type: 'success', message: `Your welcome credit ${data.promoCode} is ready — check your inbox too.` });
+      } else {
+        notify({ id: 'account-welcome', type: 'error', message: data.error || 'Could not issue your credit right now.' });
+      }
+    } catch {
+      notify({ id: 'account-welcome', type: 'error', message: 'Connection failed. Please try again.' });
+    } finally {
+      setClaimingWelcome(false);
+    }
+  };
+
   const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
 
   return (
@@ -295,9 +332,26 @@ export default function AccountPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 'bold', color: configPalette.cardTextMain }}>{user.email}</div>
-                <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Rewards: {user.rewards || 0} points</div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Rewards: {Number(user.rewards || 0).toLocaleString()} points</div>
               </div>
             </div>
+            {user.welcomePromoCode ? (
+              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 12, lineHeight: 1.5 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Your one-time 10% welcome credit (applies at checkout):</div>
+                <div style={{ fontWeight: 800, letterSpacing: 1, color: '#34c759', marginTop: 4 }}>{user.welcomePromoCode}</div>
+              </div>
+            ) : (
+              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Unlock your welcome credit — 10% off your first release + a points balance.</div>
+                <button
+                  onClick={claimWelcome}
+                  disabled={claimingWelcome}
+                  style={{ marginTop: 8, padding: '8px 12px', borderRadius: 999, border: 'none', background: '#34c759', color: '#06120a', fontWeight: 700, fontSize: 12, cursor: claimingWelcome ? 'not-allowed' : 'pointer' }}
+                >
+                  {claimingWelcome ? 'Issuing…' : 'Claim my 10% credit'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -331,47 +385,33 @@ export default function AccountPage() {
             gap: 12,
           }}
         >
-          <input
-            type="email"
-            placeholder="Email used at entry"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={isLoggedIn}
-            style={{
-              width: '100%',
-              padding: 14,
-              borderRadius: 12,
-              background: isLoggedIn ? '#0a0a0a' : '#16161a',
-              border: `1px solid ${configPalette.cardBorder}`,
-              color: isLoggedIn ? '#666' : '#fff',
-              fontSize: 13,
-              boxSizing: 'border-box',
-            }}
-          />
-          <button
-            onClick={lookup}
-            disabled={isBusy || !email}
-            style={{
-              width: '100%',
-              minHeight: 48,
-              borderRadius: 30,
-              background: configPalette.checkoutCtaButton,
-              color: '#fff',
-              border: 'none',
-              fontWeight: 'bold',
-              fontSize: 13,
-              cursor: isBusy ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {isBusy ? 'Checking…' : 'Find My Entries'}
-          </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>
+              Your entries load automatically from <strong style={{ color: configPalette.cardTextMain }}>{email}</strong>.
+            </div>
+            <button
+              onClick={() => lookup()}
+              disabled={isBusy}
+              style={{
+                padding: '9px 14px',
+                borderRadius: 999,
+                background: 'transparent',
+                border: `1px solid ${configPalette.cardBorder}`,
+                color: configPalette.cardTextMain,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: isBusy ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isBusy ? 'Refreshing…' : '↻ Refresh entries'}
+            </button>
+          </div>
         </div>}
 
         {message && (
-          <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: '#cbd5e1' }}>{message}</p>
+          <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: configPalette.cardTextMuted }}>{message}</p>
         )}
-
-        {!isLoggedIn && null}
 
         {entries && entries.length > 0 && (
           <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
