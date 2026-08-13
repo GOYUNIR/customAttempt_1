@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fast Checkout</title>
+  <meta name="description" content="Fast address checkout with Mapbox address autofill." />
+
+  <!-- Mapbox Search JS Web SDK (Address Autofill) — loaded from the Mapbox CDN -->
+  <script id="search-js" defer src="https://api.mapbox.com/search-js/v1.6.0/web.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #1d1d1d;
+      background: #f5f6f7;
+    }
+
+    .checkout-card {
+      width: 100%;
+      max-width: 480px;
+      background: #ffffff;
+      border: 1px solid #e2e2e2;
+      border-radius: 10px;
+      padding: 28px 26px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .checkout-card h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .checkout-card .subtitle {
+      margin: 0 0 22px;
+      font-size: 14px;
+      color: #6b6b6b;
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .form-group label .optional {
+      font-weight: 400;
+      color: #8a8a8a;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 11px 12px;
+      font-size: 15px;
+      color: #1d1d1d;
+      background: #fff;
+      border: 1px solid #c9c9c9;
+      border-radius: 6px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .form-group input::placeholder {
+      color: #9a9a9a;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #3a99d8;
+      box-shadow: 0 0 0 3px rgba(58, 153, 216, 0.18);
+    }
+
+    .form-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+    }
+
+    /* Mapbox dropdown suggestions inherit the input font */
+    [data-searchjs="autofill-suggestion"] {
+      font-family: inherit;
+    }
+
+    button[type="submit"] {
+      width: 100%;
+      margin-top: 6px;
+      padding: 13px 16px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: #1d1d1d;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button[type="submit"]:hover {
+      background: #3a3a3a;
+    }
+
+    button[type="submit"]:active {
+      transform: translateY(1px);
+    }
+
+    #form-feedback {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: #2e7d32;
+      min-height: 18px;
+      word-break: break-word;
+    }
+
+    .note {
+      margin: 16px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid #efefef;
+      font-size: 12px;
+      color: #8a8a8a;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="checkout-card">
+    <h1>Checkout</h1>
+    <p class="subtitle">Shipping address — start typing in the street address to autofill.</p>
+
+    <form id="checkout-form" autocomplete="on" novalidate>
+      <!-- Contact -->
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          autocomplete="email"
+          placeholder="you@example.com"
+          required
+        />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="first-name">First name</label>
+          <input
+            type="text"
+            id="first-name"
+            name="first-name"
+            autocomplete="shipping given-name"
+            placeholder="First name"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="last-name">Last name</label>
+          <input
+            type="text"
+            id="last-name"
+            name="last-name"
+            autocomplete="shipping family-name"
+            placeholder="Last name"
+            required
+          />
+        </div>
+      </div>
+
+      <!-- First street address box — Mapbox autofill attaches here -->
+      <div class="form-group">
+        <label for="address1">Street address</label>
+        <input
+          type="text"
+          id="address1"
+          name="address1"
+          autocomplete="shipping street-address"
+          placeholder="Street address"
+          required
+        />
+      </div>
+
+      <!-- ::CHUNK-2-MARKER:: -->
+
+      <div class="form-group">
+        <label for="address2">Apartment, suite, etc. <span class="optional">(optional)</span></label>
+        <input
+          type="text"
+          id="address2"
+          name="address2"
+          autocomplete="shipping address-line2"
+          placeholder="Apt, suite, unit, floor"
+        />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="city">City</label>
+          <input
+            type="text"
+            id="city"
+            name="city"
+            autocomplete="shipping address-level2"
+            placeholder="City"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="state">State / Province</label>
+          <input
+            type="text"
+            id="state"
+            name="state"
+            autocomplete="shipping address-level1"
+            placeholder="State"
+            required
+          />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="zip">ZIP / Postal code</label>
+          <input
+            type="text"
+            id="zip"
+            name="zip"
+            autocomplete="shipping postal-code"
+            placeholder="ZIP"
+            inputmode="numeric"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="country">Country</label>
+          <input
+            type="text"
+            id="country"
+            name="country"
+            autocomplete="shipping country"
+            placeholder="Country"
+            required
+          />
+        </div>
+      </div>
+
+      <button type="submit">Place order</button>
+    </form>
+
+    <p id="form-feedback" role="status" aria-live="polite"></p>
+    <p class="note">
+      Pick an address from the dropdown and Mapbox fills in the rest automatically.
+    </p>
+  </div>
+
+  <script>
+    // Public Mapbox access token for the Mapbox Search JS Web SDK.
+    const YOUR_MAPBOX_ACCESS_TOKEN = 'pk.YOUR_PUBLIC_MAPBOX_TOKEN_GOES_HERE';
+
+    // Initialize Mapbox Address Autofill once the page has fully loaded so the
+    // deferred Search JS SDK is guaranteed to be available. The library
+    // discovers the eligible inputs inside the form via their HTML5
+    // autocomplete attributes (e.g. "shipping street-address",
+    // "shipping address-level2", "shipping postal-code") and fills in the
+    // whole address when a dropdown suggestion is selected.
+    window.addEventListener('load', () => {
+      if (window.mapboxsearch && typeof window.mapboxsearch.autofill === 'function') {
+        window.mapboxsearch.autofill({
+          accessToken: YOUR_MAPBOX_ACCESS_TOKEN,
+        });
+      } else {
+        document.getElementById('form-feedback').textContent =
+          'Mapbox Search JS failed to load.';
+      }
+    });
+
+    // Demo submit handler — no backend here, so prevent the page reload and
+    // show the collected values instead.
+    document.getElementById('checkout-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      const name = [data.get('first-name'), data.get('last-name')].filter(Boolean).join(' ');
+      const line1 = data.get('address1');
+      const line2 = data.get('address2');
+      const cityStateZip = [data.get('city'), data.get('state'), data.get('zip')]
+        .filter(Boolean)
+        .join(', ');
+      const country = data.get('country');
+      const address = [name, line1, line2, cityStateZip, country].filter(Boolean).join(', ');
+      const feedback = document.getElementById('form-feedback');
+      feedback.textContent = 'Submitted: ' + address;
+      feedback.style.color = '#2e7d32';
+    });
+  </script>
+</body>
+</html>
