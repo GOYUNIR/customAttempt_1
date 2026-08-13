@@ -9,6 +9,7 @@ import {
 } from '@/lib/server-config';
 import { buildOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
       }
 
       const category = (product.priceCategories || []).find((c: any) => String(c.size) === item.size);
-      if (!category || Number(category.price || 0) <= 0) {
+      if (!category || !isConfiguredPrice(category.price)) {
         return NextResponse.json({ error: `Price missing for ${product.name} (${item.size}).` }, { status: 400 });
       }
 

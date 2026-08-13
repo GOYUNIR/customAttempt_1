@@ -95,6 +95,19 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, credentials: 'include' });
 }
 
+// Default Stripe price ID prefilled in the product form. Mirrors the server-side
+// default (lib/server-config.ts): the STRIPE_PRODUCT_ID env var when set,
+// otherwise an obvious placeholder that forces the operator to set a real ID
+// per size. /api/admin/products GET returns the live value so this stays in
+// sync without a redeploy. There is intentionally NO hardcoded Stripe price ID
+// anywhere in this template.
+const UNCONFIGURED_STRIPE_PRICE_ID = 'price_placeholder_not_configured';
+
+// Sentinel for an unconfigured product price. New products start at this
+// obviously-wrong value so nobody can accidentally publish a product priced at
+// $0 or charge the sentinel amount — every checkout path rejects it.
+const UNCONFIGURED_PRICE_SENTINEL = 9999999;
+
 // Defaults for the glow-orb system (/admin → Settings → Orb Glow). These mirror
 // the storefront defaults so a fresh portal has sane values before any save.
 const DEFAULT_ORBS: any = {
@@ -267,9 +280,10 @@ export default function AdminPortal() {
     images: [],
     // NEW: dynamic price categories
     priceCategories: [
-      { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
+      { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: UNCONFIGURED_STRIPE_PRICE_ID, winnerTiers: '1' }
     ]
   });
+  const [defaultStripePriceId, setDefaultStripePriceId] = useState(UNCONFIGURED_STRIPE_PRICE_ID);
   const [productMsg, setProductMsg] = useState('');
   const [showProductForm, setShowProductForm] = useState(false);
   const [imageInput, setImageInput] = useState('');
@@ -469,6 +483,7 @@ export default function AdminPortal() {
     try {
       const res = await adminFetch('/api/admin/products?includeArchived=true');
       const data = await res.json();
+      if (data.defaultStripePriceId) setDefaultStripePriceId(String(data.defaultStripePriceId));
       if (data.products) {
         const sorted = [...data.products].sort((a, b) => ((a.sortOrder || 0) - (b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
         setAllProducts(sorted);
@@ -536,7 +551,7 @@ export default function AdminPortal() {
       notes: [],
       images: [],
       priceCategories: [
-        { size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
+        { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
       ]
     });
     setEditingProduct(null);
@@ -550,7 +565,7 @@ export default function AdminPortal() {
     // Ensure priceCategories exists
     const categories = product.priceCategories && Array.isArray(product.priceCategories)
       ? product.priceCategories
-      : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }];
+      : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }];
     setProductForm({
       ...product,
       priceCategories: categories,
@@ -574,7 +589,7 @@ export default function AdminPortal() {
       ...prev,
       priceCategories: [
         ...prev.priceCategories,
-        { size: '', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1' }
+        { size: '', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
       ]
     }));
   };
@@ -2065,7 +2080,7 @@ export default function AdminPortal() {
                     </div>
                   ))}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 The Stripe ID defaults to <code>price_1U1MD0PIsR6ijfBZ872i58N1</code> – you can change it per size.</span>
+                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it.</span>
                   </div>
                 </div>
 

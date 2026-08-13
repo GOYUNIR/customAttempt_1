@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts , getAdminPassword} from '@/lib/server-config';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,8 +50,8 @@ export async function GET(request: Request) {
       for (const cat of cats) {
         const price = cat.price || 0;
         const stripeId = cat.stripeId || '';
-        push(`${product.name} ${cat.size}: price`, price > 0, `$${price}`);
-        push(`${product.name} ${cat.size}: Stripe ID`, Boolean(stripeId), stripeId || 'MISSING');
+        push(`${product.name} ${cat.size}: price`, isConfiguredPrice(price), `$${price}${isConfiguredPrice(price) ? '' : ' (not configured — sentinel/unset)'}`);
+        push(`${product.name} ${cat.size}: Stripe ID`, Boolean(stripeId) && !stripeId.startsWith('price_placeholder'), stripeId || 'MISSING');
       }
     }
   }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 const PROMOS_KEY = 'config:promos';
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
     const priceCat = (product.priceCategories || []).find((c: any) => c.size === size);
-    if (!priceCat || priceCat.price <= 0) {
+    if (!priceCat || !isConfiguredPrice(priceCat.price)) {
       return NextResponse.json({ error: 'Price not set for this size' }, { status: 400 });
     }
     const basePriceCents = Math.round(priceCat.price * 100);

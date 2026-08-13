@@ -85,6 +85,7 @@ address:submissions - Addresses captured by the standalone address form (`/addre
 
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
+STRIPE_PRODUCT_ID (optional) – global default Stripe price ID. Used when a product/size has no Stripe ID set in /admin. Per-product IDs set in admin always win. There is NO hardcoded Stripe price ID in this template – if a product/size has no ID and STRIPE_PRODUCT_ID is unset, checkout fails loudly with an obvious placeholder (`price_placeholder_not_configured`) instead of charging a wrong account.
 UPSTASH_REDIS_REST_URL
 UPSTASH_REDIS_REST_TOKEN
 ADMIN_BASIC_AUTH_USERNAME
@@ -106,7 +107,7 @@ NEXT_PUBLIC_MAPBOX_TOKEN (required for Mapbox address autofill dropdowns; must b
 ---
 
 ## GOAL STATUS (from previous AI)
-- ✅ Stripe unified price ID `price_1U1MD0PIsR6ijfBZ872i58N1` is now the default for all seed products.
+- ✅ Stripe price IDs are NO LONGER hardcoded anywhere – per-size IDs come from `/admin` (wins), else `STRIPE_PRODUCT_ID`, else an obvious placeholder that fails checkout loudly. Seed products use `defaultStripePriceId()` so new seeds inherit the env var.
 - ✅ Default size label is now `'Standard'` – changeable via admin portal.
 - ✅ All products, prices, sizes, and Stripe IDs can be fully customized through `/admin` → Products and Settings.
 - ✅ Unseeded store now shows **0 items** (no fallback catalog is served from `goyunir.config.ts`).
@@ -176,7 +177,7 @@ All product‑specific data (prices, Stripe IDs, inventory, winner tiers) is now
 - Each category includes:
   - `size` – the label shown to customers.
   - `price` – the retail price in USD.
-  - `stripeId` – the Stripe Price ID for that size (defaults to `price_1U1MD0PIsR6ijfBZ872i58N1`).
+  - `stripeId` – the Stripe Price ID for that size (defaults to the `STRIPE_PRODUCT_ID` env var when set, otherwise the placeholder `price_placeholder_not_configured`; see `defaultStripePriceId()` / `resolveStripePriceId()` in `lib/server-config.ts`). No real Stripe price ID is ever hardcoded – the admin-set value always wins.
   - `winnerTiers` – comma‑separated list of winner counts per draw (only used if Raffle Mode is enabled).
 - **New products default to hidden** (`isActive: false`) – you must explicitly publish them.
 - **Archived** and **Upcoming** flags do NOT hide the product – they only change its display section in the catalog.

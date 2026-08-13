@@ -18,7 +18,7 @@ import {
   getAdminPassword,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getProductPrice, getWinnerCount, shouldRunDraw } from '@/lib/storefront-config';
+import { getProductPrice, getWinnerCount, shouldRunDraw, isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
@@ -97,7 +97,7 @@ async function runAutoDraw(request: Request) {
         const priceCat = (productDefinition.priceCategories || []).find(
           (c: any) => String(c?.size || '') === productSize,
         );
-        const categoryPriceCents = priceCat && Number(priceCat.price) > 0
+        const categoryPriceCents = priceCat && isConfiguredPrice(priceCat.price)
           ? Math.round(Number(priceCat.price) * 100)
           : 0;
         const overridePrice = productSize === '100ml' ? override?.price100ml : override?.price50ml;

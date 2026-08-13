@@ -7,9 +7,10 @@ import {
   archiveEntry,
   ArchiveRecord,
   loadProducts, // new helper to fetch product from Redis
+  resolveStripePriceId,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getAvailableSizes } from '@/lib/storefront-config';
+import { getAvailableSizes, isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -46,14 +47,14 @@ export async function POST(request: Request) {
 
     // Price and Stripe ID come directly from the priceCategories (no separate overrides needed)
     const basePrice = category.price;
-    if (!basePrice || basePrice <= 0) {
+    if (!isConfiguredPrice(basePrice)) {
       return NextResponse.json({ error: `Price not set for size "${size}". Set it in admin.` }, { status: 400 });
     }
     const priceCents = Math.round(basePrice * 100);
 
-    const stripeId = category.stripeId;
-    if (!stripeId || stripeId === 'price_placeholder' || stripeId === '') {
-      return NextResponse.json({ error: `Stripe price ID not set for size "${size}". Set it in admin.` }, { status: 400 });
+    const stripeId = resolveStripePriceId(category.stripeId);
+    if (!stripeId || stripeId.startsWith('price_placeholder') || stripeId === '') {
+      return NextResponse.json({ error: `Stripe price ID not set for size "${size}". Set it in admin or via STRIPE_PRODUCT_ID.` }, { status: 400 });
     }
 
     // Get live inventory state

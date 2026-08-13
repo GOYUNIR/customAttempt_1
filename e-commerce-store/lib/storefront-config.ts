@@ -287,7 +287,7 @@ function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string },
         stripeId: normalizeText(category?.stripeId, ''),
         winnerTiers: typeof category?.winnerTiers === 'string' ? category.winnerTiers : (Array.isArray(category?.winnerTiers) ? category.winnerTiers.join(',') : '0'),
       }))
-    : [{ size: fallbackSize, price: 0, stripeId: '', winnerTiers: '0' }];
+    : [{ size: fallbackSize, price: UNCONFIGURED_PRICE_SENTINEL, stripeId: '', winnerTiers: '0' }];
 
   return {
     id: normalizeText(product.id, `p${index + 1}`),
@@ -396,18 +396,36 @@ function findPriceCategory(product: StorefrontProduct, size: string) {
   return categories.find((category) => String(category?.size || '').trim() === normalizedSize) || null;
 }
 
+/**
+ * Sentinel for an unconfigured price. Products created in /admin start at this
+ * obviously-wrong value so operators can see at a glance that they must set a
+ * real price before publishing. It is NEVER chargeable — every checkout/draw
+ * path uses `isConfiguredPrice()` and rejects it.
+ */
+export const UNCONFIGURED_PRICE_SENTINEL = 9999999;
+
+/**
+ * A price is only chargeable when it is a finite number, greater than zero,
+ * and below the obviously-wrong sentinel. This keeps a product that was never
+ * configured (or was configured with a placeholder) from being charged.
+ */
+export function isConfiguredPrice(price: unknown): boolean {
+  const numeric = Number(price);
+  return Number.isFinite(numeric) && numeric > 0 && numeric < UNCONFIGURED_PRICE_SENTINEL;
+}
+
 export function getProductPrice(product: StorefrontProduct, size: string): number {
   const category = findPriceCategory(product, size);
   if (category && Number.isFinite(Number(category.price))) {
     const categoryPrice = Number(category.price);
-    if (categoryPrice > 999999) return 0;
+    if (!isConfiguredPrice(categoryPrice)) return 0;
     return Math.max(0, categoryPrice);
   }
 
   // Legacy fallback for older Redis records that still store fixed size fields.
   const price = size === '100ml' ? product.price100ml : product.price50ml;
   const numericPrice = typeof price === 'number' ? price : 0;
-  if (numericPrice > 999999) return 0;
+  if (!isConfiguredPrice(numericPrice)) return 0;
   return Math.max(0, numericPrice);
 }
 export function getProductStripeId(product: StorefrontProduct, size: string): string {

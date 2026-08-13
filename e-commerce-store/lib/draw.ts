@@ -11,8 +11,9 @@ import {
   resetPoolAndBlocks,
   LAST_DRAW_KEY,
   loadProducts,
+  resolveStripePriceId,
 } from '@/lib/server-config';
-import { getProductStripeId, getWinnerCount } from '@/lib/storefront-config';
+import { getProductStripeId, getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
 
 export interface DrawResult {
   email: string;
@@ -38,9 +39,10 @@ export async function runDropDraw(request: Request | NextRequest) {
     const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
     for (const category of priceCategories) {
             const size = String(category?.size || 'Standard');
-      const categoryPriceCents = category && Number(category.price) > 0
+      const categoryPriceCents = category && isConfiguredPrice(category.price)
         ? Math.round(Number(category.price) * 100)
         : 0;
+      if (categoryPriceCents <= 0) continue;
       const poolKey = `drop_pool:${product.name}:${size}`;
       const totalEntries = await redis.llen(poolKey);
       if (totalEntries === 0) continue;
@@ -105,7 +107,7 @@ export async function runDropDraw(request: Request | NextRequest) {
               const fallbackSession = await stripe.checkout.sessions.create({
                 customer: customerId,
                 payment_method_types: ['card'],
-                line_items: [{ price: getProductStripeId(product, size), quantity: 1 }],
+                line_items: [{ price: resolveStripePriceId(getProductStripeId(product, size)), quantity: 1 }],
                 mode: 'payment',
                 expires_at: Math.floor(Date.now() / 1000) + 1800,
                 success_url: `${buildAbsoluteUrl(request as Request, '/')}?session=success`,
@@ -126,7 +128,7 @@ export async function runDropDraw(request: Request | NextRequest) {
           const fallbackSession = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             customer_email: email,
-            line_items: [{ price: getProductStripeId(product, size), quantity: 1 }],
+            line_items: [{ price: resolveStripePriceId(getProductStripeId(product, size)), quantity: 1 }],
             mode: 'payment',
             expires_at: Math.floor(Date.now() / 1000) + 1800,
             success_url: `${buildAbsoluteUrl(request as Request, '/')}?session=success`,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient , getAdminPassword, defaultStripePriceId} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,84 +19,84 @@ const DEFAULT_PRODUCTS = [
     id: 'p1', name: 'Elysian White — Launch Draw', slug: 'elysian-white-launch-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'Primary hero raffle drop with tight allocation.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 0,
     notes: [{ label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Feels exclusive and fair, but customers wait for the charge instead of converting instantly.' }],
-    priceCategories: [{ size: 'Standard', price: 95, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 120, totalInventory: 120, winnerTiers: [3, 2, 2], releaseEndsAt: isoIn(2 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p2', name: 'Obsidian Void — Priority Draw', slug: 'obsidian-void-priority-draw', prefix: 'obsidian-void', tagline: 'RAFFLE / LIVE', desc: 'High-intent raffle queue with limited winners.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 1,
     notes: [{ label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Excellent for social proof and promoter traffic, but lower instant revenue than FCFS.' }],
-    priceCategories: [{ size: 'Standard', price: 110, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2,1' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }], images: ['/images/obsidian-void/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p3', name: 'Noir Citrus — Instant Drop', slug: 'noir-citrus-instant-drop', prefix: 'baseItem1', tagline: 'FCFS / LIVE', desc: 'Fast-checkout direct buy drop for cart flow.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 2,
     notes: [{ label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Fastest checkout path, but it can sell through instantly without the anticipation of a draw.' }],
-    priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p4', name: 'Amber Pulse — Direct Release', slug: 'amber-pulse-direct-release', prefix: 'baseItem2', tagline: 'FCFS / LIVE', desc: 'Cart-compatible direct release for mixed traffic.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 3,
     notes: [{ label: 'MODE', name: 'Direct release', text: 'Great for polished launches where the goal is immediate revenue without raffle friction.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Excellent for speed and repeat purchases, but less selective than an allocation draw.' }],
-    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p5', name: 'Velvet Resin — Upcoming', slug: 'velvet-resin-upcoming', prefix: 'elysian-white', tagline: 'UPCOMING / QUEUED', desc: 'Queued release to simulate upcoming placement.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 4,
     notes: [{ label: 'MODE', name: 'Upcoming raffle', text: 'Builds anticipation before a controlled launch window and can still carry private-entry messaging.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Strong for countdown energy and promoter buildup, but not as immediately monetizable as FCFS.' }],
-    priceCategories: [{ size: 'Standard', price: 99, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p6', name: 'Solar Drift — Upcoming FCFS', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'Upcoming direct-buy release for catalog simulation.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 5,
     notes: [{ label: 'MODE', name: 'Upcoming FCFS', text: 'Signals a precise opening moment for direct purchase traffic.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Great for countdown marketing and influencer drops, but inventory can disappear very quickly.' }],
-    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p7', name: 'Monolith Air — Upcoming', slug: 'monolith-air-upcoming', prefix: 'obsidian-void', tagline: 'UPCOMING / RAFFLE', desc: 'Upcoming raffle entry with low allocation.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 6,
     notes: [{ label: 'MODE', name: 'Low-allocation upcoming', text: 'Simulates a very tight raffle with a visible countdown before activation.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'High exclusivity and strong anticipation, but deliberately low conversion capacity.' }],
-    priceCategories: [{ size: 'Standard', price: 104, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p8', name: 'Atlas Bloom — Archive', slug: 'atlas-bloom-archive', prefix: 'baseItem2', tagline: 'ARCHIVE', desc: 'Completed release to populate archived catalog state.',
     isActive: true, isArchived: true, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 7,
     notes: [{ label: 'MODE', name: 'Archive proof', text: 'Shows clients how sold-out or completed releases can remain visible as proof of demand.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Excellent social proof, but intentionally not the primary conversion surface anymore.' }],
-    priceCategories: [{ size: 'Standard', price: 118, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 118, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p9', name: 'Cinder Wave — Archive', slug: 'cinder-wave-archive', prefix: 'baseItem1', tagline: 'ARCHIVE', desc: 'Historic raffle archive entry to test old winner records.',
     isActive: true, isArchived: true, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 8,
     notes: [{ label: 'MODE', name: 'Archive raffle', text: 'Lets a client demonstrate past allocation demand while keeping the page presentable.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Strong credibility and storytelling, but meant more for trust than instant sales.' }],
-    priceCategories: [{ size: 'Standard', price: 102, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p10', name: 'Mirage Salt — Hidden Draft', slug: 'mirage-salt-hidden-draft', prefix: 'baseItem2', tagline: 'DRAFT', desc: 'Hidden draft to simulate non-published product records.',
     isActive: false, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 9,
     notes: [{ label: 'MODE', name: 'Hidden draft', text: 'Shows how products can be staged privately before public release.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Ideal for preparation and QA, but invisible until activated.' }],
-    priceCategories: [{ size: 'Standard', price: 128, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p11', name: 'Night Petal — Live Draw', slug: 'night-petal-live-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'Secondary live raffle to verify multi-draw storefront behavior.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 10,
     notes: [{ label: 'MODE', name: 'Secondary live draw', text: 'Demonstrates multiple simultaneous raffles inside the same storefront.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Great for volume simulation, but it splits attention across more than one live offer.' }],
-    priceCategories: [{ size: 'Standard', price: 108, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p12', name: 'Quartz Ember — Live FCFS', slug: 'quartz-ember-live-fcfs', prefix: 'obsidian-void', tagline: 'FCFS / LIVE', desc: 'Additional direct buy listing to stress-test cart and checkout UX.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 11,
     notes: [{ label: 'MODE', name: 'Cart stress test', text: 'Demonstrates how direct items can stack into a cart for higher order value.' }, { label: 'TRADEOFF', name: 'Pros / cons', text: 'Best for repeat buyers and bundles, but less selective than a prestige draw.' }],
-    priceCategories: [{ size: 'Standard', price: 152, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 152, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg'],
     maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
   },
 ];

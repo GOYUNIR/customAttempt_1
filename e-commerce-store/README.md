@@ -55,6 +55,11 @@ you manually nudge the cron expression.
 
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRODUCT_ID` (optional) — global default Stripe price ID; used when a
+  product/size has no per-product Stripe ID set in `/admin`. Per-product IDs
+  set in admin always win. There is no hardcoded Stripe price ID in this
+  template — if none is set anywhere, checkout fails with an obvious
+  placeholder instead of charging the wrong account.
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
 - `ADMIN_BASIC_AUTH_USERNAME`

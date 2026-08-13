@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,9 +42,9 @@ export async function POST(request: Request) {
       if (!product) continue;
 
       const priceCat = (product.priceCategories || []).find((c: any) => c.size === size);
-      if (!priceCat || priceCat.price <= 0) continue;
+      if (!priceCat || !isConfiguredPrice(priceCat.price)) continue;
       const priceCents = Math.round(priceCat.price * 100);
-      const stripePriceId = priceCat.stripeId;
+      const stripePriceId = resolveStripePriceId(priceCat.stripeId);
       if (!stripePriceId) continue;
 
       const entries = await redis.lrange(poolKey, 0, -1);

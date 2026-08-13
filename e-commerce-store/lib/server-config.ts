@@ -2,6 +2,7 @@ import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
 
 export const STORE_CONFIG_KEY = 'store:config';
 
@@ -550,6 +551,34 @@ export function createStripeClient(): Stripe | null {
   }
 }
 
+// ============================================================
+// STRIPE PRICE ID DEFAULTS
+// ============================================================
+// There is intentionally NO hardcoded Stripe price ID in this codebase — a
+// published template must never charge against a price ID owned by the
+// template author. Resolution order:
+//  1. The price ID explicitly set per product/size in /admin (stored in
+//     Redis) always wins.
+//  2. Otherwise the STRIPE_PRODUCT_ID env var is used (set in Vercel).
+//  3. Otherwise an obviously-placeholder ID is returned so checkout fails with
+//     a clear "set it in admin" error instead of silently charging something.
+export const UNCONFIGURED_STRIPE_PRICE_ID = 'price_placeholder_not_configured';
+
+export function defaultStripePriceId(): string {
+  return (process.env.STRIPE_PRODUCT_ID || '').trim() || UNCONFIGURED_STRIPE_PRICE_ID;
+}
+
+/**
+ * Resolves the Stripe price ID that should be used to charge a category.
+ * Empty / placeholder values fall back to the env default. An ID explicitly
+ * set per product/size in the admin portal always wins.
+ */
+export function resolveStripePriceId(stored?: string | null): string {
+  const raw = typeof stored === 'string' ? stored.trim() : '';
+  if (!raw || raw.startsWith('price_placeholder')) return defaultStripePriceId();
+  return raw;
+}
+
 export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
   const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? 'localhost:3000';
   const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.VERCEL_ENV === 'production' ? 'https' : 'http');
@@ -610,9 +639,10 @@ export async function trackPromoClick(redis: Redis, code: string) {
 function normalizePriceCategory(category: any, fallbackSize: string) {
   const size = typeof category?.size === 'string' && category.size.trim() ? category.size.trim() : fallbackSize;
   const price = typeof category?.price === 'number' ? category.price : Number(category?.price ?? 0);
-  const stripeId = typeof category?.stripeId === 'string' && category.stripeId.trim()
+  const rawStripeId = typeof category?.stripeId === 'string' && category.stripeId.trim()
     ? category.stripeId
     : (typeof category?.stripePriceId === 'string' && category.stripePriceId.trim() ? category.stripePriceId : '');
+  const stripeId = resolveStripePriceId(rawStripeId);
   const winnerTiers = typeof category?.winnerTiers === 'string'
     ? category.winnerTiers
     : (Array.isArray(category?.winnerTiers) ? category.winnerTiers.join(',') : '0');
@@ -631,7 +661,7 @@ function normalizeFallbackProduct(product: any, index: number) {
 
   const fallbackCategories = Array.isArray(product?.priceCategories) && product.priceCategories.length > 0
     ? product.priceCategories.map((category: any) => normalizePriceCategory(category, fallbackSize))
-    : [{ size: fallbackSize, price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }];
+    : [{ size: fallbackSize, price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }];
 
   return {
     ...product,
@@ -682,7 +712,7 @@ export async function loadProducts(redis: any): Promise<Record<string, any>> {
           ...parsed,
           priceCategories: Array.isArray(parsed.priceCategories) && parsed.priceCategories.length > 0
             ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard'))
-            : [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }],
+            : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }],
         };
         out[k] = normalized;
       }

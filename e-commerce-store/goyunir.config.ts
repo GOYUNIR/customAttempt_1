@@ -124,8 +124,11 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     },
   },
 
-  // NOTE: Fallback catalog used when Redis is empty. Keep these aligned with
-  // admin seed defaults so empty-Redis and seeded experiences stay consistent.
+  // NOTE: This productCatalog is a STATIC CONFIG used only for catalog preview,
+  // cron/draw metadata, and admin read helpers. It is NOT served to the
+  // storefront — when Redis is empty the store shows 0 items. Stripe IDs are
+  // intentionally blank here; they are resolved at seed/checkout time from the
+  // STRIPE_PRODUCT_ID env var or the per-product values set in /admin.
   productCatalog: [
     {
       id: 'p1',
@@ -135,7 +138,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       tagline: 'RAFFLE / LIVE',
       desc: 'Primary hero raffle drop with tight allocation.',
       priceCategories: [
-        { size: 'Standard', price: 95, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '3,2,2' }
+        { size: 'Standard', price: 95, stripeId: '', winnerTiers: '3,2,2' }
       ],
       notes: [
         { label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' },
@@ -157,7 +160,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       tagline: 'RAFFLE / LIVE',
       desc: 'High-intent raffle queue with limited winners.',
       priceCategories: [
-        { size: 'Standard', price: 110, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '2,2,1' }
+        { size: 'Standard', price: 110, stripeId: '', winnerTiers: '2,2,1' }
       ],
       notes: [
         { label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' },
@@ -179,8 +182,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       tagline: 'FCFS / LIVE',
       desc: 'Fast-checkout direct buy drop for cart flow.',
       priceCategories: [
-        { size: 'Sampler Set', price: 19, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' },
-        { size: 'Full Bottle', price: 145, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' },
+        { size: 'Sampler Set', price: 19, stripeId: '', winnerTiers: '0' },
+        { size: 'Full Bottle', price: 145, stripeId: '', winnerTiers: '0' },
       ],
       notes: [
         { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },

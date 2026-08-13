@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { ensureMapboxAutofill, getMapboxStatus, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -295,7 +296,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const addToCart = () => {
     if (!product) return;
     const cat = getProductPriceCategory(product, selectedSize);
-    if (!cat || cat.price <= 0) {
+    if (!cat || !isConfiguredPrice(cat.price)) {
       setMessage('Price not set for this size. Please set in admin.');
       notify({ type: 'error', message: 'This size is not ready yet.' });
       return;
@@ -540,7 +541,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       : product.isArchived
         ? 'Archive placement preserves the release as proof of demand and collectability.'
         : 'Reserved for collectors moving early, before the allocation tightens further.';
-  const checkoutDisabled = soldOut || !selectedSize || price <= 0;
+  const checkoutDisabled = soldOut || !selectedSize || !isConfiguredPrice(price);
   const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
 
   return (

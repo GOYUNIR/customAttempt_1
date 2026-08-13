@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, loadProducts , getAdminPassword, defaultStripePriceId} from '@/lib/server-config';
+import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -133,7 +134,7 @@ export async function GET(request: Request) {
   if (!includeArchived) {
     products = products.filter((p: any) => !p.isArchived && !p.isUpcoming);
   }
-  return NextResponse.json({ products });
+  return NextResponse.json({ products, defaultStripePriceId: defaultStripePriceId() });
 }
 
 export async function POST(request: Request) {
@@ -226,7 +227,7 @@ export async function POST(request: Request) {
     prefix: has('prefix') ? String(body.prefix || '') : (existing?.prefix || ''),
     tagline: has('tagline') ? String(body.tagline || '') : (existing?.tagline || ''),
     desc: has('desc') ? String(body.desc || '') : (existing?.desc || ''),
-    priceCategories: Array.isArray(body.priceCategories) ? body.priceCategories : (existing?.priceCategories || [{ size: 'Standard', price: 0, stripeId: 'price_1U1MD0PIsR6ijfBZ872i58N1', winnerTiers: '0' }]),
+    priceCategories: Array.isArray(body.priceCategories) ? body.priceCategories : (existing?.priceCategories || [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }]),
     isActive: body.isActive !== undefined ? toBool(body.isActive, existing?.isActive ?? false) : (existing?.isActive ?? false),
     isArchived: body.isArchived !== undefined ? toBool(body.isArchived, existing?.isArchived ?? false) : (existing?.isArchived ?? false),
     isUpcoming: body.isUpcoming !== undefined ? toBool(body.isUpcoming, existing?.isUpcoming ?? false) : (existing?.isUpcoming ?? false),
