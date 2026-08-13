@@ -9,6 +9,8 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     accentBlue: '#3b82f6',
     textMain: '#ffffff',
     textMuted: '#888888',
+    cardTextMain: '#ffffff',
+    cardTextMuted: '#c9c9d3',
     checkoutCtaButton: '#635bff',
     fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 12,

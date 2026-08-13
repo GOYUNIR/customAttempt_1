@@ -104,6 +104,10 @@ export interface StorefrontConfig {
     accentBlue: string;
     textMain: string;
     textMuted: string;
+    /** Primary text color rendered on card/info-box backgrounds. */
+    cardTextMain: string;
+    /** Secondary/muted text color rendered on card/info-box backgrounds. */
+    cardTextMuted: string;
     checkoutCtaButton: string;
     /** CSS font stack applied to the storefront body (set by design presets). */
     fontFamily?: string;
@@ -169,6 +173,8 @@ const defaultThemeColors = {
   accentBlue: '#3b82f6',
   textMain: '#ffffff',
   textMuted: '#888888',
+  cardTextMain: '#ffffff',
+  cardTextMuted: '#c9c9d3',
   checkoutCtaButton: '#635bff',
   fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
   borderRadius: 12,

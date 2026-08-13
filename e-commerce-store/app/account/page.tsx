@@ -284,8 +284,8 @@ export default function AccountPage() {
           <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 12, padding: 12, marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 'bold' }}>{user.email}</div>
-                <div style={{ fontSize: 11, color: configPalette.textMuted }}>Rewards: {user.rewards || 0} points</div>
+                <div style={{ fontSize: 13, fontWeight: 'bold', color: configPalette.cardTextMain }}>{user.email}</div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Rewards: {user.rewards || 0} points</div>
               </div>
             </div>
           </div>
@@ -300,12 +300,12 @@ export default function AccountPage() {
 
         {!isLoggedIn && (
           <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 16, padding: 16, marginBottom: 18 }}>
-            <p style={{ margin: '0 0 10px', fontSize: 12, color: '#cbd5e1' }}>
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: configPalette.cardTextMuted }}>
               Account login is required to prevent address/entry access by guessing card digits.
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Link href="/auth/login" style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
-              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
+              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
             </div>
           </div>
         )}
@@ -380,10 +380,10 @@ export default function AccountPage() {
                     padding: 16,
                   }}
                 >
-                  <div style={{ fontWeight: 'bold', fontSize: 14 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: 14, color: configPalette.cardTextMain }}>
                     {entry.variant} — {entry.size}
                   </div>
-                  <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>
                     {entry.status || 'Active entry'}
                   </div>
                   {(typeof entry.listPrice === 'number' ||
@@ -399,7 +399,7 @@ export default function AccountPage() {
                       ) : (
                         <>
                           {typeof entry.listPrice === 'number' && (
-                            <div style={{ color: configPalette.textMuted }}>
+                            <div style={{ color: configPalette.cardTextMuted }}>
                               List ${entry.listPrice.toFixed(2)}
                               {entry.discountPercent && entry.discountPercent > 0 ? (
                                 <>
@@ -434,7 +434,7 @@ export default function AccountPage() {
                     </div>
                   )}
                   {entry.shippingAddress && (
-                    <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 4 }}>
+                    <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 4 }}>
                       Shipping: {entry.shippingAddress}
                     </div>
                   )}

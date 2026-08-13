@@ -30,6 +30,10 @@ export type ThemePreset = {
     accentBlue: string;
     textMain: string;
     textMuted: string;
+    /** Primary text color rendered on card/info-box backgrounds. */
+    cardTextMain: string;
+    /** Secondary/muted text color rendered on card/info-box backgrounds. */
+    cardTextMuted: string;
     checkoutCtaButton: string;
     /** CSS font stack applied to the storefront body. */
     fontFamily: string;
@@ -64,6 +68,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       accentBlue: '#B08D2A',
       textMain: '#111111',
       textMuted: '#6B7280',
+      cardTextMain: '#F7F7F7',
+      cardTextMuted: '#9CA3AF',
       checkoutCtaButton: '#111111',
       fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif",
       borderRadius: 0,
@@ -93,6 +99,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       accentBlue: '#FF3E3E',
       textMain: '#FFFFFF',
       textMuted: '#9CA3AF',
+      cardTextMain: '#FFFFFF',
+      cardTextMuted: '#A1A1AA',
       checkoutCtaButton: '#FF3E3E',
       fontFamily: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 10,
@@ -122,6 +130,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       accentBlue: '#A98B63',
       textMain: '#222B21',
       textMuted: '#6B7166',
+      cardTextMain: '#F5F2EC',
+      cardTextMuted: '#C9D4C4',
       checkoutCtaButton: '#2C3E2B',
       fontFamily: "'Nunito', 'Poppins', 'Segoe UI', sans-serif",
       borderRadius: 999,

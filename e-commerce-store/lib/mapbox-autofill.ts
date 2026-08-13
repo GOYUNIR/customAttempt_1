@@ -200,6 +200,22 @@ export function resolveMapboxToken(): string {
 export function getMapboxStatus(): GoyunirMapboxStatus {
   if (status.status === 'active') {
     const info = verifyMapboxAttachment();
+    // Heal path: eligible inputs exist but the SDK hasn't attached yet (or the
+    // attach side effects were dropped when React replaced the input's DOM node
+    // on a re-render). Restarting the retry loop here means a status read can
+    // never permanently leave the UI stuck on "autofill could not attach" while
+    // a dropdown is actually attachable. startAttachLoop() is a no-op when a
+    // loop is already running, and update() only dispatches status events when
+    // the attachment state flips.
+    if (
+      !tokenRejected &&
+      info.inputs > 0 &&
+      info.attachedInputs === 0 &&
+      info.listboxes === 0 &&
+      attachTimer === null
+    ) {
+      startAttachLoop();
+    }
     return {
       ...status,
       attached: !tokenRejected && (info.attachedInputs > 0 || info.listboxes > 0),
@@ -471,7 +487,7 @@ function startAttachLoop(): void {
   if (attachTimer !== null || typeof window === 'undefined') return;
   const MAX_ATTEMPTS = 20; // ~16s of retries
   let attempts = 0;
-  attachTimer = window.setInterval(() => {
+  const attempt = (): boolean => {
     attempts += 1;
     const info = verifyMapboxAttachment();
     if (info.attachedInputs > 0 || info.listboxes > 0) {
@@ -480,7 +496,7 @@ function startAttachLoop(): void {
         `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
       );
       refreshActiveStatus();
-      return;
+      return true;
     }
     if (info.inputs === 0) {
       // No eligible inputs yet — React may still be mounting the form.
@@ -490,7 +506,7 @@ function startAttachLoop(): void {
           '[mapbox-autofill] No address inputs found after retrying. It will re-attach if one appears later.'
         );
       }
-      return;
+      return false;
     }
     // Eligible inputs exist but nothing is attached — force the SDK to re-scan.
     try {
@@ -507,7 +523,14 @@ function startAttachLoop(): void {
       );
       refreshActiveStatus();
     }
-  }, 800);
+    return false;
+  };
+  // Try once immediately (a status read may have restarted us), then keep
+  // retrying until the DOM shows real attach side effects.
+  const verified = attempt();
+  if (!verified) {
+    attachTimer = window.setInterval(attempt, 800);
+  }
 }
 
 /**

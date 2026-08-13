@@ -95,8 +95,8 @@ export default function HomePage() {
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>GOYUNIR / HIGH-CADENCE RELEASES</div>
-          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02 }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
-          <p style={{ color: '#c8c8cf', fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
+          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
+          <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
             Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -112,9 +112,9 @@ export default function HomePage() {
             <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.textMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
               Our Story
             </Link>
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>Low supply. Fast conversion. Quiet exclusivity.</span>
+            <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Low supply. Fast conversion. Quiet exclusivity.</span>
           </div>
-          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8' }}>
+          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: configPalette.cardTextMuted }}>
             Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
           </div>
         </section>
@@ -135,8 +135,8 @@ export default function HomePage() {
                         <div style={{ fontSize: 11, color: product.soldOut ? '#fbbf24' : configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px' }}>{product.soldOut ? 'Social proof' : (index === 0 ? 'Primary release' : 'Featured release')}</div>
                         <div style={{ fontSize: 11, color: product.soldOut ? '#fcd34d' : configPalette.accentBlue, fontWeight: 700 }}>{product.soldOut ? 'Sold out' : 'Open now'}</div>
                       </div>
-                      <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4 }}>{product.name}</div>
-                      <div style={{ fontSize: 12, color: '#b8b8c0', lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
+                      <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4, color: configPalette.cardTextMain }}>{product.name}</div>
+                      <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
                       <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? '#dbeafe' : '#e7e7eb', fontWeight: 700, border: product.isUpcoming ? '1px solid rgba(59,130,246,0.24)' : '1px solid rgba(255,255,255,0.08)' }}>
                         <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? '#60a5fa' : (product.soldOut ? '#fbbf24' : '#7dd3fc'), animation: 'goyunirPulse 1s ease-in-out infinite' }} />
                         {product.isUpcoming ? `Release opens: ${formatCountdown(product)}` : formatCountdown(product)}
@@ -150,8 +150,8 @@ export default function HomePage() {
         ) : (
           <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '20px 18px', background: '#0e0e10' }}>
             <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue, marginBottom: 8 }}>Release feed</div>
-            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px' }}>No live release this second.</h2>
-            <p style={{ color: '#b8b8c0', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Upcoming and archived pieces still carry the release story, countdowns, and collector context while the next allocation warms up.</p>
+            <h2 style={{ fontSize: 22, fontFamily: 'serif', margin: '0 0 8px', color: configPalette.cardTextMain }}>No live release this second.</h2>
+            <p style={{ color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>Upcoming and archived pieces still carry the release story, countdowns, and collector context while the next allocation warms up.</p>
             <Link href="/catalog" style={{ display: 'inline-block', padding: '10px 16px', borderRadius: 999, background: '#ffffff', color: '#000000', textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>See upcoming and archive</Link>
           </section>
         )}
@@ -167,8 +167,8 @@ export default function HomePage() {
                 <Link key={product.id} href={`/${product.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div style={{ padding: '12px 14px', borderRadius: 16, background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{product.name}</div>
-                      <div style={{ fontSize: 11, color: configPalette.textMuted, marginTop: 2 }}>{product.tagline || product.desc}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: configPalette.cardTextMain }}>{product.name}</div>
+                      <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>{product.tagline || product.desc}</div>
                     </div>
                     <div style={{ fontSize: 11, color: '#fbbf24' }}>Sold out</div>
                   </div>

@@ -103,7 +103,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [mapboxHint, setMapboxHint] = useState('');
 
   // Live Mapbox autofill hint (drives the small status line under the shipping
-  // field). Updated whenever lib/mapbox-autofill.ts refreshes its status.
+  // field). Updated whenever lib/mapbox-autofill.ts refreshes its status, plus a
+  // safety poll: the SDK's attach loop can finish after the last status event,
+  // or React can replace the shipping input node and drop the attach side
+  // effects. Re-reading the live status every ~1.2s makes the hint converge to
+  // the real DOM state (getMapboxStatus() also restarts the attach retry loop
+  // when eligible inputs exist but nothing is attached yet).
   useEffect(() => {
     const sync = () => {
       const s = getMapboxStatus();
@@ -113,10 +118,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     };
     sync();
     window.addEventListener('goyunir-mapbox-status', sync);
-    return () => window.removeEventListener('goyunir-mapbox-status', sync);
+    const poll = window.setInterval(sync, 1200);
+    return () => {
+      window.removeEventListener('goyunir-mapbox-status', sync);
+      window.clearInterval(poll);
+    };
   }, []);
 
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette. Initialised from the build-time config and upgraded to
+  // whatever is saved in /admin → Settings (served through `/api/store` → config
+  // → themeColors). This makes page background, card backgrounds/borders,
+  // border radius, and card text colors editable from the admin portal without
+  // a redeploy.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  const uiRadius = (fallback: number) => {
+    const r = Number(configPalette.borderRadius);
+    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
+  };
   const actionMode = typeof window !== 'undefined' ? (window.localStorage.getItem('goyunir-header-action-mode') === 'bag' ? 'bag' : 'cart') : 'cart';
   const actionLabel = actionMode === 'bag' ? 'bag' : 'cart';
 
@@ -124,6 +142,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     try {
       const res = await fetch(`/api/store?slug=${slug}`);
       const data = await res.json();
+      if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data.product) {
         setProduct(data.product);
         if (data.product.isArchived) {
@@ -168,6 +187,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     try {
       const res = await fetch('/api/store');
       const data = await res.json();
+      if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
@@ -565,18 +585,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <section style={{ borderRadius: 24, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: '#111116' }}>
+        <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground }}>
           <div style={{ height: 280, background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover` }} />
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: soldOut ? '#fbbf24' : configPalette.accentBlue }}>{activeProductLabel}</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>{checkoutMode}</div>
             </div>
-            <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0 }}>{product.name}</h1>
-            <p style={{ margin: 0, color: '#c9c9d3', fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 16, background: 'rgba(255,255,255,0.02)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.06)'}` }}>
-              <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : '#e5e7eb' }}>{urgencyLabel}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
+            <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
+            <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 16, background: 'rgba(255,255,255,0.03)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.08)'}` }}>
+              <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>
+              <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {galleryImages.map((image: string, index: number) => (
@@ -586,7 +606,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
         </section>
 
-        <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -608,7 +628,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
 
           {isRaffleProduct && !product.isArchived && countdownLabel && (
-            <div style={{ marginBottom: 10, fontSize: 12, color: '#c9c9d3', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ marginBottom: 10, fontSize: 12, color: configPalette.cardTextMuted, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: countdownPulse ? '#facc15' : '#fef08a', boxShadow: countdownPulse ? '0 0 0 4px rgba(250,204,21,0.15)' : '0 0 0 1px rgba(254,240,138,0.08)', transition: 'all 180ms ease' }} />
               <span>{product.isUpcoming ? 'Release opens in' : 'Raffle ends in'}: <strong>{countdownLabel}</strong></span>
             </div>
@@ -616,8 +636,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           {/* Mapbox address autofill requires the field to live inside a <form>. */}
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
-            <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {mapboxHint === 'autofill-on' && (
             <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing in the shipping field to pick your address.</div>
@@ -634,11 +654,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           <div style={{ marginBottom: 8 }}>
             {!showPromoField ? (
-              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
             ) : (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: '#fff' }} />
-                <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: '#17171b', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+                <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+                <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, color: configPalette.cardTextMain, fontWeight: 700, cursor: 'pointer' }}>Apply</button>
               </div>
             )}
           </div>
@@ -656,37 +676,37 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             )}
             {canCheckoutDirect && (
               <>
-                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#d6c29c', color: '#09090b', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#ffffff', border: 'none', fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
                   {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
                 </button>
                 {showWaitlistOption && (
-                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: '#17171b', color: '#fff', border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
+                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.cardBackground, color: configPalette.cardTextMain, border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
                     {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Reserve for next opening' : 'Reserve for launch'}
                   </button>
                 )}
               </>
             )}
-            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: '#333', color: '#fff', border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to {actionLabel}</button>}
+            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to {actionLabel}</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
 
-        <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
-              <div key={`${note.label}-${index}`} style={{ borderRadius: 16, background: '#09090b', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
+              <div key={`${note.label}-${index}`} style={{ borderRadius: 16, background: 'rgba(0,0,0,0.25)', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
                 <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{note.name}</div>
-                <div style={{ fontSize: 12, color: '#c8c8cf', lineHeight: 1.55 }}>{note.text}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
+                <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55 }}>{note.text}</div>
               </div>
             ))}
           </div>
         </section>
 
         {showCart && cart.length > 0 && (
-          <section style={{ borderRadius: 20, border: `1px solid ${configPalette.cardBorder}`, background: '#111116', padding: 14 }}>
+          <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
             {cart.map((item, index) => (
               <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>
@@ -694,7 +714,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <span>${item.price.toFixed(2)}</span>
               </div>
             ))}
-            <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: '#fff', color: '#000', border: 'none', fontWeight: 700 }}>Review prepared bag</button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, border: 'none', fontWeight: 700 }}>Review prepared bag</button>
           </section>
         )}
       </div>

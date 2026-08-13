@@ -155,8 +155,8 @@ export default function CatalogPage() {
             {!item.image && 'NO IMAGE'}
           </div>
           <div style={{ padding: '10px 12px' }}>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.textMain }}>{item.name}</div>
-            <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{item.name}</div>
+            <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>
               {item.status}
               {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
             </div>
@@ -243,8 +243,8 @@ export default function CatalogPage() {
                       padding: '14px 16px',
                     }}
                   >
-                    <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{drop.name}</div>
-                    <div style={{ fontSize: '10px', color: configPalette.textMuted, marginTop: '2px' }}>{drop.tagline}</div>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
+                    <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
                     <div style={{ fontSize: '10px', color: '#d6c29c', marginTop: 6 }}>Limited handmade supply. Open while allocation remains.</div>
                   </div>
                 </Link>
@@ -331,12 +331,12 @@ export default function CatalogPage() {
                   marginBottom: '16px',
                 }}
               />
-              <h3 style={{ fontSize: '18px', fontFamily: 'serif', margin: '0 0 4px 0' }}>{selectedItem.name}</h3>
-              <div style={{ fontSize: '11px', color: configPalette.textMuted, marginBottom: '12px' }}>
+              <h3 style={{ fontSize: '18px', fontFamily: 'serif', margin: '0 0 4px 0', color: configPalette.cardTextMain }}>{selectedItem.name}</h3>
+              <div style={{ fontSize: '11px', color: configPalette.cardTextMuted, marginBottom: '12px' }}>
                 {selectedItem.status}
               </div>
               {selectedItem.description && (
-                <p style={{ fontSize: '13px', lineHeight: '1.6', color: '#ccc', margin: '0 0 20px 0' }}>
+                <p style={{ fontSize: '13px', lineHeight: '1.6', color: configPalette.cardTextMuted, margin: '0 0 20px 0' }}>
                   {selectedItem.description}
                 </p>
               )}

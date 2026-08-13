@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 
@@ -180,6 +181,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   }, []);
 
   // Live Mapbox autofill hint (drives the small status line in the cart drawer).
+  // The status event + a safety poll keep the hint in sync with the real DOM:
+  // the SDK's attach loop can verify after the last event fires, and React can
+  // replace the shipping input node (dropping attach side effects) — re-reading
+  // the live status every ~1.2s converges the hint (and restarts the attach
+  // retry loop through getMapboxStatus() when inputs aren't attached yet).
   useEffect(() => {
     const sync = () => {
       const s = getMapboxStatus();
@@ -189,7 +195,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     };
     sync();
     window.addEventListener('goyunir-mapbox-status', sync);
-    return () => window.removeEventListener('goyunir-mapbox-status', sync);
+    const poll = window.setInterval(sync, 1200);
+    return () => {
+      window.removeEventListener('goyunir-mapbox-status', sync);
+      window.clearInterval(poll);
+    };
   }, []);
 
   useEffect(() => {
@@ -576,6 +586,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   };
 
   const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.94)';
+  // Full palette for the chrome/cart drawer — starts at the build-time config and
+  // upgrades to whatever /admin → Settings has saved (theme state is set from
+  // /api/store → config → themeColors). Keeps drawer/card text editable.
+  const liveTheme = { ...GOYUNIR_STORE_SUITE.themeColors, ...(theme || {}) } as Record<string, any>;
+  const drawerBg = liveTheme.cardBackground || '#0b0b0f';
+  const drawerText = liveTheme.cardTextMain || '#ffffff';
+  const drawerTextMuted = liveTheme.cardTextMuted || '#a1a1aa';
+  const uiRadius = (fallback: number) => {
+    const r = Number(liveTheme.borderRadius);
+    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
+  };
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
@@ -732,20 +753,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </div>
       </div>
 
-      <footer style={{ background: 'rgba(8,8,10,0.96)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
+      <footer style={{ background: liveTheme.primaryBackground || 'rgba(8,8,10,0.96)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: liveTheme.textMuted || '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
-            <Link href="/terms" style={{ color: '#71717a', textDecoration: 'none' }}>Terms</Link>
-            <Link href="/privacy" style={{ color: '#71717a', textDecoration: 'none' }}>Privacy</Link>
-            <Link href="/shipping" style={{ color: '#71717a', textDecoration: 'none' }}>Shipping</Link>
-            <Link href="/account" style={{ color: '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
+            <Link href="/terms" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Terms</Link>
+            <Link href="/privacy" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Privacy</Link>
+            <Link href="/shipping" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Shipping</Link>
+            <Link href="/account" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-            <a href="https://instagram.com/goyunir" target="_blank" rel="noreferrer" style={{ color: '#52525b', textDecoration: 'none' }}>Instagram</a>
-            <a href="https://tiktok.com/goyunir" target="_blank" rel="noreferrer" style={{ color: '#52525b', textDecoration: 'none' }}>TikTok</a>
-            <a href="mailto:goyunir.support@gmail.com" style={{ color: '#52525b', textDecoration: 'none' }}>goyunir.support@gmail.com</a>
+            <a href="https://instagram.com/goyunir" target="_blank" rel="noreferrer" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Instagram</a>
+            <a href="https://tiktok.com/goyunir" target="_blank" rel="noreferrer" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>TikTok</a>
+            <a href="mailto:goyunir.support@gmail.com" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>goyunir.support@gmail.com</a>
           </div>
-          <div style={{ color: '#3f3f46', fontSize: 10 }}>
+          <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
             © {new Date().getFullYear()} GOYUNIR ALL RIGHTS RESERVED.
           </div>
         </div>
@@ -753,30 +774,30 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', background: '#0b0b0f', borderLeft: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>
-                <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: '#7dd3fc' }}>{actionTitle}</div>
-                <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: '#fff' }}>Review items</div>
+                <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: liveTheme.accentBlue || '#7dd3fc' }}>{actionTitle}</div>
+                <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: drawerText }}>Review items</div>
               </div>
-              <button onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#d4d4d8', borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
+              <button onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: drawerTextMuted, borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {cart.length === 0 ? (
-                <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: 20, padding: 18, color: '#a1a1aa', fontSize: 13, lineHeight: 1.6 }}>
+                <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: uiRadius(20), padding: 18, color: drawerTextMuted, fontSize: 13, lineHeight: 1.6 }}>
                   Your {actionTitle.toLowerCase()} is empty. Add direct-purchase items from a product page to review them here.
                 </div>
               ) : (
                 cart.map((item, index) => (
-                  <div key={`${item.productId}-${item.size}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 18, padding: 12, background: '#111116' }}>
+                  <div key={`${item.productId}-${item.size}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: uiRadius(18), padding: 12, background: 'rgba(255,255,255,0.04)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{item.name}</div>
-                        <div style={{ fontSize: 11, color: '#a1a1aa', marginTop: 3 }}>{item.size}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>{item.name}</div>
+                        <div style={{ fontSize: 11, color: drawerTextMuted, marginTop: 3 }}>{item.size}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>${Number(item.price || 0).toFixed(2)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>${Number(item.price || 0).toFixed(2)}</div>
                         <button
                           onClick={() => {
                             const next = cart.filter((_, currentIndex) => currentIndex !== index);
@@ -795,7 +816,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             </div>
 
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 14, paddingTop: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#d4d4d8', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: drawerTextMuted, marginBottom: 12 }}>
                 <span>Total</span>
                 <strong>${total.toFixed(2)}</strong>
               </div>
@@ -807,9 +828,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     value={checkoutEmail}
                     onChange={(e) => setCheckoutEmail(e.target.value)}
                     placeholder="name@example.com"
-                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
                   />
-                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
+                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
                   {mapboxHint === 'autofill-on' && (
                     <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — start typing to pick your address.</div>
                   )}
@@ -823,7 +844,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     <div style={{ fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
                   )}
                   {!showPromoField ? (
-                    <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+                    <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
                   ) : (
                     <input
                       type="text"
@@ -834,7 +855,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                         window.localStorage.setItem('goyunir-promo-code', next);
                       }}
                       placeholder="Promo code (optional)"
-                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }}
+                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
                     />
                   )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
@@ -845,10 +866,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 </form>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems || raffleOnlyCart} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems || raffleOnlyCart ? 'not-allowed' : 'pointer' }}>
+                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems || raffleOnlyCart} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: liveTheme.textMain || '#f3f4f6', color: liveTheme.primaryBackground || '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems || raffleOnlyCart ? 'not-allowed' : 'pointer' }}>
                   {checkoutBusy ? 'Starting…' : checkoutLabel}
                 </button>
-                <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#d4d4d8', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
+                <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: drawerTextMuted, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
               </div>
               {cartMsg && <div style={{ marginTop: 8, color: '#fca5a5', fontSize: 12 }}>{cartMsg}</div>}
             </div>

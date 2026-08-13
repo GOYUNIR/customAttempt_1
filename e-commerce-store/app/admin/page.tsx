@@ -2544,7 +2544,7 @@ export default function AdminPortal() {
                 </button>
               </div>
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
-                Checks every environment variable, Stripe/Redis connectivity, every product's schedule/price/Stripe ID, and slug uniqueness — run this after any config change or before a big drop.
+                Checks every environment variable (including the Mapbox token), Redis/Stripe connectivity, store config + theme integrity, every product's price/Stripe ID/images, slug uniqueness, winner tiers, inventory, live states, drop pools, and legacy-key hygiene — run this after any config change or before a big drop.
               </p>
               {selftestResults?.error && <p style={{ color: '#f87171', fontSize: 12 }}>{selftestResults.error}</p>}
               {selftestResults?.results && (
@@ -2601,7 +2601,7 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Edit site appearance and content. Changes are stored in Redis and applied at build time — you'll need to redeploy for changes to take effect.
+                Edit site appearance and content. Theme colors, card backgrounds/borders, radius, and text colors apply live to product pages and the cart (cached up to ~10s); static pages (home/catalog/legal) are baked at build time, so a redeploy may be needed for those to pick up color changes.
               </p>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
               
