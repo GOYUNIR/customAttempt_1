@@ -5,10 +5,24 @@
  * (item-page entry form + cart drawer).
  *
  * The Mapbox Search JS SDK is loaded lazily and attached exactly once per page
- * load. The AddressAutofillCollection returned by `autofill()` keeps a
- * MutationObserver on the document, so inputs that mount later (e.g. the cart
- * drawer's shipping field) are picked up automatically — components just call
- * `ensureMapboxAutofill()` on mount.
+ * load. Inputs that mount later (e.g. the cart drawer's shipping field) are
+ * picked up automatically by our own guarded MutationObserver — components just
+ * call `ensureMapboxAutofill()` on mount.
+ *
+ * IMPORTANT — why we do NOT call the SDK's `collection.observe()`:
+ * Mapbox search-js v1.6.0 (the latest release) has a stack-overflow bug on
+ * React pages. Its `observe()` installs a document-wide MutationObserver whose
+ * callback re-scans the shipping inputs and compares the old/new element lists
+ * with a naive `deepEquals()` that has NO cycle detection. React mounts its
+ * fiber bookkeeping as an ENUMERABLE own property on DOM nodes
+ * (`__reactFiber$…`), and that object is circular (fiber.stateNode → element →
+ * __reactFiber$… → …). So the first DOM mutation after `observe()` makes the
+ * SDK recurse forever and throw
+ *   Uncaught RangeError: Maximum call stack size exceeded
+ * (stack frame maps to src/utils/index.ts → `deepEquals`). This module instead
+ * runs its own identity-based MutationObserver and only calls the SDK's
+ * `update()` when the set of shipping inputs actually changed — same behaviour,
+ * no crash.
  *
  * Token resolution order (same contract as the standalone checkout pages in
  * /public):
@@ -66,6 +80,16 @@ let status: GoyunirMapboxStatus = { status: 'no-token', token: false };
 // Exact street-address strings that came from a Mapbox suggestion this session.
 const verifiedAddresses = new Set<string>();
 
+// ── SDK observe() workaround ─────────────────────────────────────────────────
+// We deliberately never call collection.observe(): the SDK's MutationObserver
+// deep-compares the shipping inputs (deepEquals, no cycle detection) and React
+// DOM nodes carry a circular enumerable __reactFiber$… property, so any DOM
+// mutation blows the stack ("Maximum call stack size exceeded"). Instead we
+// watch the document with our own observer that compares inputs BY IDENTITY and
+// calls collection.update() only when the input set actually changed.
+let autofillObserver: MutationObserver | null = null;
+let attachedInputs: HTMLInputElement[] = [];
+
 function setStatus(next: GoyunirMapboxStatus): void {
   status = next;
   if (typeof window !== 'undefined') {
@@ -118,7 +142,7 @@ export function getMapboxStatus(): GoyunirMapboxStatus {
   return { ...status };
 }
 
-/** True once the SDK loaded and the autofill collection is observing the page. */
+/** True once the SDK loaded and autofill is attached to the page. */
 export function isMapboxAutofillActive(): boolean {
   return status.status === 'active';
 }
@@ -191,14 +215,79 @@ function watchManualEdits(): void {
   );
 }
 
+/** Street-address inputs the SDK attaches to (same selector the SDK uses). */
+function findAddressInputs(): HTMLInputElement[] {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return [];
+  try {
+    return Array.from(
+      document.querySelectorAll<HTMLInputElement>(
+        'input[autocomplete~="street-address"], input[autocomplete~="address-line1"]'
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** True when the two input lists contain the same elements (order-insensitive). */
+function inputsEqual(a: HTMLInputElement[], b: HTMLInputElement[]): boolean {
+  if (a.length !== b.length) return false;
+  const seen = new Set(a);
+  for (const el of b) {
+    if (!seen.has(el)) return false;
+  }
+  return true;
+}
+
+/**
+ * Attach the SDK to any street-address input that mounted since the last pass
+ * (e.g. the cart drawer's shipping field). Comparison is by identity only —
+ * never deep-equality — so React's circular `__reactFiber$…` DOM properties
+ * can never make this recurse. No-op when nothing changed.
+ */
+export function resyncMapboxAutofill(): void {
+  if (!collection || typeof collection.update !== 'function') return;
+  const current = findAddressInputs();
+  if (inputsEqual(current, attachedInputs)) return;
+  attachedInputs = current;
+  try {
+    collection.update();
+  } catch (err) {
+    console.warn('[mapbox-autofill] Failed to attach autofill to a newly mounted input.', err);
+  }
+}
+
+/**
+ * Watch the document for shipping inputs that mount later. Replaces the SDK's
+ * own `observe()`, whose MutationObserver callback crashed on React DOM nodes
+ * (deepEquals stack overflow — see the module comment at the top).
+ */
+function startAutofillObserver(): void {
+  if (autofillObserver || typeof window === 'undefined' || typeof MutationObserver === 'undefined') {
+    return;
+  }
+  autofillObserver = new MutationObserver(() => {
+    resyncMapboxAutofill();
+  });
+  autofillObserver.observe(document, { subtree: true, childList: true });
+  // Attach to anything already in the DOM (no-op if the constructor did it).
+  resyncMapboxAutofill();
+}
+
 /**
  * Attach Mapbox address autofill to the page. Safe to call from multiple
  * components and on every mount: the SDK + collection are created only once,
- * and the collection's MutationObserver attaches to inputs rendered later.
+ * and our identity-based MutationObserver attaches to inputs rendered later.
  */
 export async function ensureMapboxAutofill(): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (status.status === 'loading' || status.status === 'active') return;
+  if (status.status === 'loading') return;
+  if (status.status === 'active') {
+    // Already running — pick up any input that mounted since the last observer
+    // tick (no-op unless the input set actually changed).
+    resyncMapboxAutofill();
+    return;
+  }
 
   const token = resolveMapboxToken();
   if (!token) {
@@ -223,15 +312,18 @@ export async function ensureMapboxAutofill(): Promise<void> {
     return;
   }
   try {
+    // Capture the inputs the SDK constructor is about to attach to, so our own
+    // resync below doesn't re-attach (and re-name) the same elements.
+    attachedInputs = findAddressInputs();
     collection = mapbox.autofill({ accessToken: token });
-    if (collection && typeof collection.observe === 'function') {
-      // Watch the document for inputs added later (e.g. the cart drawer).
-      collection.observe();
-    }
     if (collection && typeof collection.addEventListener === 'function') {
       collection.addEventListener('retrieve', handleRetrieve);
     }
     watchManualEdits();
+    // NOTE: we deliberately do NOT call collection.observe() here — the SDK's
+    // MutationObserver deep-compares React DOM nodes and overflows the stack.
+    // startAutofillObserver() provides the same auto-attach behaviour safely.
+    startAutofillObserver();
     setStatus({ status: 'active', token: true });
     console.info('[mapbox-autofill] Address autofill is ACTIVE. Requests will count on your Mapbox dashboard.');
   } catch (err) {

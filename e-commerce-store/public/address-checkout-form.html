@@ -368,15 +368,22 @@
       document.getElementById('checkout-form').addEventListener('submit', async function (event) {
         event.preventDefault();
         var form = event.target;
-        var data = new FormData(form);
         var submit = form.querySelector('button[type="submit"]');
 
-        var email = String(data.get('email') || '').trim();
-        var line1 = String(data.get('address1') || '').trim();
-        var line2 = String(data.get('address2') || '').trim();
-        var cityStateZip = [data.get('city'), data.get('state'), data.get('zip')]
-          .filter(Boolean)
-          .join(', ');
+        // Read fields by element ID, not by FormData name: Mapbox's SDK renames
+        // the street-address input it attaches to (`address1` becomes
+        // `address1 address-search`), so `FormData.get('address1')` returns null
+        // whenever autofill is active.
+        var email = String(document.getElementById('email').value || '').trim();
+        var line1 = String(document.getElementById('address1').value || '').trim();
+        var line2 = String(document.getElementById('address2').value || '').trim();
+        var city = String(document.getElementById('city').value || '').trim();
+        var state = String(document.getElementById('state').value || '').trim();
+        var zip = String(document.getElementById('zip').value || '').trim();
+        var variant = document.getElementById('context-variant').value;
+        var size = document.getElementById('context-size').value;
+        var orderRef = document.getElementById('context-order-ref').value;
+        var cityStateZip = [city, state, zip].filter(Boolean).join(', ');
         var address = [line1, line2, cityStateZip].filter(Boolean).join(', ');
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -405,9 +412,9 @@
               email: email,
               address: address,
               verified: mapboxVerified ? true : undefined,
-              variant: data.get('variant') || undefined,
-              size: data.get('size') || undefined,
-              orderRef: data.get('orderRef') || undefined,
+              variant: variant || undefined,
+              size: size || undefined,
+              orderRef: orderRef || undefined,
               source: 'address-form'
             })
           });
