@@ -5,8 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Address Checkout Form</title>
 
-  <!-- Mapbox Search JS (Address Autofill) from the Mapbox CDN -->
-  <script id="search-js" defer src="https://api.mapbox.com/search-js/v1.6.0/web.js"></script>
+  <!-- Mapbox Search JS (Address Autofill) from the Mapbox CDN.
+       data-mapbox-token is a dedicated fallback attribute: the
+       scripts/inject-mapbox-token.mjs build step replaces its
+       __NEXT_PUBLIC_MAPBOX_TOKEN__ placeholder with the real token during the
+       Vercel build, so no token is ever committed to the repo. -->
+  <script
+    id="search-js"
+    defer
+    src="https://api.mapbox.com/search-js/v1.6.0/web.js"
+    data-mapbox-token="__NEXT_PUBLIC_MAPBOX_TOKEN__"
+  ></script>
 
   <style>
     body {
@@ -191,12 +200,32 @@
     //      before this file runs).
     //   2. process.env.NEXT_PUBLIC_MAPBOX_TOKEN — the standard Next.js public
     //      env var; tooling/build steps can inline it into the page.
+    //   3. The data-mapbox-token attribute on the <script id="search-js"> tag
+    //      — a dedicated fallback attribute. During the Vercel build,
+    //      scripts/inject-mapbox-token.mjs replaces its placeholder
+    //      (__NEXT_PUBLIC_MAPBOX_TOKEN__) with the real token, mapping the
+    //      NEXT_PUBLIC_MAPBOX_TOKEN env var straight into this page.
     //
     // Generate your own token here:
     //   https://account.mapbox.com/access-tokens/
+    const MAPBOX_TOKEN_ATTRIBUTE = 'data-mapbox-token';
+    const MAPBOX_TOKEN_PLACEHOLDER = '__NEXT_PUBLIC_MAPBOX_TOKEN__';
+
+    // Read the dedicated fallback attribute. If the build ran without the env
+    // var set, the placeholder is still in place and is ignored here.
+    const searchScriptEl = document.getElementById('search-js');
+    const attributeToken = searchScriptEl
+      ? searchScriptEl.getAttribute(MAPBOX_TOKEN_ATTRIBUTE)
+      : '';
+    const tokenFromAttribute =
+      attributeToken && attributeToken !== MAPBOX_TOKEN_PLACEHOLDER
+        ? attributeToken
+        : '';
+
     const YOUR_MAPBOX_ACCESS_TOKEN =
       (typeof window !== 'undefined' && window.ENV_MAPBOX_TOKEN) ||
       (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_MAPBOX_TOKEN) ||
+      tokenFromAttribute ||
       '';
 
     // Initialize Mapbox Address Autofill once the page has fully loaded.
@@ -206,7 +235,7 @@
     window.addEventListener('load', () => {
       if (!YOUR_MAPBOX_ACCESS_TOKEN) {
         document.getElementById('form-feedback').textContent =
-          'Mapbox access token not configured. Set NEXT_PUBLIC_MAPBOX_TOKEN or inject window.ENV_MAPBOX_TOKEN.';
+          'Mapbox access token not configured. Set NEXT_PUBLIC_MAPBOX_TOKEN, inject window.ENV_MAPBOX_TOKEN, or map data-mapbox-token at build time.';
         return;
       }
       if (!window.mapboxsearch || typeof window.mapboxsearch.autofill !== 'function') {
