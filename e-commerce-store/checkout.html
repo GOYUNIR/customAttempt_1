@@ -275,16 +275,39 @@
   </div>
 
   <script>
-    // Public Mapbox access token for the Mapbox Search JS Web SDK.
-    const YOUR_MAPBOX_ACCESS_TOKEN = 'pk.YOUR_PUBLIC_MAPBOX_TOKEN_GOES_HERE';
+    // Public Mapbox access token for the Mapbox Search JS Web SDK — resolved
+    // dynamically at runtime instead of being hardcoded in this file. Never
+    // commit a real token here.
+    //
+    // Resolution order:
+    //   1. window.ENV_MAPBOX_TOKEN — injected at runtime by the hosting layer
+    //      (e.g. a server/edge bootstrap script that sets
+    //      window.ENV_MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
+    //      before this file runs).
+    //   2. process.env.NEXT_PUBLIC_MAPBOX_TOKEN — the standard Next.js public
+    //      env var; tooling/build steps can inline it into the page.
+    //
+    // Generate your own token here:
+    //   https://account.mapbox.com/access-tokens/
+    const YOUR_MAPBOX_ACCESS_TOKEN =
+      (typeof window !== 'undefined' && window.ENV_MAPBOX_TOKEN) ||
+      (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_MAPBOX_TOKEN) ||
+      '';
 
-    // Initialize Mapbox Address Autofill once the page has fully loaded so the
-    // deferred Search JS SDK is guaranteed to be available. The library
-    // discovers the eligible inputs inside the form via their HTML5
-    // autocomplete attributes (e.g. "shipping street-address",
-    // "shipping address-level2", "shipping postal-code") and fills in the
-    // whole address when a dropdown suggestion is selected.
-    window.addEventListener('load', () => {
+    // Initialize Mapbox Address Autofill as soon as the DOM content has loaded.
+    // The Search JS SDK script above is loaded with `defer`, which guarantees
+    // it has executed by the time `DOMContentLoaded` fires — so
+    // `window.mapboxsearch` is available here. The library discovers the
+    // eligible inputs inside the form via their HTML5 autocomplete attributes
+    // (e.g. "shipping street-address", "shipping address-level2",
+    // "shipping postal-code") and fills in the whole address when a dropdown
+    // suggestion is selected.
+    window.addEventListener('DOMContentLoaded', () => {
+      if (!YOUR_MAPBOX_ACCESS_TOKEN) {
+        document.getElementById('form-feedback').textContent =
+          'Mapbox access token not configured. Set NEXT_PUBLIC_MAPBOX_TOKEN or inject window.ENV_MAPBOX_TOKEN.';
+        return;
+      }
       if (window.mapboxsearch && typeof window.mapboxsearch.autofill === 'function') {
         window.mapboxsearch.autofill({
           accessToken: YOUR_MAPBOX_ACCESS_TOKEN,
