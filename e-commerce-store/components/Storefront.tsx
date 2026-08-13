@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive, isMapboxVerifiedAddress } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -562,8 +562,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
   const inventoryRemaining = Number(product.inventoryRemaining ?? product.totalInventory ?? 0);
   const totalInventory = Number(product.totalInventory ?? 0);
-  // Only treat as sold out when inventory was configured and remaining is depleted.
-  const soldOut = product.soldOut === true || (totalInventory > 0 && inventoryRemaining <= 0);
+  // Sold out when (a) the API reports it, (b) inventory was configured and
+  // remaining hit zero, or (c) no inventory is configured but the product is
+  // set to stay visible as a sold-out social-proof placeholder.
+  const soldOut =
+    product.soldOut === true ||
+    (totalInventory > 0 && inventoryRemaining <= 0) ||
+    (totalInventory === 0 && (product.soldOutBehavior || 'stay_visible') === 'stay_visible');
   const activeProductLabel = soldOut ? 'Sold out' : (product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now'));
   const urgencyLabel = soldOut
     ? 'This release is fully spoken for.'
@@ -585,7 +590,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground }}>
+        <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
           <div style={{ height: 280, background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover` }} />
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -692,7 +697,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
 
-        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
+        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
@@ -706,7 +711,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         {showCart && cart.length > 0 && (
-          <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
+          <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
             {cart.map((item, index) => (
               <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>

@@ -113,6 +113,10 @@ export interface StorefrontConfig {
     fontFamily?: string;
     /** Border radius in px — 0 = square, ~10 = small rounded, 999 = fully rounded. */
     borderRadius?: number;
+    /** Header/footer/cart-drawer opacity (0-100) — set from /admin → Settings. */
+    chromeTransparency?: number;
+    /** Card/surface opacity (0-100) — set from /admin → Settings. */
+    surfaceTransparency?: number;
   };
   availableSizes: string[];
   homeRedirectSlug?: string;
@@ -178,6 +182,11 @@ const defaultThemeColors = {
   checkoutCtaButton: '#635bff',
   fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
   borderRadius: 12,
+  // Transparency (0-100, editable from /admin → Settings → Theme Colors):
+  // chromeTransparency controls header/footer/cart-drawer opacity,
+  // surfaceTransparency controls card/surface opacity on the storefront.
+  chromeTransparency: 94,
+  surfaceTransparency: 100,
 };
 
 const defaultDropSchedule: DropScheduleConfig = {
@@ -327,6 +336,20 @@ function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string },
     totalInventory: product.totalInventory,
     winnerTiers: product.winnerTiers,
   };
+}
+
+/**
+ * Apply a surface transparency (0-100) to a card background color.
+ * Uses `color-mix` so any CSS color works; falls back to the solid color when
+ * the transparency is missing/100. Used by storefront surfaces driven by the
+ * /admin → Settings → Theme Colors → "Surface opacity" slider.
+ */
+export function surfaceBackground(color?: string, transparencyPct?: number | string, fallback = ''): string {
+  const c = String(color || '').trim();
+  const pct = Number(transparencyPct);
+  if (!Number.isFinite(pct) || pct >= 100) return c || fallback;
+  const safe = Math.max(0, Math.min(100, pct));
+  return `color-mix(in srgb, ${c || fallback} ${safe}%, transparent)`;
 }
 
 /** Deep-merge a stored (partial) orbs config over the defaults. */

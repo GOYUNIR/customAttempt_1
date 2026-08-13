@@ -7,8 +7,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const redis = createRedisClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
-  const shareDescription = String(branding.shareDescription || 'Luxury raffle drops and direct releases built for high-intent mobile traffic.');
-  const themeColor = String(branding.shareAccent || config.themeColors?.accentBlue || '#3b82f6');
+  const shareDescription = String(branding.shareDescription || 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.');
+  const themeColor = String(branding.shareAccent || config.themeColors?.accentBlue || '#D4AF37');
 
   return {
     metadataBase: new URL('https://goyunir.com'),
@@ -42,14 +42,28 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Bake the live Redis theme (colors/font) into the server-rendered page shell
+  // so design presets apply even before SiteChrome hydrates and updates the
+  // body client-side. Falls back to the dark defaults when Redis is empty.
+  const redis = createRedisClient();
+  const config = await loadStoreConfigCached(redis);
+  const colors = config.themeColors || {};
   return (
     <html lang="en">
-      <body style={{ margin: 0, padding: 0, background: '#0a0a0a', color: '#ffffff' }}>
+      <body
+        style={{
+          margin: 0,
+          padding: 0,
+          background: colors.primaryBackground || '#0a0a0a',
+          color: colors.textMain || '#ffffff',
+          fontFamily: colors.fontFamily || undefined,
+        }}
+      >
         <SiteChrome>{children}</SiteChrome>
       </body>
     </html>

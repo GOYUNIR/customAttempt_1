@@ -9,8 +9,8 @@ export default async function Icon() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
-  const background = String(branding.iconBackground || branding.shareBackground || '#111111');
-  const textColor = String(branding.iconText || branding.shareText || '#ffffff');
+  const background = String(branding.iconBackground || branding.shareBackground || '#0B0B0F');
+  const textColor = String(branding.iconText || branding.shareText || '#D4AF37');
 
   return new ImageResponse(
     (

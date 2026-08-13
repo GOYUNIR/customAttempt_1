@@ -91,7 +91,13 @@ async function buildCatalogPayload() {
       const totalInventory = inventory
         ? inventory.totalInventory
         : Math.max(0, Number(product.totalInventory || 0));
-      const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
+      // Sold out when (a) inventory was configured and remaining hit zero, or
+      // (b) no inventory is configured but the operator chose "stay visible as
+      // social proof" — a 0-stock active product is a sold-out placeholder.
+      const soldOut =
+        totalInventory > 0
+          ? inventoryRemaining <= 0
+          : product.soldOutBehavior === 'stay_visible';
       const goLiveAtMs = toMs(product.goLiveAt);
       const soldOutAtMs = toMs(product.soldOutAt);
       const shouldGoLive = product.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;

@@ -315,12 +315,12 @@ export default function AdminPortal() {
     headerActionMode: 'cart',
     shareImageUrl: '',
     shareTitle: 'GOYUNIR',
-    shareDescription: 'Raffle entries, direct releases, alerts, and clean checkout flows for mobile-first traffic.',
-    shareBackground: '#050505',
-    shareAccent: '#3b82f6',
-    shareText: '#ffffff',
-    iconBackground: '#111111',
-    iconText: '#ffffff',
+    shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
+    shareBackground: '#0B0B0F',
+    shareAccent: '#D4AF37',
+    shareText: '#F5F2E9',
+    iconBackground: '#0B0B0F',
+    iconText: '#D4AF37',
   });
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
@@ -2657,7 +2657,7 @@ export default function AdminPortal() {
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(themeSettings)
-                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius')
+                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency')
                   .map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
                     {key.replace(/([A-Z])/g, ' $1').trim()}
@@ -2668,6 +2668,31 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                   </label>
                 ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  Chrome opacity (header / footer / cart drawer)
+                  <input
+                    type="range"
+                    min={40}
+                    max={100}
+                    value={Number(themeSettings.chromeTransparency ?? 94)}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, chromeTransparency: Number(e.target.value) })}
+                    style={{ display: 'block', width: '100%', marginTop: 8 }} />
+                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.chromeTransparency ?? 94)}%</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Surface opacity (cards on product / catalog pages)
+                  <input
+                    type="range"
+                    min={40}
+                    max={100}
+                    value={Number(themeSettings.surfaceTransparency ?? 100)}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, surfaceTransparency: Number(e.target.value) })}
+                    style={{ display: 'block', width: '100%', marginTop: 8 }} />
+                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.surfaceTransparency ?? 100)}%</span>
+                </label>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

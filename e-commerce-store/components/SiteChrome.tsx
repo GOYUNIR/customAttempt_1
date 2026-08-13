@@ -67,6 +67,19 @@ function normalizeHex(color: any, fallback: string) {
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
 }
 
+/**
+ * Mix a chrome/surface color to the configured transparency (0-100) via
+ * color-mix. Chrome surfaces stay readable (min 40%); the drawer keeps ~92% so
+ * the modal doesn't turn into a full-blown glass panel.
+ */
+function chromeBackground(color: string, alphaPct: number, fallback: string, minPct = 40): string {
+  const c = String(color || '').trim();
+  if (!c) return fallback;
+  const raw = Number(alphaPct);
+  const safe = clamp(Number.isFinite(raw) ? raw : 94, minPct, 100);
+  return safe >= 100 ? c : `color-mix(in srgb, ${c} ${safe}%, transparent)`;
+}
+
 /** Radial-gradient paint for a glow orb at the given opacity. */
 function orbGradient(color: string, opacity: number, fallback: string, edgeRatio = 0.38) {
   const hex = normalizeHex(color, fallback);
@@ -502,7 +515,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // Apply the admin-configured theme (design presets) to the live page shell.
   // Colors are consumed at build time by static pages, but this keeps the body
   // background/color/font and the design tokens (--background/--foreground/
-  // --ui-radius) instantly in sync with whatever is saved in /admin → Settings.
+  // --ui-radius/--ui-chrome-alpha/--ui-surface-alpha) instantly in sync with
+  // whatever is saved in /admin → Settings.
   useEffect(() => {
     if (!theme) return;
     const root = document.documentElement;
@@ -510,6 +524,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     root.style.setProperty('--ui-radius', radius);
     root.style.setProperty('--background', theme.primaryBackground || '#0a0a0a');
     root.style.setProperty('--foreground', theme.textMain || '#ffffff');
+    root.style.setProperty('--ui-chrome-alpha', String(clamp(Number(theme.chromeTransparency ?? 94), 0, 100)));
+    root.style.setProperty('--ui-surface-alpha', String(clamp(Number(theme.surfaceTransparency ?? 100), 0, 100)));
     document.body.style.background = theme.primaryBackground || '#0a0a0a';
     document.body.style.color = theme.textMain || '#ffffff';
     if (theme.fontFamily) document.body.style.fontFamily = theme.fontFamily;
@@ -585,12 +601,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const headerBg = theme?.cardBackground || 'rgba(8,8,10,0.94)';
   // Full palette for the chrome/cart drawer — starts at the build-time config and
   // upgrades to whatever /admin → Settings has saved (theme state is set from
   // /api/store → config → themeColors). Keeps drawer/card text editable.
   const liveTheme = { ...GOYUNIR_STORE_SUITE.themeColors, ...(theme || {}) } as Record<string, any>;
-  const drawerBg = liveTheme.cardBackground || '#0b0b0f';
+  const chromeAlpha = clamp(Number(liveTheme.chromeTransparency ?? 94), 0, 100);
+  const headerBg = chromeBackground(liveTheme.cardBackground, chromeAlpha, 'rgba(8,8,10,0.94)');
+  const drawerBg = chromeBackground(liveTheme.cardBackground, Math.max(chromeAlpha, 92), '#0b0b0f', 92);
   const drawerText = liveTheme.cardTextMain || '#ffffff';
   const drawerTextMuted = liveTheme.cardTextMuted || '#a1a1aa';
   const uiRadius = (fallback: number) => {
@@ -753,7 +770,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         </div>
       </div>
 
-      <footer style={{ background: liveTheme.primaryBackground || 'rgba(8,8,10,0.96)', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: liveTheme.textMuted || '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
+      <footer style={{ background: chromeBackground(liveTheme.primaryBackground, chromeAlpha, 'rgba(8,8,10,0.96)'), borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: liveTheme.textMuted || '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
             <Link href="/terms" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Terms</Link>

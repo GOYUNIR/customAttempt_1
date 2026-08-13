@@ -114,6 +114,24 @@ const DEFAULT_CONFIG = {
     checkoutCtaButton: '#635bff',
     fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 12,
+    // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
+    chromeTransparency: 94,
+    surfaceTransparency: 100,
+  },
+  // Default Branding & Share — refined noir & gold so a freshly seeded store's
+  // favicon, share card and header look intentional out of the box.
+  branding: {
+    logoUrl: '',
+    headerMode: 'both',
+    headerActionMode: 'cart',
+    shareImageUrl: '',
+    shareTitle: 'GOYUNIR',
+    shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
+    shareBackground: '#0B0B0F',
+    shareAccent: '#D4AF37',
+    shareText: '#F5F2E9',
+    iconBackground: '#0B0B0F',
+    iconText: '#D4AF37',
   },
   availableSizes: ['Standard'],
   homeRedirectSlug: 'elysian-white-launch-draw',

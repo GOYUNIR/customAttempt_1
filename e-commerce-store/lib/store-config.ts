@@ -43,6 +43,10 @@ export interface StoreConfig {
     checkoutCtaButton: string;
     fontFamily?: string;
     borderRadius?: number;
+    /** Header/footer/cart-drawer opacity (0-100) — set from /admin → Settings. */
+    chromeTransparency?: number;
+    /** Card/surface opacity (0-100) — set from /admin → Settings. */
+    surfaceTransparency?: number;
   };
   availableSizes: string[];
   homeRedirectSlug?: string;
@@ -123,6 +127,9 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     checkoutCtaButton: '#635bff',
     fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 12,
+    // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
+    chromeTransparency: 94,
+    surfaceTransparency: 100,
   },
   availableSizes: ['Standard'],
   dropSchedule: {

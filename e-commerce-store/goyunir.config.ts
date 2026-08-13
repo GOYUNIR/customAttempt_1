@@ -14,6 +14,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     checkoutCtaButton: '#635bff',
     fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 12,
+    // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
+    chromeTransparency: 94,
+    surfaceTransparency: 100,
   },
 
   availableSizes: ['Standard'],

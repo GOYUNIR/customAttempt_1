@@ -9,12 +9,12 @@ export default async function OpenGraphImage() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
-  const title = String(branding.shareTitle || 'Luxury drops built for fast taps.');
-  const description = String(branding.shareDescription || 'Luxury raffle drops and direct releases built for high-intent mobile traffic.');
+  const title = String(branding.shareTitle || 'GOYUNIR');
+  const description = String(branding.shareDescription || 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.');
   const shareImageUrl = String(branding.shareImageUrl || '').trim();
-  const background = String(branding.shareBackground || '#050505');
-  const accent = String(branding.shareAccent || '#3b82f6');
-  const text = String(branding.shareText || '#ffffff');
+  const background = String(branding.shareBackground || '#0B0B0F');
+  const accent = String(branding.shareAccent || '#D4AF37');
+  const text = String(branding.shareText || '#F5F2E9');
 
   return new ImageResponse(
     (

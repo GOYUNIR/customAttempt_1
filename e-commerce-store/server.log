@@ -1,0 +1,46 @@
+
+> e-commerce-store@0.1.0 start
+> next start
+
+▲ Next.js 16.2.12
+- Local:         http://localhost:3000
+- Network:       http://192.168.12.129:3000
+✓ Ready in 235ms
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /account. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /admin. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /account. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /account. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /account. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /[slug]. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport

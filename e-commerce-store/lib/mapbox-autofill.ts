@@ -114,15 +114,44 @@ let attachedInputs: HTMLInputElement[] = [];
 
 // ── Actual-attach tracking ───────────────────────────────────────────────────
 // `status: 'active'` only means "SDK loaded + collection created". It does NOT
-// mean the SDK attached autofill to any input. We track real attachment here by
-// inspecting the DOM for the SDK's side effects: it renames attached inputs to
-// `<name> address-search`, adds `data-lpignore`, and appends a
-// `<mapbox-search-listbox>` element to <body> per attached input.
+// mean the SDK attached autofill to any input. We track real attachment by
+// inspecting the DOM for the SDK's ground-truth side effects: it appends one
+// `<mapbox-search-listbox>` per attached input to <body> and points that
+// element's `.input` property at the attached input.
 let attachTimer: number | null = null;
 let suggestErrors: string[] = [];
 let suggestCount = 0;
 let resolvedTokenPrefix = '';
 let tokenRejected = false;
+
+/**
+ * True once the SDK successfully attached to at least one input this page-load.
+ * Once latched, autofill stays "on" for the rest of the session while eligible
+ * inputs exist — our identity-based MutationObserver keeps the collection
+ * re-attached, so a transient DOM read of 0 during a React re-render can never
+ * flip the checkout gates or the UI hint back to "could not attach".
+ */
+let attachedEver = false;
+
+/**
+ * Whether the SDK is effectively attached RIGHT NOW. Combines a live DOM read
+ * with the `attachedEver` latch: after the first verified attach, eligible
+ * inputs count as attached until they're gone (the observer heals teardowns
+ * within a tick), so the hint and the checkout gate never flap.
+ */
+function isCurrentlyAttached(): boolean {
+  if (tokenRejected) return false;
+  const info = verifyMapboxAttachment();
+  if (info.inputs === 0) return false;
+  return attachedEver ? true : info.attachedInputs > 0;
+}
+
+/** Admin/auth pages never render a shipping input — skip the SDK entirely there. */
+function pageNeverHasAddressInputs(): boolean {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname || '';
+  return path.startsWith('/admin') || path.startsWith('/auth');
+}
 
 function setStatus(next: GoyunirMapboxStatus): void {
   status = next;
@@ -200,25 +229,21 @@ export function resolveMapboxToken(): string {
 export function getMapboxStatus(): GoyunirMapboxStatus {
   if (status.status === 'active') {
     const info = verifyMapboxAttachment();
-    // Heal path: eligible inputs exist but the SDK hasn't attached yet (or the
-    // attach side effects were dropped when React replaced the input's DOM node
-    // on a re-render). Restarting the retry loop here means a status read can
+    const attached = isCurrentlyAttached();
+    // Heal path: eligible inputs exist but the SDK isn't actually attached yet
+    // (or the attach side effects were dropped when React replaced the input's
+    // DOM node on a re-render). Restart the retry loop here so a status read can
     // never permanently leave the UI stuck on "autofill could not attach" while
     // a dropdown is actually attachable. startAttachLoop() is a no-op when a
     // loop is already running, and update() only dispatches status events when
     // the attachment state flips.
-    if (
-      !tokenRejected &&
-      info.inputs > 0 &&
-      info.attachedInputs === 0 &&
-      info.listboxes === 0 &&
-      attachTimer === null
-    ) {
+    if (!tokenRejected && info.inputs > 0 && !attached && attachTimer === null) {
+      resyncMapboxAutofill();
       startAttachLoop();
     }
     return {
       ...status,
-      attached: !tokenRejected && (info.attachedInputs > 0 || info.listboxes > 0),
+      attached,
       inputs: info.inputs,
       attachedInputs: info.attachedInputs,
       listboxes: info.listboxes,
@@ -246,10 +271,35 @@ function listboxElements(): Element[] {
 }
 
 /**
+ * Count listboxes whose SDK `.input` is one of the CURRENT eligible inputs.
+ * This is the SDK's ground-truth attach signal: the SDK appends one
+ * `<mapbox-search-listbox>` per attached input to <body> and points its `.input`
+ * property at that element. Attribute-based checks (`data-lpignore`,
+ * `name="… address-search"`) are NOT reliable because the SDK leaves those
+ * attributes behind when `collection.update()` tears an instance down (it only
+ * removes the listbox and listeners), so an input can look "attached" while no
+ * dropdown actually exists.
+ */
+function realAttachedInputs(eligible: HTMLInputElement[]): number {
+  if (typeof document === 'undefined') return 0;
+  try {
+    const set = new Set(eligible);
+    let count = 0;
+    const listboxes = Array.from(document.querySelectorAll('mapbox-search-listbox'));
+    for (const lb of listboxes) {
+      const input = (lb as Element & { input?: HTMLInputElement }).input;
+      if (input && set.has(input)) count += 1;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Inspect the DOM for the SDK's attach side effects:
- *  - the SDK renames each attached input to `<name> address-search`
- *  - the SDK adds `data-lpignore` to each attached input
- *  - the SDK appends a `<mapbox-search-listbox>` dropdown per attached input
+ *  - the SDK appends a `<mapbox-search-listbox>` dropdown to <body> per
+ *    attached input and links it to that input via its `.input` property.
  * These are the ONLY reliable signals that autofill actually attached; the
  * `status: 'active'` flag merely means the SDK loaded.
  */
@@ -262,14 +312,9 @@ export function verifyMapboxAttachment(): {
     return { inputs: 0, attachedInputs: 0, listboxes: 0 };
   }
   const eligible = findAddressInputs();
-  const attached = eligible.filter(
-    (i) =>
-      (i.getAttribute('name') || '').includes('address-search') ||
-      i.hasAttribute('data-lpignore')
-  ).length;
   return {
     inputs: eligible.length,
-    attachedInputs: attached,
+    attachedInputs: realAttachedInputs(eligible),
     listboxes: listboxElements().length,
   };
 }
@@ -281,8 +326,7 @@ export function isMapboxAutofillActive(): boolean {
   // don't force customers to "pick from the suggestions" — fall back to
   // structural validation instead.
   if (tokenRejected) return false;
-  const info = verifyMapboxAttachment();
-  return info.attachedInputs > 0 || info.listboxes > 0;
+  return isCurrentlyAttached();
 }
 
 /**
@@ -318,7 +362,31 @@ function refreshActiveStatus(): void {
   const next: GoyunirMapboxStatus = {
     status: 'active',
     token: true,
-    attached: !tokenRejected && (info.attachedInputs > 0 || info.listboxes > 0),
+    attached: isCurrentlyAttached(),
+    inputs: info.inputs,
+    attachedInputs: info.attachedInputs,
+    listboxes: info.listboxes,
+    tokenPrefix: resolvedTokenPrefix,
+    host: typeof window !== 'undefined' ? window.location.hostname : undefined,
+    suggestErrors: suggestErrors.slice(-5),
+    suggestCount,
+    tokenRejected,
+  };
+  setStatus(next);
+}
+
+/**
+ * Transition the module to `active` and publish the FULL status payload in one
+ * event. Publishing a bare `{ status: 'active', token: true }` first would let
+ * components briefly read `attached: undefined` and flip the hint to
+ * "autofill could not attach" before the attach loop verifies.
+ */
+function markActive(): void {
+  const info = verifyMapboxAttachment();
+  const next: GoyunirMapboxStatus = {
+    status: 'active',
+    token: true,
+    attached: isCurrentlyAttached(),
     inputs: info.inputs,
     attachedInputs: info.attachedInputs,
     listboxes: info.listboxes,
@@ -435,8 +503,7 @@ export function resyncMapboxAutofill(): void {
   const current = findAddressInputs();
   const info = verifyMapboxAttachment();
   const inputsChanged = !inputsEqual(current, attachedInputs);
-  const missingAttach =
-    current.length > 0 && info.attachedInputs === 0 && info.listboxes === 0;
+  const missingAttach = current.length > 0 && info.attachedInputs === 0;
   if (!inputsChanged && !missingAttach) return;
   attachedInputs = current;
   try {
@@ -490,7 +557,8 @@ function startAttachLoop(): void {
   const attempt = (): boolean => {
     attempts += 1;
     const info = verifyMapboxAttachment();
-    if (info.attachedInputs > 0 || info.listboxes > 0) {
+    if (info.attachedInputs > 0) {
+      attachedEver = true;
       stopAttachLoop();
       console.info(
         `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
@@ -499,16 +567,21 @@ function startAttachLoop(): void {
       return true;
     }
     if (info.inputs === 0) {
-      // No eligible inputs yet — React may still be mounting the form.
+      // No eligible inputs yet — React may still be mounting the form, or this
+      // page simply never renders a shipping input (e.g. /admin, /auth). This
+      // is expected, not an error: the observer re-attaches if one appears.
       if (attempts >= MAX_ATTEMPTS) {
         stopAttachLoop();
-        console.warn(
-          '[mapbox-autofill] No address inputs found after retrying. It will re-attach if one appears later.'
+        console.info(
+          '[mapbox-autofill] No address inputs on this page — autofill will attach automatically if one appears later.'
         );
       }
       return false;
     }
-    // Eligible inputs exist but nothing is attached — force the SDK to re-scan.
+    // Eligible inputs exist but nothing is actually attached — force the SDK to
+    // re-scan. The SDK's update() is destructive (it tears down and rebuilds all
+    // instances), but we only reach this branch when there is nothing real to
+    // tear down, so the dropdown is never flickered while it is working.
     try {
       collection?.update?.();
     } catch (err) {
@@ -540,6 +613,9 @@ function startAttachLoop(): void {
  */
 export async function ensureMapboxAutofill(): Promise<void> {
   if (typeof window === 'undefined') return;
+  // Admin/auth pages never render a shipping input — loading the SDK there is
+  // wasted work and only produces "no address inputs" noise in the console.
+  if (pageNeverHasAddressInputs()) return;
   if (status.status === 'loading') return;
   if (status.status === 'active') {
     // Already running — pick up any input that mounted since the last observer
@@ -571,7 +647,7 @@ export async function ensureMapboxAutofill(): Promise<void> {
     return;
   }
   if (collection) {
-    setStatus({ status: 'active', token: true });
+    markActive();
     resyncMapboxAutofill();
     startAttachLoop();
     refreshActiveStatus();
@@ -627,7 +703,7 @@ export async function ensureMapboxAutofill(): Promise<void> {
     // MutationObserver deep-compares React DOM nodes and overflows the stack.
     // startAutofillObserver() provides the same auto-attach behaviour safely.
     startAutofillObserver();
-    setStatus({ status: 'active', token: true });
+    markActive();
     console.info(
       '[mapbox-autofill] SDK loaded (token ' + resolvedTokenPrefix + '). Verifying attach…'
     );

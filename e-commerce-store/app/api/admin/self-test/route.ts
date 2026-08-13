@@ -235,7 +235,14 @@ export async function GET(request: Request) {
         );
       }
       const totalInventory = Math.max(0, Number(product?.totalInventory || 0));
-      if (isActive && totalInventory === 0) activeNoInventory += 1;
+      if (isActive && totalInventory === 0) {
+        // 0 inventory is intentional when the product is set to stay visible as
+        // a sold-out social-proof placeholder (it displays "Sold out"). Only
+        // flag it as a misconfiguration when an archiving behavior was chosen
+        // instead — that product will never sell but also never archive.
+        const behavior = String(product?.soldOutBehavior || 'stay_visible');
+        if (behavior !== 'stay_visible') activeNoInventory += 1;
+      }
       const images = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
       push(
         `${name}: images`,

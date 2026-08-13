@@ -1,7 +1,9 @@
 import { chromium } from 'playwright-core';
 
 const BASE = 'http://localhost:3000';
-const FAKE_TOKEN = 'pk_test_dummy_invalid_token_for_attach_check';
+// Valid public-token PREFIX so the SDK loads and attaches; suggest requests
+// will be rejected (401) but attach verification + dropdown wiring still work.
+const FAKE_TOKEN = 'pk.eyJ1fakeinvalidtokenforattachcheck';
 
 const browser = await chromium.launch({
   executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',

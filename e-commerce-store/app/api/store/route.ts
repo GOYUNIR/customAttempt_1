@@ -145,8 +145,14 @@ function applyLifecycle(
     const totalInventory = inventory
       ? inventory.totalInventory
       : Math.max(0, Number(item.totalInventory || 0));
-    // Only sold out when inventory was configured and remaining hits zero.
-    const soldOut = totalInventory > 0 && inventoryRemaining <= 0;
+    // Sold out when (a) inventory was configured and remaining hit zero, or
+    // (b) no inventory is configured but the operator chose "stay visible as
+    // social proof" — a 0-stock active product is shown as sold out on purpose
+    // so it never looks like an available drop with nothing to sell.
+    const soldOut =
+      totalInventory > 0
+        ? inventoryRemaining <= 0
+        : item.soldOutBehavior === 'stay_visible';
     const goLiveAtMs = toMs(item.goLiveAt);
     const soldOutAtMs = toMs(item.soldOutAt);
     const shouldGoLive = item.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;

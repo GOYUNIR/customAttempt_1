@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 interface EntryRecord {
   variant: string;
@@ -51,7 +52,10 @@ function statusBanner(entry: EntryRecord) {
 }
 
 export default function AccountPage() {
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — starts at the build-time config and upgrades to the
+  // /admin → Settings theme (served through /api/store → config → themeColors)
+  // so design presets apply to the account page too.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
   const [email, setEmail] = useState('');
   const [last4, setLast4] = useState('');
   const [entries, setEntries] = useState<EntryRecord[] | null>(null);
@@ -74,6 +78,12 @@ export default function AccountPage() {
         }
       })
       .catch(() => {});
+    // Pull the live theme so preset background/text colors apply here too.
+    fetchStoreJson('/api/store').then((data) => {
+      if (data?.config?.themeColors) {
+        setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+      }
+    }).catch(() => {});
   }, []);
 
   // If logged in, use the user's email for lookup

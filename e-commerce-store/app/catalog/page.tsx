@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 interface CatalogItem {
   name: string;
@@ -22,10 +23,14 @@ interface ActiveDrop {
   tagline: string;
   desc: string;
   slug?: string;
+  soldOut?: boolean;
 }
 
 export default function CatalogPage() {
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — starts at the build-time config and upgrades to the
+  // /admin → Settings theme (served through /api/store → config → themeColors)
+  // so design presets (e.g. a white Luxury background) apply to the catalog too.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [activeDrops, setActiveDrops] = useState<ActiveDrop[]>([]);
   const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
@@ -82,6 +87,13 @@ export default function CatalogPage() {
         setArchiveScents([]);
       })
       .finally(() => setIsLoading(false));
+    // Pull the live theme (deduped/cached by client-store-cache) so preset
+    // background/text colors apply to this statically-built page shell.
+    fetchStoreJson('/api/store').then((data) => {
+      if (data?.config?.themeColors) {
+        setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+      }
+    }).catch(() => {});
   }, []);
 
   const handleTileClick = (item: CatalogItem) => {
@@ -170,7 +182,7 @@ export default function CatalogPage() {
     <main
       style={{
         minHeight: 'calc(100vh - 56px)',
-        background: '#07070a',
+        background: configPalette.primaryBackground,
         color: configPalette.textMain,
         padding: '24px 20px 60px',
         boxSizing: 'border-box',
@@ -245,7 +257,7 @@ export default function CatalogPage() {
                   >
                     <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
                     <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
-                    <div style={{ fontSize: '10px', color: '#d6c29c', marginTop: 6 }}>Limited handmade supply. Open while allocation remains.</div>
+                    <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : 'Limited handmade supply. Open while allocation remains.'}</div>
                   </div>
                 </Link>
               ))}

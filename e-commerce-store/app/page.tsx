@@ -11,7 +11,11 @@ export default function HomePage() {
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
   const [nowTick, setNowTick] = useState(Date.now());
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette. Starts at the build-time config and upgrades to whatever
+  // is saved in /admin → Settings (served through `/api/store` → config →
+  // themeColors) so design presets (e.g. a white Luxury background) apply to the
+  // static home shell without a redeploy.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
 
   // Only tick the clock while at least one release shows a live countdown —
   // otherwise the whole page re-renders every second for nothing.
@@ -30,6 +34,7 @@ export default function HomePage() {
     async function checkProducts() {
       try {
         const data = await fetchStoreJson('/api/store');
+        if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
@@ -57,7 +62,7 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <main style={{ minHeight: '100vh', background: '#0a0a0a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
+      <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 13, letterSpacing: '4px', textTransform: 'uppercase', color: '#666' }}>Loading live drops</div>
           <div style={{ marginTop: 12, width: 44, height: 2, background: configPalette.accentPurple, marginLeft: 'auto', marginRight: 'auto' }} />
@@ -90,7 +95,7 @@ export default function HomePage() {
   };
 
   return (
-    <main style={{ minHeight: '100vh', background: '#07070a', color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
+    <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>

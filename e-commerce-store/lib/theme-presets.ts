@@ -39,6 +39,10 @@ export type ThemePreset = {
     fontFamily: string;
     /** Border radius in px — 0 = square, ~10 = small rounded, 999 = fully rounded. */
     borderRadius: number;
+    /** Header/footer/cart-drawer opacity (0-100). */
+    chromeTransparency: number;
+    /** Card/surface opacity (0-100). */
+    surfaceTransparency: number;
   };
   /** Accent-matched glow orb colors (background orbs; top-bar orb was removed). */
   orbs: {
@@ -73,6 +77,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       checkoutCtaButton: '#111111',
       fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif",
       borderRadius: 0,
+      chromeTransparency: 96,
+      surfaceTransparency: 100,
     },
     orbs: {
       primary: { color: '#D4AF37', opacity: 12 },
@@ -104,6 +110,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       checkoutCtaButton: '#FF3E3E',
       fontFamily: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 10,
+      chromeTransparency: 90,
+      surfaceTransparency: 100,
     },
     orbs: {
       primary: { color: '#FF3E3E', opacity: 16 },
@@ -135,6 +143,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       checkoutCtaButton: '#2C3E2B',
       fontFamily: "'Nunito', 'Poppins', 'Segoe UI', sans-serif",
       borderRadius: 999,
+      chromeTransparency: 92,
+      surfaceTransparency: 100,
     },
     orbs: {
       primary: { color: '#C8A97E', opacity: 16 },
