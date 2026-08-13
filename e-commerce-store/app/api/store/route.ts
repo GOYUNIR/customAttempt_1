@@ -5,10 +5,11 @@ import {
   findLiveInventoryForProduct,
   getFallbackStoreProducts,
   listLiveStates,
-  loadStoreConfig,
+  loadStoreConfigCached,
   safeParseRedisItem,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -166,80 +167,85 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requestedSlug = String(url.searchParams.get('slug') || '').trim();
 
-    const redis = createRedisClient();
-    const sortProducts = (items: PublicStoreProduct[]) =>
-      [...items].sort(
-        (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
-      );
+    const payload = await withTtlCache(`store:${requestedSlug || '*'}:v1`, 10_000, () => buildStorePayload(requestedSlug));
+    return NextResponse.json(payload);
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
 
-    if (!redis) {
-      const fallbackProducts = sortProducts(Object.values(getFallbackStoreProducts()).map(sanitizeProduct));
-      const lifecycleProducts = applyLifecycle(fallbackProducts, []);
-      const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
-      const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
-      const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
-      const product = requestedSlug
-        ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
-        : null;
+async function buildStorePayload(requestedSlug: string) {
+  const redis = createRedisClient();
+  const sortProducts = (items: PublicStoreProduct[]) =>
+    [...items].sort(
+      (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
+    );
 
-      return NextResponse.json({
-        config: mergePublicConfig({}),
-        activeProducts,
-        archivedProducts,
-        upcomingProducts,
-        allProducts: lifecycleProducts,
-        product,
-        scheduleOverride: {},
-        socialOverride: {},
-        timestamp: Date.now(),
-        fromFallback: true,
-      });
-    }
-
-    const config = mergePublicConfig(await loadStoreConfig(redis));
-    const liveStates = await listLiveStates(redis);
-
-    let allProducts: PublicStoreProduct[] = [];
-    const allRaw = await redis.hgetall('store:products');
-    if (allRaw) {
-      for (const value of Object.values(allRaw)) {
-        const p = safeParseRedisItem<any>(value);
-        if (p) allProducts.push(sanitizeProduct(p));
-      }
-    }
-
-    // Redis empty → serve config fallbacks so the storefront is never blank.
-    if (allProducts.length === 0) {
-      allProducts = Object.values(getFallbackStoreProducts()).map(sanitizeProduct);
-    }
-
-    allProducts = sortProducts(allProducts);
-    const lifecycleProducts = applyLifecycle(allProducts, liveStates);
+  if (!redis) {
+    const fallbackProducts = sortProducts(Object.values(getFallbackStoreProducts()).map(sanitizeProduct));
+    const lifecycleProducts = applyLifecycle(fallbackProducts, []);
     const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
     const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
     const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
-
     const product = requestedSlug
       ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
       : null;
 
-    const scheduleRaw = await redis.get('config:drop_schedule');
-    const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
-    const socialRaw = await redis.get('config:social_proof');
-    const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
-
-    return NextResponse.json({
-      config,
+    return {
+      config: mergePublicConfig({}),
       activeProducts,
       archivedProducts,
       upcomingProducts,
       allProducts: lifecycleProducts,
       product,
-      scheduleOverride,
-      socialOverride,
+      scheduleOverride: {},
+      socialOverride: {},
       timestamp: Date.now(),
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+      fromFallback: true,
+    };
   }
+
+  const config = mergePublicConfig(await loadStoreConfigCached(redis));
+  const liveStates = await listLiveStates(redis);
+
+  let allProducts: PublicStoreProduct[] = [];
+  const allRaw = await redis.hgetall('store:products');
+  if (allRaw) {
+    for (const value of Object.values(allRaw)) {
+      const p = safeParseRedisItem<any>(value);
+      if (p) allProducts.push(sanitizeProduct(p));
+    }
+  }
+
+  // Redis empty → serve config fallbacks so the storefront is never blank.
+  if (allProducts.length === 0) {
+    allProducts = Object.values(getFallbackStoreProducts()).map(sanitizeProduct);
+  }
+
+  allProducts = sortProducts(allProducts);
+  const lifecycleProducts = applyLifecycle(allProducts, liveStates);
+  const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
+  const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
+  const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
+
+  const product = requestedSlug
+    ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
+    : null;
+
+  const scheduleRaw = await redis.get('config:drop_schedule');
+  const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
+  const socialRaw = await redis.get('config:social_proof');
+  const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
+
+  return {
+    config,
+    activeProducts,
+    archivedProducts,
+    upcomingProducts,
+    allProducts: lifecycleProducts,
+    product,
+    scheduleOverride,
+    socialOverride,
+    timestamp: Date.now(),
+  };
 }

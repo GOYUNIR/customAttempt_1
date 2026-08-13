@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import SiteChrome from '@/components/SiteChrome';
-import { createRedisClient, loadStoreConfig } from '@/lib/server-config';
-
-export const dynamic = 'force-dynamic';
+import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 
 export async function generateMetadata(): Promise<Metadata> {
   const redis = createRedisClient();
-  const config = await loadStoreConfig(redis);
+  const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const shareDescription = String(branding.shareDescription || 'Luxury raffle drops and direct releases built for high-intent mobile traffic.');
   const themeColor = String(branding.shareAccent || config.themeColors?.accentBlue || '#3b82f6');

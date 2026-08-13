@@ -1,13 +1,12 @@
 import { ImageResponse } from 'next/og';
-import { createRedisClient, loadStoreConfig } from '@/lib/server-config';
+import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 
 export const size = { width: 32, height: 32 };
 export const contentType = 'image/png';
-export const dynamic = 'force-dynamic';
 
 export default async function Icon() {
   const redis = createRedisClient();
-  const config = await loadStoreConfig(redis);
+  const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
   const background = String(branding.iconBackground || branding.shareBackground || '#111111');

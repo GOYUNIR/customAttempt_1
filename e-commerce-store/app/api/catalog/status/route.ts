@@ -8,10 +8,34 @@ import {
   listLiveStates,
   safeParseRedisItem,
 } from '@/lib/server-config';
+import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  try {
+    const payload = await withTtlCache('catalog:status:v1', 15_000, () => buildCatalogPayload());
+    return NextResponse.json(payload);
+  } catch (err: any) {
+    console.error('[catalog/status] Error:', err);
+    return NextResponse.json(
+      {
+        error: err?.message || 'Unknown error',
+        activeDrops: [],
+        upcomingDrops: [],
+        archiveScents: [],
+        archivedProductIds: [],
+        soldOutProductIds: [],
+        notesByProductId: {},
+        availableFromByProductId: {},
+        records: [],
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function buildCatalogPayload() {
   try {
     const redis = createRedisClient();
     const toMs = (value: unknown) => {
@@ -63,7 +87,7 @@ export async function GET() {
           soldOut: p.soldOut === true,
         }));
 
-      return NextResponse.json({
+      return {
         activeDrops,
         upcomingDrops,
         archiveScents,
@@ -73,7 +97,7 @@ export async function GET() {
         availableFromByProductId: {},
         records: [],
         fromFallback: true,
-      });
+      };
     }
 
     const archived = await getCatalogArchiveRecords(redis);
@@ -186,7 +210,7 @@ export async function GET() {
       ),
     );
 
-    return NextResponse.json({
+    return {
       activeDrops,
       upcomingDrops,
       archiveScents,
@@ -195,22 +219,19 @@ export async function GET() {
       notesByProductId: {},
       availableFromByProductId: {},
       records: archived,
-    });
+    };
   } catch (err: any) {
     console.error('[catalog/status] Error:', err);
-    return NextResponse.json(
-      {
-        error: err?.message || 'Unknown error',
-        activeDrops: [],
-        upcomingDrops: [],
-        archiveScents: [],
-        archivedProductIds: [],
-        soldOutProductIds: [],
-        notesByProductId: {},
-        availableFromByProductId: {},
-        records: [],
-      },
-      { status: 500 },
-    );
+    return {
+      error: err?.message || 'Unknown error',
+      activeDrops: [],
+      upcomingDrops: [],
+      archiveScents: [],
+      archivedProductIds: [],
+      soldOutProductIds: [],
+      notesByProductId: {},
+      availableFromByProductId: {},
+      records: [],
+    };
   }
 }

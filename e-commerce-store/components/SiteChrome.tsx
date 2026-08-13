@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 type CartItem = {
   productId: string;
@@ -57,9 +58,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [checkoutAddress, setCheckoutAddress] = useState('');
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [cartMsg, setCartMsg] = useState('');
-  const [scrollY, setScrollY] = useState(0);
-  const [pointerX, setPointerX] = useState(0.5);
-  const [pointerY, setPointerY] = useState(0.35);
   const [theme, setTheme] = useState<any>(null);
   const [branding, setBranding] = useState<any>(null);
   const [promoCode, setPromoCode] = useState('');
@@ -75,6 +73,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const lastScrollYRef = useRef(0);
   const lastScrollAtRef = useRef(0);
   const noticeTimerRef = useRef<number | null>(null);
+  // Background glow is animated via direct DOM writes (refs) so the ~60fps
+  // idle/pointer drift never triggers a React re-render of the whole app.
+  const easedXRef = useRef(0.5);
+  const easedYRef = useRef(0.35);
+  const orbPrimaryRef = useRef<HTMLDivElement | null>(null);
+  const orbSecondaryRef = useRef<HTMLDivElement | null>(null);
+  const orbTertiaryRef = useRef<HTMLDivElement | null>(null);
 
   const showNotice = (next: { id?: string; type: string; message: string; persist?: boolean }) => {
     setNotice({ id: next.id, type: next.type, message: next.message });
@@ -96,7 +101,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     const open = () => setCartOpen(true);
     const onScroll = () => {
       const nextScroll = window.scrollY || 0;
-      setScrollY(nextScroll);
       if (nextScroll > 120) setShowScrollCue(false);
       else if (nextScroll < 40) setShowScrollCue(true);
     };
@@ -119,12 +123,31 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       lastInteraction = Date.now();
     };
 
+    // Pushes the eased glow position straight onto the DOM (no React state),
+    // which keeps the animation at 60fps without re-rendering the app. The
+    // CSS variables live on <html> so both the background glow and the header
+    // accent glow can read them.
+    const applyGlow = (x: number, y: number) => {
+      const primary = orbPrimaryRef.current;
+      const secondary = orbSecondaryRef.current;
+      const tertiary = orbTertiaryRef.current;
+      if (!primary || !secondary || !tertiary) return;
+      const vw = window.innerWidth || 1;
+      const vh = window.innerHeight || 1;
+      document.documentElement.style.setProperty('--glow-x', `${15 + x * 70}%`);
+      document.documentElement.style.setProperty('--glow-y', `${8 + y * 55}%`);
+      primary.style.transform = `translate3d(${((-16 + x * 68) / 100) * vw}px, ${((-8 + y * 72) / 100) * vh}px, 0)`;
+      secondary.style.transform = `translate3d(${((56 - x * 32) / 100) * vw}px, ${((48 - y * 26) / 100) * vh}px, 0)`;
+      tertiary.style.transform = `translate3d(${((18 + x * 24) / 100) * vw}px, ${((62 - y * 18) / 100) * vh}px, 0)`;
+    };
+
     let rafId = 0;
     let idleTargetX = 0.52;
-
     let idleTargetY = 0.42;
     let nextIdleRetargetAt = Date.now() + 2300;
+    let running = true;
     const animateIdle = () => {
+      if (!running) return;
       const now = Date.now();
       const idleFor = now - lastInteraction;
       const scrollMomentumAge = now - lastScrollAtRef.current;
@@ -146,8 +169,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.02 + microDriftX, 0.05, 0.95);
         targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.02 + microDriftY, 0.08, 0.92);
       }
-      setPointerX((prev) => clamp(prev + (targetXRef.current - prev) * 0.06, 0.05, 0.95));
-      setPointerY((prev) => clamp(prev + (targetYRef.current - prev) * 0.06, 0.08, 0.92));
+      const easedX = clamp(easedXRef.current + (targetXRef.current - easedXRef.current) * 0.06, 0.05, 0.95);
+      const easedY = clamp(easedYRef.current + (targetYRef.current - easedYRef.current) * 0.06, 0.08, 0.92);
+      easedXRef.current = easedX;
+      easedYRef.current = easedY;
+      applyGlow(easedX, easedY);
       rafId = window.requestAnimationFrame(animateIdle);
     };
 
@@ -188,8 +214,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       }
     }
 
-    fetch('/api/store')
-      .then((res) => res.json())
+    fetchStoreJson('/api/store')
       .then((data) => {
         setTheme(data?.config?.themeColors || null);
         setBranding(data?.config?.branding || null);
@@ -215,6 +240,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       });
     };
 
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        running = false;
+        window.cancelAnimationFrame(rafId);
+      } else if (!running) {
+        running = true;
+        rafId = window.requestAnimationFrame(animateIdle);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     window.addEventListener('goyunir-open-cart', open as EventListener);
     window.addEventListener('goyunir-cart-updated', sync as EventListener);
     window.addEventListener('storage', sync);
@@ -224,8 +260,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('pointermove', onPointer, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
     rafId = window.requestAnimationFrame(animateIdle);
+    applyGlow(easedXRef.current, easedYRef.current);
     const cueTimer = window.setTimeout(() => setShowScrollCue((current) => (current ? true : current)), 600);
     return () => {
+      running = false;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('goyunir-open-cart', open as EventListener);
       window.removeEventListener('goyunir-cart-updated', sync as EventListener);
       window.removeEventListener('storage', sync);
@@ -320,23 +359,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
   }, [headerActionMode]);
 
-  const glowX = 15 + pointerX * 70;
-  const glowY = 8 + pointerY * 55;
-  const blurBoost = Math.min(10, Math.floor(scrollY / 60));
-  const orbPrimaryX = -16 + pointerX * 68;
-  const orbPrimaryY = -8 + pointerY * 72;
-  const orbSecondaryX = 56 - pointerX * 32;
-  const orbSecondaryY = 48 - pointerY * 26;
-  const orbTertiaryX = 18 + pointerX * 24;
-  const orbTertiaryY = 62 - pointerY * 18;
-
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
-        <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(circle at ${glowX}% ${glowY}%, rgba(255,255,255,0.022), transparent 16%)` }} />
-        <div style={{ position: 'absolute', width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, left: `${orbPrimaryX}%`, top: `${orbPrimaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `${headerAccent}22`, filter: 'blur(48px)', willChange: 'transform,left,top', opacity: 0.95 }} />
-        <div style={{ position: 'absolute', width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, left: `${orbSecondaryX}%`, top: `${orbSecondaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(168,85,247,0.18)', filter: 'blur(54px)', willChange: 'transform,left,top', opacity: 0.92 }} />
-        <div style={{ position: 'absolute', width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, left: `${orbTertiaryX}%`, top: `${orbTertiaryY}%`, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(255,244,214,0.09)', filter: 'blur(34px)', willChange: 'transform,left,top', opacity: 0.9 }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at var(--glow-x, 50%) var(--glow-y, 35%), rgba(255,255,255,0.022), transparent 16%)' }} />
+        <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `${headerAccent}22`, filter: 'blur(48px)', willChange: 'transform', opacity: 0.95 }} />
+        <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(168,85,247,0.18)', filter: 'blur(54px)', willChange: 'transform', opacity: 0.92 }} />
+        <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'rgba(255,244,214,0.09)', filter: 'blur(34px)', willChange: 'transform', opacity: 0.9 }} />
       </div>
       {bannerMessage && (
         <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
@@ -371,16 +400,16 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           minHeight: '84px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           background: `${headerBg}`,
-          backdropFilter: `blur(${20 + blurBoost}px)`,
+          backdropFilter: 'blur(18px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '12px 12px 14px',
           zIndex: 100,
           boxSizing: 'border-box',
-          transform: `translateY(${Math.min(8, scrollY * 0.02)}px)`,
+          transform: 'translateY(0)',
           transition: 'transform 160ms ease, backdrop-filter 220ms ease',
-          backgroundImage: `radial-gradient(circle at ${glowX}% -20%, ${headerAccent}33, transparent 35%)`,
+          backgroundImage: `radial-gradient(circle at var(--glow-x, 50%) -20%, ${headerAccent}33, transparent 35%)`,
           boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
         }}
       >

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 export default function HomePage() {
   const [loading, setLoading] = useState(true);
@@ -12,16 +13,23 @@ export default function HomePage() {
   const [nowTick, setNowTick] = useState(Date.now());
   const configPalette = GOYUNIR_STORE_SUITE.themeColors;
 
+  // Only tick the clock while at least one release shows a live countdown —
+  // otherwise the whole page re-renders every second for nothing.
+  const needsCountdown = activeProducts.some((product: any) => {
+    const releaseEndsAt = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
+    return Number.isFinite(releaseEndsAt) && releaseEndsAt > Date.now();
+  });
+
   useEffect(() => {
+    if (!needsCountdown) return;
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [needsCountdown]);
 
   useEffect(() => {
     async function checkProducts() {
       try {
-        const res = await fetch('/api/store');
-        const data = await res.json();
+        const data = await fetchStoreJson('/api/store');
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];

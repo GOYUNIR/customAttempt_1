@@ -34,10 +34,20 @@ export default function CatalogPage() {
   const [clock, setClock] = useState(Date.now());
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Only tick the clock while any tile shows a live countdown (a future
+  // goLive/available date) — avoids re-rendering the whole catalog every second.
+  const needsClock = [...activeDrops, ...upcomingDrops, ...archiveScents].some((item) => {
+    const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || '');
+    if (!target) return false;
+    const ms = new Date(target).getTime();
+    return Number.isFinite(ms) && ms > Date.now();
+  });
+
   useEffect(() => {
+    if (!needsClock) return;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [needsClock]);
 
   const formatCountdown = (value?: string) => {
     const target = value ? new Date(value).getTime() : NaN;

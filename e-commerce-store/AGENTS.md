@@ -179,3 +179,14 @@ All fields (including price, Stripe ID, inventory, and winner tiers) are editabl
 
 ### Image upload
 You can upload image files directly (multiple at once) – they are stored as base64 data URLs. The system automatically numbers them (1, 2, 3…) and the `prefix` is derived from the product `slug`.
+
+## Performance / Caching (read this before touching storefront perf)
+
+Public-facing display data is cached with short TTLs to keep the site snappy. This is intentional and safe — admin writes bypass the caches, so no data is lost; the only effect is that **storefront display data can lag up to a few seconds** behind a change.
+
+- `lib/ttl-cache.ts` — server-side in-memory TTL cache (`withTtlCache(key, ttlMs, fetcher)`). Used by `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s), the heartbeat social-proof tally (15s), and `loadStoreConfigCached` (30s, used by layout metadata / favicon / OG image).
+- `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes in-flight requests and reuses results for 10s. HomePage and SiteChrome both fetch `/api/store`; this makes it a single round trip.
+- `app/layout.tsx` has **no** `force-dynamic` — the page shell is statically prerendered (`/`, `/catalog`, legal pages). Product slugs (`/[slug]`) and admin/account remain dynamic on purpose.
+- `components/SiteChrome.tsx` animates the background glow via **direct DOM writes** (refs + CSS custom properties), never React state, so the ~60fps idle drift does not re-render the app. Keep it that way.
+- Home (`app/page.tsx`) and Catalog (`app/catalog/page.tsx`) only run their 1-second countdown tickers while a live countdown is actually visible.
+- If you add a new public read endpoint, wrap its Redis reads in `withTtlCache` with a short TTL instead of hitting Redis on every request. If you change storefront config/settings, remember the public site may show cached values for up to 30s.

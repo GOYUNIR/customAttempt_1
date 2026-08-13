@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,11 +34,15 @@ export async function GET(request: Request) {
         if (now % 3 === 0) await redis.zremrangebyscore(trafficKey, 0, now - 60 * 1000);
       }
 
-      // Always computed fresh from real numbers — no ratchet, so wins
-      // and cancellations correctly SUBTRACT from the displayed count.
-      const trueSub = await sumAllSubs(redis);
-      const boost = Number((await redis.get(SOCIAL_PROOF_BOOST_KEY)) ?? 0);
-      socialProofDisplay = Math.max(0, socialCfg.baseCount + trueSub + boost);
+      // The entry/subscription tally is recomputed on every page load today;
+      // cache the read-heavy tally for a few seconds so repeat requests are
+      // cheap while still reflecting new entries within the TTL.
+      const tally = await withTtlCache('analytics:social-proof-tally:v1', 15_000, async () => {
+        const trueSub = await sumAllSubs(redis);
+        const boost = Number((await redis.get(SOCIAL_PROOF_BOOST_KEY)) ?? 0);
+        return { trueSub, boost };
+      });
+      socialProofDisplay = Math.max(0, socialCfg.baseCount + tally.trueSub + tally.boost);
     }
 
     return NextResponse.json({ socialProofDisplay });

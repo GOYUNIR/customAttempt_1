@@ -1,6 +1,7 @@
 import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { withTtlCache } from '@/lib/ttl-cache';
 
 export const STORE_CONFIG_KEY = 'store:config';
 
@@ -63,6 +64,16 @@ export async function loadStoreConfig(redis: Redis | null | undefined): Promise<
   } catch {
     return {};
   }
+}
+
+/**
+ * Cached variant for public-facing reads (layout metadata, favicon, OG image,
+ * storefront theme). Branding/theme changes are documented as requiring a
+ * rebuild anyway, so a short TTL here is safe and removes a Redis round trip
+ * from every request on warm instances.
+ */
+export function loadStoreConfigCached(redis: Redis | null | undefined): Promise<Record<string, any>> {
+  return withTtlCache('store:config', 30_000, () => loadStoreConfig(redis));
 }
 
 export const POOL_STATS_KEY = 'stats:pools';
