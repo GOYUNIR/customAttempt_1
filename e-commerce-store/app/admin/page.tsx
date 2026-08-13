@@ -1279,7 +1279,7 @@ export default function AdminPortal() {
 
   const organizeRedis = async () => {
     if (!password) return alert('Enter password');
-    setOrganizeMsg('Organizing Redis keys...');
+    setOrganizeMsg('Cleaning up redundant Redis keys...');
     try {
       const res = await adminFetch('/api/admin/organize-redis', {
         method: 'POST',
@@ -1288,15 +1288,16 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setOrganizeMsg(`Organized: ${data.products} products, ${data.upcoming} upcoming, ${data.archived} archived.`);
-        showToast('UPDATED · Redis organized');
+        const detail = Array.isArray(data.removed) && data.removed.length > 0 ? ` Removed: ${data.removed.join(', ')}` : '';
+        setOrganizeMsg((data.message || 'Redis cleanup complete.') + detail);
+        showToast('UPDATED · Redis cleaned');
         await fetchProducts();
         await fetchCatalogSettings();
       } else {
-        setOrganizeMsg(data.error || 'Failed to organize Redis.');
+        setOrganizeMsg(data.error || 'Failed to clean up Redis.');
       }
     } catch (err: any) {
-      setOrganizeMsg(err.message || 'Failed to organize Redis.');
+      setOrganizeMsg(err.message || 'Failed to clean up Redis.');
     }
   };
 
@@ -2584,11 +2585,11 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Redis Organization</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Redis Cleanup</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                Rebuilds active, upcoming, and archive indexes from canonical product records and syncs catalog groupings.
+                Deletes legacy redundant keys (product mirror hashes, standalone image keys, and the old catalog_config copy). Products and settings live in single source-of-truth keys, so nothing here removes real data.
               </p>
-              <button onClick={organizeRedis} style={buttonGhost}>Normalize Redis Keys</button>
+              <button onClick={organizeRedis} style={buttonGhost}>Clean Up Redis</button>
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
             </div>
           </div>

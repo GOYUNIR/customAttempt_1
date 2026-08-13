@@ -3,12 +3,11 @@ import { createRedisClient , getAdminPassword, defaultStripePriceId} from '@/lib
 
 export const dynamic = 'force-dynamic';
 
+// Single source of truth: products live ONLY in `store:products`. The
+// storefront derives active/archived/upcoming by filtering these flags at read
+// time (see /api/store and /api/catalog/status), so no mirror hashes exist.
 const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
 const CONFIG_KEY = 'store:config';
-const CATALOG_CONFIG_KEY = 'store:catalog_config';
 
 // Seeded products – now using priceCategories, no price50ml/100ml.
 const NOW = new Date().toISOString();
@@ -227,29 +226,13 @@ export async function GET(request: Request) {
       });
     }
 
-    await Promise.all([
-      redis.del(ACTIVE_PRODUCTS_KEY),
-      redis.del(ARCHIVED_PRODUCTS_KEY),
-      redis.del(UPCOMING_PRODUCTS_KEY),
-    ]);
-
     let seeded = 0;
     for (const product of DEFAULT_PRODUCTS) {
       await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      if (product.isActive) {
-        await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      }
-      if (product.isArchived) {
-        await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      }
-      if (product.isUpcoming) {
-        await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      }
       seeded++;
     }
 
     await redis.set(CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
-    await redis.set(CATALOG_CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG.catalogPreview));
 
     const verify = await redis.hgetall(PRODUCTS_KEY);
     const verifyCount = verify ? Object.keys(verify).length : 0;

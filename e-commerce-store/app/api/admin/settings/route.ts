@@ -60,10 +60,7 @@ export async function POST(request: Request) {
     };
 
     await redis.set(SETTINGS_KEY, JSON.stringify(settings));
-    
-    // Also update the store config for the frontend
-    await redis.set('store:config', JSON.stringify(settings));
-    
+
     return NextResponse.json({ success: true, settings });
   } catch (err: any) {
     console.error('[Settings API] POST Error:', err);

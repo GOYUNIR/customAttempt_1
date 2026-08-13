@@ -64,17 +64,9 @@ export async function POST(request: Request) {
     }
     product.updatedAt = new Date().toISOString();
 
-    // Save back to Redis
+    // Save back to Redis. Images live inside the product object ONLY — there
+    // is no separate `store:product_images:*` key to keep in sync.
     await redis.hset(PRODUCTS_KEY, { [productId]: JSON.stringify(product) });
-
-    // Also update the active/archived/upcoming indexes if needed
-    if (product.isActive && !product.isArchived && !product.isUpcoming) {
-      await redis.hset('store:active_products', { [productId]: JSON.stringify(product) });
-    } else if (product.isArchived) {
-      await redis.hset('store:archived_products', { [productId]: JSON.stringify(product) });
-    } else if (product.isUpcoming) {
-      await redis.hset('store:upcoming_products', { [productId]: JSON.stringify(product) });
-    }
 
     return NextResponse.json({
       success: true,

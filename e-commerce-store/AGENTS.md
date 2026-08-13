@@ -19,14 +19,17 @@ GOYUNIR is a raffle/drop allocation storefront built on Next.js with Redis as th
 
 ### Key Redis Keys
 
-store:products - All products
-store:active_products - Active products (shown on storefront)
-store:archived_products - Archived products (shown in catalog archive)
-store:product_images - Product 360° rotation images
-store:config - Site configuration (colors, hero, footer, etc.)
-drop_pool:* - Entry pools for each product/size
-archive:ledger - Permanent entry history
-address:submissions - Addresses captured by the standalone address form (`/address-checkout-form.html`)
+The store uses a **single source of truth** model — products and settings each live in exactly ONE key, and the storefront derives views (active/archived/upcoming) by filtering at read time. There are NO mirror hashes or duplicate image keys to keep in sync.
+
+- `store:products` (hash) – THE canonical product records. All `images` (including base64 uploads) live inside each product object.
+- `store:config` (string) – THE canonical site configuration: colors, hero, footer, drop schedule, social proof, branding, `catalogPreview` (upcoming/archive groupings), orbs, etc.
+- `drop_pool:*` – Entry pools for each product/size
+- `intent_pool:*` – Pre-payment intent pools for each product/size
+- `archive:ledger` – Permanent entry history
+- `address:submissions` – Addresses captured by the standalone address form (`/address-checkout-form.html`)
+- `live_state` / `catalog:archive_state` / `stats:*` / `config:promos` / `drop_fraud_block:*` / `email:*` – Operational data, not display data.
+
+**Legacy keys that no longer exist** (removed via the **Clean Up Redis** button on `/admin` → Developer tab): `store:active_products`, `store:archived_products`, `store:upcoming_products` (full JSON copies of products), `store:product_images:*` (duplicate image arrays), and `store:catalog_config` (duplicate catalog groupings). If you ever see them, run Clean Up Redis — do NOT rebuild them.
 
 ### Address Capture Pages
 - **`public/address-checkout-form.html`** is a standalone address form served at `/address-checkout-form.html`.
@@ -77,9 +80,10 @@ address:submissions - Addresses captured by the standalone address form (`/addre
 
 ### Files to NEVER Modify
 - `components/Storefront.tsx` – Modify carefully (cart/checkout/product-page flow; no fallback catalog is served here)
-- `app/api/store/config/route.ts` – Critical for site loading
 - `app/[slug]/page.tsx` – Product page routing
 - `goyunir.config.ts` – Only change if you need a new hardcoded default; prefer using admin portal
+
+`app/api/store/config/route.ts` is a legacy endpoint (nothing in the client calls it — the site uses `/api/store`). It is kept functional and now derives products from `store:products` like every other read path; change it carefully if you touch it.
 
 ## Environment Variables (set in Vercel)
 

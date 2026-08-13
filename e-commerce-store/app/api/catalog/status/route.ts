@@ -64,9 +64,12 @@ async function buildCatalogPayload() {
 
     const archived = await getCatalogArchiveRecords(redis);
     const archivedProductIds = archived.map((r) => r.productId);
-    const catalogConfig = safeParseRedisItem<any>(await redis.get('store:catalog_config')) || {};
-    const configuredUpcoming = Array.isArray(catalogConfig.upcomingDrops) ? catalogConfig.upcomingDrops : [];
-    const configuredArchive = Array.isArray(catalogConfig.archiveScents) ? catalogConfig.archiveScents : [];
+    // Catalog groupings are stored inside store:config.catalogPreview (single
+    // source of truth) — there is no separate `store:catalog_config` key.
+    const storeConfig = safeParseRedisItem<any>(await redis.get('store:config')) || {};
+    const catalogPreview = storeConfig.catalogPreview || {};
+    const configuredUpcoming = Array.isArray(catalogPreview.upcomingDrops) ? catalogPreview.upcomingDrops : [];
+    const configuredArchive = Array.isArray(catalogPreview.archiveScents) ? catalogPreview.archiveScents : [];
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
 

@@ -5,11 +5,9 @@ import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
 export const dynamic = 'force-dynamic';
 
 const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
-const IMAGES_KEY = 'store:product_images';
-const CATALOG_CONFIG_KEY = 'store:catalog_config';
+// Catalog preview (upcoming/archive groupings) is stored inside store:config
+// (single source of truth). There is intentionally NO separate key for it.
+const STORE_CONFIG_KEY = 'store:config';
 
 function toBool(value: any, fallback = false) {
   if (typeof value === 'boolean') return value;
@@ -26,10 +24,13 @@ async function syncCatalogConfigForProduct(
   product: any,
   options?: { previousSlug?: string; previousName?: string },
 ) {
-  const raw = await redis.get(CATALOG_CONFIG_KEY);
+  // Catalog groupings live in store:config.catalogPreview (single source of
+  // truth). Read-modify-write so manual admin entries are preserved.
+  const raw = await redis.get(STORE_CONFIG_KEY);
   const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
-  const upcomingDrops = Array.isArray(parsed?.upcomingDrops) ? parsed.upcomingDrops : [];
-  const archiveScents = Array.isArray(parsed?.archiveScents) ? parsed.archiveScents : [];
+  const preview = parsed?.catalogPreview || {};
+  const upcomingDrops = Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [];
+  const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];
 
   const upcomingEntry = {
     name: product.name,
@@ -73,7 +74,7 @@ async function syncCatalogConfigForProduct(
     nextArchive.push(archiveEntry);
   }
 
-  await redis.set(CATALOG_CONFIG_KEY, JSON.stringify({ upcomingDrops: nextUpcoming, archiveScents: nextArchive }));
+  await redis.set(STORE_CONFIG_KEY, JSON.stringify({ ...parsed, catalogPreview: { upcomingDrops: nextUpcoming, archiveScents: nextArchive } }));
 }
 
 async function saveProduct(redis: any, product: any, options?: { previousSlug?: string; previousName?: string }) {
@@ -83,23 +84,9 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
   if (product.isArchived) product.isUpcoming = false;
   if (product.isUpcoming) product.isArchived = false;
 
+  // Products live ONLY in store:products. No mirror hashes to maintain —
+  // active/archived/upcoming are derived by filtering at read time.
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  await redis.hdel(ACTIVE_PRODUCTS_KEY, product.id);
-  await redis.hdel(ARCHIVED_PRODUCTS_KEY, product.id);
-  await redis.hdel(UPCOMING_PRODUCTS_KEY, product.id);
-
-  if (product.isActive) {
-    await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  }
-  if (product.isArchived) {
-    await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  }
-  if (product.isUpcoming) {
-    await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-  }
-  if (product.images && product.images.length > 0) {
-    await redis.set(`${IMAGES_KEY}:${product.id}`, JSON.stringify(product.images));
-  }
 
   await syncCatalogConfigForProduct(redis, product, options);
 }
@@ -115,10 +102,6 @@ async function deleteProduct(redis: any, id: string) {
     }
   }
   await redis.hdel(PRODUCTS_KEY, id);
-  await redis.hdel(ACTIVE_PRODUCTS_KEY, id);
-  await redis.hdel(ARCHIVED_PRODUCTS_KEY, id);
-  await redis.hdel(UPCOMING_PRODUCTS_KEY, id);
-  await redis.del(`${IMAGES_KEY}:${id}`);
   if (deletedProduct) {
     await syncCatalogConfigForProduct(redis, { ...deletedProduct, isUpcoming: false, isArchived: false });
   }

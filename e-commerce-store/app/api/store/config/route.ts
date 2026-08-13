@@ -6,11 +6,9 @@ import { mergeOrbsConfig } from '@/lib/storefront-config';
 export const dynamic = 'force-dynamic';
 
 const CONFIG_KEY = 'store:config';
+// Products live ONLY in store:products — active/archived/upcoming are derived
+// by filtering on their flags, so no mirror hashes are read here.
 const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
-const IMAGES_KEY = 'store:product_images';
 
 type StoreProduct = {
   id: string;
@@ -169,66 +167,20 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    let activeProducts: StoreProduct[] = [];
-    let archivedProducts: StoreProduct[] = [];
-    let upcomingProducts: StoreProduct[] = [];
+    // Single read of the canonical product hash, then derive sections by flags.
+    // Images are already embedded in each product object (no N+1 lookups).
     let allProducts: StoreProduct[] = [];
-
-    // Get active products from Redis
-    const activeRaw = await redis.hgetall(ACTIVE_PRODUCTS_KEY);
-    if (activeRaw) {
-      for (const [k, v] of Object.entries(activeRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
-          activeProducts.push({ ...p, images });
-        }
-      }
-    }
-
-    // Get archived products
-    const archivedRaw = await redis.hgetall(ARCHIVED_PRODUCTS_KEY);
-    if (archivedRaw) {
-      for (const [k, v] of Object.entries(archivedRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
-          archivedProducts.push({ ...p, images });
-        }
-      }
-    }
-
-    // Get upcoming products
-    const upcomingRaw = await redis.hgetall(UPCOMING_PRODUCTS_KEY);
-    if (upcomingRaw) {
-      for (const [k, v] of Object.entries(upcomingRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
-          upcomingProducts.push({ ...p, images });
-        }
-      }
-    }
-
-    // Get all products
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
     if (allRaw) {
-      for (const [k, v] of Object.entries(allRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(v);
-        if (p) {
-          const imgKey = `${IMAGES_KEY}:${p.id}`;
-          const imgRaw = await redis.get(imgKey);
-          const images = safeParseRedisItem<string[]>(imgRaw) || p.images || [];
-          allProducts.push({ ...p, images });
-        }
+      for (const value of Object.values(allRaw)) {
+        const p = safeParseRedisItem<StoreProduct>(value);
+        if (p) allProducts.push(p);
       }
     }
+
+    let activeProducts = allProducts.filter((p) => p.isActive && !p.isArchived && !p.isUpcoming);
+    let archivedProducts = allProducts.filter((p) => p.isArchived);
+    let upcomingProducts = allProducts.filter((p) => p.isUpcoming && !p.isArchived);
 
     {
       activeProducts = sortProducts(activeProducts);

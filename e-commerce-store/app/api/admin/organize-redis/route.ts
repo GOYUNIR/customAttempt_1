@@ -1,13 +1,29 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, getAdminPassword, safeParseRedisItem } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
-const PRODUCTS_KEY = 'store:products';
-const ACTIVE_PRODUCTS_KEY = 'store:active_products';
-const ARCHIVED_PRODUCTS_KEY = 'store:archived_products';
-const UPCOMING_PRODUCTS_KEY = 'store:upcoming_products';
+// ============================================================
+// REDIS CLEANUP — removes legacy redundant keys.
+//
+// The store has a single source of truth for products (`store:products`) and
+// settings (`store:config`). These legacy keys were mirror copies or
+// duplicates that used to be kept in sync on every write:
+//   - store:active_products / store:archived_products / store:upcoming_products
+//       Full JSON copies of products already stored in store:products.
+//       The storefront derives these by filtering product flags at read time.
+//   - store:product_images:* — copies of the images array already embedded in
+//       each product object.
+//   - store:catalog_config — a third copy of catalog groupings now stored in
+//       store:config.catalogPreview.
+// ============================================================
+const MIRROR_KEYS = [
+  'store:active_products',
+  'store:archived_products',
+  'store:upcoming_products',
+];
 const CATALOG_CONFIG_KEY = 'store:catalog_config';
+const PRODUCT_IMAGES_PREFIX = 'store:product_images:';
 
 export async function POST(request: Request) {
   try {
@@ -21,53 +37,59 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    const raw = await redis.hgetall(PRODUCTS_KEY);
-    const products = Object.values(raw || {}).map((value) => safeParseRedisItem<any>(value)).filter(Boolean) as any[];
+    const removed: string[] = [];
 
-    await Promise.all([
-      redis.del(ACTIVE_PRODUCTS_KEY),
-      redis.del(ARCHIVED_PRODUCTS_KEY),
-      redis.del(UPCOMING_PRODUCTS_KEY),
-    ]);
-
-    const upcomingDrops: any[] = [];
-    const archiveScents: any[] = [];
-
-    for (const product of products) {
-      if (product.isActive) {
-        await redis.hset(ACTIVE_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      }
-      if (product.isArchived) {
-        await redis.hset(ARCHIVED_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-        archiveScents.push({
-          name: product.name,
-          status: 'Archived',
-          image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
-          description: product.desc || '',
-          slug: product.slug,
-        });
-      }
-      if (product.isUpcoming && !product.isArchived) {
-        await redis.hset(UPCOMING_PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-        upcomingDrops.push({
-          name: product.name,
-          status: 'Upcoming',
-          eta: product.tagline || 'Coming soon',
-          image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
-          description: product.desc || '',
-          slug: product.slug,
-        });
+    // 1) Drop the product mirror hashes (full duplicate payloads).
+    for (const key of MIRROR_KEYS) {
+      const exists = await redis.exists(key);
+      if (exists) {
+        await redis.del(key);
+        removed.push(key);
       }
     }
 
-    const dedupe = (items: any[]) => items.filter((item, index, all) => all.findIndex((other) => String(other.slug || other.name) === String(item.slug || item.name)) === index);
-    await redis.set(CATALOG_CONFIG_KEY, JSON.stringify({
-      upcomingDrops: dedupe(upcomingDrops),
-      archiveScents: dedupe(archiveScents),
-    }));
+    // 2) Drop the standalone per-product image keys (images live in products).
+    const imageKeys = await redis.keys(`${PRODUCT_IMAGES_PREFIX}*`);
+    if (Array.isArray(imageKeys) && imageKeys.length > 0) {
+      await redis.del(...imageKeys);
+      removed.push(`${PRODUCT_IMAGES_PREFIX}* (${imageKeys.length} keys)`);
+    }
 
-    return NextResponse.json({ success: true, products: products.length, upcoming: dedupe(upcomingDrops).length, archived: dedupe(archiveScents).length });
+    // 3) Migrate then drop the legacy catalog config copy. Manual entries
+    //    edited in the admin Catalog tab are folded into store:config.catalogPreview
+    //    (the canonical location) so nothing is lost before the old key is removed.
+    const catalogExists = await redis.exists(CATALOG_CONFIG_KEY);
+    if (catalogExists) {
+      const legacyCatalog = safeParseRedisItem<any>(await redis.get(CATALOG_CONFIG_KEY)) || {};
+      const configRaw = await redis.get('store:config');
+      const storeConfig = safeParseRedisItem<any>(configRaw) || {};
+      const preview = storeConfig.catalogPreview || {};
+      const upcomingDrops = Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [];
+      const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];
+      const legacyUpcoming = Array.isArray(legacyCatalog.upcomingDrops) ? legacyCatalog.upcomingDrops : [];
+      const legacyArchive = Array.isArray(legacyCatalog.archiveScents) ? legacyCatalog.archiveScents : [];
+      const dedupeBySlug = (items: any[]) =>
+        items.filter((item, index, all) => all.findIndex((other) => String(other.slug || other.name) === String(item.slug || item.name)) === index);
+      const migratedUpcoming = dedupeBySlug([...upcomingDrops, ...legacyUpcoming]);
+      const migratedArchive = dedupeBySlug([...archiveScents, ...legacyArchive]);
+      const merged = {
+        ...storeConfig,
+        catalogPreview: { upcomingDrops: migratedUpcoming, archiveScents: migratedArchive },
+        updatedAt: new Date().toISOString(),
+      };
+      if (JSON.stringify(merged) !== configRaw) {
+        await redis.set('store:config', JSON.stringify(merged));
+      }
+      await redis.del(CATALOG_CONFIG_KEY);
+      removed.push(`${CATALOG_CONFIG_KEY} (migrated into store:config.catalogPreview)`);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: removed.length > 0 ? `Removed ${removed.length} redundant key group(s).` : 'Nothing to clean — Redis is already tidy.',
+      removed,
+    });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Unable to organize Redis' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Unable to clean up Redis' }, { status: 500 });
   }
 }

@@ -3,17 +3,18 @@ import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/s
 
 export const dynamic = 'force-dynamic';
 
-const CATALOG_CONFIG_KEY = 'store:catalog_config';
-
 export async function GET() {
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ upcomingDrops: [], archiveScents: [] });
 
-  const raw = await redis.get(CATALOG_CONFIG_KEY);
+  // Catalog groupings are stored inside store:config.catalogPreview (single
+  // source of truth) — shared with the admin Settings tab.
+  const raw = await redis.get('store:config');
   const config = safeParseRedisItem<any>(raw) || {};
+  const preview = config.catalogPreview || {};
   return NextResponse.json({
-    upcomingDrops: config.upcomingDrops || [],
-    archiveScents: config.archiveScents || [],
+    upcomingDrops: Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [],
+    archiveScents: Array.isArray(preview.archiveScents) ? preview.archiveScents : [],
   });
 }
 
@@ -30,6 +31,16 @@ export async function POST(request: Request) {
   const upcomingDrops = Array.isArray(body?.upcomingDrops) ? body.upcomingDrops : [];
   const archiveScents = Array.isArray(body?.archiveScents) ? body.archiveScents : [];
 
-  await redis.set(CATALOG_CONFIG_KEY, JSON.stringify({ upcomingDrops, archiveScents }));
+  // Read-modify-write store:config so non-catalog settings are preserved.
+  const raw = await redis.get('store:config');
+  const current = safeParseRedisItem<any>(raw) || {};
+  await redis.set(
+    'store:config',
+    JSON.stringify({
+      ...current,
+      catalogPreview: { upcomingDrops, archiveScents },
+      updatedAt: new Date().toISOString(),
+    }),
+  );
   return NextResponse.json({ success: true });
 }
