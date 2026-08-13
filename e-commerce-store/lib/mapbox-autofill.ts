@@ -288,7 +288,7 @@ export function getAutofillAddressValue(input?: HTMLInputElement | null): string
   const inputs = findAddressInputs();
   if (inputs.length === 0) return '';
   const active = document.activeElement as HTMLInputElement | null;
-  if (active && active.matches && inputs.includes(active)) return read(active);
+  if (active && inputs.includes(active)) return read(active);
   return read(inputs[inputs.length - 1]);
 }
 
@@ -494,7 +494,7 @@ function startAttachLoop(): void {
     }
     // Eligible inputs exist but nothing is attached — force the SDK to re-scan.
     try {
-      collection?.update();
+      collection?.update?.();
     } catch (err) {
       console.warn('[mapbox-autofill] Retry update() failed:', err);
     }
@@ -595,7 +595,7 @@ export async function ensureMapboxAutofill(): Promise<void> {
     const initialAttach = verifyMapboxAttachment();
     if (initialAttach.attachedInputs === 0 && initialAttach.listboxes === 0) {
       try {
-        collection?.update();
+        collection?.update?.();
       } catch (err) {
         console.warn('[mapbox-autofill] Initial update() failed:', err);
       }
