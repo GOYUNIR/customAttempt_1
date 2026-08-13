@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { ensureMapboxAutofill } from '@/lib/mapbox-autofill';
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
@@ -167,6 +168,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setSelectedSize(cats[0].size);
     }
   }, [product, selectedSize]);
+
+  // Attach Mapbox address autofill once the product (and its address input) is
+  // rendered. The helper is a singleton, so calling it from multiple components
+  // is safe; the SDK only loads when a token is configured.
+  useEffect(() => {
+    if (!product) return;
+    ensureMapboxAutofill();
+  }, [product]);
 
   useEffect(() => {
     setCart(readStoredCart());
@@ -547,10 +556,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
-            <input type="text" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
-          </div>
+          {/* Mapbox address autofill requires the field to live inside a <form>. */}
+          <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+            <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: '#09090b', border: `1px solid ${configPalette.cardBorder}`, color: '#fff' }} />
+          </form>
 
           <div style={{ marginBottom: 8 }}>
             {!showPromoField ? (

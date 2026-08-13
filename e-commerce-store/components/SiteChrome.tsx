@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { ensureMapboxAutofill } from '@/lib/mapbox-autofill';
 
 type CartItem = {
   productId: string;
@@ -154,6 +155,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     orbsRef.current = orbs;
   }, [orbs]);
+
+  // Attach Mapbox address autofill to the cart drawer's shipping field. The
+  // helper is a singleton and its collection observes the document for inputs
+  // added later (the drawer only mounts when opened), so this call is enough.
+  useEffect(() => {
+    ensureMapboxAutofill();
+  }, []);
 
   useEffect(() => {
     const sync = () => setCart(readCart());
@@ -756,7 +764,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 <strong>${total.toFixed(2)}</strong>
               </div>
               {hasItems && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
                   <input
                     type="email"
                     autoComplete="email"
@@ -767,7 +775,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   />
                   <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: '#09090b', color: '#fff', fontSize: 12 }} />
                   {!showPromoField ? (
-                    <button onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+                    <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: '#c8c8cf', fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
                   ) : (
                     <input
                       type="text"
@@ -786,7 +794,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     {encryptionHealthy ? 'Encrypted checkout' : 'Encryption check failed'}
                   </div>
                   <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>These details stay remembered across product and cart checkout so collectors do not need to repeat themselves.</div>
-                </div>
+                </form>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems || raffleOnlyCart} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: '#f3f4f6', color: '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems || raffleOnlyCart ? 'not-allowed' : 'pointer' }}>

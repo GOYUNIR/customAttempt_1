@@ -33,6 +33,7 @@ address:submissions - Addresses captured by the standalone checkout pages (`/che
 - Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` is configured (or `window.ENV_MAPBOX_TOKEN` is injected at runtime). Without a token the forms still work via native browser autofill + manual entry.
 - Submitting posts to **`/api/address/save`**: the address is logged to `address:submissions`, and when the URL carries `?variant=&size=&email=` (and optionally `?orderRef=`) it is attached to the matching open entry. An already-set entry address is only overwritten when the matching `orderRef` is supplied.
 - The token placeholder is mapped into `data-mapbox-token` at build time by `scripts/inject-mapbox-token.mjs` (targets `public/` files).
+- The **React storefront** (item-page entry form in `components/Storefront.tsx` + cart drawer in `components/SiteChrome.tsx`) wires the same autofill through `lib/mapbox-autofill.ts`: token resolved from `window.ENV_MAPBOX_TOKEN` → `NEXT_PUBLIC_MAPBOX_TOKEN`, SDK loaded lazily once, and a single autofill collection `observe()`s the document so inputs mounted later (cart drawer) attach automatically. Those address inputs must stay **inside a `<form>`** with `autocomplete="shipping street-address"` — Mapbox only attaches to eligible inputs that are descendants of a `<form>`. No token → native browser autofill fallback (no dropdown).
 
 
 ### Admin Portal (`/admin`)
