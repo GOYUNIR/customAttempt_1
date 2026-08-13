@@ -26,6 +26,13 @@ store:product_images - Product 360° rotation images
 store:config - Site configuration (colors, hero, footer, etc.)
 drop_pool:* - Entry pools for each product/size
 archive:ledger - Permanent entry history
+address:submissions - Addresses captured by the standalone checkout pages (`/checkout.html`, `/address-checkout-form.html`)
+
+### Address Capture Pages
+- **`public/checkout.html`** and **`public/address-checkout-form.html`** are standalone address forms served at `/checkout.html` and `/address-checkout-form.html`.
+- Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` is configured (or `window.ENV_MAPBOX_TOKEN` is injected at runtime). Without a token the forms still work via native browser autofill + manual entry.
+- Submitting posts to **`/api/address/save`**: the address is logged to `address:submissions`, and when the URL carries `?variant=&size=&email=` (and optionally `?orderRef=`) it is attached to the matching open entry. An already-set entry address is only overwritten when the matching `orderRef` is supplied.
+- The token placeholder is mapped into `data-mapbox-token` at build time by `scripts/inject-mapbox-token.mjs` (targets `public/` files).
 
 
 ### Admin Portal (`/admin`)

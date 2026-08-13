@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fast Checkout</title>
+  <meta name="description" content="Fast address checkout with autofill." />
+
+  <!-- Mapbox Search JS marker. The SDK is loaded lazily by the inline script at
+       the bottom ONLY when a token is available. data-mapbox-token is the
+       injection point: scripts/inject-mapbox-token.mjs replaces its
+       __NEXT_PUBLIC_MAPBOX_TOKEN__ placeholder with the real token during the
+       Vercel build, so no token is ever committed to the repo. Without a token
+       the form still works via native browser autofill. -->
+  <script
+    id="search-js"
+    data-mapbox-token="__NEXT_PUBLIC_MAPBOX_TOKEN__"
+  ></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #1d1d1d;
+      background: #f5f6f7;
+    }
+
+    .checkout-card {
+      width: 100%;
+      max-width: 480px;
+      background: #ffffff;
+      border: 1px solid #e2e2e2;
+      border-radius: 10px;
+      padding: 28px 26px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    .checkout-card h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .checkout-card .subtitle {
+      margin: 0 0 22px;
+      font-size: 14px;
+      color: #6b6b6b;
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .form-group label .optional {
+      font-weight: 400;
+      color: #8a8a8a;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 11px 12px;
+      font-size: 15px;
+      color: #1d1d1d;
+      background: #fff;
+      border: 1px solid #c9c9c9;
+      border-radius: 6px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .form-group input::placeholder {
+      color: #9a9a9a;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #3a99d8;
+      box-shadow: 0 0 0 3px rgba(58, 153, 216, 0.18);
+    }
+
+    .form-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+    }
+
+    /* Mapbox dropdown suggestions inherit the input font */
+    [data-searchjs="autofill-suggestion"] {
+      font-family: inherit;
+    }
+
+    button[type="submit"] {
+      width: 100%;
+      margin-top: 6px;
+      padding: 13px 16px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: #1d1d1d;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button[type="submit"]:hover {
+      background: #3a3a3a;
+    }
+
+    button[type="submit"]:active {
+      transform: translateY(1px);
+    }
+
+    button[type="submit"]:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #form-feedback {
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      color: #2e7d32;
+      min-height: 18px;
+      word-break: break-word;
+    }
+
+    #form-feedback.error {
+      color: #b00020;
+    }
+
+    .note {
+      margin: 16px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid #efefef;
+      font-size: 12px;
+      color: #8a8a8a;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="checkout-card">
+    <h1>Checkout</h1>
+    <p class="subtitle">Shipping address — autofill fills in the whole form when available.</p>
+
+    <form id="checkout-form" autocomplete="on" novalidate>
+      <!-- Contact -->
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          autocomplete="email"
+          placeholder="you@example.com"
+          required
+        />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="first-name">First name</label>
+          <input
+            type="text"
+            id="first-name"
+            name="first-name"
+            autocomplete="shipping given-name"
+            placeholder="First name"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="last-name">Last name</label>
+          <input
+            type="text"
+            id="last-name"
+            name="last-name"
+            autocomplete="shipping family-name"
+            placeholder="Last name"
+            required
+          />
+        </div>
+      </div>
+
+      <!-- Street address — autofill attaches here -->
+      <div class="form-group">
+        <label for="address1">Street address</label>
+        <input
+          type="text"
+          id="address1"
+          name="address1"
+          autocomplete="shipping street-address"
+          placeholder="Street address"
+          required
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="address2">Apartment, suite, etc. <span class="optional">(optional)</span></label>
+        <input
+          type="text"
+          id="address2"
+          name="address2"
+          autocomplete="shipping address-line2"
+          placeholder="Apt, suite, unit, floor"
+        />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="city">City</label>
+          <input
+            type="text"
+            id="city"
+            name="city"
+            autocomplete="shipping address-level2"
+            placeholder="City"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="state">State / Province</label>
+          <input
+            type="text"
+            id="state"
+            name="state"
+            autocomplete="shipping address-level1"
+            placeholder="State"
+            required
+          />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="zip">ZIP / Postal code</label>
+          <input
+            type="text"
+            id="zip"
+            name="zip"
+            autocomplete="shipping postal-code"
+            placeholder="ZIP"
+            inputmode="numeric"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="country">Country</label>
+          <input
+            type="text"
+            id="country"
+            name="country"
+            autocomplete="shipping country"
+            placeholder="Country"
+            required
+          />
+        </div>
+      </div>
+
+      <!-- Entry context (optional). Prefilled from the URL query string so the
+           page can be used as an email link for a specific order:
+           /checkout.html?email=...&variant=...&size=...&orderRef=... -->
+      <input type="hidden" id="context-variant" name="variant" value="" />
+      <input type="hidden" id="context-size" name="size" value="" />
+      <input type="hidden" id="context-order-ref" name="orderRef" value="" />
+      <input type="hidden" id="context-name" name="name" value="" />
+
+      <button type="submit">Save shipping address</button>
+    </form>
+
+    <p id="form-feedback" role="status" aria-live="polite"></p>
+    <p class="note" id="autofill-note"></p>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var MAPBOX_PLACEHOLDER = '__NEXT_PUBLIC_MAPBOX_TOKEN__';
+      var MAPBOX_SDK_URL = 'https://api.mapbox.com/search-js/v1.6.0/web.js';
+
+      // ── Mapbox Address Autofill (optional progressive enhancement) ──────
+      // The SDK only loads when a token is configured. Without one the form
+      // still works via native browser autofill (autocomplete attributes).
+      // Token resolution order:
+      //   1. window.ENV_MAPBOX_TOKEN   — runtime injection by the hosting layer.
+      //   2. data-mapbox-token attr    — injected at build time by
+      //      scripts/inject-mapbox-token.mjs from NEXT_PUBLIC_MAPBOX_TOKEN.
+      function resolveToken() {
+        if (typeof window !== 'undefined' && window.ENV_MAPBOX_TOKEN) {
+          return window.ENV_MAPBOX_TOKEN;
+        }
+        var el = document.getElementById('search-js');
+        var attr = el ? el.getAttribute('data-mapbox-token') : '';
+        return attr && attr !== MAPBOX_PLACEHOLDER ? attr : '';
+      }
+
+      function setFeedback(message, isError) {
+        var el = document.getElementById('form-feedback');
+        if (!el) return;
+        el.textContent = message || '';
+        el.classList.toggle('error', !!isError);
+      }
+
+      var token = resolveToken();
+      var note = document.getElementById('autofill-note');
+      if (note) {
+        note.textContent = token
+          ? 'Start typing in the street address to autofill.'
+          : 'Autofill is enabled in your browser.';
+      }
+
+      if (token) {
+        var sdk = document.createElement('script');
+        sdk.src = MAPBOX_SDK_URL;
+        sdk.async = true;
+        sdk.onload = function () {
+          if (window.mapboxsearch && typeof window.mapboxsearch.autofill === 'function') {
+            try {
+              window.mapboxsearch.autofill({ accessToken: token });
+            } catch (err) {
+              console.error('[autofill] init failed', err);
+            }
+          }
+        };
+        sdk.onerror = function () {
+          if (note) note.textContent = 'Autofill is enabled in your browser.';
+        };
+        document.head.appendChild(sdk);
+      }
+
+      // ── Prefill from the URL query string ──────────────────────────────────
+      // Lets the page be sent as a link for a specific order.
+      (function prefill() {
+        var params = new URLSearchParams(window.location.search);
+        var email = params.get('email');
+        if (email) document.getElementById('email').value = email;
+        var name = params.get('name');
+        if (name) {
+          var parts = name.split(' ').filter(Boolean);
+          if (parts.length > 0) document.getElementById('first-name').value = parts[0];
+          if (parts.length > 1) document.getElementById('last-name').value = parts.slice(1).join(' ');
+        }
+        var map = {
+          variant: 'context-variant',
+          size: 'context-size',
+          orderRef: 'context-order-ref',
+          name: 'context-name'
+        };
+        Object.keys(map).forEach(function (key) {
+          var val = params.get(key);
+          if (val) document.getElementById(map[key]).value = val;
+        });
+      })();
+
+      // ── Submit → POST to /api/address/save (persisted to the store) ────────
+      document.getElementById('checkout-form').addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var form = event.target;
+        var data = new FormData(form);
+        var submit = form.querySelector('button[type="submit"]');
+
+        var email = String(data.get('email') || '').trim();
+        var name = [data.get('first-name'), data.get('last-name')].filter(Boolean).join(' ');
+        var line1 = String(data.get('address1') || '').trim();
+        var line2 = String(data.get('address2') || '').trim();
+        var cityStateZip = [data.get('city'), data.get('state'), data.get('zip')]
+          .filter(Boolean)
+          .join(', ');
+        var country = String(data.get('country') || '').trim();
+        var address = [line1, line2, cityStateZip, country].filter(Boolean).join(', ');
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          setFeedback('Please enter a valid email address.', true);
+          return;
+        }
+        if (address.length < 8) {
+          setFeedback('Please enter a complete shipping address.', true);
+          return;
+        }
+
+        setFeedback('Saving…');
+        submit.disabled = true;
+        try {
+          var res = await fetch('/api/address/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: email,
+              name: name || undefined,
+              address: address,
+              variant: data.get('variant') || undefined,
+              size: data.get('size') || undefined,
+              orderRef: data.get('orderRef') || undefined,
+              source: 'checkout'
+            })
+          });
+          var result = await res.json().catch(function () { return {}; });
+          if (res.ok && result.success) {
+            setFeedback(result.message || 'Shipping address saved.');
+          } else {
+            setFeedback(result.error || 'Could not save the address. Please try again.', true);
+          }
+        } catch (err) {
+          setFeedback('Could not reach the server. Open this page from the store site, not as a local file.', true);
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

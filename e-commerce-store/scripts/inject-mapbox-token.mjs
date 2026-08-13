@@ -41,7 +41,7 @@ const projectRoot = path.resolve(__dirname, '..');
 // with the <script id="search-js"> tag in the target HTML files.
 const ATTRIBUTE_NAME = 'data-mapbox-token';
 const PLACEHOLDER = '__NEXT_PUBLIC_MAPBOX_TOKEN__';
-const TARGET_FILES = ['checkout.html', 'address-checkout-form.html'];
+const TARGET_FILES = ['public/checkout.html', 'public/address-checkout-form.html'];
 
 const token = (process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '').trim();
 
