@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       theme, hero, form, footer, branding,
       productNotes,
       animationMechanics, dropSchedule,
-      socialProof, homeRedirectSlug, catalogPreview
+      socialProof, homeRedirectSlug, catalogPreview, orbs
     } = body;
     
     // Get current config to merge
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
       socialProof: socialProof || current.socialProof || {},
       homeRedirectSlug: homeRedirectSlug || current.homeRedirectSlug || undefined,
       catalogPreview: catalogPreview || current.catalogPreview || { upcomingDrops: [], archiveScents: [] },
+      orbs: orbs || current.orbs || {},
       updatedAt: new Date().toISOString(),
     };
 

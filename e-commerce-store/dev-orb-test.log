@@ -1,0 +1,25 @@
+
+> e-commerce-store@0.1.0 dev
+> next dev -p 3111
+
+▲ Next.js 16.2.12 (Turbopack)
+- Local:         http://localhost:3111
+- Network:       http://192.168.12.129:3111
+- Environments: .env.local
+✓ Ready in 648ms
+
+ GET /api/store 200 in 1007ms (next.js: 440ms, application-code: 567ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 430ms (next.js: 139ms, application-code: 291ms)
+ GET /api/store/config 401 in 35ms (next.js: 28ms, application-code: 7ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 37ms (next.js: 5ms, application-code: 32ms)
+ GET /api/store/config 401 in 9ms (next.js: 3ms, application-code: 5ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 43ms (next.js: 5ms, application-code: 38ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /admin. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET /admin 200 in 686ms (next.js: 557ms, proxy.ts: 73ms, application-code: 56ms)

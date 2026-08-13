@@ -102,6 +102,25 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ],
   },
 
+  // Glow orb system (editable live from /admin → Settings → Orb Glow).
+  // The top-bar orb lives inside the fixed header; primary/secondary/tertiary
+  // are the background glow orbs behind the storefront content.
+  orbs: {
+    enabled: true,
+    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    motion: {
+      idleEnabled: true,
+      pointerEnabled: true,
+      scrollEnabled: true,
+      intensity: 100,
+      speed: 100,
+      momentum: 40,
+    },
+  },
+
   // NOTE: Fallback catalog used when Redis is empty. Keep these aligned with
   // admin seed defaults so empty-Redis and seeded experiences stay consistent.
   productCatalog: [

@@ -183,6 +183,21 @@ const DEFAULT_CONFIG = {
       { name: 'Cinder Wave — Archive', status: 'Archived', image: '/images/baseItem1/1.jpeg', description: 'Historic raffle archive record.', slug: 'cinder-wave-archive' },
     ],
   },
+  orbs: {
+    enabled: true,
+    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    motion: {
+      idleEnabled: true,
+      pointerEnabled: true,
+      scrollEnabled: true,
+      intensity: 100,
+      speed: 100,
+      momentum: 40,
+    },
+  },
 };
 
 export async function GET(request: Request) {

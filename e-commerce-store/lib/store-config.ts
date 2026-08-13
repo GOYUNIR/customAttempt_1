@@ -1,4 +1,30 @@
 import { createRedisClient } from './server-config';
+import { mergeOrbsConfig } from './storefront-config';
+
+export interface OrbVisualConfig {
+  enabled: boolean;
+  color: string;
+  opacity: number;
+  size: number;
+}
+
+export interface OrbMotionConfig {
+  idleEnabled: boolean;
+  pointerEnabled: boolean;
+  scrollEnabled: boolean;
+  intensity: number;
+  speed: number;
+  momentum: number;
+}
+
+export interface OrbsConfig {
+  enabled: boolean;
+  topBar: OrbVisualConfig;
+  primary: OrbVisualConfig;
+  secondary: OrbVisualConfig;
+  tertiary: OrbVisualConfig;
+  motion: OrbMotionConfig;
+}
 
 export interface StoreConfig {
   themeColors: {
@@ -72,6 +98,7 @@ export interface StoreConfig {
     upcomingDrops: any[];
     archiveScents: any[];
   };
+  orbs: OrbsConfig;
   productCatalog: any[];
 }
 
@@ -146,6 +173,21 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     upcomingDrops: [],
     archiveScents: [],
   },
+  orbs: {
+    enabled: true,
+    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    motion: {
+      idleEnabled: true,
+      pointerEnabled: true,
+      scrollEnabled: true,
+      intensity: 100,
+      speed: 100,
+      momentum: 40,
+    },
+  },
   productCatalog: [],
 };
 
@@ -174,6 +216,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
       socialProof: { ...DEFAULT_CONFIG.socialProof, ...config.socialProof },
       brandFooterData: { ...DEFAULT_CONFIG.brandFooterData, ...config.brandFooterData },
       catalogPreview: { ...DEFAULT_CONFIG.catalogPreview, ...config.catalogPreview },
+      orbs: mergeOrbsConfig(config.orbs),
     } as StoreConfig;
   } catch {
     return DEFAULT_CONFIG as StoreConfig;

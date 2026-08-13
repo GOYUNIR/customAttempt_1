@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
+import { mergeOrbsConfig } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +106,21 @@ const DEFAULT_CONFIG = {
     upcomingDrops: [],
     archiveScents: [],
   },
+  orbs: {
+    enabled: true,
+    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    motion: {
+      idleEnabled: true,
+      pointerEnabled: true,
+      scrollEnabled: true,
+      intensity: 100,
+      speed: 100,
+      momentum: 40,
+    },
+  },
 };
 
 export async function GET(request: NextRequest) {
@@ -132,6 +148,7 @@ export async function GET(request: NextRequest) {
       themeColors: { ...DEFAULT_CONFIG.themeColors, ...(config?.themeColors || {}) },
       availableSizes: Array.isArray(config?.availableSizes) && config.availableSizes.length > 0 ? config.availableSizes : DEFAULT_CONFIG.availableSizes,
       homeRedirectSlug: typeof config?.homeRedirectSlug === 'string' && config.homeRedirectSlug.trim() && !['elysian-white','obsidian-void'].includes(config.homeRedirectSlug) ? config.homeRedirectSlug : DEFAULT_CONFIG.homeRedirectSlug,
+      orbs: mergeOrbsConfig(config?.orbs || DEFAULT_CONFIG.orbs),
     };
 
     if (!redis) {

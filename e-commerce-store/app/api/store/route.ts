@@ -8,6 +8,7 @@ import {
   safeParseRedisItem,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { mergeOrbsConfig } from '@/lib/storefront-config';
 import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
@@ -119,6 +120,7 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
         : defaults.catalogPreview?.archiveScents || [],
     },
     branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
+    orbs: mergeOrbsConfig(redisConfig?.orbs || (defaults as any).orbs),
   };
 }
 

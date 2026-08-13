@@ -94,6 +94,36 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   return fetch(input, { ...init, credentials: 'include' });
 }
 
+// Defaults for the glow-orb system (/admin → Settings → Orb Glow). These mirror
+// the storefront defaults so a fresh portal has sane values before any save.
+const DEFAULT_ORBS: any = {
+  enabled: true,
+  topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+  motion: {
+    idleEnabled: true,
+    pointerEnabled: true,
+    scrollEnabled: true,
+    intensity: 100,
+    speed: 100,
+    momentum: 40,
+  },
+};
+
+function mergeOrbSettings(base: any, incoming: any): any {
+  if (!incoming) return base;
+  return {
+    enabled: typeof incoming.enabled === 'boolean' ? incoming.enabled : base.enabled,
+    topBar: { ...(base.topBar || {}), ...(incoming.topBar || {}) },
+    primary: { ...(base.primary || {}), ...(incoming.primary || {}) },
+    secondary: { ...(base.secondary || {}), ...(incoming.secondary || {}) },
+    tertiary: { ...(base.tertiary || {}), ...(incoming.tertiary || {}) },
+    motion: { ...(base.motion || {}), ...(incoming.motion || {}) },
+  };
+}
+
 // ===== Helper: convert file to base64 data URL =====
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -269,6 +299,7 @@ export default function AdminPortal() {
     iconText: '#ffffff',
   });
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
+  const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
   const [settingsMsg, setSettingsMsg] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
 
@@ -413,6 +444,7 @@ export default function AdminPortal() {
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
         if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
+        if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
       setSettingsMsg('');
     } catch (err: any) {
@@ -1224,6 +1256,7 @@ export default function AdminPortal() {
           footer: footerSettings,
           branding: brandingSettings,
           productNotes,
+          orbs: orbSettings,
         }),
       });
       const data = await res.json();
@@ -2588,6 +2621,105 @@ export default function AdminPortal() {
                 </div>
                 <div style={{ fontSize: 12, lineHeight: 1.6, color: 'rgba(255,255,255,0.82)' }}>{brandingSettings.shareDescription}</div>
               </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 4px', textTransform: 'uppercase' }}>Orb Glow</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                Animated glow orbs behind the storefront and inside the top bar. Saved changes apply on the next storefront load (public config is cached up to ~30s).
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={Boolean(orbSettings.enabled)} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, enabled: e.target.checked }))} />
+                Enable glow orbs
+              </label>
+
+              {orbSettings.enabled && (
+                <>
+                  <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 12, padding: 12, marginBottom: 10, background: 'rgba(255,255,255,0.02)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>Top bar orb</div>
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={Boolean(orbSettings.topBar?.enabled)} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, enabled: e.target.checked } }))} /> Enabled
+                      </label>
+                    </div>
+                    {orbSettings.topBar?.enabled && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                        <label style={{ fontSize: 11 }}>
+                          Color
+                          <input type="color" value={orbSettings.topBar.color || '#7dd3fc'} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, color: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
+                        </label>
+                        <label style={{ fontSize: 11 }}>
+                          Opacity
+                          <input type="range" min={0} max={100} value={Number(orbSettings.topBar.opacity) || 0} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, opacity: Number(e.target.value) } }))} style={{ display: 'block', width: '100%', marginTop: 10 }} />
+                          <span style={{ fontSize: 10, color: '#888' }}>{Number(orbSettings.topBar.opacity) || 0}%</span>
+                        </label>
+                        <label style={{ fontSize: 11 }}>
+                          Size (px)
+                          <input type="number" min={40} max={420} value={Number(orbSettings.topBar.size) || 210} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, topBar: { ...prev.topBar, size: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {(['primary', 'secondary', 'tertiary'] as const).map((key) => {
+                    const orb = orbSettings[key] || {};
+                    return (
+                      <div key={key} style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 12, padding: 12, marginBottom: 10, background: 'rgba(255,255,255,0.02)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'capitalize' }}>{key} orb</div>
+                          <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={Boolean(orb.enabled)} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], enabled: e.target.checked } }))} /> Enabled
+                          </label>
+                        </div>
+                        {orb.enabled && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                            <label style={{ fontSize: 11 }}>
+                              Color
+                              <input type="color" value={orb.color || '#3b82f6'} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], color: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
+                            </label>
+                            <label style={{ fontSize: 11 }}>
+                              Opacity
+                              <input type="range" min={0} max={100} value={Number(orb.opacity) || 0} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], opacity: Number(e.target.value) } }))} style={{ display: 'block', width: '100%', marginTop: 10 }} />
+                              <span style={{ fontSize: 10, color: '#888' }}>{Number(orb.opacity) || 0}%</span>
+                            </label>
+                            <label style={{ fontSize: 11 }}>
+                              Size (vw)
+                              <input type="number" min={10} max={120} value={Number(orb.size) || 40} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], size: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 12, padding: 12, marginBottom: 10, background: 'rgba(255,255,255,0.02)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Motion</div>
+                    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+                      {([
+                        ['idleEnabled', 'Idle drift'],
+                        ['pointerEnabled', 'Follow cursor'],
+                        ['scrollEnabled', 'Scroll reaction'],
+                      ] as [string, string][]).map(([key, label]) => (
+                        <label key={key} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={Boolean(orbSettings.motion?.[key])} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, motion: { ...prev.motion, [key]: e.target.checked } }))} />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                      {([
+                        ['intensity', 'Travel distance', 20, 200],
+                        ['speed', 'Response speed', 30, 200],
+                        ['momentum', 'Momentum / heaviness', 0, 100],
+                      ] as [string, string, number, number][]).map(([key, label, min, max]) => (
+                        <label key={key} style={{ fontSize: 11 }}>
+                          {label}
+                          <input type="range" min={min} max={max} value={Number(orbSettings.motion?.[key]) || 0} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, motion: { ...prev.motion, [key]: Number(e.target.value) } }))} style={{ display: 'block', width: '100%', marginTop: 8 }} />
+                          <span style={{ fontSize: 10, color: '#888' }}>{Number(orbSettings.motion?.[key]) || 0}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
                 {settingsLoading ? 'Saving…' : 'Save All Settings'}

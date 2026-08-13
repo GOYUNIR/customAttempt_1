@@ -67,6 +67,33 @@ export interface CatalogPreviewItem {
   slug?: string;
 }
 
+/** One glow orb (top-bar orb uses px size; background orbs use vw size). */
+export interface OrbVisualConfig {
+  enabled: boolean;
+  color: string;   // hex, e.g. '#3b82f6'
+  opacity: number; // 0-100
+  size: number;    // top-bar orb: px; background orbs: vw units
+}
+
+/** Physics + behaviour controls for the orb system. */
+export interface OrbMotionConfig {
+  idleEnabled: boolean;    // drift around the page while idle
+  pointerEnabled: boolean; // follow the cursor
+  scrollEnabled: boolean;  // react to page scroll
+  intensity: number;       // 20-200 — how far orbs travel (% of default range)
+  speed: number;           // 30-200 — spring stiffness (higher = snappier)
+  momentum: number;        // 0-100 — heaviness / glide (higher = heavier, more drift)
+}
+
+export interface OrbsConfig {
+  enabled: boolean;
+  topBar: OrbVisualConfig;
+  primary: OrbVisualConfig;
+  secondary: OrbVisualConfig;
+  tertiary: OrbVisualConfig;
+  motion: OrbMotionConfig;
+}
+
 export interface StorefrontConfig {
   themeColors: {
     primaryBackground: string;
@@ -125,6 +152,7 @@ export interface StorefrontConfig {
     upcomingDrops: CatalogPreviewItem[];
     archiveScents: CatalogPreviewItem[];
   };
+  orbs: OrbsConfig;
   productCatalog: StorefrontProduct[];
 }
 
@@ -201,6 +229,24 @@ const defaultFooter = {
   corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
 };
 
+// Default orb system — background glow orbs plus the animated top-bar orb.
+// Every value here is editable live from /admin → Settings → Orb Glow.
+const defaultOrbs: OrbsConfig = {
+  enabled: true,
+  topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+  motion: {
+    idleEnabled: true,
+    pointerEnabled: true,
+    scrollEnabled: true,
+    intensity: 100,
+    speed: 100,
+    momentum: 40,
+  },
+};
+
 function normalizeText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -269,6 +315,19 @@ function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string },
   };
 }
 
+/** Deep-merge a stored (partial) orbs config over the defaults. */
+export function mergeOrbsConfig(input?: Partial<OrbsConfig> | null): OrbsConfig {
+  if (!input) return defaultOrbs;
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : defaultOrbs.enabled,
+    topBar: { ...defaultOrbs.topBar, ...(input.topBar || {}) },
+    primary: { ...defaultOrbs.primary, ...(input.primary || {}) },
+    secondary: { ...defaultOrbs.secondary, ...(input.secondary || {}) },
+    tertiary: { ...defaultOrbs.tertiary, ...(input.tertiary || {}) },
+    motion: { ...defaultOrbs.motion, ...(input.motion || {}) },
+  };
+}
+
 export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): StorefrontConfig {
   const productCatalog = Array.isArray(input.productCatalog)
     ? input.productCatalog.filter(Boolean).map((product, index) => normalizeProduct(product as any, index))
@@ -292,6 +351,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       upcomingDrops: normalizeCatalogItems(input.catalogPreview?.upcomingDrops),
       archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents),
     },
+    orbs: mergeOrbsConfig(input.orbs),
     productCatalog,
   };
 }

@@ -16,6 +16,45 @@ type CartItem = {
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 
+// Orb system defaults — overridden at runtime by /admin → Settings → Orb Glow
+// (served through `/api/store` → config.orbs). Motion uses a spring-damper so
+// the orbs feel heavy and keep momentum instead of snapping to the cursor.
+const DEFAULT_ORBS: any = {
+  enabled: true,
+  topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+  motion: {
+    idleEnabled: true,
+    pointerEnabled: true,
+    scrollEnabled: true,
+    intensity: 100,
+    speed: 100,
+    momentum: 40,
+  },
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+/** Convert 0-100 opacity into a 2-digit hex alpha suffix for hex colors. */
+function alphaHex(pct: number) {
+  const v = Math.round(clamp(pct, 0, 100) * 255 / 100);
+  return v.toString(16).padStart(2, '0');
+}
+
+/** Keep colors 6-digit hex so hex-alpha suffixes stay valid. */
+function normalizeHex(color: any, fallback: string) {
+  const s = String(color || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
+}
+
+/** Radial-gradient paint for a glow orb at the given opacity. */
+function orbGradient(color: string, opacity: number, fallback: string, edgeRatio = 0.38) {
+  const hex = normalizeHex(color, fallback);
+  return `radial-gradient(circle, ${hex}${alphaHex(opacity)} 0%, ${hex}${alphaHex(opacity * edgeRatio)} 42%, transparent 72%)`;
+}
+
 function readCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -60,6 +99,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [cartMsg, setCartMsg] = useState('');
   const [theme, setTheme] = useState<any>(null);
   const [branding, setBranding] = useState<any>(null);
+  const [orbs, setOrbs] = useState<any>(null);
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
@@ -73,13 +113,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const lastScrollYRef = useRef(0);
   const lastScrollAtRef = useRef(0);
   const noticeTimerRef = useRef<number | null>(null);
-  // Background glow is animated via direct DOM writes (refs) so the ~60fps
-  // idle/pointer drift never triggers a React re-render of the whole app.
+  // Background glow + top-bar orb are animated via direct DOM writes (refs) so
+  // the ~60fps idle/pointer drift never triggers a React re-render of the app.
+  // Motion is a spring-damper: heavy, smooth, momentum-filled, no sharp snaps.
   const easedXRef = useRef(0.5);
   const easedYRef = useRef(0.35);
+  const orbVXRef = useRef(0);
+  const orbVYRef = useRef(0);
+  const pointerTargetXRef = useRef(0.5);
+  const pointerTargetYRef = useRef(0.35);
+  const lastFrameAtRef = useRef(0);
+  const orbsRef = useRef<any>(null);
   const orbPrimaryRef = useRef<HTMLDivElement | null>(null);
   const orbSecondaryRef = useRef<HTMLDivElement | null>(null);
   const orbTertiaryRef = useRef<HTMLDivElement | null>(null);
+  const headerOrbRef = useRef<HTMLDivElement | null>(null);
 
   const showNotice = (next: { id?: string; type: string; message: string; persist?: boolean }) => {
     setNotice({ id: next.id, type: next.type, message: next.message });
@@ -91,6 +139,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       noticeTimerRef.current = window.setTimeout(() => setNotice((current) => (current?.id === next.id || !next.id ? null : current)), 2400);
     }
   };
+
+  // Keep the rAF loop in sync with the latest admin orb settings without
+  // restarting the loop or re-rendering.
+  useEffect(() => {
+    orbsRef.current = orbs;
+  }, [orbs]);
 
   useEffect(() => {
     const sync = () => setCart(readCart());
@@ -104,9 +158,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (nextScroll > 120) setShowScrollCue(false);
       else if (nextScroll < 40) setShowScrollCue(true);
     };
-    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
     let lastInteraction = Date.now();
     const onPointer = (event: PointerEvent) => {
+      const cfg = orbsRef.current;
+      if (cfg?.motion?.pointerEnabled === false) return;
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
       targetXRef.current = clamp(event.clientX / width, 0.04, 0.96);
@@ -114,6 +169,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       lastInteraction = Date.now();
     };
     const onTouchMove = (event: TouchEvent) => {
+      const cfg = orbsRef.current;
+      if (cfg?.motion?.pointerEnabled === false) return;
       const touch = event.touches?.[0];
       if (!touch) return;
       const width = window.innerWidth || 1;
@@ -130,15 +187,30 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     // pre-blurred radial gradients (no `filter: blur()`), so the glow is
     // painted once and then only composited.
     const applyGlow = (x: number, y: number) => {
+      const cfg = orbsRef.current;
+      const motion = cfg?.motion || DEFAULT_ORBS.motion;
+      const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, 2.5);
       const primary = orbPrimaryRef.current;
       const secondary = orbSecondaryRef.current;
       const tertiary = orbTertiaryRef.current;
-      if (!primary || !secondary || !tertiary) return;
+      const headerOrb = headerOrbRef.current;
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
-      primary.style.transform = `translate3d(${((-16 + x * 68) / 100) * vw}px, ${((-8 + y * 72) / 100) * vh}px, 0)`;
-      secondary.style.transform = `translate3d(${((56 - x * 32) / 100) * vw}px, ${((48 - y * 26) / 100) * vh}px, 0)`;
-      tertiary.style.transform = `translate3d(${((18 + x * 24) / 100) * vw}px, ${((62 - y * 18) / 100) * vh}px, 0)`;
+      if (primary) {
+        primary.style.transform = `translate3d(${((-16 + x * 68 * intensity) / 100) * vw}px, ${((-8 + y * 72 * intensity) / 100) * vh}px, 0)`;
+      }
+      if (secondary) {
+        secondary.style.transform = `translate3d(${((56 - x * 32 * intensity) / 100) * vw}px, ${((48 - y * 26 * intensity) / 100) * vh}px, 0)`;
+      }
+      if (tertiary) {
+        tertiary.style.transform = `translate3d(${((18 + x * 24 * intensity) / 100) * vw}px, ${((62 - y * 18 * intensity) / 100) * vh}px, 0)`;
+      }
+      if (headerOrb) {
+        // The top-bar orb stays centered and drifts a short, smooth distance.
+        const hx = (x - 0.5) * 34 * intensity;
+        const hy = (y - 0.5) * 18 * intensity;
+        headerOrb.style.transform = `translate3d(calc(-50% + ${hx.toFixed(2)}px), calc(-50% + ${hy.toFixed(2)}px), 0)`;
+      }
     };
 
     let rafId = 0;
@@ -148,29 +220,73 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     let running = true;
     const animateIdle = () => {
       if (!running) return;
+      const nowPerf = performance.now();
+      const lastFrame = lastFrameAtRef.current || nowPerf;
+      const dt = Math.min(34, Math.max(8, nowPerf - lastFrame));
+      lastFrameAtRef.current = nowPerf;
+      const frame = dt / 16.667;
+
       const now = Date.now();
+      const cfg = orbsRef.current;
+      const motion = cfg?.motion || DEFAULT_ORBS.motion;
+      const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, 2.5);
+      const speedFactor = clamp((motion.speed ?? 100) / 100, 0.3, 2.2);
+      const momentumFactor = clamp((motion.momentum ?? 40) / 100, 0, 1);
+
       const idleFor = now - lastInteraction;
       const scrollMomentumAge = now - lastScrollAtRef.current;
-      if (scrollMomentumAge < 2600) {
-        targetXRef.current = clamp(targetXRef.current + velocityXRef.current, 0.05, 0.95);
-        targetYRef.current = clamp(targetYRef.current + velocityYRef.current, 0.08, 0.92);
-        velocityXRef.current *= 0.98;
-        velocityYRef.current *= 0.98;
-      }
-      if (idleFor > 950) {
+
+      // Idle drift: gently wander the raw target, never snapping.
+      if (motion.idleEnabled && idleFor > 950) {
         if (now >= nextIdleRetargetAt) {
-          idleTargetX = 0.18 + Math.random() * 0.64;
-          idleTargetY = 0.14 + Math.random() * 0.68;
-          nextIdleRetargetAt = now + 1600 + Math.random() * 2600;
+          idleTargetX = 0.16 + Math.random() * 0.68;
+          idleTargetY = 0.12 + Math.random() * 0.7;
+          nextIdleRetargetAt = now + 2200 + Math.random() * 2600;
         }
         const t = now / 1000;
-        const microDriftX = Math.sin(t * 1.1) * 0.014 + Math.sin(t * 2.1) * 0.005;
-        const microDriftY = Math.cos(t * 1.05) * 0.013 + Math.cos(t * 1.8) * 0.005;
-        targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.02 + microDriftX, 0.05, 0.95);
-        targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.02 + microDriftY, 0.08, 0.92);
+        const microDriftX = Math.sin(t * 0.9) * 0.012 + Math.sin(t * 1.7) * 0.005;
+        const microDriftY = Math.cos(t * 0.85) * 0.011 + Math.cos(t * 1.5) * 0.005;
+        targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.014 + microDriftX, 0.05, 0.95);
+        targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.014 + microDriftY, 0.08, 0.92);
       }
-      const easedX = clamp(easedXRef.current + (targetXRef.current - easedXRef.current) * 0.06, 0.05, 0.95);
-      const easedY = clamp(easedYRef.current + (targetYRef.current - easedYRef.current) * 0.06, 0.08, 0.92);
+
+      // Scroll momentum: keep feeding the target while the scroll decelerates.
+      if (motion.scrollEnabled && scrollMomentumAge < 2600) {
+        targetXRef.current = clamp(targetXRef.current + velocityXRef.current * frame, 0.05, 0.95);
+        targetYRef.current = clamp(targetYRef.current + velocityYRef.current * frame, 0.08, 0.92);
+        velocityXRef.current *= Math.pow(0.97, frame);
+        velocityYRef.current *= Math.pow(0.97, frame);
+      }
+
+      // Smooth the target with a low-pass filter so even sudden pointer jumps
+      // glide instead of lurching the orbs.
+      const targetSmooth = clamp(0.05 * speedFactor, 0.02, 0.18);
+      pointerTargetXRef.current = clamp(
+        pointerTargetXRef.current + (targetXRef.current - pointerTargetXRef.current) * targetSmooth * frame,
+        0.05, 0.95,
+      );
+      pointerTargetYRef.current = clamp(
+        pointerTargetYRef.current + (targetYRef.current - pointerTargetYRef.current) * targetSmooth * frame,
+        0.08, 0.92,
+      );
+
+      // Spring-damper toward the smoothed target: this is what gives the orbs
+      // their heavy, momentum-filled feel. Higher `momentum` = less friction,
+      // so the orbs keep gliding after you stop and settle with a soft drift.
+      const stiffness = 0.0022 * speedFactor;
+      const friction = 0.928 + momentumFactor * 0.038;
+      orbVXRef.current += (pointerTargetXRef.current - easedXRef.current) * stiffness * frame;
+      orbVYRef.current += (pointerTargetYRef.current - easedYRef.current) * stiffness * frame;
+      orbVXRef.current *= Math.pow(friction, frame);
+      orbVYRef.current *= Math.pow(friction, frame);
+
+      // Hard velocity cap — the orbs can never snap or teleport.
+      const maxVel = 0.024 * speedFactor * (0.4 + momentumFactor);
+      orbVXRef.current = clamp(orbVXRef.current, -maxVel, maxVel);
+      orbVYRef.current = clamp(orbVYRef.current, -maxVel, maxVel);
+
+      const easedX = clamp(easedXRef.current + orbVXRef.current * frame, 0.02, 0.98);
+      const easedY = clamp(easedYRef.current + orbVYRef.current * frame, 0.05, 0.95);
       easedXRef.current = easedX;
       easedYRef.current = easedY;
       applyGlow(easedX, easedY);
@@ -178,12 +294,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     };
 
     const onScrollMotion = () => {
+      const cfg = orbsRef.current;
+      if (cfg?.motion?.scrollEnabled === false) return;
       const maxScroll = Math.max(1, document.body.scrollHeight - window.innerHeight);
       const progress = (window.scrollY || 0) / maxScroll;
       const now = Date.now();
       const deltaY = window.scrollY - lastScrollYRef.current;
       const deltaT = Math.max(16, now - lastScrollAtRef.current || 16);
-            const scrollVelocity = deltaY / deltaT;
+      const scrollVelocity = deltaY / deltaT;
       velocityYRef.current = clamp(velocityYRef.current + scrollVelocity * 0.62, -0.14, 0.14);
       velocityXRef.current = clamp(Math.sin(progress * Math.PI * 6) * 0.028 + scrollVelocity * 0.07, -0.08, 0.08);
       targetYRef.current = clamp(0.15 + progress * 0.7, 0.1, 0.9);
@@ -218,6 +336,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       .then((data) => {
         setTheme(data?.config?.themeColors || null);
         setBranding(data?.config?.branding || null);
+        setOrbs(data?.config?.orbs || null);
       })
       .catch(() => {});
 
@@ -246,6 +365,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         window.cancelAnimationFrame(rafId);
       } else if (!running) {
         running = true;
+        lastFrameAtRef.current = performance.now();
         rafId = window.requestAnimationFrame(animateIdle);
       }
     };
@@ -259,6 +379,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('scroll', onScrollMotion, { passive: true });
     window.addEventListener('pointermove', onPointer, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
+    lastFrameAtRef.current = performance.now();
     rafId = window.requestAnimationFrame(animateIdle);
     applyGlow(easedXRef.current, easedYRef.current);
     const cueTimer = window.setTimeout(() => setShowScrollCue((current) => (current ? true : current)), 600);
@@ -351,6 +472,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
   const actionVerb = headerActionMode === 'bag' ? 'bag' : 'cart';
 
+  // Resolve admin-configurable orb settings (falls back to built-in defaults).
+  const resolvedOrbs = orbs || DEFAULT_ORBS;
+  const orbsEnabled = resolvedOrbs.enabled !== false;
+  const topBarOrb = { ...DEFAULT_ORBS.topBar, ...(resolvedOrbs.topBar || {}) };
+  const primaryOrb = { ...DEFAULT_ORBS.primary, ...(resolvedOrbs.primary || {}) };
+  const secondaryOrb = { ...DEFAULT_ORBS.secondary, ...(resolvedOrbs.secondary || {}) };
+  const tertiaryOrb = { ...DEFAULT_ORBS.tertiary, ...(resolvedOrbs.tertiary || {}) };
+
   // Keep the resolved header action mode ("bag" vs "cart") in sync so the
   // storefront can read it on render. Without this, the value was only ever
   // written inside the promo-link branch with the initial render's value, so
@@ -363,9 +492,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     <>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />
-        <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '58vw', height: '58vw', minWidth: 280, minHeight: 280, maxWidth: 620, maxHeight: 620, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: `radial-gradient(circle, ${headerAccent}40 0%, ${headerAccent}14 38%, transparent 70%)`, willChange: 'transform', opacity: 0.95 }} />
-        <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '44vw', height: '44vw', minWidth: 220, minHeight: 220, maxWidth: 480, maxHeight: 480, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'radial-gradient(circle, rgba(168,85,247,0.36) 0%, rgba(168,85,247,0.12) 40%, transparent 70%)', willChange: 'transform', opacity: 0.92 }} />
-        <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: '28vw', height: '28vw', minWidth: 140, minHeight: 140, maxWidth: 280, maxHeight: 280, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: 'radial-gradient(circle, rgba(255,244,214,0.16) 0%, rgba(255,244,214,0.05) 42%, transparent 72%)', willChange: 'transform', opacity: 0.9 }} />
+        {orbsEnabled && primaryOrb.enabled !== false && (
+          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(primaryOrb.size) || 58}vw`, height: `${Number(primaryOrb.size) || 58}vw`, minWidth: 160, minHeight: 160, maxWidth: 780, maxHeight: 780, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, primaryOrb.opacity, '#3b82f6'), willChange: 'transform' }} />
+        )}
+        {orbsEnabled && secondaryOrb.enabled !== false && (
+          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(secondaryOrb.size) || 44}vw`, height: `${Number(secondaryOrb.size) || 44}vw`, minWidth: 120, minHeight: 120, maxWidth: 560, maxHeight: 560, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, secondaryOrb.opacity, '#a855f7'), willChange: 'transform' }} />
+        )}
+        {orbsEnabled && tertiaryOrb.enabled !== false && (
+          <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(tertiaryOrb.size) || 28}vw`, height: `${Number(tertiaryOrb.size) || 28}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, tertiaryOrb.opacity, '#ffd79b'), willChange: 'transform' }} />
+        )}
       </div>
       {bannerMessage && (
         <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
@@ -408,10 +543,28 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           boxSizing: 'border-box',
           transform: 'translateY(0)',
           transition: 'transform 160ms ease',
+          overflow: 'hidden',
           backgroundImage: `radial-gradient(circle at 50% -20%, ${headerAccent}33, transparent 35%)`,
           boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
         }}
       >
+        {orbsEnabled && topBarOrb.enabled !== false && (
+          <div
+            ref={headerOrbRef}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: `${Number(topBarOrb.size) || 210}px`,
+              height: `${Number(topBarOrb.size) || 210}px`,
+              transform: 'translate3d(-50%, -50%, 0)',
+              borderRadius: '999px',
+              pointerEvents: 'none',
+              background: orbGradient(topBarOrb.color, topBarOrb.opacity, '#7dd3fc', 0.45),
+              willChange: 'transform',
+            }}
+          />
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
           <Link href="/catalog" aria-label="Catalog" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>
