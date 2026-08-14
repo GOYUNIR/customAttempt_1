@@ -125,6 +125,13 @@ const DEFAULT_CONFIG = {
       momentum: 40,
     },
   },
+  legal: {
+    companyName: '',
+    supportEmail: '',
+    terms: '',
+    privacy: '',
+    shipping: '',
+  },
 };
 
 export async function GET(request: NextRequest) {

@@ -356,6 +356,8 @@ export default function AdminPortal() {
     shareImageUrl: '',
     shareTitle: 'GOYUNIR',
     shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
+    shareTagline: '',
+    shareUrl: '',
     shareBackground: '#0B0B0F',
     shareAccent: '#D4AF37',
     shareText: '#F5F2E9',
@@ -370,6 +372,9 @@ export default function AdminPortal() {
     purchasePointsPerDollar: 10,
     giftingEnabled: true,
     giftDiscountPercent: 10,
+    // Custom caption shown in the account "Redeem points" box. Leave empty to
+    // use the built-in dynamic message (gifting + percentage aware).
+    redemptionInfoMessage: '',
   });
   // Product gallery behaviour (auto-advance + slow zoom).
   const [gallerySettings, setGallerySettings] = useState({
@@ -388,6 +393,23 @@ export default function AdminPortal() {
     footerTagline: '',
     supportEmail: '',
   });
+  // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
+  // so buyers never need code changes to update policies, company name, or the
+  // support address. Stored under store:config.legal.
+  const [legalSettings, setLegalSettings] = useState<{
+    companyName: string;
+    supportEmail: string;
+    terms: string;
+    privacy: string;
+    shipping: string;
+  }>({
+    companyName: '',
+    supportEmail: '',
+    terms: '',
+    privacy: '',
+    shipping: '',
+  });
+  const [legalOpen, setLegalOpen] = useState(false);
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -537,6 +559,7 @@ export default function AdminPortal() {
         if (data.settings.rewards) setRewardsSettings((prev) => ({ ...prev, ...data.settings.rewards }));
         if (data.settings.gallery) setGallerySettings((prev) => ({ ...prev, ...data.settings.gallery }));
         if (data.settings.copy) setCopySettings((prev) => ({ ...prev, ...data.settings.copy }));
+        if (data.settings.legal) setLegalSettings((prev) => ({ ...prev, ...data.settings.legal }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
@@ -1391,6 +1414,7 @@ export default function AdminPortal() {
           rewards: rewardsSettings,
           gallery: gallerySettings,
           copy: copySettings,
+          legal: legalSettings,
           productNotes,
           orbs: orbSettings,
         }),
@@ -2948,6 +2972,57 @@ export default function AdminPortal() {
                 </>
               )}
 
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+                <button
+                  onClick={() => setLegalOpen((v) => !v)}
+                  style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  {legalOpen ? '▾' : '▸'} Legal & Policies (Terms / Privacy / Shipping)
+                </button>
+              </h4>
+              {legalOpen && (
+                <>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px', lineHeight: 1.5 }}>
+                    The /terms, /privacy and /shipping pages are generated entirely from this content — no code changes needed when a buyer updates their policies. Format: lines starting with <code>## </code> become section headings, <code>- </code> becomes a bullet, and blank lines separate paragraphs. Use <code>{'{companyName}'}</code> and <code>{'{supportEmail}'}</code> tokens inside the text.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                    <label style={{ fontSize: 11 }}>
+                      Company / legal entity name
+                      <input
+                        type="text"
+                        value={legalSettings.companyName || ''}
+                        onChange={(e) => setLegalSettings((prev) => ({ ...prev, companyName: e.target.value }))}
+                        placeholder="Leave empty to use brand name"
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                      />
+                    </label>
+                    <label style={{ fontSize: 11 }}>
+                      Support email (policy pages)
+                      <input
+                        type="email"
+                        value={legalSettings.supportEmail || ''}
+                        onChange={(e) => setLegalSettings((prev) => ({ ...prev, supportEmail: e.target.value }))}
+                        placeholder="Leave empty to use footer support email"
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                      />
+                    </label>
+                  </div>
+                  {([['terms', 'Terms of Service'], ['privacy', 'Privacy Policy'], ['shipping', 'Shipping & Sales Policy']] as [string, string][]).map(([key, label]) => (
+                    <label key={key} style={{ fontSize: 11, display: 'block', marginBottom: 10 }}>
+                      {label}
+                      <textarea
+                        rows={7}
+                        value={String(legalSettings[key as keyof typeof legalSettings] || '')}
+                        onChange={(e) => setLegalSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder="## 1. Heading&#10;&#10;Paragraph text…"
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, resize: 'vertical' }}
+                      />
+                      <span style={{ fontSize: 10, color: '#666' }}>Leave empty to use the built-in default policy.</span>
+                    </label>
+                  ))}
+                </>
+              )}
+
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
@@ -3034,6 +3109,8 @@ export default function AdminPortal() {
                 {Object.entries({
                   shareTitle: brandingSettings.shareTitle,
                   shareDescription: brandingSettings.shareDescription,
+                  shareTagline: brandingSettings.shareTagline,
+                  shareUrl: brandingSettings.shareUrl,
                   shareImageUrl: brandingSettings.shareImageUrl,
                   shareBackground: brandingSettings.shareBackground,
                   shareAccent: brandingSettings.shareAccent,
@@ -3168,6 +3245,17 @@ export default function AdminPortal() {
                   Gift credit discount %
                   <input type="number" min={0} max={100} value={rewardsSettings.giftDiscountPercent ?? 10} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, giftDiscountPercent: Math.max(0, Math.min(100, Number(e.target.value) || 10)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   <span style={{ fontSize: 10, color: '#666' }}>Default 10 = a gifted credit is worth 10% less than face value.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Redeem info message (shown under the redeem box in /account)
+                  <textarea
+                    rows={3}
+                    value={String(rewardsSettings.redemptionInfoMessage || '')}
+                    onChange={(e) => setRewardsSettings((prev) => ({ ...prev, redemptionInfoMessage: e.target.value }))}
+                    placeholder="Every redemption issues a unique one-time promo code… (leave empty to use the built-in message that auto-includes the gift discount %)"
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, resize: 'vertical' }}
+                  />
+                  <span style={{ fontSize: 10, color: '#666' }}>Leave empty for the default copy. You can also use {`{giftPercent}`} to insert the gift-discount percentage.</span>
                 </label>
               </div>
 

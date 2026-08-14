@@ -124,6 +124,7 @@ export default function AccountPage() {
     minRedeemPoints?: number;
     giftingEnabled?: boolean;
     giftDiscountPercent?: number;
+    redemptionInfoMessage?: string;
   }>({});
   const didAutoLookup = useRef(false);
 
@@ -484,8 +485,8 @@ export default function AccountPage() {
         boxSizing: 'border-box',
       }}
     >
-      <div style={{ maxWidth: 420, margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ maxWidth: 560, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <Link
             href="/"
             style={{
@@ -518,57 +519,87 @@ export default function AccountPage() {
                 cursor: 'pointer',
               }}
             >
-              Logout
+              Log out
             </button>
           )}
         </div>
 
-        {isLoggedIn && user && (
-          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 12, padding: 12, marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 'bold', color: configPalette.cardTextMain }}>{user.email}</div>
-                <div style={{ fontSize: 10, color: configPalette.cardTextMuted, marginTop: 2 }}>Signed in as {user.email}</div>
-                <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 4 }}>Rewards: {Number(user.rewards || 0).toLocaleString()} points</div>
-              </div>
+        {/* Page header */}
+        <div style={{ marginBottom: 22 }}>
+          <h1 style={{ fontSize: 28, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px', color: configPalette.cardTextMain }}>My Account</h1>
+          <p style={{ fontSize: 13, color: configPalette.textMuted, margin: 0, lineHeight: 1.6 }}>
+            {isLoggedIn
+              ? `Signed in as ${user?.email} — manage your entries, rewards and credits.`
+              : 'Sign in to securely view and manage your entries and rewards.'}
+          </p>
+        </div>
+
+        {!isLoggedIn && (
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 20, padding: 20, marginBottom: 18 }}>
+            <p style={{ margin: '0 0 12px', fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
+              Account login is required to prevent address and entry access by guessing card digits. Entries are linked to your email — sign in to see them.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link href="/auth/login" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.checkoutCtaButton || '#635bff', color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
+              <Link href="/auth/signup" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
             </div>
-            {user.welcomePromoCode ? (
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  background: welcomePromoUsed ? 'rgba(148,163,184,0.06)' : 'rgba(34,197,94,0.08)',
-                  border: welcomePromoUsed ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(34,197,94,0.2)',
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                }}
-              >
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>
-                  {welcomePromoUsed
-                    ? 'Your one-time 10% welcome credit — used:'
-                    : 'Your one-time 10% welcome credit — ready to use at checkout:'}
+          </div>
+        )}
+
+        {isLoggedIn && user && (
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 22, padding: 20, marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 6 }}>Rewards balance</div>
+                <div style={{ fontSize: 34, fontWeight: 800, color: configPalette.cardTextMain, lineHeight: 1 }}>
+                  {Number(user.rewards || 0).toLocaleString()}
+                  <span style={{ fontSize: 13, fontWeight: 500, color: configPalette.cardTextMuted, marginLeft: 8 }}>points</span>
                 </div>
-                <div style={{ fontWeight: 800, letterSpacing: 1, color: welcomePromoUsed ? '#94a3b8' : '#34c759', marginTop: 4 }}>{user.welcomePromoCode}</div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 8 }}>
+                  {rewardsConfig.pointsPerDollar
+                    ? `${Number(rewardsConfig.pointsPerDollar).toLocaleString()} points = $1.00 credit`
+                    : 'Points convert to store credit at checkout.'}
+                  {rewardsConfig.minRedeemPoints ? ` · minimum ${Number(rewardsConfig.minRedeemPoints).toLocaleString()} points` : ''}
+                </div>
               </div>
-            ) : (
-              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5 }}>
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Unlock your welcome credit — 10% off your first release + a points balance.</div>
-                <button
-                  onClick={claimWelcome}
-                  disabled={claimingWelcome}
-                  style={{ marginTop: 8, padding: '8px 12px', borderRadius: 999, border: 'none', background: '#34c759', color: '#06120a', fontWeight: 700, fontSize: 12, cursor: claimingWelcome ? 'not-allowed' : 'pointer' }}
+              {user.welcomePromoCode ? (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    background: welcomePromoUsed ? 'rgba(148,163,184,0.06)' : 'rgba(34,197,94,0.08)',
+                    border: welcomePromoUsed ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(34,197,94,0.2)',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    maxWidth: 220,
+                  }}
                 >
-                  {claimingWelcome ? 'Issuing…' : 'Claim my 10% credit'}
-                </button>
-              </div>
-            )}
+                  <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>
+                    {welcomePromoUsed
+                      ? 'One-time welcome credit — used:'
+                      : 'One-time welcome credit — ready at checkout:'}
+                  </div>
+                  <div style={{ fontWeight: 800, letterSpacing: 1, color: welcomePromoUsed ? '#94a3b8' : '#34c759', marginTop: 4, wordBreak: 'break-all' }}>{user.welcomePromoCode}</div>
+                </div>
+              ) : (
+                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5, maxWidth: 220 }}>
+                  <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Unlock your welcome credit — 10% off your first release.</div>
+                  <button
+                    onClick={claimWelcome}
+                    disabled={claimingWelcome}
+                    style={{ marginTop: 8, padding: '8px 12px', borderRadius: 999, border: 'none', background: '#34c759', color: '#06120a', fontWeight: 700, fontSize: 12, cursor: claimingWelcome ? 'not-allowed' : 'pointer' }}
+                  >
+                    {claimingWelcome ? 'Issuing…' : 'Claim my 10% credit'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
             {isLoggedIn && (
-              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(125,211,252,0.06)', border: '1px solid rgba(125,211,252,0.16)', fontSize: 12, lineHeight: 1.5 }}>
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 4 }}>Redeem points for store credit</div>
+              <div style={{ marginTop: 0, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>Redeem points for store credit</div>
                 <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginBottom: 8 }}>
                   {rewardsConfig.pointsPerDollar
                     ? `${Number(rewardsConfig.pointsPerDollar).toLocaleString()} points = $1.00 credit`
@@ -589,12 +620,20 @@ export default function AccountPage() {
                   </button>
                 </div>
                 <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 8, lineHeight: 1.5 }}>
-                  Every redemption issues a unique one-time promo code.
-                  {rewardsConfig.giftingEnabled === false
-                    ? ' It is reserved to your account only.'
-                    : rewardsConfig.giftDiscountPercent
-                      ? ` You can keep it or gift it to someone — a gifted code is worth ${Math.max(0, Number(rewardsConfig.giftDiscountPercent) || 10)}% less than face value.`
-                      : ' You can keep it or gift it to someone else.'}
+                  {(() => {
+                    const giftPercent = Math.max(0, Number(rewardsConfig.giftDiscountPercent) || 10);
+                    const custom = String(rewardsConfig.redemptionInfoMessage || '').trim();
+                    if (custom) {
+                      return custom.replace(/\{giftPercent\}/g, String(giftPercent));
+                    }
+                    return `Every redemption issues a unique one-time promo code.${
+                      rewardsConfig.giftingEnabled === false
+                        ? ' It is reserved to your account only.'
+                        : rewardsConfig.giftDiscountPercent
+                          ? ` You can keep it or gift it to someone — a gifted code is worth ${giftPercent}% less than face value.`
+                          : ' You can keep it or gift it to someone else.'
+                    }`;
+                  })()}
                 </div>
                 {redeemMsg && <div style={{ marginTop: 8, fontSize: 11, color: redeemedCode ? '#34d399' : '#fbbf24' }}>{redeemMsg}</div>}
                 {redeemedCode && (
@@ -604,8 +643,8 @@ export default function AccountPage() {
             )}
 
             {isLoggedIn && creditPromos.length > 0 && (
-              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 4 }}>Your credits & codes</div>
+              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 4 }}>Your credits & codes</div>
                 {creditPromos.map((promo) => (
                   <div
                     key={promo.code}
@@ -674,7 +713,7 @@ export default function AccountPage() {
             )}
 
             {isLoggedIn && (
-              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
                 {!showPwdForm ? (
                   <button
                     onClick={() => setShowPwdForm(true)}
@@ -708,40 +747,9 @@ export default function AccountPage() {
               </div>
             )}
 
-        <h1 style={{ fontSize: 20, fontFamily: 'serif', margin: '0 0 4px' }}>Manage My Entry</h1>
-        <p style={{ fontSize: 12, color: configPalette.textMuted, margin: '0 0 24px' }}>
-          {isLoggedIn
-            ? 'Your entries are linked to your account for secure management.'
-            : 'Sign in to securely view and manage your entries.'}
-        </p>
-
-        {!isLoggedIn && (
-          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 16, padding: 16, marginBottom: 18 }}>
-            <p style={{ margin: '0 0 10px', fontSize: 12, color: configPalette.cardTextMuted }}>
-              Account login is required to prevent address/entry access by guessing card digits.
-            </p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Link href="/auth/login" style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.checkoutCtaButton, color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
-              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
-            </div>
-          </div>
-        )}
-
-        {isLoggedIn && <div
-          style={{
-            background: configPalette.cardBackground,
-            border: `1px solid ${configPalette.cardBorder}`,
-            borderRadius: 20,
-            padding: 20,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>
-              Your entries load automatically from <strong style={{ color: configPalette.cardTextMain }}>{email}</strong>.
-            </div>
+        <div style={{ marginTop: 26, marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <h2 style={{ fontSize: 17, fontFamily: 'Georgia, Times New Roman, serif', margin: 0, color: configPalette.cardTextMain }}>My Entries</h2>
+          {isLoggedIn && (
             <button
               onClick={() => lookup()}
               disabled={isBusy}
@@ -759,8 +767,13 @@ export default function AccountPage() {
             >
               {isBusy ? 'Refreshing…' : '↻ Refresh entries'}
             </button>
+          )}
+        </div>
+        {isLoggedIn && (
+          <div style={{ fontSize: 11, color: configPalette.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+            Your entries load automatically from <strong style={{ color: configPalette.cardTextMain }}>{email}</strong>.
           </div>
-        </div>}
+        )}
 
         {message && (
           <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: configPalette.cardTextMuted }}>{message}</p>

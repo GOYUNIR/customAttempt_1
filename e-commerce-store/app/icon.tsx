@@ -9,7 +9,7 @@ export default async function Icon() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
-  const brandName = String(branding.brandName || branding.shareTitle || 'GOYUNIR');
+  const brandName = String(branding.brandName || branding.shareTitle || 'Store');
   const background = String(branding.iconBackground || branding.shareBackground || '#0B0B0F');
   const textColor = String(branding.iconText || branding.shareText || '#D4AF37');
 

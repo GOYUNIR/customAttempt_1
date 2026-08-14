@@ -32,7 +32,7 @@ function siteUrlFromRequest(request: Request) {
     const u = new URL(request.url);
     return `${u.protocol}//${u.host}`;
   } catch {
-    return 'https://goyunir.com';
+    return 'https://example.com';
   }
 }
 

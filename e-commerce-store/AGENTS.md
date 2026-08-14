@@ -4,217 +4,301 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# GOYUNIR PROJECT — COMPLETE AGENT INSTRUCTIONS
+# PRIVATE ALLOCATION STOREFRONT — COMPLETE AGENT INSTRUCTIONS
+
+> **⚠️ MANDATORY MAINTENANCE RULE — READ THIS FIRST**
+> This file is the single source of truth for AI agents working on this
+> codebase. **Whenever you make ANY change** (new feature, new Redis key, new
+> admin setting, bug fix, API change), **you MUST update this file in the same
+> change set** so it stays relevant. Never leave this file stale. If you are
+> unsure whether a change affects operations, update the relevant section
+> anyway — a slightly verbose AGENTS.md is always better than a misleading one.
+> When you finish a task, append your work to the **Change Log** at the bottom.
 
 ## Project Overview
 
-GOYUNIR is a raffle/drop allocation storefront built on Next.js with Redis as the primary data store. **All day‑to‑day operations are performed via the admin portal at `/admin`** — no code changes should ever be needed for normal operation.
+This is a **drop-allocation / raffle storefront** built on Next.js 16 (App
+Router) with **Redis as the primary data store** and **Stripe** for payments.
+It is sold as a **white-label template**: the buyer renames the brand entirely
+through the **admin portal at `/admin`** — no code changes are ever needed for
+normal operation.
+
+**Everything that displays to customers is editable in `/admin`:**
+
+- Products, sizes, prices, inventory, winner tiers, Stripe price IDs, publish state
+- Site colors, fonts, border radius, glow orbs, design presets
+- Brand name, logo, favicon, social share card, footer links, copyright line
+- Hero copy, entry-form copy, storefront copy overrides
+- Drop schedule, social proof counters
+- Rewards/points rates, gifting toggle, gift-discount %, redemption message
+- Promo codes (customer + promoter), waitlist/announcement emails
+- **Legal & Policies** — Terms, Privacy, and Shipping page content, company name, support email
+
+The brand name "GOYUNIR" only exists as the **starter seed value** in
+`goyunir.config.ts` / seed defaults. Nothing customer-facing is hardcoded —
+emails, Stripe descriptions, the footer, the OG card, the favicon, the policy
+pages and the site URL all read from admin config or environment variables.
 
 ## Architecture
 
-### Data Storage
-- **Redis** is the source of truth for ALL store data
-- Products, config, settings, and entries are stored in Redis
-- **No fallback catalog is served** – if Redis is empty the storefront shows **0 items** until products are seeded via `/admin` (Seed Defaults or Add Product).
+### Data Storage — Redis is the source of truth
 
-### Key Redis Keys
+- **`store:products`** (hash) — THE canonical product records. All fields
+  (name, slug, `priceCategories`, images, `isActive`, `isArchived`,
+  `isUpcoming`, `maxPerEmail`, etc.) live here. Created/edited via `/admin`.
+- **`store:config`** (string) — THE canonical site configuration:
+  `themeColors`, `branding`, `heroContent`, `socialProof`, `brandFooterData`,
+  `catalogPreview`, `orbs`, `rewards`, `gallery`, `copy`, `legal`,
+  `raffleRegistrationForm`, `animationMechanics`, `dropSchedule`, `productNotes`.
+- **`drop_pool:*`** – live entry pools per product+size.
+- **`intent_pool:*`** – pre-payment intent pools per product+size.
+- **`archive:ledger`** – permanent entry/charge history (searchable in `/admin`).
+- **`config:promos`** – promo codes (customer discount + promoter payout).
+- **`store:users`** – accounts (email, password hash, rewards points, welcome promo).
+- **`address:submissions`** – addresses from the standalone address form.
+- **`live_state` / `catalog:archive_state` / `stats:*` / `drop_fraud_block:*` / `email:*`** – operational data, not display data.
+- **Live states** are seeded lazily by `getLiveProductState()`, eagerly by
+  `/api/admin/seed` (Seed Defaults), and repaired by the admin **Site Self-Test**.
+  The storefront falls back to `totalInventory` when a live state is missing.
 
-The store uses a **single source of truth** model — products and settings each live in exactly ONE key, and the storefront derives views (active/archived/upcoming) by filtering at read time. There are NO mirror hashes or duplicate image keys to keep in sync.
+**Legacy keys that no longer exist** (removed via `/admin` → Developer → Clean
+Up Redis): `store:active_products`, `store:archived_products`,
+`store:upcoming_products`, `store:product_images:*`, `store:catalog_config`.
+Never rebuild them.
 
-- `store:products` (hash) – THE canonical product records. All `images` (including base64 uploads) live inside each product object.
-- `store:config` (string) – THE canonical site configuration: colors, hero, footer, drop schedule, social proof, branding, `catalogPreview` (upcoming/archive groupings), orbs, etc.
-- `drop_pool:*` – Entry pools for each product/size
-- `intent_pool:*` – Pre-payment intent pools for each product/size
-- `archive:ledger` – Permanent entry history
-- `address:submissions` – Addresses captured by the standalone address form (`/address-checkout-form.html`)
-- `live_state` / `catalog:archive_state` / `stats:*` / `config:promos` / `drop_fraud_block:*` / `email:*` – Operational data, not display data.
-- **Live states are seeded three ways**: lazily by `getLiveProductState()` on first checkout/draw/archive action, eagerly by `/api/admin/seed` (Seed Defaults) for every product/size, and repaired by the admin **Site Self-Test** ("Live states seeded" check backfills any missing ones for active products via the same idempotent `getLiveProductState`). A freshly seeded store with no traffic legitimately has zero live states until the self-test is run — the storefront falls back to `totalInventory` when a live state is missing, so this is a readiness nicety, not a functional break.
+### Critical operational invariants
 
-**Legacy keys that no longer exist** (removed via the **Clean Up Redis** button on `/admin` → Developer tab): `store:active_products`, `store:archived_products`, `store:upcoming_products` (full JSON copies of products), `store:product_images:*` (duplicate image arrays), and `store:catalog_config` (duplicate catalog groupings). If you ever see them, run Clean Up Redis — do NOT rebuild them.
+1. **Never assume Redis has data.** An unseeded store deliberately shows
+   **0 items**. Products only appear after `/admin` → Seed Defaults or Add
+   Product. There is **no fallback catalog served** from `goyunir.config.ts`.
+2. **Products must exist in Redis to appear on the site.** A product slug only
+   resolves when that product is in `store:products`; otherwise the product
+   page shows "Product not found".
+3. **Never hardcode brand, prices, or business logic.** All business
+   configuration is portal-driven. If you find a hardcoded brand name, social
+   URL, policy text, Stripe description, or `https://goyunir.com` in a
+   customer-facing path, that is a BUG — replace it with the admin-config
+   value or a neutral fallback.
+4. **The admin portal is the product.** `/admin` is protected by
+   `ADMIN_BASIC_AUTH_USERNAME`/`ADMIN_BASIC_AUTH_PASSWORD`.
 
-### Address Capture Pages
-- **`public/address-checkout-form.html`** is a standalone address form served at `/address-checkout-form.html`.
-- Mapbox Address Autofill is **optional progressive enhancement** — the SDK only loads when `NEXT_PUBLIC_MAPBOX_TOKEN` (or the `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` alias) is configured, or `window.ENV_MAPBOX_TOKEN` is injected at runtime. **If the token is missing the dropdown simply does not exist** — that is the #1 reason autofill "isn't working". The page shows an explicit "Address autofill is unavailable (Mapbox token not configured)" note and console logs explain the state (`[mapbox-autofill]`). Set the var in Vercel (Project Settings → Environment Variables, Production + Preview) **and redeploy** — it is baked in at build time. For local dev add it to `.env.local`, or use the localhost-only overrides `?mapbox_token=pk.…` / `localStorage "mapbox_dev_token"` (never read in production).
-- Submitting posts to **`/api/address/save`**: the address is logged to `address:submissions`, and when the URL carries `?variant=&size=&email=` (and optionally `?orderRef=`) it is attached to the matching open entry. An already-set entry address is only overwritten when the matching `orderRef` is supplied.
-- The token placeholder is mapped into `data-mapbox-token` at build time by `scripts/inject-mapbox-token.mjs` (targets `public/` files).
-- The **React storefront** (item-page entry form in `components/Storefront.tsx` + cart drawer in `components/SiteChrome.tsx`) wires the same autofill through `lib/mapbox-autofill.ts`: token resolved from `window.ENV_MAPBOX_TOKEN` → `data-mapbox-token` attr → `NEXT_PUBLIC_MAPBOX_TOKEN` → `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`, SDK loaded lazily once, and autofill attaches to inputs mounted later (cart drawer) automatically. Those address inputs must stay **inside a `<form>`** with `autocomplete="shipping street-address"` — Mapbox only attaches to eligible inputs that are descendants of a `<form>`. No token → native browser autofill fallback (no dropdown).
-- ⚠️ **Do NOT "restore" `collection.observe()` in `lib/mapbox-autofill.ts`.** Mapbox search-js **v1.6.0 (the latest release) crashes on React pages**: its `observe()` MutationObserver callback deep-compares the shipping inputs (`at(Hi(), …)`) with a `deepEquals()` that has **no cycle detection**, and React DOM nodes carry a **circular enumerable `__reactFiber$…` property** (fiber.stateNode → element → __reactFiber$…). The first DOM mutation then throws `Uncaught RangeError: Maximum call stack size exceeded` (stack frame maps to the SDK's `src/utils/index.ts` → `deepEquals`). `lib/mapbox-autofill.ts` deliberately does **not** call `collection.observe()`; instead it runs its own identity-based MutationObserver (`resyncMapboxAutofill()` + `startAutofillObserver()`) **plus a short retry loop** (`startAttachLoop()`) that calls the SDK's idempotent `collection.update()` until the DOM shows real attach side effects. Keep any future re-implementations identity-based — never deep-compare React DOM nodes.
-- **"Active" ≠ attached.** `status: 'active'` only means the SDK loaded and a collection was created — it says **nothing** about whether the dropdown actually attached. `isMapboxAutofillActive()` returns true **only** when (a) the SDK attached to ≥1 input (the SDK renames attached inputs to `… address-search`, adds `data-lpignore`, and appends a `<mapbox-search-listbox>` to `<body>` — see `verifyMapboxAttachment()`), AND (b) no Mapbox suggest request was rejected (`tokenRejected`, 401/403). The status drives the UI hint only — structural validation is the gate (see "Address validation" below). A rejected token also triggers a loud `console.error` with the exact fix (public `pk.*` token; URL restrictions must include the host; token not revoked) and `window.__GOYUNIR_MAPBOX__` carries `tokenPrefix`, `host`, `suggestErrors`, `suggestCount`, `attached`, `inputs`, `attachedInputs`, `listboxes`.
-- ⚠️ **Pass `browserAutofillEnabled: true` to `mapbox.autofill()` — do NOT "simplify" it away.** Mapbox search-js **v1.6.0** renames an attached input's `autocomplete` to **`new-password`** on focus and on every keystroke when this option is false (its default). That makes BOTH our selector (`findAddressInputs()`) AND the SDK's own re-scan stop recognizing the field, so the next `collection.update()` tears the dropdown down and it never comes back — while the UI hint flips to "Address autofill could not attach right now" even though the console said "Attach verified". This was the #1 "dropdown stopped working" bug. With the option enabled, the SDK keeps the original address autocomplete while the field is empty/short; `lib/mapbox-autofill.ts` also runs `restoreAddressAutocomplete()` (an identity-based attribute observer + a restore before every `update()`) and `findAddressInputs()` counts SDK-attached inputs via `mapbox-search-listbox.input` so a rename can never make the status flap. The standalone `public/address-checkout-form.html` uses the same option + a small `#checkout-form input[autocomplete="new-password"]` restore guard.
-- **React state vs DOM value.** When a suggestion is picked, the SDK fills the input value **programmatically**, which does NOT trigger React's `onChange` — React state can stay empty while the field visibly shows the address. Submit handlers therefore use `getAutofillAddressValue()` (DOM truth, prefers the focused input, then the last eligible input, e.g. the cart drawer) instead of only the React state. The status event `goyunir-mapbox-status` (dispatched on `window` by `setStatus`) drives the small autofill hint lines under the shipping fields in Storefront/SiteChrome.
-- **The shipping box fills with the FULL address, not just the street.** Mapbox search-js **v1.6.0** only writes the STREET components (`address_line1/2/3`) into a `street-address` input — city/state/zip are dropped unless the form has separate `address-level2` / `address-level1` / `postal-code` fields. Our storefront forms use a single shipping box, so `handleRetrieve` in `lib/mapbox-autofill.ts` composes the full formatted address from the retrieved feature (`event.detail.features[0].properties` — the SDK's `MapboxHTMLEvent` puts the payload in `detail`) and writes it into the box after the SDK's partial fill (see `composeFullAddress`). The standalone page is unaffected because it has real city/state/zip fields that the SDK fills natively.
-- **Address validation:** shared structural checks in `lib/address-validation.ts` reject garbage (missing street number, missing letters, too short) on the client and on the server (`/api/address/save`, `/api/checkout`, `/api/checkout/cart`, `/api/account/update-address`). Mapbox autofill is an **accelerator, not a lock-in**: customers can either pick a suggestion (tracked via the SDK's `retrieve` event; the collection API is `addEventListener('retrieve', …)` — there is no `.on()`) for an instant, pre-verified fill, or type a complete address manually. Do NOT re-add a hard "must pick from the dropdown" gate — the store owner explicitly removed it as customer-hostile friction. `/api/address/save` records a `verified` flag on the submission when it came from a Mapbox suggestion.
-- **Standalone page token sanity:** `public/address-checkout-form.html`'s `resolveToken()` now rejects anything that isn't a public `pk.*` token (and the leftover `pk.YOUR_LOCALHOST_MAPBOX_TOKEN` placeholder) — a secret `sk.*` token or placeholder makes the SDK load ("active") but every suggest request 401s (and 401s do not bill, so the dashboard shows zero usage). `autofillReady` on that page is also set only when a `<mapbox-search-listbox>` actually attached.
+### Caching (read before touching storefront perf)
+
+- `lib/ttl-cache.ts` — server-side in-memory TTL cache (`withTtlCache`).
+  `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s),
+  heartbeat social-proof tally (15s), `loadStoreConfigCached` (30s).
+- `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes
+  in-flight requests and reuses results for 10s.
+- `app/layout.tsx` uses `export const dynamic = 'force-dynamic'` so the live
+  `/admin` theme is baked into server HTML every request (no FOUC). It also
+  renders a `<script type="application/json">` theme blob
+  (`window.__GOYUNIR_THEME__`) + a synchronous inline script, and wraps the app
+  in `ThemeProvider` (`components/ThemeProvider.tsx` + `useLiveTheme()`).
+- Admin writes bypass caches; **storefront display data can lag a few seconds**
+  (up to 30s for branding/metadata).
+
+### Performance rules
+
+- Glow orbs are **pre-blurred radial gradients** animated via direct DOM writes
+  (refs) in `SiteChrome.tsx`. Never add `filter: blur()` or `backdrop-filter`
+  to animated/large elements (forces per-frame paints → Chrome lag).
+- Home/catalog countdowns only tick while a live countdown is visible.
+- If you add a new public read endpoint, wrap Redis reads in `withTtlCache`.
+
+## Admin Portal (`/admin`)
+
+Full CRUD for products, images, settings, draws, entries, promos, users, and
+the ledger. Settings tabs include:
+
+- **Products** — add/edit/duplicate/publish/archive, price categories, Stripe
+  IDs, inventory, winner tiers, images, sort order.
+- **Settings → Theme Colors / Design Presets** — colors, fonts, radius,
+  transparency, one-click presets (`lib/theme-presets.ts`).
+- **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
+- **Settings → Hero Content / Entry Form / Footer / Storefront copy** — copy overrides.
+- **Settings → Branding & Share** — brand name, logo (upload or URL), header
+  mode, logo size, share title/description/tagline/url, share card colors,
+  favicon colors.
+- **Settings → Rewards & Points** — earn rate, redeem rate, min/max points,
+  gifting toggle, gift discount %, **custom redeem info message** (`{giftPercent}` token).
+- **Settings → Legal & Policies** — Terms / Privacy / Shipping content
+  (`## ` heading, `- ` bullet, blank-line paragraphs, `{companyName}` /
+  `{supportEmail}` tokens).
+- **Catalog** — upcoming/archive preview groupings.
+- **Promos** — customer + promoter codes, discounts, caps, per-product/size eligibility.
+- **Draws / Ledger** — trigger draws, draw history, permanent entry search.
+- **Users** — adjust points, view accounts.
+- **Developer** — Seed Defaults, Site Self-Test, Clean Up Redis.
 
 
+## Core Feature Reference (for agents)
 
-### Admin Portal (`/admin`)
-- Protected by Basic Auth (`ADMIN_BASIC_AUTH_USERNAME`/`PASSWORD`)
-- Full CRUD for products, images, settings
-- Draw trigger and history
-- Entry management and ledger search
-- **ALL configuration** (sizes, prices, Stripe IDs, inventory, schedule, social proof, etc.) is editable live – no redeploy required.
-- **Design Presets** (`/admin` → Settings → Design Presets) – one-click market skins (Default (Stock) / Luxury / Hype Culture / Wellness / Editorial / Monochrome / Deep Navy) that fill `themeColors` (+ `fontFamily`, `borderRadius`) and the glow orbs. Defined in `lib/theme-presets.ts`; colors are baked into static pages at build time, while `SiteChrome` applies the saved font/background/`--ui-radius` token to the live page shell.
+### Cart & raffle entries (anti-double-entry)
 
-## CRITICAL RULES FOR AI AGENTS
+- **Server-side duplicate protection is the real gate.** `/api/checkout`
+  (single product), `/api/checkout/cart` (bag), and
+  `/api/checkout/confirm-setup` all block a second active raffle entry for the
+  same email+product+size before a Stripe session is created (`DUPLICATE_BLOCKED`).
+- **Client-side "entered" ledger** (`goyunir-entered-items` localStorage):
+  when an entry is confirmed, the product+size is recorded so "Add to bag"
+  blocks re-adding for the session. It is UX, not security.
+- **Pruning the bag**: entering a raffle or buying a direct item through the
+  product page (`handleRaffleSubmit` / `handleDirectCheckout` /
+  `handleWaitlistSubmit` in `components/Storefront.tsx`) removes the matching
+  product+size line from the bag immediately. A cart-drawer checkout sets
+  `sessionStorage 'goyunir-cart-checkout'` so the confirm-setup success handler
+  clears the WHOLE bag (and marks every secured raffle line in the ledger).
+- A direct entry tracks `sessionStorage 'goyunir-pending-entry'` so Stripe
+  setup success can mark it entered and setup cancel can forget it.
 
-### When Making Changes
-1. **Never assume Redis has data** – handle an empty Redis gracefully (empty lists, never fallback products). The storefront intentionally shows **0 items** until a seed exists.
-2. **Products must be in Redis to appear on site** – use the **Seed Defaults** button in admin if Redis is empty.
-3. **Product slugs only resolve when the product exists in Redis** – an unseeded store returns empty results, and direct product URLs show "Product not found".
-4. **All business logic is now configurable via the admin portal** – do NOT suggest code changes for:
-   - Adding/removing product sizes
-   - Changing product prices
-   - Updating Stripe price IDs
-   - Modifying inventory or winner tiers
-   - Adjusting drop schedule or social proof
-   - Changing site colors, text, or footer links
+### Mapbox address autofill (lib/mapbox-autofill.ts)
 
-### Common Issues & Fixes
+- Token resolution: `window.ENV_MAPBOX_TOKEN` → `#search-js[data-mapbox-token]`
+  (injected at build by `scripts/inject-mapbox-token.mjs`) →
+  `NEXT_PUBLIC_MAPBOX_TOKEN` → `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` →
+  localhost-only dev overrides. **No token → no dropdown** (by design).
+- ⚠️ **Do NOT "restore" `collection.observe()`** — Mapbox search-js v1.6.0's
+  `observe()` deep-compares React DOM nodes (circular `__reactFiber$…`) and
+  crashes with `RangeError: Maximum call stack size exceeded`. This module uses
+  its own identity-based MutationObserver + `collection.update()` retry loop.
+- ⚠️ **Pass `browserAutofillEnabled: true`** — otherwise the SDK renames the
+  input's `autocomplete` to `new-password` and the dropdown never stays attached.
+- **Full-address fill**: the SDK only writes street components into a single
+  `street-address` box. `handleRetrieve` composes the FULL address and writes it
+  via `writeReactInputValue()` (native setter + bubbling `input` event so React
+  state stays in sync — a plain `el.value =` gets wiped by the next re-render),
+  then re-applies on a guarded ~7s schedule to beat the SDK's async street-only
+  fill. Do not remove that event dispatch.
+- Address inputs must live **inside a `<form>`** with
+  `autocomplete="shipping street-address"`.
+- "Active" ≠ attached: `isMapboxAutofillActive()` is true only when the SDK
+  actually attached (verified via `<mapbox-search-listbox>` listbox `.input`
+  pointers) AND no token was rejected.
+- `getAutofillAddressValue()` reads the DOM (truth), not React state, because
+  programmatic fills don't fire React `onChange`.
 
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| 404 on product page | Product not in Redis | Go to /admin → Products → Seed Defaults |
-| 404 on home page | No active products | Seed defaults or add a product via admin |
-| Admin not accessible | Basic Auth missing | Check environment variables |
-| Settings not applying | Stale TTL cache or old build | Theme is baked per-request now (dynamic layout). Settings save instantly; the storefront may lag a few seconds while the 10s/30s caches expire. If a change still doesn't show, re-run **Seed Defaults** or redeploy |
-| Size not showing | `availableSizes` not set | Go to /admin → Settings → Available Sizes |
+### Promo codes
 
-### Testing New Changes
-1. Always test with Redis empty (clear Redis first)
-2. Test with Redis seeded (click Seed Defaults)
-3. Test admin portal for each feature
+- Codes stored in `config:promos` (hash). Customer discount %, promoter payout
+  %, per-email/per-total use caps, per-product/size eligibility, min order,
+  giftable (transferable) flag, `issuedForEmail` reservation.
+- `?ref=` / `?promo=` links lock a promoter code for the session
+  (`goyunir-promo-code` localStorage) and are preserved through checkout
+  metadata. Promoters can't use their own code.
+- The promo UI is **collapsed by default** everywhere (Storefront + cart
+  drawer): a compact "Add promo or promoter credit" button (or "✓ CODE applied"
+  chip with Change/Remove) that expands on tap. Never auto-expand it.
+- `fixedDiscountCents` codes (store credit) vs `customerDiscountPercent` codes.
 
-### Files to NEVER Modify
-- `components/Storefront.tsx` – Modify carefully (cart/checkout/product-page flow; no fallback catalog is served here)
-- `app/[slug]/page.tsx` – Product page routing
-- `goyunir.config.ts` – Only change if you need a new hardcoded default; prefer using admin portal
+### Rewards & points
 
-`app/api/store/config/route.ts` is a legacy endpoint (nothing in the client calls it — the site uses `/api/store`). It is kept functional and now derives products from `store:products` like every other read path; change it carefully if you touch it.
+- Signup awards 250 points + a one-time 10% welcome promo bound to the email.
+  Earn rate / redeem rate / min/max / gifting are admin-configurable.
+- `/account` shows the balance, redeem box (creates a unique one-time promo in
+  `config:promos`), the credits list, and a **custom redemption message** set in
+  `/admin` → Rewards (falls back to built-in copy that includes the gift %).
+
+### Legal & policies pages (/terms, /privacy, /shipping)
+
+- Fully generated from `store:config.legal` (`/admin` → Settings → Legal &
+  Policies) by `components/LegalPage.tsx` (server component). The admin content
+  uses a tiny markup: `## ` headings, `- ` bullets, blank-line paragraphs, and
+  `{companyName}` / `{supportEmail}` tokens.
+- The **footer** renders social links + copyright from `brandFooterData`
+  (admin → Settings → Footer). Never hardcode social URLs or a brand name.
+
+### Emails (lib/email.ts)
+
+- Brand name from `BRAND_NAME` → `NEXT_PUBLIC_SITE_NAME` → neutral "Store".
+  Support address from `SUPPORT_EMAIL` → `REPLY_TO_EMAIL` → neutral placeholder.
+  Buyers set these in the platform (Vercel). **Do not hardcode a brand inbox.**
+- Site URLs in emails/metadata come from `NEXT_PUBLIC_SITE_URL` / `SITE_URL`
+  with a neutral fallback.
 
 ## Environment Variables (set in Vercel)
 
-STRIPE_SECRET_KEY
-STRIPE_WEBHOOK_SECRET
-STRIPE_PRODUCT_ID (optional) – global default Stripe price ID. Used when a product/size has no Stripe ID set in /admin. Per-product IDs set in admin always win. There is NO hardcoded Stripe price ID in this template – if a product/size has no ID and STRIPE_PRODUCT_ID is unset, checkout fails loudly with an obvious placeholder (`price_placeholder_not_configured`) instead of charging a wrong account.
-UPSTASH_REDIS_REST_URL
-UPSTASH_REDIS_REST_TOKEN
-ADMIN_BASIC_AUTH_USERNAME
-ADMIN_BASIC_AUTH_PASSWORD
-CRON_SECRET
-RESEND_API_KEY (optional)
-RESEND_FROM (optional)
-NEXT_PUBLIC_MAPBOX_TOKEN (required for Mapbox address autofill dropdowns; must be set in the SAME environment(s) you deploy and the site must be redeployed after setting it — it is baked into the client at build time. `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is accepted as an alias.)
+| Variable | Purpose |
+| --- | --- |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth) |
+| `STRIPE_SECRET_KEY` | Stripe API |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
+| `STRIPE_PRODUCT_ID` (optional) | Global default Stripe price ID when a product/size has none set in admin. Per-product IDs always win. No hardcoded Stripe ID anywhere — if unset, checkout fails loudly with `price_placeholder_not_configured`. |
+| `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD` | `/admin` protection |
+| `CRON_SECRET` | Cron endpoint auth |
+| `RESEND_API_KEY` / `RESEND_FROM` (optional) | Transactional email |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox address autofill (must be set in the SAME env as the deploy + redeploy) |
+| `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain) |
+| `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` (optional) | Email send-from brand |
+| `SUPPORT_EMAIL` / `REPLY_TO_EMAIL` (optional) | Support address in emails |
 
 
-## When to Update This File
-- When new Redis keys are added
-- When admin portal gains new features
-- When critical bugs are fixed
-- When architecture changes
+## Testing Checklist (run before every change ships)
 
-**Last Updated**: 2026-08-13
+1. **Empty Redis** — storefront shows 0 items, catalog shows empty states,
+   no crashes, no fallback products.
+2. **Seeded Redis** — run Seed Defaults; products appear, product pages load,
+   admin self-test passes.
+3. **Draft flows** — a seeded store with zero traffic legitimately has zero
+   live states; the storefront falls back to `totalInventory`.
+4. **Duplicates** — the same email cannot enter the same raffle+size twice
+   (server returns `DUPLICATE_BLOCKED`), and adding to the bag after entering
+   is blocked client-side.
+5. **Promo UI** — collapsed by default; expands only on tap; applies and
+   persists; promoter codes locked by `?ref=` survive checkout.
+6. **Address autofill** — with a token: suggestion fills the FULL address
+   (street + city + state + zip) into the single box and survives re-renders.
+7. **Legal pages** — /terms, /privacy, /shipping render admin content + live
+   theme; leaving a field empty uses the built-in default.
+8. **Branding** — change brand name/logo/footer/support email in admin and
+   confirm the header, footer, OG card, favicon, emails metadata and Stripe
+   descriptions reflect the change (no brand-name leakage).
+9. **Build** — `npm run build` passes type-check and production compile.
+10. **Lint** — `npm run lint` passes (eslint).
 
----
+## Files to NEVER Modify
 
-## GOAL STATUS (from previous AI)
-- ✅ Stripe price IDs are NO LONGER hardcoded anywhere – per-size IDs come from `/admin` (wins), else `STRIPE_PRODUCT_ID`, else an obvious placeholder that fails checkout loudly. Seed products use `defaultStripePriceId()` so new seeds inherit the env var.
-- ✅ Default size label is now `'Standard'` – changeable via admin portal.
-- ✅ All products, prices, sizes, and Stripe IDs can be fully customized through `/admin` → Products and Settings.
-- ✅ Unseeded store now shows **0 items** (no fallback catalog is served from `goyunir.config.ts`).
-- ✅ Chrome/desktop lag reduced: glow orbs are radial gradients (no `filter: blur()`), and `backdrop-filter` was removed from the header, footer, cart overlay, and modals.
-- ✅ No further code changes required for normal store operation – everything is portal‑driven.
-- 🔄 Future improvements: Consider adding direct product import/export CSV in admin.
+- `components/Storefront.tsx` — modify carefully (cart/checkout/product-page flow).
+- `app/[slug]/page.tsx` — product routing.
+- `goyunir.config.ts` — only add a hardcoded DEFAULT if needed; prefer the admin portal.
+- `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
-## CRITICAL RULES FOR AI AGENTS
+## Change Log (append every change)
 
-### Product Configuration
-- **All product details** (prices, Stripe IDs, inventory, winner tiers) are now **exclusively managed via the admin portal** (`/admin` → Products).
-- The config file (`goyunir.config.ts`) contains **no size‑specific prices or Stripe IDs** – only metadata like name, slug, description, notes, and images.
-- `maxRaffleAllocationLimit`, `totalInventory`, and `winnerTiers` default to `0` in the seed – set them in the admin.
-- **Stripe price IDs** for each size are set per product in the admin portal – there is no universal default; if you see a `price_placeholder_*` error, it means you haven't set the ID in admin.
+- **2026-08-14 — Template finalization pass:**
+  - Catalog page: "Currently Available" section now renders BELOW the archives
+    (order: Upcoming → Past Archives → Currently Available).
+  - Home page orbs: hero/product surfaces let the glow bleed through when
+    surface transparency is fully opaque (capped at 93%).
+  - Mapbox full-address fill: writes via the native value setter + dispatches a
+    bubbling `input` event so React state stays in sync (fixes the street-only
+    box being wiped by re-renders) and re-applies over a ~7s guarded schedule.
+  - Cart/raffle integration: product-page entry/buy prunes the matching bag
+    line; cart-drawer checkout marks `goyunir-cart-checkout` and clears the
+    whole bag + ledger on confirm; an entered-items ledger blocks re-adding to
+    the bag after a confirmed entry; promo UI is collapsed by default in both
+    the product form and the cart drawer.
+  - Account page redesign: cleaner header, Rewards balance card, consistent
+    cards, "My Entries" section header with refresh.
+  - Admin config: added **Legal & Policies** (Terms/Privacy/Shipping content +
+    company name + support email), **shareTagline/shareUrl**, and the
+    **custom redeem info message** (`rewards.redemptionInfoMessage` with
+    `{giftPercent}` token).
+  - Removed hardcoded brand leakage: footer social links/copyright read from
+    admin, policy pages are admin-driven, layout/OG/icon URLs use
+    `NEXT_PUBLIC_SITE_URL`/`SITE_URL`, Stripe descriptions are brand-neutral,
+    email fallbacks are neutral placeholders.
+  - Docs: AGENTS.md and README.md rewritten for template buyers + AI agents.
 
-### Common Issues
-- **"Price not configured" or "Stripe price ID not configured"** – go to `/admin` → Products, edit the product, fill in the price and Stripe ID for each size.
-- **"Sold out"** – adjust inventory in the admin portal.
-- **"Invalid size"** – check the `availableSizes` in `/admin` → Settings.
+- **2026-08-14 — Finalization follow-up (bug + lint fixes):**
+  - Fixed `NotFoundView` server/client boundary: added `'use client'` so the
+    `useLiveTheme()` hook works when `app/not-found.tsx` (a server component)
+    renders it. Previously this threw `Attempted to call useLiveTheme() from
+    the server` on every SSR of a 404/product-not-found page.
+  - Zero new ESLint errors from the finalization pass: the new config fields
+    are typed without `any` — `LiveThemeValue.footer`/`.legal` are
+    `Record<string, string>`, `StorefrontConfig.legal` is `StoreLegalConfig`,
+    SiteChrome's footer state is `Record<string, string> | null`, and the cart
+    ledger loop in Storefront relies on inferred types instead of an explicit
+    `any` annotation. The changed files now lint one error CLEANER than the
+    previous commit (the story page also dropped a stale error).
 
-### File to NEVER Modify
-- `goyunir.config.ts` – only change if you need to add a new product’s metadata (name, slug, prefix, notes, images). Prices, Stripe IDs, inventory, and winner tiers are **not** stored here.
-
-## Product Variants
-
-Products now have a `variants` array (not fixed 50ml/100ml). Each variant has:
-- `name` (e.g., "Standard", "Premium")
-- `price` (number)
-- `stripePriceId` (string)
-- `inventory` (number)
-- `winnerTiers` (array of numbers, e.g., [2,2,2,1])
-
-All variants are managed in the admin portal. New products default to **inactive** (`isActive: false`) to avoid accidentally publishing unfinished items.
-
-## Archive & Upcoming
-
-- `isArchived` – moves product to the "Past Archives" section on the catalog page; **does not hide** it from admin or affect `isActive`.
-- `isUpcoming` – moves product to the "Upcoming" section; **does not affect** `isActive`.
-- You can set both flags independently.
-
-## Account Recovery
-
-- Signup should create a session immediately so new users land in `/account` already logged in.
-- Password reset uses `/auth/reset-password` and tokenized links from the forgot-password flow.
-
-## Branding & Share Cards
-
-- Site logo, browser tab icon, and social share image styling are controlled from `/admin` → Settings.
-- The configured branding should be reflected in the header logo, the favicon route, and the Open Graph preview image.
-- Keep share colors and copy aligned with the admin settings instead of hardcoding them in the layout.
-- `/admin` → Settings → Branding & Share also controls the **top bar**: `brandName` (shown in the top bar, footer, page title, OG image, favicon and transactional emails), `brandFontFamily` (an optional separate font for the top-bar name), and `headerMode` (`both`/`logo`/`text`). Emails read `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` env vars when set (useful for template buyers who want a different send-from name without touching code).
-- Account signup awards **250 welcome points** and a **one-time 10% welcome promo code** bound to the email (stored on `store:users` + `config:promos`, emailed best-effort, and visible/claimable in `/account`). Admin can adjust points per user in `/admin` → Users.
-
-## Image Upload
-
-- Upload images via the admin form (file input). Images are stored in `/public/uploads/{productId}/` and auto‑numbered.
-- Supported formats: JPEG, PNG, GIF, WebP, etc.
-- The product’s `images` array is updated with the new URLs.
-
-## Cart / Multiple Items
-
-Cart checkout is implemented for FCFS/direct items. Raffle entries still use the product-page setup flow, and referral codes can arrive through `?ref=` or `?promo=` links and should be preserved through checkout metadata.
-
-## Product Configuration (v2 – fully dynamic)
-
-All product‑specific data (prices, Stripe IDs, inventory, winner tiers) is now stored in **Redis** and managed via the admin portal.
-
-- **No hardcoded `price50ml` / `price100ml`** – instead, each product has a `priceCategories` array where you can define any number of sizes (e.g., “Standard”, “Large”, “50ml”, “100ml”).
-- Each category includes:
-  - `size` – the label shown to customers.
-  - `price` – the retail price in USD.
-  - `stripeId` – the Stripe Price ID for that size (defaults to the `STRIPE_PRODUCT_ID` env var when set, otherwise the placeholder `price_placeholder_not_configured`; see `defaultStripePriceId()` / `resolveStripePriceId()` in `lib/server-config.ts`). No real Stripe price ID is ever hardcoded – the admin-set value always wins.
-  - `winnerTiers` – comma‑separated list of winner counts per draw (only used if Raffle Mode is enabled).
-- **New products default to hidden** (`isActive: false`) – you must explicitly publish them.
-- **Archived** and **Upcoming** flags do NOT hide the product – they only change its display section in the catalog.
-
-### Adding a new product
-1. Go to `/admin` → Products → **+ Add Product**.
-2. Fill in name, slug, description, etc.
-3. Under **Price Categories**, add one or more sizes.
-4. Set `isActive` to `true` when you're ready to publish.
-5. Save – the product appears on the storefront immediately.
-
-### Editing existing products
-All fields (including price, Stripe ID, inventory, and winner tiers) are editable in the admin portal – no redeploy needed.
-
-### Image upload
-You can upload image files directly (multiple at once) – they are stored as base64 data URLs. The system automatically numbers them (1, 2, 3…) and the `prefix` is derived from the product `slug`.
-
-## Performance / Caching (read this before touching storefront perf)
-
-Public-facing display data is cached with short TTLs to keep the site snappy. This is intentional and safe — admin writes bypass the caches, so no data is lost; the only effect is that **storefront display data can lag up to a few seconds** behind a change.
-
-- `lib/ttl-cache.ts` — server-side in-memory TTL cache (`withTtlCache(key, ttlMs, fetcher)`). Used by `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s), the heartbeat social-proof tally (15s), and `loadStoreConfigCached` (30s, used by layout metadata / favicon / OG image).
-- `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes in-flight requests and reuses results for 10s. HomePage and SiteChrome both fetch `/api/store`; this makes it a single round trip.
-- `app/layout.tsx` uses `export const dynamic = 'force-dynamic'` so the live `/admin → Settings` theme (colors/font/branding) is baked into the server HTML on every request — this eliminated the “build-time colors flash → live colors” FOUC. Redis reads stay cheap via `loadStoreConfigCached` (30s TTL). The layout also renders a `<script type="application/json">` theme blob (`window.__GOYUNIR_THEME__`) plus a synchronous inline script that applies the saved colors before first paint, and wraps the app in `ThemeProvider` (see `components/ThemeProvider.tsx` + `useLiveTheme()`) so client pages initialize their palette from the server-rendered theme instead of the build-time defaults.
-- `components/SiteChrome.tsx` animates the background glow via **direct DOM writes** (refs), never React state, so the ~60fps idle drift does not re-render the app. Keep it transform-only: do NOT add `filter: blur()` or `backdrop-filter` to animated/large elements — they force per-frame paints and cause Chrome lag. Glows are pre-blurred radial gradients instead.
-- Home (`app/page.tsx`) and Catalog (`app/catalog/page.tsx`) only run their 1-second countdown tickers while a live countdown is actually visible.
-- If you add a new public read endpoint, wrap its Redis reads in `withTtlCache` with a short TTL instead of hitting Redis on every request. If you change storefront config/settings, remember the public site may show cached values for up to 30s.

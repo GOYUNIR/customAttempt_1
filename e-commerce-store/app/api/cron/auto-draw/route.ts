@@ -217,7 +217,7 @@ async function runAutoDraw(request: Request) {
               await stripe.paymentIntents.create({
                 amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
                 off_session: true, confirm: true, receipt_email: winnerEmail,
-                description: `GOYUNIR: ${productName} (${productSize})`,
+                description: `${productName} (${productSize})`,
               });
 
               grandRevenueChargesCount++;
@@ -263,7 +263,7 @@ async function runAutoDraw(request: Request) {
                 originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
                 discountPercent: winnerDiscountPercent > 0 ? winnerDiscountPercent : undefined,
                 shippingAddress: shippingAddress || undefined,
-                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com',
+                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com',
               });
               if (!(emailResult as any)?.ok) {
                 console.error('[auto-draw] winner email failed', winnerEmail, emailResult);

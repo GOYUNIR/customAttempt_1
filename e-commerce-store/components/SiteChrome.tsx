@@ -151,6 +151,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [theme, setTheme] = useState<any>(liveCtx?.themeColors || null);
   const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
   const [orbs, setOrbs] = useState<any>(liveCtx?.orbs || null);
+  // Footer links/copyright — all editable from /admin → Settings → Footer and
+  // served through /api/store → config.brandFooterData. The footer NEVER
+  // hardcodes social URLs or a brand name.
+  const [footerSettings, setFooterSettings] = useState<Record<string, string> | null>(liveCtx?.footer || null);
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
@@ -442,7 +446,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     if (incomingPromo) {
       window.localStorage.setItem('goyunir-promo-code', incomingPromo);
       setPromoCode(incomingPromo);
-      setShowPromoField(true);
       setBannerMessage(`Promoter credit ${incomingPromo} is locked for this session.`);
       fetch('/api/promo/validate/track', {
         method: 'POST',
@@ -453,8 +456,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     } else {
       const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
       if (storedPromo) {
+        // Keep the code applied for checkout, but keep the promo UI COLLAPSED —
+        // customers tap the button to reveal it instead of being faced with an
+        // open input on every visit.
         setPromoCode(storedPromo);
-        setShowPromoField(true);
       }
     }
 
@@ -463,6 +468,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         setTheme(data?.config?.themeColors || null);
         setBranding(data?.config?.branding || null);
         setOrbs(data?.config?.orbs || null);
+        if (data?.config?.brandFooterData) setFooterSettings(data.config.brandFooterData);
       })
       .catch(() => {});
 
@@ -630,6 +636,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (res.ok && data.url) {
         setEncryptionHealthy(true);
         showNotice({ id: 'cart-checkout', type: 'success', message: 'Checkout is ready.' });
+        // Remember that this checkout came from the whole bag: the confirm-setup
+        // success handler on the product page uses this to clear the ENTIRE cart
+        // (and mark every secured raffle line as entered) instead of only
+        // pruning the single product-page line.
+        try { window.sessionStorage.setItem('goyunir-cart-checkout', 'true'); } catch {}
         // Mixed carts (raffle entries + direct items) create two sessions: first
         // the raffle card-setup (secures the entries), then the FCFS payment.
         // Remember the follow-up payment URL so the confirm-setup flow can pick
@@ -862,13 +873,23 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             <Link href="/shipping" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Shipping</Link>
             <Link href="/account" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-            <a href="https://instagram.com/goyunir" target="_blank" rel="noreferrer" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Instagram</a>
-            <a href="https://tiktok.com/goyunir" target="_blank" rel="noreferrer" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>TikTok</a>
-            <a href="mailto:goyunir.support@gmail.com" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>goyunir.support@gmail.com</a>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
+            {(() => {
+              const ig = String(footerSettings?.instagramLink || '').trim();
+              const tt = String(footerSettings?.tiktokLink || '').trim();
+              const mail = String(footerSettings?.supportEmail || '').trim();
+              const linkStyle = { color: liveTheme.textMuted || '#71717a', textDecoration: 'none' } as const;
+              return (
+                <>
+                  {ig ? <a href={ig} target="_blank" rel="noreferrer" style={linkStyle}>Instagram</a> : null}
+                  {tt ? <a href={tt} target="_blank" rel="noreferrer" style={linkStyle}>TikTok</a> : null}
+                  {mail ? <a href={`mailto:${mail}`} style={linkStyle}>{mail}</a> : null}
+                </>
+              );
+            })()}
           </div>
           <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
-            © {new Date().getFullYear()} {String(branding?.brandName || branding?.shareTitle || 'GOYUNIR').toUpperCase()} ALL RIGHTS RESERVED.
+            © {new Date().getFullYear()} {String(footerSettings?.corporateEntityCopyright || branding?.brandName || branding?.shareTitle || 'ALL RIGHTS RESERVED.')}
           </div>
         </div>
       </footer>
@@ -949,20 +970,37 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   {mapboxHint === 'token-rejected' && (
                     <div style={{ fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
                   )}
-                  {!showPromoField ? (
-                    <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+                  {showPromoField ? (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        value={promoCode}
+                        onChange={(e) => {
+                          const next = e.target.value.toUpperCase().trim();
+                          setPromoCode(next);
+                          window.localStorage.setItem('goyunir-promo-code', next);
+                        }}
+                        placeholder="Promo code (optional)"
+                        style={{ flex: 1, minWidth: 150, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
+                      />
+                      <button onClick={() => setShowPromoField(false)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
+                    </div>
+                  ) : promoCode ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#86efac' }}>✓ {promoCode} applied</span>
+                      <button onClick={() => setShowPromoField(true)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Change</button>
+                      <button
+                        onClick={() => {
+                          setPromoCode('');
+                          window.localStorage.removeItem('goyunir-promo-code');
+                        }}
+                        style={{ border: 'none', background: 'transparent', color: '#fca5a5', fontSize: 12, cursor: 'pointer' }}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   ) : (
-                    <input
-                      type="text"
-                      value={promoCode}
-                      onChange={(e) => {
-                        const next = e.target.value.toUpperCase().trim();
-                        setPromoCode(next);
-                        window.localStorage.setItem('goyunir-promo-code', next);
-                      }}
-                      placeholder="Promo code (optional)"
-                      style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
-                    />
+                    <button type="button" onClick={() => setShowPromoField(true)} style={{ alignSelf: 'flex-start', padding: '4px 0', border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
                   )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: encryptionHealthy ? '#34d399' : '#f87171' }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: encryptionHealthy ? '#22c55e' : '#ef4444', boxShadow: `0 0 0 2px ${encryptionHealthy ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)'}` }} />

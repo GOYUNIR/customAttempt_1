@@ -100,7 +100,7 @@ export async function POST(request: Request) {
     const origin = (() => {
       const forwardedProto = request.headers.get('x-forwarded-proto');
       const forwardedHost = request.headers.get('x-forwarded-host');
-      const host = forwardedHost || request.headers.get('host') || 'goyunir.com';
+      const host = forwardedHost || request.headers.get('host') || 'example.com';
       const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
       return `${protocol}://${host}`;
     })();

@@ -30,6 +30,8 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
     heroContent,
     copy: config.copy || {},
     gallery: config.gallery || {},
+    footer: config.brandFooterData || {},
+    legal: config.legal || {},
   };
   return liveValue;
 }
@@ -38,18 +40,23 @@ export async function generateMetadata(): Promise<Metadata> {
   const redis = createRedisClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
-  const brandName = String(branding.brandName || branding.shareTitle || 'GOYUNIR');
-  const shareDescription = String(branding.shareDescription || 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.');
+  const brandName = String(branding.brandName || branding.shareTitle || GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright.replace(/\s*ALL RIGHTS RESERVED\.?$/i, '').trim() || 'Store');
+  const shareDescription = String(branding.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || 'Private releases, handled cleanly.');
+  // The site URL is NEVER hardcoded — set NEXT_PUBLIC_SITE_URL / SITE_URL in the
+  // platform (Vercel) and it flows into metadata, canonical, OG and emails.
+  const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || '').replace(/\/$/, '');
+  const base = siteUrl || 'https://example.com';
+  const canonicalUrl = branding.shareUrl && /^https?:\/\//i.test(String(branding.shareUrl)) ? String(branding.shareUrl).replace(/\/$/, '') : base;
 
   return {
-    metadataBase: new URL('https://goyunir.com'),
+    metadataBase: new URL(base),
     title: {
       default: brandName,
       template: `%s | ${brandName}`,
     },
     description: shareDescription,
     alternates: {
-      canonical: 'https://goyunir.com',
+      canonical: canonicalUrl,
     },
     icons: {
       icon: '/icon',
@@ -58,7 +65,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: brandName,
       description: shareDescription,
-      url: 'https://goyunir.com',
+      url: canonicalUrl,
       siteName: brandName,
       images: ['/opengraph-image'],
       type: 'website',

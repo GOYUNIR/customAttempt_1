@@ -1,23 +1,29 @@
+'use client';
+
 import Link from 'next/link';
+import { useLiveTheme } from '@/components/ThemeProvider';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export default function NotFoundView() {
+  const liveCtx = useLiveTheme();
+  const c = { ...GOYUNIR_STORE_SUITE.themeColors, ...(liveCtx?.themeColors || {}) };
   return (
     <main style={{
       minHeight: 'calc(100vh - 56px)',
-      background: '#0a0a0a',
-      color: '#ffffff',
+      background: c.primaryBackground || '#0a0a0a',
+      color: c.textMain || '#ffffff',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
       padding: '20px',
-      fontFamily: 'system-ui, sans-serif',
+      fontFamily: c.fontFamily || 'system-ui, sans-serif',
     }}>
       <div style={{ textAlign: 'center', maxWidth: '480px' }}>
         <div style={{
           fontSize: '80px',
           marginBottom: '16px',
-          color: '#333'
+          color: c.cardBorder || '#333',
         }}>
           404
         </div>
@@ -25,11 +31,12 @@ export default function NotFoundView() {
           fontSize: '28px',
           fontFamily: 'serif',
           margin: '0 0 12px',
-          fontWeight: 'normal'
+          fontWeight: 'normal',
+          color: c.cardTextMain,
         }}>
           Page Not Found
         </h1>
-        <p style={{ color: '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
+        <p style={{ color: c.textMuted || '#888', fontSize: '14px', lineHeight: '1.7', marginBottom: '32px' }}>
           This product isn&apos;t available right now. Check out our catalog for what&apos;s currently available.
         </p>
         <Link
@@ -37,8 +44,8 @@ export default function NotFoundView() {
           style={{
             padding: '12px 28px',
             borderRadius: '30px',
-            background: '#ffffff',
-            color: '#000000',
+            background: c.textMain || '#ffffff',
+            color: c.primaryBackground || '#000000',
             textDecoration: 'none',
             fontWeight: '600',
             fontSize: '14px',

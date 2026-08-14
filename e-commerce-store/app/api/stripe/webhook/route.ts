@@ -35,7 +35,7 @@ function pendingPromoKey(code: string, email: string) {
 function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
   if (env) return env.replace(/\/$/, '');
-  return 'https://goyunir.com';
+  return 'https://example.com';
 }
 
 /**

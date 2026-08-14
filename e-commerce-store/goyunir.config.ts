@@ -87,11 +87,11 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   catalogPreview: {
     upcomingDrops: [
       {
-        name: 'GOYUNIR Heavyweight Tee — Vol. 1',
+        name: 'Signature Heavyweight Tee — Vol. 1',
         status: 'Upcoming',
         eta: 'Late 2026',
         image: '/images/tee-vol1/1.jpeg',
-        description: 'A heavyweight cotton tee with a raised GOYUNIR emblem across the chest. This is early — expect this category to take a while before anything ships.',
+        description: 'A heavyweight cotton tee with a raised emblem across the chest. This is early — expect this category to take a while before anything ships.',
       },
       {
         name: 'Raw Weave Cargo',

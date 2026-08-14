@@ -9,13 +9,17 @@ export default async function OpenGraphImage() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const logoUrl = String(branding.logoUrl || '').trim();
-  const brandName = String(branding.brandName || branding.shareTitle || 'GOYUNIR');
+  const brandName = String(branding.brandName || branding.shareTitle || 'Store');
   const title = String(branding.shareTitle || brandName);
-  const description = String(branding.shareDescription || 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.');
+  const description = String(branding.shareDescription || 'Private releases, handled cleanly.');
+  const tagline = String(branding.shareTagline || '');
   const shareImageUrl = String(branding.shareImageUrl || '').trim();
   const background = String(branding.shareBackground || '#0B0B0F');
   const accent = String(branding.shareAccent || '#D4AF37');
   const text = String(branding.shareText || '#F5F2E9');
+  // The URL shown on the card is NEVER hardcoded — derive it from the platform
+  // env (NEXT_PUBLIC_SITE_URL / SITE_URL) or the admin shareUrl.
+  const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || branding.shareUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '') || 'example.com';
 
   return new ImageResponse(
     (
@@ -39,10 +43,10 @@ export default async function OpenGraphImage() {
             {logoUrl ? <img src={logoUrl} alt={title} style={{ width: 68, height: 68, borderRadius: 16, objectFit: 'cover', border: `1px solid ${accent}55` }} /> : null}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <div style={{ letterSpacing: 6, fontSize: 24, fontWeight: 700 }}>{brandName.toUpperCase()}</div>
-              <div style={{ fontSize: 16, opacity: 0.8, marginTop: 4 }}>Luxury releases, handled cleanly.</div>
+              {tagline ? <div style={{ fontSize: 16, opacity: 0.8, marginTop: 4 }}>{tagline}</div> : null}
             </div>
           </div>
-          <div style={{ fontSize: 20, color: accent }}>goyunir.com</div>
+          <div style={{ fontSize: 20, color: accent }}>{siteUrl}</div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', maxWidth: 900 }}>

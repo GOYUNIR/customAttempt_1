@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       createdAt: Date.now(),
     }));
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com';
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
     await sendPasswordResetEmail({
       to: normalizedEmail,
       resetUrl: `${siteUrl.replace(/\/$/, '')}/auth/reset-password?token=${token}`,

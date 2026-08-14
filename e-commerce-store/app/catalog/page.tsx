@@ -299,6 +299,32 @@ export default function CatalogPage() {
           ) : null}
         </motion.div>
 
+        <h2
+          style={{
+            fontSize: '13px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            color: configPalette.accentBlue,
+            margin: '0 0 12px 0',
+          }}
+        >
+          Upcoming Releases
+        </h2>
+        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'), 'upcoming')}
+
+        <h2
+          style={{
+            fontSize: '13px',
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            color: configPalette.accentPurple,
+            margin: '32px 0 12px 0',
+          }}
+        >
+          Past Archives
+        </h2>
+        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
+
         {filteredActiveDrops.length > 0 && (
           <>
             <h2
@@ -307,7 +333,7 @@ export default function CatalogPage() {
                 textTransform: 'uppercase',
                 letterSpacing: '1px',
                 color: configPalette.textMain,
-                margin: '0 0 8px 0',
+                margin: '32px 0 8px 0',
               }}
             >
               Currently Available
@@ -315,7 +341,7 @@ export default function CatalogPage() {
             <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 12px 0', lineHeight: 1.6 }}>
               Live releases are open for entry right now — open while allocation remains.
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredActiveDrops.map((drop) => (
                 <Link
                   key={drop.id}
@@ -342,32 +368,6 @@ export default function CatalogPage() {
             </div>
           </>
         )}
-
-        <h2
-          style={{
-            fontSize: '13px',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            color: configPalette.accentBlue,
-            margin: '0 0 12px 0',
-          }}
-        >
-          Upcoming Releases
-        </h2>
-        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'), 'upcoming')}
-
-        <h2
-          style={{
-            fontSize: '13px',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            color: configPalette.accentPurple,
-            margin: '32px 0 12px 0',
-          }}
-        >
-          Past Archives
-        </h2>
-        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
 
         {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && (
           <div style={{ marginTop: 24 }}>

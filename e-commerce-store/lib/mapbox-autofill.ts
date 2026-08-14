@@ -488,8 +488,43 @@ function composeFullAddress(props: Record<string, unknown> | null | undefined): 
   return s(props.name);
 }
 
+/**
+ * Write an input's value in a way React actually sees. React overrides the
+ * value setter on HTMLInputElement, so a plain `el.value = …` assignment never
+ * reaches the component state — the NEXT React re-render then resets the box
+ * from its (stale) state, which is exactly why the composed full address kept
+ * getting wiped back to the street-only SDK fill. Using the prototype setter +
+ * a bubbling `input` event makes React's onChange fire exactly like a real
+ * keystroke, so component state and the DOM stay in sync permanently.
+ */
+function writeReactInputValue(el: HTMLInputElement, value: string): void {
+  try {
+    const proto = window.HTMLInputElement?.prototype;
+    const setter = proto && Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (typeof setter === 'function') setter.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  } catch {
+    try {
+      el.value = value;
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function handleRetrieve(event: any): void {
-  const input = event && (event.target as HTMLInputElement | undefined);
+  // The SDK's `MapboxHTMLEvent` target can be the form or the input. Resolve to
+  // an actual eligible address input (active one first) so we always write the
+  // box the customer is looking at.
+  const raw = event && event.target;
+  let input: HTMLInputElement | null =
+    raw && typeof raw.value === 'string' && raw instanceof HTMLInputElement ? raw : null;
+  if (!input) {
+    const inputs = findAddressInputs();
+    const active = typeof document !== 'undefined' ? (document.activeElement as HTMLInputElement | null) : null;
+    input = active && inputs.includes(active) ? active : (inputs[inputs.length - 1] || null);
+  }
   // The SDK fires `retrieve` just before it fills the address fields. It only
   // writes the street components into a single `street-address` box (city,
   // state, zip are skipped when the form has no fields for them), and its own
@@ -501,41 +536,41 @@ function handleRetrieve(event: any): void {
     event?.detail?.features?.[0]?.properties ||
     event?.features?.[0]?.properties;
   const composed = composeFullAddress(props);
-  if (!composed) return;
+  if (!composed || !input) return;
 
-  // Apply the full address over several ticks. The SDK's own form-fill can land
-  // at any moment, so we keep re-writing our (longer, complete) value until the
-  // SDK is done. If the box ends up with just the street, the last write wins.
-  // The backoff grows so the final attempts land well AFTER the SDK's async
-  // form-fill + re-scan/update() cycles (which on slow devices can fire up to
-  // ~2s after the retrieve event).
+  // Apply the full address over a guarded schedule. The SDK's own form-fill can
+  // land at any moment (and, worse, re-truncate the box back to street-only on
+  // slow devices), so we keep re-writing our longer complete value until the
+  // SDK is done. Each write goes through writeReactInputValue so React state is
+  // updated too — without that, the next React re-render resets the box and the
+  // address the customer just picked silently disappears.
   let attempts = 0;
-  const MAX_ATTEMPTS = 16;
+  const RETRY_SCHEDULE_MS = [0, 40, 120, 260, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400, 6600];
   const writeFull = () => {
     attempts += 1;
-    const el = input && typeof input.value === 'string' ? input : null;
-    if (!el || !el.isConnected) return;
+    const el = input && input.isConnected ? input : null;
+    if (!el) return;
     const current = String(el.value || '').trim();
     // Override when our composed address is strictly richer than what's in the
-    // box (covers the "SDK wrote street only" case) or identical to it — and
-    // also re-apply if the SDK truncated a value we already verified.
+    // box (covers the "SDK wrote street only" case) — and also re-apply if the
+    // SDK truncated a value we already verified into the box.
     const wasVerified = el.dataset.mapboxVerified === 'true';
     if (current !== composed && (current.length < composed.length || wasVerified)) {
-      el.value = composed;
+      writeReactInputValue(el, composed);
     }
-    // Mark as verified once the box actually contains the full address.
-    if (String(el.value || '').trim() === composed) {
+    // Mark as verified once the box actually contains the full address. A
+    // second read (after the input event flushed) confirms the value stuck.
+    const afterWrite = String(el.value || '').trim();
+    if (afterWrite === composed || (wasVerified && current === composed)) {
       verifiedAddresses.add(composed);
       el.setAttribute('data-mapbox-verified', 'true');
       el.setAttribute('data-mapbox-verified-value', composed);
       if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
       return;
     }
-    if (attempts < MAX_ATTEMPTS) {
-      // 0ms, 30ms, 90ms, 210ms, 450ms, 930ms, 1890ms, 2730ms… — the later
-      // attempts are scheduled far enough out to win against the SDK's slowest
-      // async form-fill, then a few extra ticks to absorb any SDK re-scans.
-      window.setTimeout(writeFull, Math.min(3000, attempts * attempts * 30 + 30));
+    if (attempts < RETRY_SCHEDULE_MS.length) {
+      const delay = RETRY_SCHEDULE_MS[attempts] ?? 6600;
+      window.setTimeout(writeFull, delay);
     }
   };
   writeFull();

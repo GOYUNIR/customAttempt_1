@@ -17,6 +17,10 @@ export interface LiveThemeValue {
   heroContent?: Record<string, any>;
   copy?: Record<string, any>;
   gallery?: Record<string, any>;
+  /** brandFooterData — social links, support email, copyright line. */
+  footer?: Record<string, string>;
+  /** Legal & policy content for the /terms, /privacy and /shipping pages. */
+  legal?: Record<string, string>;
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

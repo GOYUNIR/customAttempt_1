@@ -132,6 +132,7 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
     branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
     rewards: { ...(defaults.rewards || {}), ...(redisConfig.rewards || {}) },
     gallery: { ...(defaults.gallery || {}), ...(redisConfig.gallery || {}) },
+    legal: { ...(defaults.legal || {}), ...(redisConfig.legal || {}) },
     orbs: mergeOrbsConfig(redisConfig?.orbs || (defaults as any).orbs),
   };
 }

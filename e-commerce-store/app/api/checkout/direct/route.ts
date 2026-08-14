@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       off_session: false,
       confirm: true,
       receipt_email: email,
-      description: `GOYUNIR direct: ${product.name} (${size})`,
+      description: `${product.name} (${size})`,
     });
 
     if (paymentIntent.status !== 'succeeded') {

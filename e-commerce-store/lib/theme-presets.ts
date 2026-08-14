@@ -58,7 +58,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'default',
     name: 'Default (Stock)',
-    tagline: 'Restores the exact stock GOYUNIR theme — matte black, violet/blue accents, Inter type.',
+    tagline: 'Restores the exact stock theme — matte black, violet/blue accents, Inter type.',
     accent: '#635bff',
     background: '#0a0a0a',
     container: '#111111',

@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
-      copy
+      copy, legal
     } = body;
     
     // Get current config to merge
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
       catalogPreview: catalogPreview || current.catalogPreview || { upcomingDrops: [], archiveScents: [] },
       orbs: orbs || current.orbs || {},
       copy: copy || current.copy || {},
+      legal: legal || current.legal || {},
       updatedAt: new Date().toISOString(),
     };
 

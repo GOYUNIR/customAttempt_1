@@ -220,7 +220,7 @@ export async function POST(request: Request) {
 
     // ── Rewards config (conversion rate + gifting toggle) so /account can show
     // the points→credit rate and explain gifting without hardcoding numbers.
-    let rewardsConfig: { pointsPerDollar?: number; minRedeemPoints?: number; giftingEnabled?: boolean; giftDiscountPercent?: number } = {};
+    let rewardsConfig: { pointsPerDollar?: number; minRedeemPoints?: number; giftingEnabled?: boolean; giftDiscountPercent?: number; redemptionInfoMessage?: string } = {};
     try {
       const rawConfig = await redis.get(STORE_CONFIG_KEY);
       const config = safeParseRedisItem<any>(rawConfig) || {};
@@ -229,6 +229,7 @@ export async function POST(request: Request) {
         minRedeemPoints: Math.max(1, Number(config?.rewards?.minRedeemPoints) || 500),
         giftingEnabled: config?.rewards?.giftingEnabled !== false,
         giftDiscountPercent: Math.max(0, Number(config?.rewards?.giftDiscountPercent) || 10),
+        redemptionInfoMessage: typeof config?.rewards?.redemptionInfoMessage === 'string' ? config.rewards.redemptionInfoMessage : undefined,
       };
     } catch {}
 

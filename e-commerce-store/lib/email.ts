@@ -8,18 +8,20 @@ function getResend() {
 }
 
 /** Brand name used inside transactional emails. Falls back to the environment
- * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and then GOYUNIR so template buyers can
- * rename the brand without touching email markup. */
+ * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and then a neutral 'Store' so template
+ * buyers can rename the brand without touching email markup. Set BRAND_NAME in
+ * the platform for production sends. */
 function emailBrandName(): string {
-  return process.env.BRAND_NAME || process.env.NEXT_PUBLIC_SITE_NAME || 'GOYUNIR';
+  return process.env.BRAND_NAME || process.env.NEXT_PUBLIC_SITE_NAME || 'Store';
 }
 
 const from = () => process.env.RESEND_FROM || `${emailBrandName()} <onboarding@resend.dev>`;
-const replyTo = () => process.env.REPLY_TO_EMAIL || process.env.SUPPORT_EMAIL || 'goyunir.support@gmail.com';
+const replyTo = () => process.env.REPLY_TO_EMAIL || process.env.SUPPORT_EMAIL || 'support@example.com';
 
 /** Customer support address used inside transactional emails. Customers cannot
- * reply to the automated Resend sender, so every template points them here. */
-const supportEmail = () => process.env.SUPPORT_EMAIL || 'goyunir.support@gmail.com';
+ * reply to the automated Resend sender, so every template points them here.
+ * Set SUPPORT_EMAIL in the platform (Vercel) — never hardcode a brand's inbox. */
+const supportEmail = () => process.env.SUPPORT_EMAIL || 'support@example.com';
 
 /** One confirmation when raffle entry is secured (card saved, not charged yet). */
 export async function sendEntryConfirmedEmail(opts: {
@@ -92,7 +94,7 @@ export async function sendEntryConfirmedEmail(opts: {
 
   const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
 
-  const siteBase = (opts.siteUrl || '').replace(/\/$/, '') || 'https://goyunir.com';
+  const siteBase = (opts.siteUrl || '').replace(/\/$/, '') || process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
   const purchasePointsPerDollar = Math.max(0, Number(opts.purchasePointsPerDollar) || 10);
   const expectedPoints =
     typeof opts.listPrice === 'number' && opts.listPrice > 0
@@ -125,7 +127,7 @@ export async function sendEntryConfirmedEmail(opts: {
       html: `
         <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
           <div style="text-align:center;margin-bottom:24px;">
-            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">GOYUNIR</div>
+            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">${emailBrandName().toUpperCase()}</div>
             <div style="width:60px;height:3px;background:linear-gradient(90deg,#a855f7,#3b82f6);margin:8px auto 0;border-radius:4px;"></div>
           </div>
           
@@ -232,7 +234,7 @@ export async function sendWinnerEmail(opts: {
       html: `
         <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
           <div style="text-align:center;margin-bottom:24px;">
-            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">GOYUNIR</div>
+            <div style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:600;">${emailBrandName().toUpperCase()}</div>
             <div style="width:60px;height:3px;background:linear-gradient(90deg,#a855f7,#3b82f6);margin:8px auto 0;border-radius:4px;"></div>
           </div>
           
@@ -312,7 +314,7 @@ export async function sendEntryRecoveryEmail(opts: {
       subject,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">One step left</h1>
           <p style="margin:0 0 12px">${body}</p>
           <p style="margin:0 0 16px">Card is saved only — charged only if selected. One entry per email.</p>
@@ -346,10 +348,10 @@ export async function sendPasswordResetEmail(opts: {
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: 'Reset your GOYUNIR password',
+      subject: `Reset your ${emailBrandName()} password`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
-          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">Reset your password</h1>
           <p style="margin:0 0 14px;color:#4b5563">Use the link below to set a new password for your account.</p>
           <p style="margin:0 0 20px"><a href="${opts.resetUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">Reset password</a></p>
@@ -372,10 +374,10 @@ export async function sendWaitlistConfirmationEmail(opts: { to: string }) {
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: 'You are on the GOYUNIR release list',
+      subject: `You are on the ${emailBrandName()} release list`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
-          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">You’re in.</h1>
           <p style="margin:0 0 12px;color:#4b5563">You will be first to know when the next release opens or a new product goes live.</p>
           <p style="margin:0;color:#6b7280;font-size:13px">This list is managed directly by the brand team from the admin portal.</p>
@@ -397,7 +399,7 @@ export async function sendReleaseAnnouncementEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com';
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
   const productUrl = siteUrl ? `${siteUrl.replace(/\/$/, '')}/${opts.slug}` : `/${opts.slug}`;
   try {
     const { data, error } = await resend.emails.send({
@@ -407,7 +409,7 @@ export async function sendReleaseAnnouncementEmail(opts: {
       subject: `Now live — ${opts.productName}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
-          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:24px;font-weight:700;margin:0 0 8px">${opts.productName} is now live.</h1>
           <p style="margin:0 0 14px;color:#4b5563">${opts.tagline || 'Limited release access is now open.'}</p>
           <p style="margin:0 0 20px"><a href="${productUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">Open release</a></p>
@@ -442,7 +444,7 @@ export async function sendPromoterInvoiceEmail(opts: {
       subject: `💰 Affiliate credit — ${opts.code}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">Promo credited</h1>
           <p style="margin:0 0 12px">Code <strong>${opts.code}</strong> produced a paid allocation for ${opts.product}.</p>
           <p style="margin:0 0 12px;color:#666;font-size:12px">Order Ref: ${orderRef}</p>
@@ -497,7 +499,7 @@ export async function sendAccountUpdateEmail(opts: {
       subject: `📦 ${heading} — ${opts.product}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;color:#111;line-height:1.5">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">${heading}</h1>
           <p style="margin:0 0 12px">${body}</p>
           <p style="color:#666;font-size:13px;margin:0">Didn't make this change? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a> right away.</p>
@@ -527,6 +529,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
+  const siteBase = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
   const eligibleProducts = Array.isArray(opts.eligibleProductSlugs) ? opts.eligibleProductSlugs.join(', ') : '';
   const eligibleSizes = Array.isArray(opts.eligibleSizes) ? opts.eligibleSizes.join(', ') : '';
   try {
@@ -534,10 +537,10 @@ export async function sendDeliveryIncentiveEmail(opts: {
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `Your GOYUNIR delivery credit is ready`,
+      subject: `Your ${emailBrandName()} delivery credit is ready`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.55">
-          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
+          <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">${emailBrandName().toUpperCase()}</p>
           <h1 style="font-size:22px;font-weight:700;margin:0 0 12px">Your delivery credit is unlocked.</h1>
           <p style="margin:0 0 12px">Thanks for receiving <strong>${opts.product}</strong>${opts.size ? ` (${opts.size})` : ''}. Your private follow-up credit is now active.</p>
           <div style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#111;color:#fff;display:inline-block;font-weight:700;letter-spacing:1px">${opts.code}</div>
@@ -546,7 +549,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
           ${eligibleProducts ? `<p style="margin:0 0 8px">Eligible release(s): <strong>${eligibleProducts}</strong></p>` : ''}
           ${eligibleSizes ? `<p style="margin:0 0 14px">Eligible size(s): <strong>${eligibleSizes}</strong></p>` : ''}
           <p style="margin:0 0 14px;color:#4b5563">This code is linked to your email, limited to one use, and cannot be transferred or stacked.</p>
-          <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="https://goyunir.com/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
+          <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="${siteBase.replace(/\/$/, '')}/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
           <p style="margin:0;color:#666;font-size:13px">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,

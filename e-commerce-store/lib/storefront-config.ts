@@ -1,3 +1,5 @@
+import { DEFAULT_LEGAL, type StoreLegalConfig } from '@/lib/legal-config';
+
 export interface StorefrontNote {
   label: string;
   name: string;
@@ -168,6 +170,8 @@ export interface StorefrontConfig {
     archiveScents: CatalogPreviewItem[];
   };
   orbs: OrbsConfig;
+  /** Legal & policy content for /terms, /privacy, /shipping (admin-editable). */
+  legal: StoreLegalConfig;
   productCatalog: StorefrontProduct[];
 }
 
@@ -405,6 +409,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents),
     },
     orbs: mergeOrbsConfig(input.orbs),
+    legal: { ...DEFAULT_LEGAL, ...(input.legal ?? {}) },
     productCatalog,
   };
 }

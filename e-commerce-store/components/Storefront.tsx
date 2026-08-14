@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -66,6 +66,59 @@ function readCheckoutDetails() {
 function writeCheckoutDetails(email: string, address: string) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CHECKOUT_DETAILS_KEY, JSON.stringify({ email, address }));
+}
+
+/**
+ * Session "already entered" ledger. Records productId+size pairs that were
+ * actually secured as raffle/waitlist entries this session so the "Add to bag"
+ * button can block an item the customer is already entered for even before the
+ * email-based server lookup runs (the server also blocks duplicates at
+ * checkout, so this is convenience + UX, not the security gate).
+ */
+const ENTERED_LEDGER_KEY = 'goyunir-entered-items';
+
+function readEnteredLedger(): Array<{ productId: string; size: string }> {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(ENTERED_LEDGER_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function markEnteredLedger(productId: string, size: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const list = readEnteredLedger().filter((e) => !(e.productId === productId && e.size === size));
+    list.push({ productId, size });
+    window.localStorage.setItem(ENTERED_LEDGER_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function readPendingEntry(): { productId?: string; size?: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem('goyunir-pending-entry');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingEntry(productId: string, size: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem('goyunir-pending-entry', JSON.stringify({ productId, size }));
+  } catch {}
+}
+
+function clearPendingEntry() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem('goyunir-pending-entry');
+  } catch {}
 }
 
 function notify(detail: { id?: string; type: string; message: string; persist?: boolean }) {
@@ -255,6 +308,30 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     return () => window.clearInterval(timer);
   }, [autoPlayOn, galleryPaused, galleryIntervalMs, imgCount]);
 
+  // Always-current cart mirror so helper functions can safely prune items from
+  // any closure (e.g. the setup-success effect) without stale state. Declared
+  // BEFORE the effects so closures can reference it freely.
+  const cartRef = useRef<Array<{ productId: string; size: string }>>([]);
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
+
+  /**
+   * Remove every cart line matching productId+size. Used when the customer
+   * enters a raffle / buys a direct item through the product page instead of
+   * the bag — the item is now either being entered or purchased, so it must not
+   * linger in the bag where it could be double-processed.
+   */
+  const removeItemFromCart = (productId: string, size: string) => {
+    const current = cartRef.current;
+    const next = current.filter((entry) => !(entry.productId === productId && entry.size === size));
+    if (next.length !== current.length) {
+      cartRef.current = next;
+      setCart(next);
+      writeStoredCart(next);
+    }
+  };
+
   useEffect(() => {
     setCart(readStoredCart());
     if (typeof window !== 'undefined') {
@@ -263,8 +340,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (draft.address) setAddress(draft.address);
       const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
       if (storedPromo) {
+        // Keep the code applied (it is sent to checkout automatically) but keep
+        // the promo UI COLLAPSED — customers opt in to see the input by tapping
+        // the "Add promo" button, they are never faced with an open field.
         setPromoCode(storedPromo);
-        setShowPromoField(true);
       }
     }
   }, []);
@@ -286,7 +365,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (incomingPromo) {
       window.localStorage.setItem('goyunir-promo-code', incomingPromo);
       setPromoCode(incomingPromo);
-      setShowPromoField(true);
       fetch('/api/promo/validate/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,10 +383,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const purchaseState = params.get('purchase');
     if (!sessionId) {
       if (setupState === 'cancel') {
+        // The customer backed out of card setup — a direct entry was never
+        // secured, so forget the pending-entry marker (and the cart line stays
+        // pruned; they can re-add if they change their mind).
+        clearPendingEntry();
         setMessage('Card setup was cancelled before the entry was secured.');
         notify({ id: 'stripe-cancel', type: 'error', message: 'Card setup was cancelled before the entry was secured.' });
       }
       if (purchaseState === 'cancel') {
+        try { window.sessionStorage.removeItem('goyunir-cart-checkout'); } catch {}
         setMessage('Checkout was cancelled before payment completed.');
         notify({ id: 'stripe-cancel', type: 'error', message: 'Checkout was cancelled before payment completed.' });
       }
@@ -338,8 +421,37 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           clearQuery();
           // Entries are now secured — drop the prepared raffle items from the bag.
           if (data.success) {
-            setCart([]);
-            writeStoredCart([]);
+            const viaCartCheckout = (() => {
+              try { return window.sessionStorage.getItem('goyunir-cart-checkout') === 'true'; } catch { return false; }
+            })();
+            try { window.sessionStorage.removeItem('goyunir-cart-checkout'); } catch {}
+            if (viaCartCheckout) {
+              // Whole cart was checked out through the drawer: every raffle line
+              // in it is now a real entry — remember them so "Add to bag" blocks
+              // re-adding, then clear the cart.
+              try {
+                const items = readStoredCart();
+                items.forEach((item) => {
+                  if ((item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle') {
+                    markEnteredLedger(String(item.productId || ''), String(item.size || ''));
+                  }
+                });
+              } catch {}
+              setCart([]);
+              writeStoredCart([]);
+            } else {
+              // Direct product-page entry: the matching line was already pruned
+              // when the entry started. Mark it as entered so it can't be
+              // re-added to the bag this session.
+              const pending = readPendingEntry();
+              if (pending?.productId && pending.size) {
+                markEnteredLedger(pending.productId, pending.size);
+                removeItemFromCart(pending.productId, pending.size);
+              }
+              clearPendingEntry();
+            }
+          } else {
+            clearPendingEntry();
           }
           // Mixed carts (raffle + direct items) continue into the FCFS payment
           // session after the raffle card setup is confirmed.
@@ -360,6 +472,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
 
     if (purchaseState === 'success') {
+      try { window.sessionStorage.removeItem('goyunir-cart-checkout'); } catch {}
+      clearPendingEntry();
       setCart([]);
       writeStoredCart([]);
       setMessage('Purchase complete. Your order is now being prepared.');
@@ -378,6 +492,22 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
     const isRaffleEntry = checkoutMode === 'RAFFLE';
+
+    // Block re-adding an item the customer already secured as a raffle/waitlist
+    // entry this session (see markEnteredLedger). The server ALSO blocks
+    // duplicates at checkout, so this is a UX gate, not the security boundary.
+    if (isRaffleEntry) {
+      const ledger = readEnteredLedger();
+      const alreadySecured = ledger.some(
+        (e) => String(e.productId || '') === String(product.id || '') && String(e.size || '') === String(selectedSize || ''),
+      );
+      if (alreadySecured) {
+        const msg = `You're already entered for ${product.name} (${selectedSize}). Check your entry in Manage My Entry.`;
+        setMessage(msg);
+        notify({ type: 'info', message: msg });
+        return;
+      }
+    }
 
     // Never stack a second raffle entry for a variant+size the email already
     // holds an active entry for. Fail-open: if the lookup errors or the
@@ -402,6 +532,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             (!entry.status || String(entry.status).toUpperCase() === 'ENTERED' || !terminalStates.includes(String(entry.status).toUpperCase())),
         );
         if (alreadyEntered) {
+          markEnteredLedger(String(product.id || ''), String(selectedSize || ''));
           const msg = `You're already entered for ${product.name} (${selectedSize}). Check your entry in Manage My Entry.`;
           setMessage(msg);
           notify({ type: 'info', message: msg });
@@ -474,6 +605,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     setIsSubmitting(true);
     setMessage('');
+    // The customer is entering this release NOW through the product page, so the
+    // same product+size must not linger in the bag where it could be entered a
+    // second time through the drawer. Remember the pending line so the setup
+    // success handler can mark it as entered (and the cancel handler can forget
+    // it) once Stripe returns.
+    removeItemFromCart(String(product.id || ''), String(selectedSize || ''));
+    writePendingEntry(String(product.id || ''), String(selectedSize || ''));
     notify({ id: 'product-submit', type: 'loading', message: 'Securing encrypted entry...', persist: true });
     try {
       const res = await fetch('/api/checkout', {
@@ -484,7 +622,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (data.alreadyEntered) {
         // Already in the pool — no Stripe session was launched, so this is a
-        // friendly heads-up, not a failure.
+        // friendly heads-up, not a failure. Remember it so "Add to bag" blocks
+        // re-adding for the rest of this session.
+        markEnteredLedger(String(product.id || ''), String(selectedSize || ''));
+        clearPendingEntry();
         setMessage(data.error || "You're already entered. Good luck!");
         notify({ id: 'product-submit', type: 'info', message: data.error || "You're already entered. Good luck!", persist: true });
       } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
@@ -494,10 +635,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       } else {
         // Business errors (invalid promo, already entered, sold out...) are NOT
         // encryption failures — keep the handoff indicator honest.
+        clearPendingEntry();
         setMessage(data.error || 'Failed to start checkout');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Failed to start checkout.' });
       }
     } catch (e) {
+      clearPendingEntry();
       setEncryptionHealthy(false);
       setMessage('Connection error');
       notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
@@ -521,6 +664,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     setIsSubmitting(true);
     setMessage('');
+    // Direct purchase through the product page — remove the matching line from
+    // the bag so it can't be bought twice (once here, once through the drawer).
+    removeItemFromCart(String(product.id || ''), String(selectedSize || ''));
     notify({ id: 'product-submit', type: 'loading', message: 'Preparing secure checkout...', persist: true });
     try {
       const res = await fetch('/api/checkout', {
@@ -561,6 +707,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     setIsSubmitting(true);
     setMessage('');
+    // Entering the waitlist through the product page — prune the matching bag
+    // line and remember the pending entry so the setup success handler can mark
+    // it as entered (and the cancel handler can forget it).
+    removeItemFromCart(String(product.id || ''), String(selectedSize || ''));
+    writePendingEntry(String(product.id || ''), String(selectedSize || ''));
     notify({ id: 'product-submit', type: 'loading', message: 'Preparing release reservation...', persist: true });
     try {
       const res = await fetch('/api/checkout', {
@@ -570,6 +721,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       });
       const data = await res.json();
       if (data.alreadyEntered) {
+        markEnteredLedger(String(product.id || ''), String(selectedSize || ''));
+        clearPendingEntry();
         setMessage(data.error || "You're already on the list. Good luck!");
         notify({ id: 'product-submit', type: 'info', message: data.error || "You're already on the list. Good luck!", persist: true });
       } else if (res.ok && typeof data.url === 'string' && /^https?:\/\//i.test(data.url)) {
@@ -577,10 +730,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         notify({ id: 'product-submit', type: 'success', message: 'Card is ready for the release window.' });
         window.location.href = data.url;
       } else {
+        clearPendingEntry();
         setMessage(data.error || 'Could not start waitlist reservation');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Could not start waitlist reservation.' });
       }
     } catch {
+      clearPendingEntry();
       setEncryptionHealthy(false);
       setMessage('Connection error');
       notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
@@ -766,13 +921,32 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           )}
 
           <div style={{ marginBottom: 8 }}>
-            {!showPromoField ? (
-              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
-            ) : (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {showPromoField ? (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
                 <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, color: configPalette.cardTextMain, fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+                <button onClick={() => setShowPromoField(false)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
               </div>
+            ) : promoCode ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: promoValid === false ? '#fca5a5' : '#86efac' }}>
+                  {promoValid === false ? `"${promoCode}" not applied` : `✓ ${promoCode} applied`}
+                </span>
+                <button onClick={() => setShowPromoField(true)} style={{ border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Change</button>
+                <button
+                  onClick={() => {
+                    setPromoCode('');
+                    setPromoValid(null);
+                    setPromoMsg('');
+                    window.localStorage.removeItem('goyunir-promo-code');
+                  }}
+                  style={{ border: 'none', background: 'transparent', color: '#fca5a5', fontSize: 12, cursor: 'pointer' }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
             )}
           </div>
           {promoMsg && <div style={{ marginBottom: 8, fontSize: 11, color: promoValid === false ? '#fca5a5' : '#86efac' }}>{promoMsg}</div>}

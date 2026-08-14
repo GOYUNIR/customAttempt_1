@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient , getAdminPassword, defaultStripePriceId, getLiveProductState} from '@/lib/server-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
+import { DEFAULT_LEGAL } from '@/lib/legal-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -243,6 +244,10 @@ const DEFAULT_CONFIG = {
     minRedeemPoints: 100,
     maxRedeemPoints: 0,
     purchasePointsPerDollar: 10,
+    giftingEnabled: true,
+    giftDiscountPercent: 10,
+    // Custom caption under the redeem box in /account. Empty = built-in copy.
+    redemptionInfoMessage: '',
   },
   // Product gallery: auto-advancing photos with a slow cinematic zoom.
   gallery: {
@@ -340,6 +345,7 @@ const DEFAULT_CONFIG = {
       momentum: 40,
     },
   },
+  legal: DEFAULT_LEGAL,
 };
 
 export async function GET(request: Request) {
