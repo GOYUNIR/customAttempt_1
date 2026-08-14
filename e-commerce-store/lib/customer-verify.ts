@@ -14,6 +14,7 @@
 
 import { randomBytes, createHash } from 'crypto';
 import { emailVerifyKey } from '@/lib/redis-keys';
+import { safeParseRedisItem } from '@/lib/server-config';
 import { sendCustomerVerificationEmail } from '@/lib/email';
 
 const VERIFY_TTL_SECONDS = 30 * 60; // 30 minutes
@@ -46,13 +47,14 @@ export async function issueCustomerVerifyCode(
   const key = emailVerifyKey(normalized);
   const existing = await redis.get(key).catch(() => null);
   if (existing) {
-    try {
-      const prev = JSON.parse(String(existing));
-      if (prev && Date.now() - Number(prev.createdAt || 0) < RESEND_THROTTLE_SECONDS * 1000) {
-        const wait = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(prev.createdAt || 0)) / 1000));
-        return { ok: false, throttled: true, error: `Please wait ${wait}s before requesting another code.` };
-      }
-    } catch { /* malformed challenge — just overwrite */ }
+    // Upstash auto-deserializes JSON, so `existing` may already be an object —
+    // parse via the shared safeParseRedisItem helper (never JSON.parse(String)).
+    const prev = safeParseRedisItem<{ createdAt?: number }>(existing);
+    if (prev && Date.now() - Number(prev.createdAt || 0) < RESEND_THROTTLE_SECONDS * 1000) {
+      const wait = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(prev.createdAt || 0)) / 1000));
+      return { ok: false, throttled: true, error: `Please wait ${wait}s before requesting another code.` };
+    }
+    // Malformed challenge — just overwrite below.
   }
 
   const code = generateVerifyCode();
@@ -64,7 +66,12 @@ export async function issueCustomerVerifyCode(
 
   const res = await sendCustomerVerificationEmail({ to: normalized, code });
   if (res && res.ok === false && !('skipped' in res && res.skipped === true)) {
-    return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY.' };
+    // Production: a failed send is fatal. Dev: the challenge is already stored
+    // and devCode is echoed below so a fresh clone stays usable even when the
+    // sandbox email provider rejects the recipient.
+    if (process.env.NODE_ENV === 'production') {
+      return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY.' };
+    }
   }
   let devCode: string | undefined;
   if (process.env.NODE_ENV !== 'production') {
@@ -85,8 +92,8 @@ export async function consumeCustomerVerifyCode(
   if (!raw) {
     return { ok: false, error: 'No active code — request a new one.' };
   }
-  let payload: { codeHash?: string; attempts?: number } = {};
-  try { payload = JSON.parse(String(raw)); } catch { payload = {}; }
+  // Upstash auto-deserializes JSON — parse via safeParseRedisItem (object-safe).
+  const payload = safeParseRedisItem<{ codeHash?: string; attempts?: number }>(raw) || {};
 
   if (!verifyCodeHash(payload.codeHash || '', String(code || '').trim())) {
     const attempts = Number(payload.attempts || 0) + 1;

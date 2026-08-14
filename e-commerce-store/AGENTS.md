@@ -362,6 +362,37 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — 2FA / verification code flow fixed (Upstash deserialization bug):**
+  - **Root cause**: `@upstash/redis` enables `automaticDeserialization` by default, so
+    `redis.get()` returns JSON stored via `setex` as an **already-parsed object**.
+    `lib/admin-verify.ts` and `lib/customer-verify.ts` called `JSON.parse(String(raw))`
+    on that value — `String(object)` is `"[object Object]"`, so the parse threw and
+    the payload came back empty. Concretely:
+    - `consumeAdminCode()` treated every submitted code (even the exact code the
+      server generated) as wrong → `/api/admin/verify-confirm` always returned
+      `400 {"error":"Incorrect code…"}`.
+    - `isAdminDeviceValid()` (used by `proxy.ts` on EVERY `/api/admin` request)
+      rejected every device token → even a successful confirm was followed by
+      `401 ADMIN_2FA_REQUIRED`, so the portal never unlocked.
+    - `lib/customer-verify.ts` had the same bug in `issueCustomerVerifyCode()`
+      (resend throttle never worked) and `consumeCustomerVerifyCode()` (every
+      signup code was rejected).
+  - **Fix**: both files now parse Redis JSON via the existing shared
+    `safeParseRedisItem()` helper (returns objects as-is, parses strings),
+    matching the pattern every other route in the codebase already used.
+  - **Dev-mode lockout fixed**: when the email provider fails to send the code
+    (e.g. Resend's sandbox rejects the recipient), `issueAdminCode()` /
+    `issueCustomerVerifyCode()` no longer hard-fail outside production — the
+    challenge is already stored in Redis and `devCode` is echoed so a fresh
+    clone stays usable. Production still fails loudly (the code is only
+    deliverable by email there).
+  - **Hydration hardening**: `app/layout.tsx` `<body>` now carries
+    `suppressHydrationWarning` (matching `<html>`) because the layout's inline
+    theme script also mutates `document.body.style` before React hydrates.
+  - Verified end-to-end locally: verify-start → verify-confirm (200 + device
+    cookie) → protected `/api/admin/*` (200 with cookie, 401 without). Lint +
+    typecheck + `npm test` clean.
+
 - **2026-08-14 — Multi-part storefront + admin hardening pass:**
   - **Mapbox full-address fill fixed** (`lib/mapbox-autofill.ts`): confirmed in
     the search-js v1.6.0 bundle that the SDK's `retrieve` handler dispatches the

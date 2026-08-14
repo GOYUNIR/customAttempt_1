@@ -125,6 +125,7 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning style={htmlStyle}>
       <body
+        suppressHydrationWarning
         style={{
           margin: 0,
           padding: 0,

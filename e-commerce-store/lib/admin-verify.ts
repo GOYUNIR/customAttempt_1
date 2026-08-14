@@ -20,6 +20,7 @@ import {
   adminVerifyAttemptsKey,
   adminSendAttemptsKey,
 } from '@/lib/redis-keys';
+import { safeParseRedisItem } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
 
 const CODE_TTL_SECONDS = 10 * 60; // 10 minutes
@@ -76,8 +77,14 @@ export async function issueAdminCode(
 
   const res = await sendAdminVerificationEmail({ to: normalized, code });
   if (res && res.ok === false && !('skipped' in res && res.skipped === true)) {
-    // Email provider failed — don't silently strand the operator.
-    return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY / ADMIN_VERIFY_EMAIL.' };
+    // Email provider failed — don't silently strand the operator. In production
+    // this is fatal (the code is only deliverable by email). Outside production
+    // the challenge is already stored above and devCode is echoed below, so a
+    // fresh clone stays usable even when Resend rejects the sandbox recipient
+    // (e.g. "you can only send testing emails to your own email address").
+    if (process.env.NODE_ENV === 'production') {
+      return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY / ADMIN_VERIFY_EMAIL.' };
+    }
   }
   let devCode: string | undefined;
   if (process.env.NODE_ENV !== 'production') {
@@ -106,8 +113,11 @@ export async function consumeAdminCode(
   if (!raw) {
     return { ok: false, error: 'No active code. Request a new one.' };
   }
-  let payload: { codeHash?: string } = {};
-  try { payload = JSON.parse(String(raw)); } catch { payload = {}; }
+  // The Upstash client auto-deserializes JSON stored via setex, so `raw` is
+  // often ALREADY an object. JSON.parse(String(raw)) would then throw on
+  // "[object Object]" and every code would be rejected as "Incorrect code" —
+  // use the shared safeParseRedisItem helper (handles both string and object).
+  const payload = safeParseRedisItem<{ codeHash?: string }>(raw) || {};
 
   if (!verifyCodeHash(payload.codeHash || '', String(code || '').trim())) {
     const next = attempts + 1;
@@ -146,12 +156,12 @@ export async function isAdminDeviceValid(redis: any, token: string): Promise<boo
   if (!token) return false;
   const raw = await redis.get(adminDeviceKey(token)).catch(() => null);
   if (!raw) return false;
-  try {
-    const parsed = JSON.parse(String(raw));
-    return Boolean(parsed && (parsed.email || parsed.createdAt));
-  } catch {
-    return false;
-  }
+  // Same Upstash deserialization nuance as consumeAdminCode — `raw` may already
+  // be the parsed object, so JSON.parse(String(raw)) would throw on
+  // "[object Object]" and make every /api/admin request return 401
+  // ADMIN_2FA_REQUIRED even after a successful code confirm.
+  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw);
+  return Boolean(parsed && (parsed.email || parsed.createdAt));
 }
 
 /** Extract the device token from a Request's cookie header (proxy + routes). */
