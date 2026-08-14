@@ -118,11 +118,33 @@ export async function runDropDraw(request: Request | NextRequest) {
               const fallbackSession = await stripe.checkout.sessions.create({
                 customer: customerId,
                 payment_method_types: ['card'],
-                line_items: [{ price: resolveStripePriceId(getProductStripeId(product, size)), quantity: 1 }],
+                // Use the DISCOUNTED unit amount so winners who applied a promo
+                // never get a full-price fallback invoice.
+                line_items: [{
+                  price_data: {
+                    currency: 'usd',
+                    unit_amount: priceCents,
+                    product_data: {
+                      name: `${product.name} - ${size}`,
+                      description: product.tagline || product.desc || undefined,
+                    },
+                  },
+                  quantity: 1,
+                }],
                 mode: 'payment',
                 expires_at: Math.floor(Date.now() / 1000) + 1800,
                 success_url: `${buildAbsoluteUrl(request as Request, '/')}?session=success`,
                 cancel_url: `${buildAbsoluteUrl(request as Request, '/')}?session=cancel`,
+                metadata: {
+                  productId: String(product.id),
+                  variant: String(product.name),
+                  size,
+                  email,
+                  address: shippingAddress,
+                  checkoutType: 'single',
+                  ...(promoCode ? { promoCode, ref: promoCode } : {}),
+                  orderRef: String(entry.orderRef || '') || buildOrderRef(email, product.name, size),
+                },
               });
               resultsSummary.push({ email, scent: product.name, size, checkout: fallbackSession.url ?? undefined, status: 'checkout', message: 'Card declined/error - Failover checkout session created.' });
               successCount += 1;
@@ -131,6 +153,8 @@ export async function runDropDraw(request: Request | NextRequest) {
             await archiveEntry(redis, {
               email, variant: product.name, size, shippingAddress,
               id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED',
+              ...(promoCode ? { promoCode, discountPercent: entryDiscount || undefined } : {}),
+              orderRef: String(entry.orderRef || '') || buildOrderRef(email, product.name, size),
             });
           }
         }
@@ -139,17 +163,40 @@ export async function runDropDraw(request: Request | NextRequest) {
           const fallbackSession = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             customer_email: email,
-            line_items: [{ price: resolveStripePriceId(getProductStripeId(product, size)), quantity: 1 }],
+            line_items: [{
+              price_data: {
+                currency: 'usd',
+                unit_amount: priceCents,
+                product_data: {
+                  name: `${product.name} - ${size}`,
+                  description: product.tagline || product.desc || undefined,
+                },
+              },
+              quantity: 1,
+            }],
             mode: 'payment',
             expires_at: Math.floor(Date.now() / 1000) + 1800,
             success_url: `${buildAbsoluteUrl(request as Request, '/')}?session=success`,
             cancel_url: `${buildAbsoluteUrl(request as Request, '/')}?session=cancel`,
+            metadata: {
+              productId: String(product.id),
+              variant: String(product.name),
+              size,
+              email,
+              address: shippingAddress,
+              checkoutType: 'single',
+              ...(promoCode ? { promoCode, ref: promoCode } : {}),
+              orderRef: String(entry.orderRef || '') || buildOrderRef(email, product.name, size),
+            },
           });
           resultsSummary.push({ email, scent: product.name, size, checkout: fallbackSession.url ?? undefined, status: 'checkout', message: 'Fallback checkout session created.' });
           successCount += 1;
           await archiveEntry(redis, {
             email, variant: product.name, size, shippingAddress,
             id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
+            ...(promoCode ? { promoCode, discountPercent: entryDiscount || undefined } : {}),
+            orderRef: String(entry.orderRef || '') || buildOrderRef(email, product.name, size),
+            amountCents: priceCents,
           });
         }
       }

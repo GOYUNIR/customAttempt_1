@@ -364,7 +364,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   }, [initialSlug]);
 
-  const addToCart = () => {
+  const addToCart = async () => {
     if (!product) return;
     const cat = getProductPriceCategory(product, selectedSize);
     if (!cat || !isConfiguredPrice(cat.price)) {
@@ -374,6 +374,40 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
     const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
     const isRaffleEntry = checkoutMode === 'RAFFLE';
+
+    // Never stack a second raffle entry for a variant+size the email already
+    // holds an active entry for. Fail-open: if the lookup errors or the
+    // customer isn't signed in (401), we still allow the add so checkout is
+    // never blocked — the server re-checks duplicates at payment time too.
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (isRaffleEntry && normalizedEmail) {
+      try {
+        const res = await fetch('/api/account/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail }),
+        });
+        const data = await res.json();
+        const entries = Array.isArray(data?.entries) ? data.entries : [];
+        const terminalStates = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER', 'CANCELLED_BY_ADMIN'];
+        const alreadyEntered = entries.some(
+          (entry: any) =>
+            (String(entry.variant || '').toLowerCase() === String(product.name || '').toLowerCase() ||
+              String(entry.variant || '').toLowerCase() === String(product.id || '').toLowerCase()) &&
+            String(entry.size || '') === String(selectedSize || '') &&
+            (!entry.status || String(entry.status).toUpperCase() === 'ENTERED' || !terminalStates.includes(String(entry.status).toUpperCase())),
+        );
+        if (alreadyEntered) {
+          const msg = `You're already entered for ${product.name} (${selectedSize}). Check your entry in Manage My Entry.`;
+          setMessage(msg);
+          notify({ type: 'info', message: msg });
+          return;
+        }
+      } catch {
+        // Fail-open: lookup failures must never block adding to the cart.
+      }
+    }
+
     const item = {
       productId: product.id,
       name: product.name,
@@ -681,21 +715,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
         <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted }}>Select size</div>
+            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {(product.priceCategories || []).map((cat: any) => {
                 const isSample = product.deliveryIncentiveEnabled === true && Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.includes(cat.size);
+                const accent = configPalette.checkoutCtaButton || '#635bff';
                 return (
-                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${configPalette.textMain}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? configPalette.textMain : 'transparent', color: selectedSize === cat.size ? configPalette.primaryBackground : configPalette.textMain, cursor: 'pointer', fontSize: 12 }}>
+                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${accent}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? accent : 'transparent', color: selectedSize === cat.size ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: selectedSize === cat.size ? 700 : 500 }}>
                     {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
                     {isSample ? ' · Sample' : ''}
                   </button>
                 );
               })}
             </div>
-            {product.deliveryIncentiveEnabled === true && Number(product.deliveryIncentiveCreditCents || 0) > 0 && (
+            {product.deliveryIncentiveEnabled === true && ((Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.length > 0) || Number(product.deliveryIncentiveCreditCents || 0) > 0) && (
               <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)', fontSize: 11, color: '#86efac', lineHeight: 1.5 }}>
-                🧪 Try a sample first: every sample order includes a ${(Number(product.deliveryIncentiveCreditCents) / 100).toFixed(0)} credit toward the full-size bottle after delivery.
+                🧪 Try a sample first: your {Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.length > 0 ? String(product.deliveryIncentiveTriggerSizes[0]) : 'sample'} purchase is credited toward a full-size order — you only pay the difference.
+                {Number(product.deliveryIncentiveCreditCents || 0) > 0 && ` Every sample order includes a $${(Number(product.deliveryIncentiveCreditCents) / 100).toFixed(0)} credit after delivery.`}
               </div>
             )}
           </div>
@@ -709,7 +745,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           {/* Mapbox address autofill requires the field to live inside a <form>. */}
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" autoComplete="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
             <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {mapboxHint === 'autofill-on' && (

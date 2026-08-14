@@ -17,6 +17,10 @@ function emailBrandName(): string {
 const from = () => process.env.RESEND_FROM || `${emailBrandName()} <onboarding@resend.dev>`;
 const replyTo = () => process.env.REPLY_TO_EMAIL || process.env.SUPPORT_EMAIL || 'goyunir.support@gmail.com';
 
+/** Customer support address used inside transactional emails. Customers cannot
+ * reply to the automated Resend sender, so every template points them here. */
+const supportEmail = () => process.env.SUPPORT_EMAIL || 'goyunir.support@gmail.com';
+
 /** One confirmation when raffle entry is secured (card saved, not charged yet). */
 export async function sendEntryConfirmedEmail(opts: {
   to: string;
@@ -28,6 +32,9 @@ export async function sendEntryConfirmedEmail(opts: {
   listPrice?: number;
   orderRef?: string;
   siteUrl?: string;
+  rewardsBalance?: number;
+  hasAccount?: boolean;
+  purchasePointsPerDollar?: number;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -85,6 +92,30 @@ export async function sendEntryConfirmedEmail(opts: {
 
   const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
 
+  const siteBase = (opts.siteUrl || '').replace(/\/$/, '') || 'https://goyunir.com';
+  const purchasePointsPerDollar = Math.max(0, Number(opts.purchasePointsPerDollar) || 10);
+  const expectedPoints =
+    typeof opts.listPrice === 'number' && opts.listPrice > 0
+      ? Math.floor(opts.listPrice * purchasePointsPerDollar)
+      : 0;
+
+  const rewardsBox = opts.hasAccount
+    ? `
+          <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
+            <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">${typeof opts.rewardsBalance === 'number' ? `Your account has <strong>${opts.rewardsBalance} points</strong> ready to redeem for store credit — redeem them in your account.` : 'Your account is ready to redeem points for store credit — manage them in your account.'}</p>
+            ${expectedPoints > 0 ? `<p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">If you win, this entry also earns <strong>${expectedPoints} points</strong> on your purchase.</p>` : ''}
+            <a href="${siteBase}/account" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Manage account</a>
+          </div>
+        `
+    : `
+          <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
+            <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to redeem your points and track this entry.</p>
+            <a href="${siteBase}/auth/signup" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to redeem</a>
+          </div>
+        `;
+
   try {
     const { data, error } = await resend.emails.send({
       from: from(),
@@ -114,14 +145,10 @@ export async function sendEntryConfirmedEmail(opts: {
           
           <p style="margin:16px 0 8px;font-size:14px;color:#374151;">After the draw, check this inbox — if you're selected, you'll receive a confirmation and shipping details.</p>
           
-          <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
-            <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
-            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to redeem your points and track this entry.</p>
-            <a href="${(opts.siteUrl || '').replace(/\/$/, '') || 'https://goyunir.com'}/auth/signup" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to redeem</a>
-          </div>
+          ${rewardsBox}
           
           <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
-            <p style="margin:0;font-size:13px;color:#6b7280;">📧 Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#3b82f6;text-decoration:none;">goyunir.support@gmail.com</a></p>
+            <p style="margin:0;font-size:13px;color:#6b7280;">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#3b82f6;text-decoration:none;">${supportEmail()}</a>.</p>
             ${manage}
           </div>
         </div>
@@ -151,6 +178,7 @@ export async function sendWinnerEmail(opts: {
   siteUrl?: string;
   originalPrice?: string;
   discountPercent?: number;
+  listPriceCents?: number;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -159,8 +187,36 @@ export async function sendWinnerEmail(opts: {
   }
   
   const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
-  const hasDiscount = opts.discountPercent && opts.discountPercent > 0 && opts.originalPrice;
-  
+
+  const discountPercent = Math.max(0, Number(opts.discountPercent) || 0);
+
+  // Parse the charged amount (callers pass amountLabel as "$X.XX").
+  const amountCents = Math.round((Number(String(opts.amountLabel || '').replace(/[^0-9.]/g, '')) || 0) * 100);
+  const chargedLabel =
+    opts.amountLabel &&
+    String(opts.amountLabel).trim() &&
+    Number.isFinite(Number(String(opts.amountLabel).replace(/[^0-9.]/g, '')))
+      ? opts.amountLabel
+      : amountCents > 0
+        ? `$${(amountCents / 100).toFixed(2)}`
+        : '';
+
+  // Pre-discount list price for the strikethrough. Accept `originalPrice`
+  // ("$X.XX") or `listPriceCents`; when only the charged amount + discount are
+  // known, derive the list price so the discount is always shown correctly.
+  const listPriceCents =
+    Math.round((Number(String(opts.originalPrice || '').replace(/[^0-9.]/g, '')) || 0) * 100) ||
+    (Number(opts.listPriceCents) > 0 ? Math.round(Number(opts.listPriceCents)) : 0) ||
+    (discountPercent > 0 && amountCents > 0 ? Math.round(amountCents / (1 - discountPercent / 100)) : 0);
+
+  const hasDiscount = discountPercent > 0 && listPriceCents > 0;
+  const originalPriceLabel = listPriceCents > 0 ? `$${(listPriceCents / 100).toFixed(2)}` : '';
+  const promoLine = opts.promoCode
+    ? hasDiscount
+      ? `<div style="font-size:12px;color:#10b981;margin-top:4px;">🏷 Promo code: ${opts.promoCode} applied — ${discountPercent}% off</div>`
+      : `<div style="font-size:12px;color:#6b7280;margin-top:4px;">🏷 Promo code: ${opts.promoCode} is on your order</div>`
+    : '';
+
   const manageLink = opts.siteUrl ? `
     <div style="margin:16px 0;text-align:center;">
       <a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="display:inline-block;padding:12px 28px;background:#10b981;color:#fff;border-radius:999px;font-weight:600;font-size:14px;text-decoration:none;">Manage My Entry →</a>
@@ -192,15 +248,15 @@ export async function sendWinnerEmail(opts: {
               <span style="color:#666;">Amount Charged:</span>
               ${hasDiscount ? `
                 <div style="text-align:right;">
-                  <span style="color:#666;text-decoration:line-through;font-size:13px;">$${opts.originalPrice}</span>
-                  <span style="color:#10b981;font-weight:700;font-size:20px;margin-left:8px;">${opts.amountLabel}</span>
-                  <span style="background:#10b981;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:600;margin-left:8px;">${opts.discountPercent}% OFF</span>
+                  <span style="color:#666;text-decoration:line-through;font-size:13px;">${originalPriceLabel}</span>
+                  <span style="color:#10b981;font-weight:700;font-size:20px;margin-left:8px;">${chargedLabel}</span>
+                  <span style="background:#10b981;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:600;margin-left:8px;">${discountPercent}% OFF</span>
                 </div>
               ` : `
-                <span style="font-weight:700;font-size:20px;color:#111;">${opts.amountLabel}</span>
+                <span style="font-weight:700;font-size:20px;color:#111;">${chargedLabel || '—'}</span>
               `}
             </div>
-            ${opts.promoCode ? `<div style="font-size:12px;color:#10b981;margin-top:4px;">🏷 Promo code: ${opts.promoCode} applied</div>` : ''}
+            ${promoLine}
           </div>
           
           ${opts.shippingAddress ? `
@@ -215,7 +271,7 @@ export async function sendWinnerEmail(opts: {
           ${manageLink}
           
           <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
-            <p style="margin:0;font-size:13px;color:#6b7280;">📧 Questions? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#3b82f6;text-decoration:none;">goyunir.support@gmail.com</a></p>
+            <p style="margin:0;font-size:13px;color:#6b7280;">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#3b82f6;text-decoration:none;">${supportEmail()}</a>.</p>
           </div>
         </div>
       `,
@@ -264,7 +320,7 @@ export async function sendEntryRecoveryEmail(opts: {
             <a href="${opts.siteUrl}" style="display:inline-block;padding:12px 20px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-size:13px;font-weight:600">Continue on site</a>
           </p>
           <p style="color:#999;font-size:12px;margin:0">If you already finished, ignore this. We send at most a couple of reminders.</p>
-          <p style="color:#999;font-size:12px;margin:8px 0 0">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+          <p style="color:#999;font-size:12px;margin:8px 0 0">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,
     });
@@ -392,7 +448,7 @@ export async function sendPromoterInvoiceEmail(opts: {
           <p style="margin:0 0 12px;color:#666;font-size:12px">Order Ref: ${orderRef}</p>
           <p style="margin:0 0 12px">Order ~$${(opts.amountCents / 100).toFixed(2)} · estimated credit $${(opts.payoutCents / 100).toFixed(2)}.</p>
           <p style="color:#666;font-size:13px;margin:0">Payouts are settled offline. Customer email is not shared beyond attribution.</p>
-          <p style="color:#666;font-size:12px;margin:8px 0 0">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+          <p style="color:#666;font-size:12px;margin:8px 0 0">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,
     });
@@ -444,7 +500,7 @@ export async function sendAccountUpdateEmail(opts: {
           <p style="letter-spacing:3px;font-size:11px;text-transform:uppercase;color:#666;margin:0 0 16px">GOYUNIR</p>
           <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">${heading}</h1>
           <p style="margin:0 0 12px">${body}</p>
-          <p style="color:#666;font-size:13px;margin:0">Didn't make this change? Reply to this email or contact <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a> right away.</p>
+          <p style="color:#666;font-size:13px;margin:0">Didn't make this change? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a> right away.</p>
         </div>
       `,
     });
@@ -491,7 +547,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
           ${eligibleSizes ? `<p style="margin:0 0 14px">Eligible size(s): <strong>${eligibleSizes}</strong></p>` : ''}
           <p style="margin:0 0 14px;color:#4b5563">This code is linked to your email, limited to one use, and cannot be transferred or stacked.</p>
           <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="https://goyunir.com/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
-          <p style="margin:0;color:#666;font-size:13px">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+          <p style="margin:0;color:#666;font-size:13px">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,
     });
@@ -567,7 +623,7 @@ export async function sendWelcomeEmail(opts: {
           <div style="margin:0 0 18px;padding:14px 16px;border-radius:18px;background:#111;color:#fff;display:inline-block;font-weight:700;letter-spacing:1px;font-size:15px;">${opts.promoCode}</div>
           <p style="margin:0 0 12px;color:#4b5563">This code is linked to your email, limited to one use, and applies automatically on your first qualifying release.</p>
           ${siteUrl ? `<p style="margin:0 0 20px"><a href="${siteUrl}/account" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">Open my account</a></p>` : ''}
-          <p style="margin:0;color:#6b7280;font-size:13px">Questions? <a href="mailto:goyunir.support@gmail.com" style="color:#111">goyunir.support@gmail.com</a></p>
+          <p style="margin:0;color:#6b7280;font-size:13px">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,
     });

@@ -3,6 +3,7 @@ import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getL
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
 
       const priceCat = (product.priceCategories || []).find((c: any) => c.size === size);
       if (!priceCat || !isConfiguredPrice(priceCat.price)) continue;
-      const priceCents = Math.round(priceCat.price * 100);
+      const basePriceCents = Math.round(priceCat.price * 100);
       const stripePriceId = resolveStripePriceId(priceCat.stripeId);
       if (!stripePriceId) continue;
 
@@ -76,6 +77,12 @@ export async function POST(request: Request) {
         const customerId = entry.customerId || entry.stripeCustomerId;
         const paymentMethodId = entry.paymentMethodId;
         const orderRef = formatOrderRef(String(entry.orderRef || '')) || buildOrderRef(entry.email, product.name, size);
+        // Apply the promo stored on the entry at signup time ("X% off if
+        // selected") so admin-triggered draws never charge winners full price.
+        const entryDiscount = Math.min(50, Math.max(0, Number(entry.discountPercent) || 0));
+        const priceCents = entryDiscount > 0
+          ? Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)))
+          : basePriceCents;
 
         if (!customerId || !paymentMethodId) {
           declinedEntries.push(winnerStr);
@@ -119,6 +126,8 @@ export async function POST(request: Request) {
               size,
               amountLabel: `$${(priceCents / 100).toFixed(2)}`,
               promoCode: entry.promoCode || undefined,
+              originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
+              discountPercent: entryDiscount > 0 ? entryDiscount : undefined,
               shippingAddress: entry.shippingAddress || entry.address || undefined,
               orderRef,
               siteUrl: siteUrlFromEnv(),
@@ -146,7 +155,7 @@ export async function POST(request: Request) {
           if (!customerId || !paymentMethodId) continue;
           try {
             await stripe.paymentIntents.create({
-              amount: priceCents,
+              amount: basePriceCents,
               currency: 'usd',
               customer: customerId,
               payment_method: paymentMethodId,
@@ -158,9 +167,9 @@ export async function POST(request: Request) {
             live.inventoryRemaining -= 1;
             live.salesCompleted = (live.salesCompleted || 0) + 1;
             totalCharged++;
-            totalRevenueCents += priceCents;
-            await archiveEntry(redis, { ...entry, type: 'WAITLIST_CHARGED', amountCents: priceCents, shippingStatus: 'PENDING_FULFILLMENT' });
-            results.push({ email: entry.email, status: 'charged', amount: priceCents / 100, product: productName, size, amountCents: priceCents });
+            totalRevenueCents += basePriceCents;
+            await archiveEntry(redis, { ...entry, type: 'WAITLIST_CHARGED', amountCents: basePriceCents, shippingStatus: 'PENDING_FULFILLMENT' });
+            results.push({ email: entry.email, status: 'charged', amount: basePriceCents / 100, product: productName, size, amountCents: basePriceCents });
           } catch (err: any) {
             await archiveEntry(redis, { ...entry, type: 'WAITLIST_DECLINED' });
             results.push({ email: entry.email, status: 'declined', error: err.message, product: productName, size });
@@ -215,6 +224,14 @@ export async function POST(request: Request) {
       const historyLen = await redis.llen(DRAW_HISTORY_KEY);
       if (historyLen > 100) await redis.ltrim(DRAW_HISTORY_KEY, historyLen - 100, -1);
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
+    } catch {}
+
+    try {
+      await appendAudit(redis, {
+        action: 'DRAW_TRIGGERED',
+        detail: `${targetPool} · ${totalCharged} charged · $${(totalRevenueCents / 100).toFixed(2)}`,
+        actor: 'admin',
+      });
     } catch {}
 
     return NextResponse.json({

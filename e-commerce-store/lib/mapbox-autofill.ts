@@ -506,15 +506,21 @@ function handleRetrieve(event: any): void {
   // Apply the full address over several ticks. The SDK's own form-fill can land
   // at any moment, so we keep re-writing our (longer, complete) value until the
   // SDK is done. If the box ends up with just the street, the last write wins.
+  // The backoff grows so the final attempts land well AFTER the SDK's async
+  // form-fill + re-scan/update() cycles (which on slow devices can fire up to
+  // ~2s after the retrieve event).
   let attempts = 0;
+  const MAX_ATTEMPTS = 16;
   const writeFull = () => {
     attempts += 1;
     const el = input && typeof input.value === 'string' ? input : null;
     if (!el || !el.isConnected) return;
     const current = String(el.value || '').trim();
-    // Only override when our composed address is strictly richer than what's in
-    // the box (covers the "SDK wrote street only" case) or identical to it.
-    if (current.length < composed.length) {
+    // Override when our composed address is strictly richer than what's in the
+    // box (covers the "SDK wrote street only" case) or identical to it — and
+    // also re-apply if the SDK truncated a value we already verified.
+    const wasVerified = el.dataset.mapboxVerified === 'true';
+    if (current !== composed && (current.length < composed.length || wasVerified)) {
       el.value = composed;
     }
     // Mark as verified once the box actually contains the full address.
@@ -525,10 +531,11 @@ function handleRetrieve(event: any): void {
       if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
       return;
     }
-    if (attempts < 6) {
-      // 0ms, 25ms, 75ms, 175ms, 375ms, 750ms — long enough to outlast the SDK's
-      // async form-fill even on slow devices.
-      window.setTimeout(writeFull, Math.min(750, attempts * attempts * 25 + 25));
+    if (attempts < MAX_ATTEMPTS) {
+      // 0ms, 30ms, 90ms, 210ms, 450ms, 930ms, 1890ms, 2730ms… — the later
+      // attempts are scheduled far enough out to win against the SDK's slowest
+      // async form-fill, then a few extra ticks to absorb any SDK re-scans.
+      window.setTimeout(writeFull, Math.min(3000, attempts * attempts * 30 + 30));
     }
   };
   writeFull();

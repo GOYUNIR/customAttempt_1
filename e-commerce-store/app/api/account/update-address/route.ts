@@ -11,6 +11,7 @@ import {
 import { getSessionUser } from '@/lib/session-auth';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { sendAccountUpdateEmail } from '@/lib/email';
+import { appendAudit } from '../../admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,14 @@ export async function POST(request: Request) {
         changeType: 'address',
         newAddress,
       }).catch(() => {});
+      try {
+        await appendAudit(redis, {
+          action: 'ACCOUNT_ADDRESS_UPDATED',
+          detail: `${variant} / ${size} → ${newAddress}`,
+          actor: 'user',
+          email,
+        });
+      } catch {}
       return NextResponse.json({ success: true, message: 'Shipping address updated.' });
     }
 
@@ -95,6 +104,14 @@ export async function POST(request: Request) {
       changeType: 'address',
       newAddress,
     }).catch(() => {});
+    try {
+      await appendAudit(redis, {
+        action: 'ACCOUNT_ADDRESS_UPDATED',
+        detail: `${variant} / ${size} → ${newAddress} (ledger fallback)`,
+        actor: 'user',
+        email,
+      });
+    } catch {}
     return NextResponse.json({ success: true, message: 'Shipping address updated.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

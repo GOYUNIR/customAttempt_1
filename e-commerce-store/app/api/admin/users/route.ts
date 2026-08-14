@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +84,9 @@ export async function POST(request: Request) {
       const id = String(body?.id || '');
       if (!id) return NextResponse.json({ error: 'Missing user ID' }, { status: 400 });
       await redis.hdel(USERS_KEY, id);
+      try {
+        await appendAudit(redis, { action: 'USER_DELETED', detail: `User ${id}`, actor: 'admin' });
+      } catch {}
       return NextResponse.json({ success: true });
     }
 
@@ -111,6 +115,9 @@ export async function POST(request: Request) {
         updatedAt: new Date().toISOString(),
       };
       await redis.hset(USERS_KEY, { [user.id]: JSON.stringify(user) });
+      try {
+        await appendAudit(redis, { action: 'USER_CREATED', detail: email, actor: 'admin', email });
+      } catch {}
       return NextResponse.json({ success: true, user: serializeUser(user) });
     }
 
@@ -139,6 +146,9 @@ export async function POST(request: Request) {
         updatedAt: new Date().toISOString(),
       };
       await redis.hset(USERS_KEY, { [updated.id]: JSON.stringify(updated) });
+      try {
+        await appendAudit(redis, { action: 'USER_UPDATED', detail: email, actor: 'admin', email });
+      } catch {}
       return NextResponse.json({ success: true, user: serializeUser(updated) });
     }
 

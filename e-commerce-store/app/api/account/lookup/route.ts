@@ -4,6 +4,7 @@ import {
   createStripeClient,
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
+  STORE_CONFIG_KEY,
   safeParseRedisItem,
   loadProducts,
 } from '@/lib/server-config';
@@ -16,8 +17,11 @@ const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CA
 // Ledger rows that are bookkeeping, not actual entries. INTENT_STARTED means the
 // customer opened card setup but never finished; INTENT_EXPIRED means they never
 // completed it; DUPLICATE_BLOCKED is a rejected re-entry attempt; ADMIN_NOTE is
-// internal. None of these should ever show up as "entries" in the account page.
-const SKIP_TYPES = ['INTENT_STARTED', 'INTENT_EXPIRED', 'DUPLICATE_BLOCKED', 'ADMIN_NOTE'];
+// internal; ADDRESS_UPDATED is a pure address-change audit row (the real entry
+// row itself is edited in place) and must NEVER overwrite the entry's status —
+// without it, changing your address on a won order would flip "Won & charged"
+// into "Address updated" in Manage My Entry.
+const SKIP_TYPES = ['INTENT_STARTED', 'INTENT_EXPIRED', 'DUPLICATE_BLOCKED', 'ADMIN_NOTE', 'ADDRESS_UPDATED'];
 
 export async function POST(request: Request) {
   try {
@@ -151,10 +155,90 @@ export async function POST(request: Request) {
       return dateB - dateA;
     });
 
+    // ── Account-bound promos (welcome credit + anything issued to this email) ──
+    // The user record carries the welcome code; the promo records live in
+    // config:promos. We surface every promo the customer can actually use so the
+    // /account "Your credits & codes" section can render them with a used/available
+    // badge without the admin portal.
+    let userRecord: any = null;
+    try {
+      const rawUsers = await redis.hgetall('store:users');
+      if (rawUsers) {
+        for (const [k, v] of Object.entries(rawUsers)) {
+          const u = safeParseRedisItem<any>(v);
+          if (u && String(u.email || '').toLowerCase() === email) {
+            userRecord = u;
+            break;
+          }
+        }
+      }
+    } catch {}
+
+    const welcomePromoCode =
+      typeof userRecord?.welcomePromoCode === 'string' && userRecord.welcomePromoCode
+        ? userRecord.welcomePromoCode
+        : null;
+
+    const promos: any[] = [];
+    try {
+      const rawPromos = await redis.hgetall('config:promos');
+      if (rawPromos) {
+        for (const [code, raw] of Object.entries(rawPromos)) {
+          const p = safeParseRedisItem<any>(raw);
+          if (!p) continue;
+          const issuedToMe = String(p.issuedForEmail || '').toLowerCase() === email;
+          const isWelcome = welcomePromoCode ? code === welcomePromoCode : false;
+          if (!issuedToMe && !isWelcome) continue;
+
+          let used = false;
+          try {
+            const inSet = await redis.sismember(`promo:used_emails:${code}`, email);
+            const maxTotal = Number(p.maxUsesTotal || 0);
+            used = inSet === 1 || (maxTotal > 0 && Number(p.uses || 0) >= maxTotal);
+          } catch {}
+
+          promos.push({
+            code,
+            fixedDiscountCents: Number(p.fixedDiscountCents || 0),
+            customerDiscountPercent: Number(p.customerDiscountPercent || 0),
+            welcome: p.welcome === true,
+            active: p.active !== false,
+            uses: Number(p.uses || 0),
+            maxUsesTotal: Number(p.maxUsesTotal || 0),
+            createdAt: p.createdAt || '',
+            used,
+          });
+        }
+      }
+    } catch {}
+
+    promos.sort(
+      (a, b) =>
+        (b.welcome ? 1 : 0) - (a.welcome ? 1 : 0) ||
+        String(a.createdAt).localeCompare(String(b.createdAt)),
+    );
+
+    // ── Rewards config (conversion rate + gifting toggle) so /account can show
+    // the points→credit rate and explain gifting without hardcoding numbers.
+    let rewardsConfig: { pointsPerDollar?: number; minRedeemPoints?: number; giftingEnabled?: boolean; giftDiscountPercent?: number } = {};
+    try {
+      const rawConfig = await redis.get(STORE_CONFIG_KEY);
+      const config = safeParseRedisItem<any>(rawConfig) || {};
+      rewardsConfig = {
+        pointsPerDollar: Math.max(1, Number(config?.rewards?.pointsPerDollar) || 100),
+        minRedeemPoints: Math.max(1, Number(config?.rewards?.minRedeemPoints) || 500),
+        giftingEnabled: config?.rewards?.giftingEnabled !== false,
+        giftDiscountPercent: Math.max(0, Number(config?.rewards?.giftDiscountPercent) || 10),
+      };
+    } catch {}
+
     if (entries.length === 0) {
-      return NextResponse.json({ error: 'No matching entry found.' }, { status: 404 });
+      // 200 + empty array (not 404) — a signed-in user with no entries yet is a
+      // perfectly normal state. 404 here just flooded the console with
+      // "Failed to load resource: the server responded with a status of 404".
+      return NextResponse.json({ entries: [], promos, welcomePromoCode, rewards: rewardsConfig });
     }
-    return NextResponse.json({ entries });
+    return NextResponse.json({ entries, promos, welcomePromoCode, rewards: rewardsConfig });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

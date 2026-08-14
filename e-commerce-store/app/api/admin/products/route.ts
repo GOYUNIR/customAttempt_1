@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts , getAdminPassword, defaultStripePriceId} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -136,6 +137,9 @@ export async function POST(request: Request) {
 
   if (action === 'delete') {
     await deleteProduct(redis, body.id);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_DELETED', detail: `Product ${body.id}`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true });
   }
   if (action === 'archive') {
@@ -146,6 +150,9 @@ export async function POST(request: Request) {
     // DO NOT change isActive – archiving should not hide the product
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_ARCHIVED', detail: `${product.name} (${product.id})`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
   if (action === 'unarchive') {
@@ -154,6 +161,9 @@ export async function POST(request: Request) {
     product.isArchived = false;
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_UNARCHIVED', detail: `${product.name} (${product.id})`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
   if (action === 'toggleActive') {
@@ -162,6 +172,9 @@ export async function POST(request: Request) {
     product.isActive = typeof body.nextActive === 'boolean' ? body.nextActive : !Boolean(product.isActive);
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_VISIBILITY_CHANGED', detail: `${product.name} → ${product.isActive ? 'visible' : 'hidden'}`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
   if (action === 'addToUpcoming') {
@@ -171,6 +184,9 @@ export async function POST(request: Request) {
     product.isArchived = false;
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_UPCOMING_CHANGED', detail: `${product.name} → upcoming`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
   if (action === 'removeFromUpcoming') {
@@ -179,6 +195,9 @@ export async function POST(request: Request) {
     product.isUpcoming = false;
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_UPCOMING_CHANGED', detail: `${product.name} → not upcoming`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
   if (action === 'reorder') {
@@ -187,6 +206,9 @@ export async function POST(request: Request) {
     product.sortOrder = Number(body.sortOrder) || 0;
     product.updatedAt = new Date().toISOString();
     await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_REORDERED', detail: `${product.name} → sort order ${product.sortOrder}`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, product });
   }
 
@@ -251,5 +273,8 @@ export async function POST(request: Request) {
     previousSlug: existing?.slug,
     previousName: existing?.name,
   });
+    try {
+      await appendAudit(redis, { action: existing ? 'PRODUCT_UPDATED' : 'PRODUCT_CREATED', detail: `${product.name} (${product.id})`, actor: 'admin' });
+    } catch {}
   return NextResponse.json({ success: true, product });
 }

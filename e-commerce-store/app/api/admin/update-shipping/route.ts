@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, getAdminPassword } from '@/lib/server-config';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -166,6 +167,15 @@ export async function POST(request: Request) {
           break;
         }
       }
+    } catch {}
+
+    try {
+      await appendAudit(redis, {
+        action: 'SHIPPING_UPDATED',
+        detail: `${variant} ${size ? `/ ${size}` : ''} — ${email} → ${shippingStatus}${trackingNumber ? ` · tracking ${trackingNumber}` : ''}${updated > 0 ? ` (${updated} record${updated === 1 ? '' : 's'})` : ''}`,
+        actor: 'admin',
+        email,
+      });
     } catch {}
 
     return NextResponse.json({ success: true, updated, notified });

@@ -8,6 +8,7 @@ import {
   getAdminPassword,
 } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +54,16 @@ export async function POST(request: Request) {
     const promoCode = target.parsed.promoCode || null;
 
     await adminCancelOrder(redis, target, reason);
+
+    // Best-effort audit trail so the admin portal's Action Audit Log shows this.
+    try {
+      await appendAudit(redis, {
+        action: 'ENTRY_CANCELLED',
+        detail: `${variant} / ${size} — ${email}${reason && reason !== 'Cancelled by admin' ? ` (${reason})` : ''}`,
+        actor: 'admin',
+        email,
+      });
+    } catch {}
 
     // Release the promo code if it was used
     if (promoCode) {

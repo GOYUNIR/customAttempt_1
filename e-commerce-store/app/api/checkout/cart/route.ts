@@ -94,6 +94,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: addrError }, { status: 400 });
     }
 
+    // Resolve the deployment origin for Stripe success/cancel URLs. In a Next.js
+    // route handler `origin` is NOT a global (that's browser-only), so derive it
+    // from the forwarded headers (Vercel) or the Host header (localhost/dev).
+    const origin = (() => {
+      const forwardedProto = request.headers.get('x-forwarded-proto');
+      const forwardedHost = request.headers.get('x-forwarded-host');
+      const host = forwardedHost || request.headers.get('host') || 'goyunir.com';
+      const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
+      return `${protocol}://${host}`;
+    })();
+
     const allProducts = await loadProducts(redis);
     const aggregate = new Map<string, { productId: string; size: string; quantity: number }>();
     for (const item of cart) {
@@ -185,7 +196,7 @@ export async function POST(request: Request) {
         if (!promo || promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
         }
-        if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== email) {
+        if (promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== email) {
           return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
         }
         if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email) {

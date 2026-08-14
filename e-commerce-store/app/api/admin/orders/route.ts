@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { appendAudit } from '@/app/api/admin/audit/route';
 import {
   createRedisClient,
   findAllOpenOrders,
@@ -68,6 +69,9 @@ export async function POST(request: Request) {
   if (action === 'cancel') {
     const reason = String(body?.reason || 'Cancelled by admin');
     await adminCancelOrder(redis, target, reason);
+    try {
+      await appendAudit(redis, { action: 'ENTRY_CANCELLED', detail: `${variant} / ${size} — ${email}${reason !== 'Cancelled by admin' ? ` (${reason})` : ''}`, actor: 'admin', email });
+    } catch {}
     return NextResponse.json({ success: true, message: 'Order cancelled.' });
   }
 
@@ -75,6 +79,9 @@ export async function POST(request: Request) {
     const newAddress = String(body?.newAddress || '').trim();
     if (!newAddress) return NextResponse.json({ error: 'New address is required.' }, { status: 400 });
     await adminUpdateOrderAddress(redis, target, newAddress);
+    try {
+      await appendAudit(redis, { action: 'ORDER_ADDRESS_UPDATED', detail: `${variant} / ${size} — ${email} → ${newAddress}`, actor: 'admin', email });
+    } catch {}
     return NextResponse.json({ success: true, message: 'Address updated.' });
   }
 

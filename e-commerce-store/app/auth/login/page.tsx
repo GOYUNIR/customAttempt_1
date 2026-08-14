@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,7 +12,21 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — starts at the build-time config and upgrades to the
+  // /admin → Settings theme (served through /api/store → config → themeColors)
+  // so design presets apply to the login page like every other storefront page.
+  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+
+  // Pull the live theme on mount (same pattern as app/account/page.tsx).
+  useEffect(() => {
+    fetchStoreJson('/api/store')
+      .then((data: any) => {
+        if (data?.config?.themeColors) {
+          setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
     if (typeof window === 'undefined') return;
@@ -60,7 +75,7 @@ export default function LoginPage() {
         <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: '0 0 8px', color: configPalette.cardTextMain }}>Log In</h1>
         <p style={{ color: configPalette.cardTextMuted, fontSize: 13, margin: '0 0 24px' }}>Sign in to manage your entries and rewards.</p>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
+          <input type="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
           <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ padding: 12, borderRadius: 8, background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#34d399', marginTop: -6 }}>
             <span style={{ width: 7, height: 7, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 2px rgba(34,197,94,0.16)' }} />

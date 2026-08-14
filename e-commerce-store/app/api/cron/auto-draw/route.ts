@@ -175,6 +175,7 @@ async function runAutoDraw(request: Request) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
               const entryDiscount = Math.min(50, Math.max(0, Number(winnerData.discountPercent) || 0));
+              let winnerDiscountPercent = entryDiscount;
               if (entryDiscount > 0) {
                 priceCents = Math.max(50, Math.round(basePriceCents * (1 - entryDiscount / 100)));
               }
@@ -195,11 +196,15 @@ async function runAutoDraw(request: Request) {
                         );
                         if (discount > 0) {
                           priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
+                          winnerDiscountPercent = discount;
                         }
                       }
                     } else {
                       promoForCharge = null;
-                      if (entryDiscount > 0) priceCents = basePriceCents;
+                      if (entryDiscount > 0) {
+                        priceCents = basePriceCents;
+                        winnerDiscountPercent = 0;
+                      }
                     }
                   } else {
                     promoForCharge = null;
@@ -249,7 +254,17 @@ async function runAutoDraw(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents,
               });
 
-              const emailResult = await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(2)}`, promoCode: promoCode || undefined, shippingAddress: shippingAddress || undefined, siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com' });
+              const emailResult = await sendWinnerEmail({
+                to: winnerEmail,
+                product: productName,
+                size: productSize,
+                amountLabel: `$${(priceCents / 100).toFixed(2)}`,
+                promoCode: promoCode || undefined,
+                originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
+                discountPercent: winnerDiscountPercent > 0 ? winnerDiscountPercent : undefined,
+                shippingAddress: shippingAddress || undefined,
+                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com',
+              });
               if (!(emailResult as any)?.ok) {
                 console.error('[auto-draw] winner email failed', winnerEmail, emailResult);
               }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient , getAdminPassword, defaultStripePriceId, getLiveProductState} from '@/lib/server-config';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -296,6 +297,10 @@ export async function GET(request: Request) {
 
     const verify = await redis.hgetall(PRODUCTS_KEY);
     const verifyCount = verify ? Object.keys(verify).length : 0;
+
+    try {
+      await appendAudit(redis, { action: 'DEFAULTS_SEEDED', detail: `Seeded ${seeded} products · live states ${liveSeeded}`, actor: 'admin' });
+    } catch {}
 
     return NextResponse.json({
       success: true,

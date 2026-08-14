@@ -19,6 +19,26 @@ interface EntryRecord {
   orderRef?: string;
 }
 
+interface PromoInfo {
+  code: string;
+  fixedDiscountCents?: number;
+  customerDiscountPercent?: number;
+  welcome?: boolean;
+  active?: boolean;
+  uses?: number;
+  maxUsesTotal?: number;
+  createdAt?: string;
+  used?: boolean;
+}
+
+const TERMINAL_STATUSES = [
+  'WINNER_CHARGED',
+  'WINNER_DECLINED',
+  'NOT_SELECTED',
+  'CANCELLED_BY_USER',
+  'CANCELLED_BY_ADMIN',
+];
+
 function notify(detail: { id?: string; type: string; message: string; persist?: boolean }) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
@@ -36,15 +56,25 @@ function statusLabel(status?: string): string {
     DUPLICATE_BLOCKED: 'Already entered',
     INTENT_STARTED: 'Card setup started',
     INTENT_EXPIRED: 'Card setup unfinished',
+    ADDRESS_UPDATED: 'Address updated',
+    NO_ACTIVE_ENTRY: 'No active entries',
   };
   return labels[String(status || '')] || String(status || 'Entry active');
 }
 
 function statusBanner(entry: EntryRecord) {
   if (entry.status === 'WINNER_CHARGED') {
+    let text = `You won this allocation. Charged $${((entry.amountCents || 0) / 100).toFixed(2)}.`;
+    if (entry.promoCode) {
+      text += ` Promo ${entry.promoCode} (${entry.discountPercent || 0}% off) applied.`;
+    }
+    if (entry.orderRef) {
+      text += ` Order ref: ${entry.orderRef}.`;
+    }
+    text += ` Shipping: ${(entry.shippingStatus || 'PENDING_FULFILLMENT').replace(/_/g, ' ').toLowerCase()}.`;
     return {
       color: '#34c759',
-      text: `You won this allocation. Charged $${((entry.amountCents || 0) / 100).toFixed(2)}. Shipping: ${(entry.shippingStatus || 'PENDING_FULFILLMENT').replace(/_/g, ' ').toLowerCase()}.`,
+      text,
     };
   }
   if (entry.status === 'WINNER_DECLINED') {
@@ -83,7 +113,25 @@ export default function AccountPage() {
   const [paymentPortalFor, setPaymentPortalFor] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [promos, setPromos] = useState<PromoInfo[] | null>(null);
+  const [copiedCode, setCopiedCode] = useState('');
+  const [rewardsConfig, setRewardsConfig] = useState<{
+    pointsPerDollar?: number;
+    minRedeemPoints?: number;
+    giftingEnabled?: boolean;
+    giftDiscountPercent?: number;
+  }>({});
   const didAutoLookup = useRef(false);
+
+  const copyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(''), 1500);
+    } catch {
+      notify({ type: 'alert', message: 'Could not copy code — select it manually.' });
+    }
+  };
 
   // Check if user is logged in via session
   useEffect(() => {
@@ -142,6 +190,11 @@ export default function AccountPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        if (Array.isArray(data.promos)) setPromos(data.promos);
+        if (data.rewards && typeof data.rewards === 'object') setRewardsConfig(data.rewards);
+        if (typeof data.welcomePromoCode === 'string' && data.welcomePromoCode) {
+          setUser((prev: any) => ({ ...(prev || {}), welcomePromoCode: data.welcomePromoCode }));
+        }
         const filteredEntries = (data.entries || []).filter(
           (e: EntryRecord) => e.status !== 'NO_ACTIVE_ENTRY'
         );
@@ -282,6 +335,22 @@ export default function AccountPage() {
       const data = await res.json();
       if (res.ok && data.promoCode) {
         setUser((prev: any) => ({ ...(prev || {}), welcomePromoCode: data.promoCode, rewards: data.points }));
+        setPromos((prev) => {
+          const list = Array.isArray(prev) ? [...prev] : [];
+          if (!list.some((p) => p.code === data.promoCode)) {
+            list.push({
+              code: data.promoCode,
+              customerDiscountPercent: 10,
+              welcome: true,
+              active: true,
+              uses: 0,
+              maxUsesTotal: 1,
+              used: data.used === true,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          return list;
+        });
         notify({ id: 'account-welcome', type: 'success', message: `Your welcome credit ${data.promoCode} is ready — check your inbox too.` });
       } else {
         notify({ id: 'account-welcome', type: 'error', message: data.error || 'Could not issue your credit right now.' });
@@ -381,6 +450,26 @@ export default function AccountPage() {
 
   const hasOpenEntry = (entries || []).some((e) => !e.status || e.status === 'ENTERED');
 
+  // Credits shown in the card come from the lookup's promos array; if the welcome
+  // code lives on the user record but its promo record is missing (e.g. deleted
+  // in admin), still surface it so the customer never loses sight of their code.
+  const creditPromos = (() => {
+    const list = Array.isArray(promos) ? [...promos] : [];
+    if (user?.welcomePromoCode && !list.some((p) => p.code === user.welcomePromoCode)) {
+      list.push({
+        code: user.welcomePromoCode,
+        customerDiscountPercent: 10,
+        welcome: true,
+        active: true,
+        uses: 0,
+        maxUsesTotal: 1,
+        used: false,
+      });
+    }
+    return list;
+  })();
+  const welcomePromoUsed = creditPromos.find((p) => p.code === user?.welcomePromoCode)?.used === true;
+
   return (
     <main
       style={{
@@ -435,13 +524,28 @@ export default function AccountPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 'bold', color: configPalette.cardTextMain }}>{user.email}</div>
-                <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Rewards: {Number(user.rewards || 0).toLocaleString()} points</div>
+                <div style={{ fontSize: 10, color: configPalette.cardTextMuted, marginTop: 2 }}>Signed in as {user.email}</div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 4 }}>Rewards: {Number(user.rewards || 0).toLocaleString()} points</div>
               </div>
             </div>
             {user.welcomePromoCode ? (
-              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', fontSize: 12, lineHeight: 1.5 }}>
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Your one-time 10% welcome credit (applies at checkout):</div>
-                <div style={{ fontWeight: 800, letterSpacing: 1, color: '#34c759', marginTop: 4 }}>{user.welcomePromoCode}</div>
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  background: welcomePromoUsed ? 'rgba(148,163,184,0.06)' : 'rgba(34,197,94,0.08)',
+                  border: welcomePromoUsed ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(34,197,94,0.2)',
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>
+                  {welcomePromoUsed
+                    ? 'Your one-time 10% welcome credit — used:'
+                    : 'Your one-time 10% welcome credit — ready to use at checkout:'}
+                </div>
+                <div style={{ fontWeight: 800, letterSpacing: 1, color: welcomePromoUsed ? '#94a3b8' : '#34c759', marginTop: 4 }}>{user.welcomePromoCode}</div>
               </div>
             ) : (
               <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5 }}>
@@ -460,7 +564,13 @@ export default function AccountPage() {
 
             {isLoggedIn && (
               <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(125,211,252,0.06)', border: '1px solid rgba(125,211,252,0.16)', fontSize: 12, lineHeight: 1.5 }}>
-                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 8 }}>Redeem points for store credit</div>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 4 }}>Redeem points for store credit</div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginBottom: 8 }}>
+                  {rewardsConfig.pointsPerDollar
+                    ? `${Number(rewardsConfig.pointsPerDollar).toLocaleString()} points = $1.00 credit`
+                    : 'Points convert to store credit at checkout.'}
+                  {rewardsConfig.minRedeemPoints ? ` · minimum ${Number(rewardsConfig.minRedeemPoints).toLocaleString()} points` : ''}
+                </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     type="number"
@@ -474,6 +584,14 @@ export default function AccountPage() {
                     {redeeming ? 'Redeeming…' : 'Redeem'}
                   </button>
                 </div>
+                <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 8, lineHeight: 1.5 }}>
+                  Every redemption issues a unique one-time promo code.
+                  {rewardsConfig.giftingEnabled === false
+                    ? ' It is reserved to your account only.'
+                    : rewardsConfig.giftDiscountPercent
+                      ? ` You can keep it or gift it to someone — a gifted code is worth ${Math.max(0, Number(rewardsConfig.giftDiscountPercent) || 10)}% less than face value.`
+                      : ' You can keep it or gift it to someone else.'}
+                </div>
                 {redeemMsg && <div style={{ marginTop: 8, fontSize: 11, color: redeemedCode ? '#34d399' : '#fbbf24' }}>{redeemMsg}</div>}
                 {redeemedCode && (
                   <div style={{ marginTop: 6, fontWeight: 800, letterSpacing: 1, color: '#7dd3fc' }}>{redeemedCode}</div>
@@ -481,10 +599,91 @@ export default function AccountPage() {
               </div>
             )}
 
+            {isLoggedIn && creditPromos.length > 0 && (
+              <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+                <div style={{ color: configPalette.cardTextMuted, fontSize: 11, marginBottom: 4 }}>Your credits & codes</div>
+                {creditPromos.map((promo) => (
+                  <div
+                    key={promo.code}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      padding: '10px 0',
+                      borderTop: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            letterSpacing: 1,
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                            color: promo.used ? '#94a3b8' : '#7dd3fc',
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          {promo.code}
+                        </span>
+                        {promo.welcome && <span style={{ fontSize: 10, color: configPalette.cardTextMuted }}>welcome credit</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>
+                        {(promo.fixedDiscountCents || 0) > 0
+                          ? `$${((promo.fixedDiscountCents || 0) / 100).toFixed(2)} credit`
+                          : `${promo.customerDiscountPercent || 0}% off`}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: promo.used ? 'rgba(148,163,184,0.15)' : 'rgba(52,199,89,0.15)',
+                          color: promo.used ? '#94a3b8' : '#34d399',
+                        }}
+                      >
+                        {promo.used ? 'USED' : 'AVAILABLE'}
+                      </span>
+                      <button
+                        onClick={() => copyCode(promo.code)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 999,
+                          border: `1px solid ${configPalette.cardBorder}`,
+                          background: 'transparent',
+                          color: configPalette.cardTextMain,
+                          fontSize: 11,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {copiedCode === promo.code ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {isLoggedIn && (
               <div style={{ marginTop: 10, padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
                 {!showPwdForm ? (
-                  <button onClick={() => setShowPwdForm(true)} style={{ padding: 0, border: 'none', background: 'transparent', color: '#7dd3fc', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  <button
+                    onClick={() => setShowPwdForm(true)}
+                    style={{
+                      padding: 0,
+                      border: 'none',
+                      background: 'transparent',
+                      color: configPalette.cardTextMuted,
+                      fontSize: 12,
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                    }}
+                  >
                     Change password
                   </button>
                 ) : (
@@ -568,6 +767,7 @@ export default function AccountPage() {
             {entries.map((entry, idx) => {
               const isWinner = entry.status === 'WINNER_CHARGED';
               const isSettled = entry.status && entry.status !== 'ENTERED';
+              const isTerminal = TERMINAL_STATUSES.includes(entry.status || '');
               const canEdit = !isSettled;
               const banner = statusBanner(entry);
               return (
@@ -585,56 +785,62 @@ export default function AccountPage() {
                   </div>
                   <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>
                     {statusLabel(entry.status)}
-                    {entry.status === 'WINNER_CHARGED' && entry.orderRef ? (
-                      <span style={{ color: '#34d399', fontWeight: 700, marginLeft: 6 }}>REF {entry.orderRef}</span>
-                    ) : entry.orderRef ? (
-                      <span style={{ color: configPalette.textMuted, marginLeft: 6 }}>REF {entry.orderRef}</span>
-                    ) : null}
                   </div>
+                  {entry.orderRef && (
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: configPalette.textMuted, marginTop: 4 }}>
+                      Order ref: {entry.orderRef}
+                    </div>
+                  )}
                   {(typeof entry.listPrice === 'number' ||
                     typeof entry.amountCents === 'number' ||
                     typeof entry.expectedAmountCents === 'number' ||
                     entry.promoCode) && (
                     <div style={{ fontSize: 12, marginTop: 8, lineHeight: 1.45 }}>
-                      {entry.status === 'WINNER_CHARGED' && typeof entry.amountCents === 'number' ? (
-                        <div style={{ color: '#34c759', fontWeight: 600 }}>
-                          Charged ${(entry.amountCents / 100).toFixed(2)}
-                          {entry.promoCode ? ` · promo ${entry.promoCode}` : ''}
-                        </div>
+                      {isTerminal ? (
+                        typeof entry.amountCents === 'number' && (
+                          <div style={{ color: '#34c759', fontWeight: 600 }}>
+                            Charged: ${(entry.amountCents / 100).toFixed(2)}
+                          </div>
+                        )
                       ) : (
                         <>
-                          {typeof entry.listPrice === 'number' && (
+                          {(typeof entry.expectedAmountCents === 'number' ||
+                            (typeof entry.listPrice === 'number' && entry.listPrice > 0)) && (
                             <div style={{ color: configPalette.cardTextMuted }}>
-                              List ${entry.listPrice.toFixed(2)}
-                              {entry.discountPercent && entry.discountPercent > 0 ? (
-                                <>
-                                  {' '}
-                                  →{' '}
-                                  <span style={{ color: '#edb210', fontWeight: 600 }}>
-                                    $
-                                    {(
-                                      (entry.expectedAmountCents ??
-                                        Math.round(
-                                          entry.listPrice * 100 * (1 - entry.discountPercent / 100),
-                                        )) / 100
-                                    ).toFixed(2)}
-                                  </span>
-                                  {` if selected (${entry.discountPercent}% off)`}
-                                </>
-                              ) : (
-                                <span> if selected</span>
-                              )}
+                              Charge if selected: $
+                              {(
+                                (entry.expectedAmountCents ??
+                                  Math.round(
+                                    (entry.listPrice || 0) * 100 * (1 - (entry.discountPercent || 0) / 100),
+                                  )) / 100
+                              ).toFixed(2)}
                             </div>
                           )}
-                          {entry.promoCode && (
-                            <div style={{ color: '#edb210', marginTop: 2 }}>
-                              Promo {entry.promoCode}
+                          {typeof entry.listPrice === 'number' && entry.listPrice > 0 && (
+                            <div style={{ color: configPalette.cardTextMuted, marginTop: 2 }}>
+                              List ${entry.listPrice.toFixed(2)}
                               {entry.discountPercent && entry.discountPercent > 0
-                                ? ` · ${entry.discountPercent}% off`
+                                ? ` → ${entry.discountPercent}% off`
                                 : ''}
                             </div>
                           )}
                         </>
+                      )}
+                      {entry.promoCode && (
+                        <div
+                          style={{
+                            color: isTerminal ? configPalette.cardTextMuted : '#edb210',
+                            marginTop: 2,
+                          }}
+                        >
+                          {isTerminal
+                            ? `Promo ${entry.promoCode} applied`
+                            : `Promo ${entry.promoCode}${
+                                entry.discountPercent && entry.discountPercent > 0
+                                  ? ` · ${entry.discountPercent}% off if selected`
+                                  : ' if selected'
+                              }`}
+                        </div>
                       )}
                     </div>
                   )}

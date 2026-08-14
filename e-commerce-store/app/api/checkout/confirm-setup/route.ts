@@ -11,6 +11,7 @@ import {
   PROCESSED_SESSIONS_KEY,
   cleanupMatchingIntent,
   loadProducts,
+  STORE_CONFIG_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
@@ -76,6 +77,26 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
     return count;
   } catch {
     return 0;
+  }
+}
+
+/** Look up whether an email has a store account and its current rewards balance
+ * (mirrors the store:users scan used by the Stripe webhook). */
+async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
+  try {
+    if (!email) return { hasAccount: false, rewardsBalance: 0 };
+    const raw = await redis.hgetall('store:users');
+    if (!raw) return { hasAccount: false, rewardsBalance: 0 };
+    for (const [k, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
+        return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
+      }
+    }
+    return { hasAccount: false, rewardsBalance: 0 };
+  } catch (e) {
+    console.error('[confirm-setup] lookup rewards failed', e);
+    return { hasAccount: false, rewardsBalance: 0 };
   }
 }
 
@@ -198,6 +219,10 @@ async function lockOneEntry(opts: {
       const liveProducts = await loadProducts(redis);
       const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === productId) as any;
       const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
+      const userRewards = await lookupUserRewards(redis, email);
+      const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
+      const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+      const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
       const emailResult = await sendEntryConfirmedEmail({
         to: email,
         product: variant,
@@ -208,6 +233,9 @@ async function lockOneEntry(opts: {
         listPrice: listPrice > 0 ? listPrice : undefined,
         orderRef,
         siteUrl: siteUrlFromRequest(request),
+        hasAccount: userRewards.hasAccount || undefined,
+        rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
+        purchasePointsPerDollar,
       });
       if ((emailResult as any)?.ok) {
         emailSent = true;

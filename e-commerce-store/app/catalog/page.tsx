@@ -16,6 +16,12 @@ interface CatalogItem {
   availableFrom?: string;
   availableUntil?: string;
   slug?: string;
+  checkoutMode?: string;
+  isRaffle?: boolean;
+  soldOutAt?: string;
+  isActive?: boolean;
+  inventoryRemaining?: number;
+  totalInventory?: number;
 }
 interface ActiveDrop {
   id: string;
@@ -38,6 +44,9 @@ export default function CatalogPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [clock, setClock] = useState(Date.now());
   const [searchQuery, setSearchQuery] = useState('');
+  // Live /api/store product payload (lifecycle-enriched) so upcoming/archive
+  // cards can show real entry state, drop type, and sold-out dates.
+  const [liveProducts, setLiveProducts] = useState<any[]>([]);
 
   // Only tick the clock while any tile shows a live countdown (a future
   // goLive/available date) — avoids re-rendering the whole catalog every second.
@@ -93,6 +102,9 @@ export default function CatalogPage() {
       if (data?.config?.themeColors) {
         setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       }
+      if (Array.isArray(data?.allProducts)) {
+        setLiveProducts(data.allProducts);
+      }
     }).catch(() => {});
   }, []);
 
@@ -128,53 +140,105 @@ export default function CatalogPage() {
     return haystack.includes(normalizedQuery);
   });
 
-  const renderGrid = (items: CatalogItem[], emptyText: string) => (
+  const renderGrid = (items: CatalogItem[], emptyText: string, section: 'upcoming' | 'archive') => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
       {items.length === 0 && (
         <p style={{ gridColumn: '1 / -1', fontSize: '12px', color: '#777', textAlign: 'center', padding: '30px 0' }}>
           {emptyText}
         </p>
       )}
-      {items.map((item) => (
-        <motion.button
-          key={item.name}
-          whileHover={{ y: -3, scale: 1.01 }}
-          whileTap={{ scale: 0.985 }}
-          onClick={() => handleTileClick(item)}
-          style={{
-            textAlign: 'left',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
-            border: `1px solid ${configPalette.cardBorder}`,
-            borderRadius: '16px',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            padding: 0,
-            boxShadow: '0 12px 30px rgba(0,0,0,0.16)',
-          }}
-        >
-          <div
+      {items.map((item) => {
+        // Enrich with the live /api/store payload (theme + lifecycle) when
+        // available, so upcoming/archive cards show real entry state, drop
+        // type, and sold-out dates instead of relying on static catalog rows.
+        const liveProduct = liveProducts.find(
+          (p: any) =>
+            String(p.slug || '').toLowerCase() === String(item.slug || '').toLowerCase() ||
+            String(p.name || '').toLowerCase() === String(item.name || '').toLowerCase(),
+        );
+        const inventoryRemaining = Number(liveProduct?.inventoryRemaining ?? item.inventoryRemaining ?? 0);
+        const isEnterable = (liveProduct?.isActive ?? item.isActive) === true && inventoryRemaining > 0;
+        const checkoutMode = String(liveProduct?.checkoutMode || item.checkoutMode || '').toUpperCase();
+        const isRaffle = checkoutMode === 'RAFFLE' || liveProduct?.isRaffle === true || item.isRaffle === true;
+        const soldOutAt = String(liveProduct?.soldOutAt || item.soldOutAt || '').trim();
+        const soldOutDate = soldOutAt
+          ? (() => {
+              const d = new Date(soldOutAt);
+              return Number.isNaN(d.getTime()) ? '' : `Sold out ${d.toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' })}`;
+            })()
+          : '';
+        const upcomingBadge = item.goLiveAt
+          ? (() => {
+              const countdown = formatCountdown(item.goLiveAt);
+              if (countdown) return `ENTRIES OPEN — ${countdown}`;
+              const d = new Date(item.goLiveAt);
+              return Number.isNaN(d.getTime())
+                ? 'ENTER BEFORE DROP'
+                : `ENTRIES OPEN — ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+            })()
+          : 'ENTER BEFORE DROP';
+        return (
+          <motion.button
+            key={item.name}
+            whileHover={{ y: -3, scale: 1.01 }}
+            whileTap={{ scale: 0.985 }}
+            onClick={() => handleTileClick(item)}
             style={{
-              width: '100%',
-              aspectRatio: '1/1',
-              background: item.image ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#777',
-              fontSize: '10px',
+              textAlign: 'left',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
+              border: `1px solid ${configPalette.cardBorder}`,
+              borderRadius: '16px',
+              overflow: 'hidden',
+              cursor: 'pointer',
+              padding: 0,
+              boxShadow: '0 12px 30px rgba(0,0,0,0.16)',
             }}
           >
-            {!item.image && 'NO IMAGE'}
-          </div>
-          <div style={{ padding: '10px 12px' }}>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{item.name}</div>
-            <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>
-              {item.status}
-              {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
+            <div
+              style={{
+                width: '100%',
+                aspectRatio: '1/1',
+                background: item.image ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#777',
+                fontSize: '10px',
+              }}
+            >
+              {!item.image && 'NO IMAGE'}
             </div>
+            <div style={{ padding: '10px 12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{item.name}</div>
+              <div style={{ fontSize: '10px', color: configPalette.textMuted || '#a1a1aa', marginTop: '2px' }}>
+                {item.status}
+                {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
+            </div>
+            {item.description && (
+              <div style={{ fontSize: '10px', color: configPalette.textMuted || '#a1a1aa', marginTop: '4px', lineHeight: 1.5 }}>
+                {item.description}
+              </div>
+            )}
+            {section === 'upcoming' && (
+              <div style={{ marginTop: 8, display: 'inline-block', padding: '4px 8px', borderRadius: 999, fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', background: 'rgba(250,204,21,0.12)', color: '#facc15', border: '1px solid rgba(250,204,21,0.35)' }}>
+                {upcomingBadge}
+              </div>
+            )}
+            {section === 'archive' && isEnterable && (
+              <div style={{ marginTop: 8, display: 'inline-block', padding: '4px 8px', borderRadius: 999, fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }}>
+                STILL OPEN — ENTER NOW
+              </div>
+            )}
+            {section === 'archive' && (isRaffle || checkoutMode === 'FCFS' || soldOutDate) && (
+              <div style={{ marginTop: 6, fontSize: 9, color: configPalette.textMuted || '#a1a1aa', letterSpacing: '0.5px' }}>
+                {(isRaffle || checkoutMode === 'FCFS') && (isRaffle ? 'Raffle' : 'FCFS')}
+                {soldOutDate && ((isRaffle || checkoutMode === 'FCFS') ? ` · ${soldOutDate}` : soldOutDate)}
+              </div>
+            )}
           </div>
         </motion.button>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -191,7 +255,10 @@ export default function CatalogPage() {
       <div style={{ maxWidth: '480px', margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
           <div>
-            <h1 style={{ fontSize: '22px', fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px 0', letterSpacing: '1px' }}>Catalog</h1>
+            <h1 style={{ fontSize: '22px', fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px 0', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              CATALOG
+            </h1>
             <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: 0 }}>
               Built for attention-scarce traffic: live now, what is next, and what already moved.
             </p>
@@ -229,17 +296,6 @@ export default function CatalogPage() {
 
         {filteredActiveDrops.length > 0 && (
           <>
-            <h2
-              style={{
-                fontSize: '13px',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                color: configPalette.textMain,
-                margin: '0 0 12px 0',
-              }}
-            >
-              🧴 Currently Available
-            </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
               {filteredActiveDrops.map((drop) => (
                 <Link
@@ -265,6 +321,20 @@ export default function CatalogPage() {
                 </Link>
               ))}
             </div>
+            <h2
+              style={{
+                fontSize: '13px',
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                color: configPalette.textMain,
+                margin: '0 0 8px 0',
+              }}
+            >
+              Currently Available
+            </h2>
+            <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 32px 0', lineHeight: 1.6 }}>
+              Live releases are open for entry right now — open while allocation remains.
+            </p>
           </>
         )}
 
@@ -279,7 +349,7 @@ export default function CatalogPage() {
         >
           Upcoming Releases
         </h2>
-        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'))}
+        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'), 'upcoming')}
 
         <h2
           style={{
@@ -292,7 +362,7 @@ export default function CatalogPage() {
         >
           Past Archives
         </h2>
-        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'))}
+        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
 
         {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && (
           <div style={{ marginTop: 24 }}>

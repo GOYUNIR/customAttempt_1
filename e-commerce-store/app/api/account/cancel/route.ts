@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord, loadProducts } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 import { getSessionUser } from '@/lib/session-auth';
+import { appendAudit } from '../../admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +81,16 @@ export async function POST(request: Request) {
     } catch (e) {
       console.error('[cancel] email failed', e);
     }
-    
+
+    try {
+      await appendAudit(redis, {
+        action: 'ACCOUNT_ENTRY_CANCELLED',
+        detail: `${variant} / ${size}${promoCode ? ` (promo ${promoCode} released)` : ''}`,
+        actor: 'user',
+        email,
+      });
+    } catch {}
+
     return NextResponse.json({ success: true, message: 'Your entry has been cancelled.' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

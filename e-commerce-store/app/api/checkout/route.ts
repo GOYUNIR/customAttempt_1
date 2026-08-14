@@ -140,7 +140,7 @@ export async function POST(request: Request) {
       if (!promo || promo.active === false) {
         return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
       }
-      if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
+      if (promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
         return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
       }
       if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === normalizedEmail) {

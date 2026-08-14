@@ -142,7 +142,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMuted: '#A1A1AA',
       checkoutCtaButton: '#FF3E3E',
       fontFamily: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
-      borderRadius: 10,
+      borderRadius: 6,
       chromeTransparency: 90,
       surfaceTransparency: 100,
     },

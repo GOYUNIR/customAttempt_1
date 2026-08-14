@@ -122,6 +122,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutEmail, setCheckoutEmail] = useState('');
   const [checkoutAddress, setCheckoutAddress] = useState('');
+  const [signedIn, setSignedIn] = useState(false);
+  const [signedInEmail, setSignedInEmail] = useState('');
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [cartMsg, setCartMsg] = useState('');
   const [theme, setTheme] = useState<any>(null);
@@ -531,6 +533,42 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     writeCheckoutDetails(checkoutEmail, checkoutAddress);
   }, [checkoutEmail, checkoutAddress]);
 
+  // Detect the signed-in session so the header can show the green account
+  // indicator and the cart drawer can lock the email to the session address.
+  // Fails silently — signed-out visitors just see the normal account icon.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.user?.email) {
+          setSignedIn(true);
+          setSignedInEmail(String(data.user.email));
+        } else {
+          setSignedIn(false);
+          setSignedInEmail('');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSignedIn(false);
+          setSignedInEmail('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Signed-in customers always check out with their session email. Prefill it
+  // only when the field is empty so a draft the customer typed keeps winning.
+  useEffect(() => {
+    if (signedIn && signedInEmail && !checkoutEmail) {
+      setCheckoutEmail(signedInEmail);
+    }
+  }, [signedIn, signedInEmail, checkoutEmail]);
+
   const total = cart.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
   const hasItems = cart.length > 0;
   const hasRaffleItems = cart.some((item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle');
@@ -619,10 +657,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const logoHeight = Number(branding?.logoHeight) > 0 ? Number(branding.logoHeight) : headerMode === 'logo' ? 44 : 28;
   const logoTransparent =
     branding?.logoTransparent === true || String(branding?.logoTransparent || '').toLowerCase() === 'true';
-  const totalPrepared = cart.length;
-  const rafflePrepared = cart.filter(
-    (item) => (item.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(item.productType || '').toLowerCase() === 'raffle',
-  ).length;
 
   // Resolve admin-configurable orb settings (falls back to built-in defaults).
   const resolvedOrbs = orbs || DEFAULT_ORBS;
@@ -747,21 +781,31 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           {showBrandLogo && (branding?.logoUrl ? (
             <img src={branding.logoUrl} alt={brandName} style={{ width: logoWidth, height: logoHeight, borderRadius: logoTransparent ? 0 : 6, objectFit: logoTransparent ? 'contain' : 'cover', display: 'block' }} />
           ) : null)}
-          {showBrandText ? <span style={{ fontFamily: brandFont }}>{brandName}</span> : null}
+          {showBrandText ? <span style={{ fontFamily: brandFont, fontSize: Number(branding?.brandFontSize) > 0 ? `${Number(branding.brandFontSize)}px` : '11px' }}>{brandName}</span> : null}
         </Link>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: 1 }}>
-          {hasItems && (
-            <span
-              title={rafflePrepared > 0 ? `${rafflePrepared} entry allocation${rafflePrepared === 1 ? '' : 's'} ready` : `${totalPrepared} prepared item${totalPrepared === 1 ? '' : 's'}`}
-              style={{ height: 28, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, background: 'rgba(125,211,252,0.12)', border: '1px solid rgba(125,211,252,0.28)', color: '#bfe6ff', fontSize: 10, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}
-            >
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: '#7dd3fc', boxShadow: '0 0 0 3px rgba(125,211,252,0.18)' }} />
-              {rafflePrepared > 0 ? `${rafflePrepared} ${rafflePrepared === 1 ? 'entry' : 'entries'}` : `${totalPrepared} prepared`}
-            </span>
-          )}
-          <Link href="/account" aria-label="Account" style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#d4d4d8', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)' }}>
+          <Link
+            href="/account"
+            aria-label={signedIn ? 'Your account (signed in)' : 'Account'}
+            title={signedIn ? 'Your account (signed in)' : 'Account'}
+            style={{
+              width: 42,
+              height: 42,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 999,
+              background: 'rgba(255,255,255,0.07)',
+              border: signedIn ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(255,255,255,0.12)',
+              color: '#d4d4d8',
+              textDecoration: 'none',
+              boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
+              position: 'relative',
+            }}
+          >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+            {signedIn ? <span style={{ position: 'absolute', right: 2, bottom: 2, width: 10, height: 10, borderRadius: 999, background: '#22c55e', boxShadow: '0 0 0 2px rgba(8,8,10,0.9)' }} /> : null}
           </Link>
           <button
             onClick={() => setCartOpen(true)}
@@ -859,9 +903,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     autoComplete="email"
                     value={checkoutEmail}
                     onChange={(e) => setCheckoutEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
+                    readOnly={signedIn}
+                    disabled={signedIn}
+                    placeholder="email@domain.com"
+                    style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: signedIn ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.3)', color: signedIn ? drawerTextMuted : drawerText, fontSize: 12, cursor: signedIn ? 'not-allowed' : 'text' }}
                   />
+                  {signedIn && signedInEmail ? (
+                    <div style={{ fontSize: 10, color: drawerTextMuted, lineHeight: 1.4 }}>Signed in as {signedInEmail} — email can't be changed here.</div>
+                  ) : null}
                   <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
                   {mapboxHint === 'autofill-on' && (
                     <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion to fill it instantly, or type your address manually.</div>

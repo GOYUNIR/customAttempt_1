@@ -9,6 +9,25 @@ const WELCOME_POINTS = 250;
 const WELCOME_DISCOUNT_PERCENT = 10;
 const PROMOS_KEY = 'config:promos';
 
+function usedEmailsKey(code: string) {
+  return `promo:used_emails:${code}`;
+}
+
+/** True when the code was already consumed by this email (used_emails set or
+ * uses >= maxUsesTotal) — lets /account show "Used" instead of "Ready to use". */
+async function isWelcomeCodeUsed(redis: any, code: string, email: string): Promise<boolean> {
+  try {
+    const inSet = await redis.sismember(usedEmailsKey(code), email);
+    if (inSet === 1) return true;
+    const raw = await redis.hget(PROMOS_KEY, code);
+    const promo = safeParseRedisItem<any>(raw);
+    const maxTotal = Number(promo?.maxUsesTotal || 0);
+    return maxTotal > 0 && Number(promo?.uses || 0) >= maxTotal;
+  } catch {
+    return false;
+  }
+}
+
 function generateWelcomeCode(email: string) {
   const seed = email.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'MBR';
   return `WELCOME-${seed}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -34,7 +53,13 @@ export async function POST(request: Request) {
     }
 
     if (user.welcomePromoCode) {
-      return NextResponse.json({ success: true, promoCode: user.welcomePromoCode, points: user.rewards || 0 });
+      const used = await isWelcomeCodeUsed(redis, user.welcomePromoCode, user.email);
+      return NextResponse.json({
+        success: true,
+        promoCode: user.welcomePromoCode,
+        points: user.rewards || 0,
+        used,
+      });
     }
 
     const welcomeCode = generateWelcomeCode(user.email);
@@ -89,7 +114,12 @@ export async function POST(request: Request) {
       console.error('[claim-welcome] welcome email failed', emailErr);
     }
 
-    return NextResponse.json({ success: true, promoCode: welcomeCode, points: updatedUser.rewards });
+    return NextResponse.json({
+      success: true,
+      promoCode: welcomeCode,
+      points: updatedUser.rewards,
+      used: false,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

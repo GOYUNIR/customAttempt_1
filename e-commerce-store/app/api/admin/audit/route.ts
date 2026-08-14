@@ -5,12 +5,18 @@ export const dynamic = 'force-dynamic';
 
 export const AUDIT_KEY = 'admin:audit_log';
 
-export async function appendAudit(redis: any, entry: { action: string; detail?: string }) {
+export async function appendAudit(
+  redis: any,
+  entry: { action: string; detail?: string; actor?: string; email?: string },
+) {
   try {
     await redis.rpush(
       AUDIT_KEY,
       JSON.stringify({
-        ...entry,
+        action: entry.action,
+        detail: entry.detail,
+        actor: entry.actor || 'admin',
+        ...(entry.email ? { email: entry.email } : {}),
         at: new Date().toISOString(),
       }),
     );

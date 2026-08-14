@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,6 +76,9 @@ export async function POST(request: Request) {
   if (action === 'delete') {
     await redis.hdel(PROMOS_KEY, code);
     await redis.del(usedEmailsKey(code));
+    try {
+      await appendAudit(redis, { action: 'PROMO_DELETED', detail: code, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true });
   }
 
@@ -85,6 +89,9 @@ export async function POST(request: Request) {
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     existing.active = !existing.active;
     await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    try {
+      await appendAudit(redis, { action: 'PROMO_TOGGLED', detail: `${code} → ${existing.active ? 'active' : 'inactive'}`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, promo: existing });
   }
 
@@ -93,6 +100,9 @@ export async function POST(request: Request) {
     existing.payoutPaidCents = existing.payoutOwedCents || 0;
     existing.payoutOwedCents = 0;
     await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    try {
+      await appendAudit(redis, { action: 'PROMO_MARKED_PAID', detail: code, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, promo: existing });
   }
 
@@ -133,5 +143,8 @@ export async function POST(request: Request) {
   };
 
   await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(record) });
+    try {
+      await appendAudit(redis, { action: existing ? 'PROMO_UPDATED' : 'PROMO_CREATED', detail: code, actor: 'admin' });
+    } catch {}
   return NextResponse.json({ success: true, promo: record });
 }

@@ -32,7 +32,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ valid: false, error: 'Invalid or inactive code' });
   }
 
-  if (promo.issuedForEmail && email && String(promo.issuedForEmail).toLowerCase() !== email) {
+  // Giftable codes (store credit redeemed with the admin "gift/share"
+  // toggle on) are transferable — the issuedForEmail reservation is skipped.
+  if (promo.giftable !== true && promo.issuedForEmail && email && String(promo.issuedForEmail).toLowerCase() !== email) {
     return NextResponse.json({ valid: false, error: 'This code is reserved for a different account' });
   }
 

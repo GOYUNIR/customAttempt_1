@@ -67,6 +67,26 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
   }
 }
 
+/** Look up whether an email has a store account and its current rewards balance
+ * (mirrors the store:users scan in awardPurchasePoints). */
+async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
+  try {
+    if (!email) return { hasAccount: false, rewardsBalance: 0 };
+    const raw = await redis.hgetall('store:users');
+    if (!raw) return { hasAccount: false, rewardsBalance: 0 };
+    for (const [k, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
+        return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
+      }
+    }
+    return { hasAccount: false, rewardsBalance: 0 };
+  } catch (e) {
+    console.error('[webhook] lookup rewards failed', e);
+    return { hasAccount: false, rewardsBalance: 0 };
+  }
+}
+
 async function resolvePromo(
   redis: NonNullable<ReturnType<typeof createRedisClient>>,
   rawCode: string,
@@ -271,6 +291,10 @@ export async function POST(request: Request) {
               const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === meta.productId);
               const category = (product as any)?.priceCategories?.find((item: any) => item.size === size);
               const listPrice = category?.price;
+              const userRewards = await lookupUserRewards(redis, email);
+              const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
+              const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+              const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
               await sendEntryConfirmedEmail({
                 to: email,
                 product: variant,
@@ -281,6 +305,9 @@ export async function POST(request: Request) {
                 listPrice,
                 orderRef,
                 siteUrl: siteUrlFromEnv(),
+                hasAccount: userRewards.hasAccount || undefined,
+                rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
+                purchasePointsPerDollar,
               });
               await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
             }

@@ -14,6 +14,9 @@ export type StoreBrandingConfig = {
   /** CSS font stack for the brand name in the top bar only. Leave empty to
    * inherit the storefront font (themeColors.fontFamily). */
   brandFontFamily?: string;
+  /** Brand name font size in px for the top bar (default 14). Set from
+   * /admin → Settings → Branding & Share. */
+  brandFontSize?: number;
   /** Top-bar display mode: 'both' (logo + name), 'logo' (logo only) or
    * 'text' (name only). */
   headerMode?: string;
@@ -25,6 +28,23 @@ export type StoreBrandingConfig = {
   shareText?: string;
   iconBackground?: string;
   iconText?: string;
+};
+
+/** Rewards & points configuration saved under store:config.rewards from
+ * /admin → Settings → Rewards & Points. */
+export type StoreRewardsConfig = {
+  /** Points earned per $1 spent at checkout. */
+  purchasePointsPerDollar?: number;
+  /** Points required per $1 of store credit when redeeming. */
+  pointsPerDollar?: number;
+  /** Minimum points a customer can redeem at once. */
+  minRedeemPoints?: number;
+  /** Maximum points per redemption (0 = unlimited). */
+  maxRedeemPoints?: number;
+  /** Whether customers can gift/share their credit to others. */
+  giftingEnabled?: boolean;
+  /** Discount % applied to a gifted credit (default 10). */
+  giftDiscountPercent?: number;
 };
 
 export function safeParseRedisItem<T = any>(item: unknown): T | null {

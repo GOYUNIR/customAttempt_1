@@ -9,6 +9,7 @@ import {
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getAvailableSizes, getWinnerCount } from '@/lib/storefront-config';
+import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,9 @@ export async function POST(request: Request) {
         } catch {}
       }
 
+      try {
+        await appendAudit(redis, { action: 'PRODUCT_ARCHIVED', detail: `${name} (${productDefinition.id})`, actor: 'admin' });
+      } catch {}
       return NextResponse.json({ success: true, action: 'archive', productId: productDefinition.id });
     }
 
@@ -84,6 +88,9 @@ export async function POST(request: Request) {
       } catch {}
     }
 
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_UNARCHIVED', detail: `${productDefinition.name} (${productDefinition.id})`, actor: 'admin' });
+    } catch {}
     return NextResponse.json({ success: true, action: 'unarchive', productId: productDefinition.id });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

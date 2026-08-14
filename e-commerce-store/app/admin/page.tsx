@@ -38,6 +38,24 @@ function typeLabel(type: string | undefined) {
   return map[type || ''] || type || 'Unknown';
 }
 
+/** Colored badge for the audit log actor (admin=blue, user=green, system=grey). */
+function auditActorStyle(actor?: string): React.CSSProperties {
+  const a = String(actor || 'admin').toLowerCase();
+  if (a === 'user') return { background: 'rgba(52,211,153,0.16)', color: '#34d399' };
+  if (a === 'system') return { background: 'rgba(148,163,184,0.18)', color: '#a1a1aa' };
+  return { background: 'rgba(96,165,250,0.16)', color: '#60a5fa' };
+}
+
+function formatAuditTime(at?: string): string {
+  if (!at) return '';
+  try {
+    const date = new Date(at);
+    return Number.isNaN(date.getTime()) ? String(at) : date.toLocaleString();
+  } catch {
+    return String(at || '');
+  }
+}
+
 function stableOrderRef(entry: any, index: number) {
   const existing = formatOrderRef(entry?.orderRef || entry?.ref || '');
   if (existing) return existing;
@@ -316,6 +334,7 @@ export default function AdminPortal() {
     logoTransparent: false,
     brandName: 'GOYUNIR',
     brandFontFamily: '',
+    brandFontSize: 14,
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
@@ -333,6 +352,8 @@ export default function AdminPortal() {
     minRedeemPoints: 100,
     maxRedeemPoints: 0,
     purchasePointsPerDollar: 10,
+    giftingEnabled: true,
+    giftDiscountPercent: 10,
   });
   // Product gallery behaviour (auto-advance + slow zoom).
   const [gallerySettings, setGallerySettings] = useState({
@@ -341,10 +362,21 @@ export default function AdminPortal() {
     zoom: true,
     zoomDurationSeconds: 14,
   });
+  // Storefront copy overrides — saved under settings.copy. Storefront
+  // components keep their built-in defaults until a string here is non-empty.
+  const [copySettings, setCopySettings] = useState({
+    heroTitle: '',
+    heroSubtitle: '',
+    entryCta: '',
+    cartTitle: '',
+    footerTagline: '',
+    supportEmail: '',
+  });
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
   const [settingsMsg, setSettingsMsg] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -488,6 +520,7 @@ export default function AdminPortal() {
         if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
         if (data.settings.rewards) setRewardsSettings((prev) => ({ ...prev, ...data.settings.rewards }));
         if (data.settings.gallery) setGallerySettings((prev) => ({ ...prev, ...data.settings.gallery }));
+        if (data.settings.copy) setCopySettings((prev) => ({ ...prev, ...data.settings.copy }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
@@ -1341,6 +1374,7 @@ export default function AdminPortal() {
           branding: brandingSettings,
           rewards: rewardsSettings,
           gallery: gallerySettings,
+          copy: copySettings,
           productNotes,
           orbs: orbSettings,
         }),
@@ -2606,9 +2640,20 @@ export default function AdminPortal() {
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
                 Tracks admin actions like cancelling entries, updating shipping, and archiving products. Only shows actions performed from this admin portal.
               </p>
-              <div style={{ maxHeight: 220, overflowY: 'auto', marginTop: 10, fontSize: 11, color: '#888' }}>
-                {audit.length === 0 && <p>No audit entries yet. Actions like cancelling entries, updating shipping, or archiving products will appear here.</p>}
-                {audit.map((a, i) => <div key={i} style={{ marginBottom: 6 }}>{a.at} — {a.action} {a.detail || ''}</div>)}
+              <div style={{ maxHeight: 260, overflowY: 'auto', marginTop: 10 }}>
+                {audit.length === 0 && <p style={{ fontSize: 11, color: '#888' }}>No audit entries yet. Actions like cancelling entries, updating shipping, or archiving products will appear here.</p>}
+                {audit.map((a, i) => (
+                  <div key={i} style={{ marginBottom: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid #1c1c1e', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, color: '#888' }}>{formatAuditTime(a.at)}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px', borderRadius: 999, ...auditActorStyle(a.actor) }}>
+                        {String(a.actor || 'admin')}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#e4e4e7' }}>{a.action}</span>
+                    </div>
+                    {a.detail ? <div style={{ fontSize: 10, color: '#888', marginTop: 2, lineHeight: 1.5 }}>{a.detail}</div> : null}
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -2741,6 +2786,9 @@ export default function AdminPortal() {
                     style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
                   >
                     <option value="0">Square (0px)</option>
+                    <option value="2">Crisp (2px)</option>
+                    <option value="4">Sharp (4px)</option>
+                    <option value="6">Tight (6px)</option>
                     <option value="8">Subtle (8px)</option>
                     <option value="12">Default (12px)</option>
                     <option value="999">Fully rounded</option>
@@ -2790,6 +2838,43 @@ export default function AdminPortal() {
                 ))}
               </div>
 
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+                <button
+                  onClick={() => setCopyOpen((v) => !v)}
+                  style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  {copyOpen ? '▾' : '▸'} Storefront copy
+                </button>
+              </h4>
+              {copyOpen && (
+                <>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                    Override storefront text globally. Leave a field empty to keep the built-in default. These persist under settings.copy so future storefront wiring is trivial.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                    {([
+                      ['heroTitle', 'Hero title'],
+                      ['heroSubtitle', 'Hero subtitle'],
+                      ['entryCta', '"Enter now" button label'],
+                      ['cartTitle', 'Cart drawer title ("Review items")'],
+                      ['footerTagline', 'Footer tagline'],
+                      ['supportEmail', 'Support email'],
+                    ] as [string, string][]).map(([key, label]) => (
+                      <label key={key} style={{ fontSize: 11 }}>
+                        {label}
+                        <input
+                          type="text"
+                          value={String(copySettings[key as keyof typeof copySettings] || '')}
+                          onChange={(e) => setCopySettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                          placeholder="Leave empty to use default"
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
@@ -2809,6 +2894,18 @@ export default function AdminPortal() {
                     <option value="logo">Logo only</option>
                     <option value="text">Name only</option>
                   </select>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Brand name size (px)
+                  <input
+                    type="number"
+                    min={10}
+                    max={40}
+                    value={brandingSettings.brandFontSize ?? 14}
+                    onChange={(e) => setBrandingSettings((prev) => ({ ...prev, brandFontSize: Math.max(10, Math.min(40, Number(e.target.value) || 14)) }))}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  />
+                  <span style={{ fontSize: 10, color: '#666' }}>14 default.</span>
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Logo width (px)
@@ -2989,6 +3086,15 @@ export default function AdminPortal() {
                 <label style={{ fontSize: 11 }}>
                   Max points per redemption (0 = unlimited)
                   <input type="number" min={0} value={rewardsSettings.maxRedeemPoints} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, maxRedeemPoints: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={Boolean(rewardsSettings.giftingEnabled)} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, giftingEnabled: e.target.checked }))} />
+                  Customers can gift/share their credits
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Gift credit discount %
+                  <input type="number" min={0} max={100} value={rewardsSettings.giftDiscountPercent ?? 10} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, giftDiscountPercent: Math.max(0, Math.min(100, Number(e.target.value) || 10)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  <span style={{ fontSize: 10, color: '#666' }}>Default 10 = a gifted credit is worth 10% less than face value.</span>
                 </label>
               </div>
 

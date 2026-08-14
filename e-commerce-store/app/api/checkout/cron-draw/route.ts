@@ -149,6 +149,7 @@ async function runAutoDraw(request: Request) {
               let priceCents = basePriceCents;
               let promoForCharge: any = null;
 
+              let winnerDiscountPercent = 0;
               if (promoCode) {
                 try {
                   const raw = await redis.hget(PROMOS_KEY, promoCode);
@@ -157,7 +158,10 @@ async function runAutoDraw(request: Request) {
                     const self = promoForCharge.promoterEmail && String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
                     if (!self) {
                       const discount = Math.min(50, Math.max(0, Number(promoForCharge.customerDiscountPercent) || 0));
-                      if (discount > 0) priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
+                      if (discount > 0) {
+                        priceCents = Math.max(50, Math.round(basePriceCents * (1 - discount / 100)));
+                        winnerDiscountPercent = discount;
+                      }
                     } else {
                       promoForCharge = null;
                     }
@@ -210,7 +214,18 @@ async function runAutoDraw(request: Request) {
                 shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents, orderRef,
               });
 
-              await sendWinnerEmail({ to: winnerEmail, product: productName, size: productSize, amountLabel: `$${(priceCents / 100).toFixed(0)}`, orderRef, shippingAddress: shippingAddress || undefined, siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com' });
+              await sendWinnerEmail({
+                to: winnerEmail,
+                product: productName,
+                size: productSize,
+                amountLabel: `$${(priceCents / 100).toFixed(2)}`,
+                promoCode: promoCode && promoForCharge ? promoCode : undefined,
+                originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
+                discountPercent: winnerDiscountPercent > 0 ? winnerDiscountPercent : undefined,
+                orderRef,
+                shippingAddress: shippingAddress || undefined,
+                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com',
+              });
 
               processedWinners.push({
                 email: winnerEmail, product: productName, size: productSize, shippingAddress,
