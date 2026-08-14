@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -14,9 +15,12 @@ export default function SignupPage() {
   const [emailOptIn, setEmailOptIn] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  // Live theme palette — starts at the build-time config and upgrades to the
-  // /admin → Settings theme so design presets apply to the auth pages too.
-  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  // Live theme palette — initialized from the server-baked theme (no flash) and
+  // refreshed from /api/store so design presets apply to the auth pages too.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
 
   useEffect(() => {
     fetchStoreJson('/api/store')

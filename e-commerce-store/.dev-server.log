@@ -28,3 +28,323 @@ Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
 ✓ Compiled in 93ms
 ✓ Compiled in 103ms
 ✓ Compiled in 99ms
+✓ Compiled in 709ms
+✓ Compiled in 392ms
+✓ Compiled in 256ms
+✓ Compiled in 196ms
+✓ Compiled in 7ms
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 1261ms (next.js: 741ms, application-code: 520ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 52ms (next.js: 6ms, application-code: 46ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 87ms (next.js: 10ms, application-code: 77ms)
+ GET /json/version 404 in 245ms (next.js: 111ms, application-code: 134ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 65ms (next.js: 7ms, application-code: 58ms)
+ GET /api/auth/me 200 in 747ms (next.js: 725ms, application-code: 22ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"16px",--background:"#FAF6EF",--foreground:"#241C14",--ui-chrome-alpha:"96", ...}}
+                        >
+                  ...
+ 
+ GET /api/auth/me 200 in 89ms (next.js: 78ms, application-code: 12ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /catalog. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET /catalog 200 in 4.0s (next.js: 3.1s, application-code: 869ms)
+ GET / 200 in 434ms (next.js: 184ms, application-code: 249ms)
+ GET / 200 in 177ms (next.js: 7ms, application-code: 170ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 181ms (next.js: 13ms, application-code: 168ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET /api/analytics/heartbeat?visitorId=msq4otzu-ozb8ix 200 in 2.7s (next.js: 887ms, application-code: 1775ms)
+ GET / 200 in 220ms (next.js: 41ms, application-code: 178ms)
+ GET / 200 in 89ms (next.js: 8ms, application-code: 81ms)
+ GET / 200 in 54ms (next.js: 11ms, application-code: 43ms)
+ GET /api/store 200 in 3.4s (next.js: 549ms, application-code: 2.8s)
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /_not-found. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET /images/obsidian-void/1.jpeg 404 in 318ms (next.js: 36ms, application-code: 282ms)
+ GET /images/baseItem2/1.jpeg 404 in 318ms (next.js: 109ms, application-code: 209ms)
+ GET /images/baseItem1/1.jpeg 404 in 320ms (next.js: 80ms, application-code: 240ms)
+ GET /images/elysian-white/1.jpeg 404 in 322ms (next.js: 198ms, application-code: 124ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 51ms (next.js: 6ms, application-code: 45ms)
+ GET /api/store 200 in 773ms (next.js: 28ms, application-code: 745ms)
+✓ Compiled in 203ms
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 511ms (next.js: 133ms, application-code: 378ms)
+ GET / 200 in 311ms (next.js: 10ms, application-code: 301ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 305ms (next.js: 10ms, application-code: 295ms)
+ GET / 200 in 305ms (next.js: 48ms, application-code: 257ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 363ms (next.js: 166ms, application-code: 197ms)
+ GET / 200 in 366ms (next.js: 103ms, application-code: 263ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 325ms (next.js: 16ms, application-code: 309ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 313ms (next.js: 17ms, application-code: 296ms)
+ GET / 200 in 244ms (next.js: 9ms, application-code: 235ms)
+ GET / 200 in 244ms (next.js: 45ms, application-code: 199ms)
+ GET / 200 in 244ms (next.js: 122ms, application-code: 122ms)
+ GET / 200 in 245ms (next.js: 83ms, application-code: 162ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 219ms (next.js: 13ms, application-code: 206ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 186ms (next.js: 15ms, application-code: 171ms)
+ GET / 200 in 139ms (next.js: 8ms, application-code: 131ms)
+ GET / 200 in 139ms (next.js: 57ms, application-code: 82ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 166ms (next.js: 31ms, application-code: 135ms)
+ GET / 200 in 141ms (next.js: 56ms, application-code: 85ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 176ms (next.js: 7ms, application-code: 169ms)
+ GET / 200 in 147ms (next.js: 7ms, application-code: 141ms)
+ GET / 200 in 114ms (next.js: 8ms, application-code: 107ms)
+ GET / 200 in 113ms (next.js: 31ms, application-code: 82ms)
+ GET / 200 in 88ms (next.js: 33ms, application-code: 55ms)
+ GET / 200 in 61ms (next.js: 34ms, application-code: 27ms)
+✓ Compiled in 109ms
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 317ms (next.js: 155ms, application-code: 162ms)
+ GET / 200 in 116ms (next.js: 5ms, application-code: 110ms)
+ GET / 200 in 88ms (next.js: 6ms, application-code: 82ms)
+ GET / 200 in 88ms (next.js: 35ms, application-code: 53ms)
+ GET / 200 in 88ms (next.js: 60ms, application-code: 28ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 159ms (next.js: 110ms, application-code: 49ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 168ms (next.js: 116ms, application-code: 52ms)
+⚠ Unsupported metadata themeColor is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 316ms (next.js: 6ms, application-code: 310ms)
+ GET /api/store 200 in 1374ms (next.js: 80ms, application-code: 1294ms)
+✓ Compiled in 113ms
+⨯ ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon', {
+  digest: '577478717'
+}
+⨯ ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon', {
+  digest: '577478717'
+}
+⨯ ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon', {
+  digest: '577478717'
+}
+⨯ ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon', {
+  digest: '577478717'
+}
+⨯ ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon', {
+  digest: '577478717'
+}
+ GET / 200 in 315ms (next.js: 133ms, application-code: 182ms)
+ GET / 200 in 116ms (next.js: 6ms, application-code: 110ms)
+ GET / 200 in 84ms (next.js: 6ms, application-code: 77ms)
+ GET / 200 in 83ms (next.js: 30ms, application-code: 54ms)
+ GET / 200 in 83ms (next.js: 57ms, application-code: 26ms)
+[browser] Uncaught ReferenceError: themeColor is not defined
+    at Module.generateMetadata (app\layout.tsx:54:5)
+  52 |       canonical: 'https://goyunir.com',
+  53 |     },
+> 54 |     themeColor,
+     |     ^
+  55 |     icons: {
+  56 |       icon: '/icon',
+  57 |       apple: '/icon',
+✓ Compiled in 95ms
+ GET / 200 in 766ms (next.js: 145ms, application-code: 621ms)
+ GET /api/auth/me 200 in 164ms (next.js: 153ms, application-code: 11ms)
+ GET /api/auth/me 200 in 12ms (next.js: 5ms, application-code: 7ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"16px",--background:"#FAF6EF",--foreground:"#241C14",--ui-chrome-alpha:"96", ...}}
+                        >
+                  ...
+ 
+ GET /api/analytics/heartbeat?visitorId=msq4otzu-ozb8ix 200 in 1083ms (next.js: 240ms, application-code: 843ms)
+ GET /api/store 200 in 1713ms (next.js: 61ms, application-code: 1652ms)
+ GET /images/obsidian-void/1.jpeg 404 in 421ms (next.js: 139ms, application-code: 283ms)
+ GET /images/baseItem2/1.jpeg 404 in 420ms (next.js: 183ms, application-code: 237ms)
+ GET /images/baseItem1/1.jpeg 404 in 716ms (next.js: 221ms, application-code: 496ms)
+ GET /images/elysian-white/1.jpeg 404 in 887ms (next.js: 320ms, application-code: 567ms)
+✓ Compiled in 108ms
+ GET / 200 in 310ms (next.js: 130ms, application-code: 180ms)
+ GET / 200 in 128ms (next.js: 5ms, application-code: 122ms)
+ GET / 200 in 100ms (next.js: 7ms, application-code: 93ms)
+ GET / 200 in 99ms (next.js: 67ms, application-code: 32ms)
+ GET / 200 in 100ms (next.js: 40ms, application-code: 60ms)
+ GET /elysian-white-launch-draw 200 in 763ms (next.js: 211ms, application-code: 552ms)
+ GET /elysian-white-launch-draw 200 in 73ms (next.js: 14ms, application-code: 59ms)

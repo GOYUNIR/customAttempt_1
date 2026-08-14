@@ -8,7 +8,7 @@ import {
   safeParseRedisItem,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { mergeOrbsConfig } from '@/lib/storefront-config';
+import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
@@ -114,7 +114,11 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
     dropSchedule: { ...(defaults.dropSchedule || {}), ...(redisConfig.dropSchedule || {}) },
     animationMechanics: { ...(defaults.animationMechanics || {}), ...(redisConfig.animationMechanics || {}) },
     raffleRegistrationForm: { ...(defaults.raffleRegistrationForm || {}), ...(redisConfig.raffleRegistrationForm || {}) },
-    heroContent: { ...(defaults.heroContent || {}), ...(redisConfig.heroContent || {}) },
+    // Legacy heroContent (written before the story fields existed) was never
+    // displayed on the home page — fall back to the current defaults.
+    heroContent: isLegacyHeroContent(redisConfig.heroContent)
+      ? { ...(defaults.heroContent || {}) }
+      : { ...(defaults.heroContent || {}), ...(redisConfig.heroContent || {}) },
     socialProof: { ...(defaults.socialProof || {}), ...(redisConfig.socialProof || {}) },
     brandFooterData: { ...(defaults.brandFooterData || {}), ...(redisConfig.brandFooterData || {}) },
     catalogPreview: {

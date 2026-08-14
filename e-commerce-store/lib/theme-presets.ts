@@ -109,7 +109,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMuted: '#9CA3AF',
       checkoutCtaButton: '#111111',
       fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif",
-      borderRadius: 0,
+      borderRadius: 1,
       chromeTransparency: 96,
       surfaceTransparency: 100,
     },

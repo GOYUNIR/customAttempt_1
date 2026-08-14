@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,10 +13,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  // Live theme palette — starts at the build-time config and upgrades to the
-  // /admin → Settings theme (served through /api/store → config → themeColors)
-  // so design presets apply to the login page like every other storefront page.
-  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  // Live theme palette — initialized from the server-baked theme (no flash) and
+  // refreshed from /api/store so design presets apply to the login page.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
 
   // Pull the live theme on mount (same pattern as app/account/page.tsx).
   useEffect(() => {

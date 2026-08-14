@@ -141,6 +141,8 @@ export interface StorefrontConfig {
     headline: string;
     body: string;
     ctaLabel: string;
+    storyHeadline: string;
+    storyBody: string;
   };
   socialProof: {
     label: string;
@@ -225,10 +227,12 @@ const defaultFormCopy = {
 };
 
 const defaultHeroContent = {
-  eyebrow: 'The Architecture of Scent',
-  headline: 'A drop that moves faster than attention itself.',
-  body: 'We design fragrances that move faster than time itself. An intentional collision of raw natural essences and electric modern chemistry.',
-  ctaLabel: '↓ Scroll To Explore',
+  eyebrow: 'HIGH-CADENCE RELEASES',
+  headline: 'Luxury releases with private-club energy, built for decisive collectors.',
+  body: 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.',
+  ctaLabel: 'Browse drops',
+  storyHeadline: 'Our Story',
+  storyBody: 'Low supply. Fast conversion. Quiet exclusivity.',
 };
 
 const defaultSocialProof = {
@@ -350,6 +354,17 @@ export function surfaceBackground(color?: string, transparencyPct?: number | str
   if (!Number.isFinite(pct) || pct >= 100) return c || fallback;
   const safe = Math.max(0, Math.min(100, pct));
   return `color-mix(in srgb, ${c || fallback} ${safe}%, transparent)`;
+}
+
+/**
+ * A heroContent blob is "legacy" when it was written by the OLD admin settings
+ * (before the story fields existed) — i.e. it lacks both `storyHeadline` and
+ * `storyBody`. Such blobs were never actually displayed (the home page used to
+ * hardcode its hero copy), so we treat them as stale and fall back to the
+ * current defaults instead of surfacing forgotten text after an upgrade.
+ */
+export function isLegacyHeroContent(hero: any): boolean {
+  return !!hero && typeof hero !== 'string' && typeof hero.storyHeadline !== 'string' && typeof hero.storyBody !== 'string';
 }
 
 /** Deep-merge a stored (partial) orbs config over the defaults. */

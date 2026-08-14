@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
+import { surfaceBackground } from '@/lib/storefront-config';
 
 interface CatalogItem {
   name: string;
@@ -33,10 +35,13 @@ interface ActiveDrop {
 }
 
 export default function CatalogPage() {
-  // Live theme palette — starts at the build-time config and upgrades to the
-  // /admin → Settings theme (served through /api/store → config → themeColors)
-  // so design presets (e.g. a white Luxury background) apply to the catalog too.
-  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  // Live theme palette — initialized from the server-baked /admin → Settings
+  // theme (no flash) and upgraded to whatever /api/store serves so design
+  // presets (e.g. a white Luxury background) apply to the catalog too.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
   const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
   const [activeDrops, setActiveDrops] = useState<ActiveDrop[]>([]);
   const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
@@ -185,7 +190,7 @@ export default function CatalogPage() {
             onClick={() => handleTileClick(item)}
             style={{
               textAlign: 'left',
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
+              background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))'),
               border: `1px solid ${configPalette.cardBorder}`,
               borderRadius: '16px',
               overflow: 'hidden',
@@ -267,7 +272,7 @@ export default function CatalogPage() {
             View what's active
           </Link>
         </div>
-        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: '#d4d4d8', lineHeight: 1.6 }}>
+        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.02)'), fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
           Live releases are open for entry right now. Upcoming and archived drops stay on the record so collectors can see the full story and get ahead of the next opening.
         </div>
 
@@ -275,7 +280,7 @@ export default function CatalogPage() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          style={{ marginBottom: 20, padding: '10px 12px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 8 }}
+          style={{ marginBottom: 20, padding: '10px 12px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.03)'), display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: configPalette.accentBlue }}>
             <circle cx="11" cy="11" r="6" />
@@ -296,6 +301,20 @@ export default function CatalogPage() {
 
         {filteredActiveDrops.length > 0 && (
           <>
+            <h2
+              style={{
+                fontSize: '13px',
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                color: configPalette.textMain,
+                margin: '0 0 8px 0',
+              }}
+            >
+              Currently Available
+            </h2>
+            <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 12px 0', lineHeight: 1.6 }}>
+              Live releases are open for entry right now — open while allocation remains.
+            </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' }}>
               {filteredActiveDrops.map((drop) => (
                 <Link
@@ -305,7 +324,7 @@ export default function CatalogPage() {
                 >
                   <div
                     style={{
-                      background: configPalette.cardBackground,
+                      background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
                       border: `1px solid ${configPalette.cardBorder}`,
                       borderRadius: '14px',
                       padding: '14px 16px',
@@ -321,20 +340,6 @@ export default function CatalogPage() {
                 </Link>
               ))}
             </div>
-            <h2
-              style={{
-                fontSize: '13px',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                color: configPalette.textMain,
-                margin: '0 0 8px 0',
-              }}
-            >
-              Currently Available
-            </h2>
-            <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 32px 0', lineHeight: 1.6 }}>
-              Live releases are open for entry right now — open while allocation remains.
-            </p>
           </>
         )}
 
@@ -370,6 +375,7 @@ export default function CatalogPage() {
               source="catalog"
               headline="Nothing public yet? Get the next release before everyone else does."
               body="This list is for quiet launch notices, not noise. Brands can notify the list directly from the admin portal when a new raffle or FCFS product goes live."
+              palette={configPalette}
             />
           </div>
         )}
@@ -401,7 +407,7 @@ export default function CatalogPage() {
                 width: '100%',
                 maxWidth: '480px',
                 margin: '0 auto',
-                background: '#0e0e10',
+                background: configPalette.cardBackground,
                 borderRadius: '24px 24px 0 0',
                 padding: '24px 20px 40px',
                 boxSizing: 'border-box',

@@ -1,14 +1,32 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
 
 export default function ForgotPasswordPage() {
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — initialized from the server-baked theme (no flash) and
+  // refreshed from /api/store so the CTA button matches the saved accent color
+  // instead of the build-time purple.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    fetchStoreJson('/api/store')
+      .then((data: any) => {
+        if (data?.config?.themeColors) {
+          setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
     if (typeof window === 'undefined') return;

@@ -5,19 +5,25 @@ import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
+import { surfaceBackground } from '@/lib/storefront-config';
 
 export default function HomePage() {
+  const liveCtx = useLiveTheme();
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
   const [nowTick, setNowTick] = useState(Date.now());
   const [authUser, setAuthUser] = useState<any>(null);
-  const [branding, setBranding] = useState<any>(null);
-  // Live theme palette. Starts at the build-time config and upgrades to whatever
-  // is saved in /admin → Settings (served through `/api/store` → config →
-  // themeColors) so design presets (e.g. a white Luxury background) apply to the
-  // static home shell without a redeploy.
-  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
+  // Live theme palette. Initialized from the server-baked /admin → Settings
+  // theme (no flash), then upgraded by /api/store on mount so edits pick up
+  // within the ~10s cache window without a redeploy.
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
+  // Hero copy is fully editable from /admin → Settings → Hero Content.
+  const [heroContent, setHeroContent] = useState<any>(liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
 
   const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
 
@@ -40,6 +46,7 @@ export default function HomePage() {
         const data = await fetchStoreJson('/api/store');
         if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
         if (data?.config?.branding) setBranding(data.config.branding);
+        if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
@@ -108,16 +115,16 @@ export default function HomePage() {
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))', boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / HIGH-CADENCE RELEASES</div>
-          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>Luxury releases with private-club energy, built for decisive collectors.</h1>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))'), boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
+          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'HIGH-CADENCE RELEASES'}</div>
+          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroContent.headline || 'Luxury releases with private-club energy, built for decisive collectors.'}</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
-            Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.
+            {heroContent.body || 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.'}
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {primaryProduct?.slug ? (
               <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                Browse drops
+                {heroContent.ctaLabel || 'Browse drops'}
               </button>
             ) : (
               activeProducts.length > 0 && (
@@ -126,10 +133,10 @@ export default function HomePage() {
                 </Link>
               )
             )}
-            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
-              Our Story
+            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardTextMain === '#0a0a0c' ? 'rgba(10,10,12,0.25)' : 'rgba(255,255,255,0.22)'}`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+              {heroContent.storyHeadline || 'Our Story'}
             </Link>
-            <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>Low supply. Fast conversion. Quiet exclusivity.</span>
+            <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
           </div>
           <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 14, border: `1px solid ${configPalette.cardBorder}`, background: 'rgba(255,255,255,0.02)', fontSize: 12, color: configPalette.cardTextMuted }}>
             Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
@@ -145,7 +152,7 @@ export default function HomePage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeProducts.map((product: any, index: number) => (
                 <Link key={product.id} href={`/${product.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{ borderRadius: 22, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217', boxShadow: '0 16px 48px rgba(0,0,0,0.22)', transform: `translateY(${index === 0 ? 0 : 2}px)`, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
+                  <div style={{ borderRadius: 22, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217'), boxShadow: '0 16px 48px rgba(0,0,0,0.22)', transform: `translateY(${index === 0 ? 0 : 2}px)`, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
                     <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -177,6 +184,7 @@ export default function HomePage() {
             source="home"
             headline="Get notified the moment the next release goes live."
             body="Join the alert list and we will send the drop as soon as it opens."
+            palette={configPalette}
           />
         )}
 
@@ -202,7 +210,7 @@ export default function HomePage() {
           </section>
         )}
 
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: '#0e0e10', color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#0e0e10'), color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>

@@ -56,10 +56,12 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   },
 
   heroContent: {
-    eyebrow: 'The Architecture of Scent',
-    headline: 'A drop that moves faster than attention itself.',
-    body: 'We design fragrances that move faster than time itself. An intentional collision of raw natural essences and electric modern chemistry.',
-    ctaLabel: '↓ Scroll To Explore',
+    eyebrow: 'HIGH-CADENCE RELEASES',
+    headline: 'Luxury releases with private-club energy, built for decisive collectors.',
+    body: 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.',
+    ctaLabel: 'Browse drops',
+    storyHeadline: 'Our Story',
+    storyBody: 'Low supply. Fast conversion. Quiet exclusivity.',
   },
 
   socialProof: {

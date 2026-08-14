@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
@@ -127,12 +128,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     };
   }, []);
 
-  // Live theme palette. Initialised from the build-time config and upgraded to
-  // whatever is saved in /admin → Settings (served through `/api/store` → config
-  // → themeColors). This makes page background, card backgrounds/borders,
-  // border radius, and card text colors editable from the admin portal without
-  // a redeploy.
-  const [configPalette, setConfigPalette] = useState<any>(GOYUNIR_STORE_SUITE.themeColors);
+  // Live theme palette. Initialized from the server-baked /admin → Settings
+  // theme (no flash) and upgraded to whatever is saved in /admin → Settings
+  // (served through `/api/store` → config → themeColors). This makes page
+  // background, card backgrounds/borders, border radius, and card text colors
+  // editable from the admin portal without a redeploy.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
   const uiRadius = (fallback: number) => {
     const r = Number(configPalette.borderRadius);
     return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;

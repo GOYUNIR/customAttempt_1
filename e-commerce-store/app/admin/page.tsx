@@ -88,6 +88,22 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
+/** Font-family presets shown in the Settings → Font Family dropdown, each option
+ *  rendered in its own typeface so admins see a live preview of the style. */
+const FONT_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Inter — clean modern sans', value: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" },
+  { label: 'Space Grotesk — techy geometric sans', value: "'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif" },
+  { label: 'Sora — rounded friendly sans', value: "'Sora', 'Inter', 'Segoe UI', Arial, sans-serif" },
+  { label: 'IBM Plex Sans — crisp corporate sans', value: "'IBM Plex Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" },
+  { label: 'Archivo — bold condensed sans', value: "'Archivo', 'Helvetica Neue', Arial, sans-serif" },
+  { label: 'Nunito — soft rounded sans', value: "'Nunito', 'Poppins', 'Segoe UI', sans-serif" },
+  { label: 'Playfair Display — elegant editorial serif', value: "'Playfair Display', Georgia, 'Times New Roman', serif" },
+  { label: 'Cormorant Garamond — luxury fashion serif', value: "'Cormorant Garamond', 'Playfair Display', Georgia, serif" },
+  { label: 'Georgia — classic book serif', value: "Georgia, 'Times New Roman', serif" },
+  { label: 'System UI — native platform font', value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif" },
+  { label: 'Monospace — terminal / technical', value: "'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace" },
+];
+
 const buttonPrimary: React.CSSProperties = {
   padding: '10px 16px',
   borderRadius: 10,
@@ -514,7 +530,7 @@ export default function AdminPortal() {
       const data = await res.json();
       if (data.settings) {
         if (data.settings.themeColors) setThemeSettings({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.settings.themeColors });
-        if (data.settings.heroContent) setHeroSettings(data.settings.heroContent);
+        if (data.settings.heroContent) setHeroSettings({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.settings.heroContent });
         if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
         if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
         if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
@@ -2677,7 +2693,16 @@ export default function AdminPortal() {
                 Edit site appearance and content. Theme colors, card backgrounds/borders, radius, and text colors apply live to product pages and the cart (cached up to ~10s); static pages (home/catalog/legal) are baked at build time, so a redeploy may be needed for those to pick up color changes.
               </p>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
-              
+
+              {/* Sticky top save button — stays visible while scrolling the long settings form. */}
+              <div style={{ position: 'sticky', top: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 12, background: 'rgba(10,10,12,0.94)', border: '1px solid #2a2a2e', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
+                <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading}>
+                  {settingsLoading ? 'Saving…' : 'Save All Settings'}
+                </button>
+                <span style={{ fontSize: 11, color: '#888' }}>Changes below publish to the live store immediately.</span>
+                {settingsMsg && <span style={{ fontSize: 11, fontWeight: 700, color: settingsMsg.includes('Failed') ? '#f87171' : '#34d399' }}>{settingsMsg}</span>}
+              </div>
+
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Design Presets</h4>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
                 One-click market skins for client onboarding. Applying a preset fills the theme colors, font, border treatment and glow below — then press <strong style={{ color: '#ccc' }}>Save Settings</strong>.
@@ -2771,41 +2796,89 @@ export default function AdminPortal() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
                   Font Family
-                  <input
-                    type="text"
-                    value={String(themeSettings.fontFamily || '')}
-                    onChange={(e) => setThemeSettings({ ...themeSettings, fontFamily: e.target.value })}
-                    placeholder="e.g. Georgia, serif"
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                </label>
-                <label style={{ fontSize: 11 }}>
-                  Border Radius
                   <select
-                    value={String(themeSettings.borderRadius ?? 12)}
-                    onChange={(e) => setThemeSettings({ ...themeSettings, borderRadius: Number(e.target.value) })}
+                    value={FONT_OPTIONS.some((f) => f.value === String(themeSettings.fontFamily || '').trim()) ? String(themeSettings.fontFamily || '').trim() : '__custom__'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v !== '__custom__') setThemeSettings({ ...themeSettings, fontFamily: v });
+                    }}
                     style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
                   >
-                    <option value="0">Square (0px)</option>
-                    <option value="2">Crisp (2px)</option>
-                    <option value="4">Sharp (4px)</option>
-                    <option value="6">Tight (6px)</option>
-                    <option value="8">Subtle (8px)</option>
-                    <option value="12">Default (12px)</option>
-                    <option value="999">Fully rounded</option>
+                    {FONT_OPTIONS.map((f) => (
+                      <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>
+                    ))}
+                    <option value="__custom__">Custom font stack…</option>
                   </select>
+                  {!FONT_OPTIONS.some((f) => f.value === String(themeSettings.fontFamily || '').trim()) && (
+                    <input
+                      type="text"
+                      value={String(themeSettings.fontFamily || '')}
+                      onChange={(e) => setThemeSettings({ ...themeSettings, fontFamily: e.target.value })}
+                      placeholder="e.g. Georgia, serif"
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                    />
+                  )}
+                  <span style={{ fontSize: 10, color: '#888' }}>Each option is previewed in its own typeface.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Border Radius (px)
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={Number(themeSettings.borderRadius ?? 12)}
+                    onChange={(e) => {
+                      let v = Number(e.target.value);
+                      if (Number.isNaN(v)) v = 1;
+                      v = Math.max(1, Math.min(999, v));
+                      setThemeSettings({ ...themeSettings, borderRadius: v });
+                    }}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  />
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
+                    {[1, 2, 4, 6, 8, 12, 16, 24, 999].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setThemeSettings({ ...themeSettings, borderRadius: r })}
+                        style={{
+                          ...buttonGhost,
+                          padding: '3px 8px',
+                          fontSize: 10,
+                          borderRadius: 6,
+                          borderColor: Number(themeSettings.borderRadius ?? 12) === r ? '#7dd3fc' : '#27272a',
+                          color: Number(themeSettings.borderRadius ?? 12) === r ? '#7dd3fc' : '#aaa',
+                        }}
+                      >
+                        {r === 999 ? 'Full' : `${r}px`}
+                      </button>
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 10, color: '#888' }}>Minimum 1px — square (0px) is no longer offered because it clips card content.</span>
                 </label>
               </div>
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                The intro section on the home page (the “GOYUNIR / HIGH-CADENCE RELEASES” block). Every line is editable.
+              </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                {Object.entries(heroSettings).map(([key, value]) => (
+                {([
+                  ['eyebrow', 'Eyebrow (rendered after the brand name)'],
+                  ['headline', 'Headline'],
+                  ['body', 'Body copy'],
+                  ['ctaLabel', 'Primary button label'],
+                  ['storyHeadline', 'Story link label'],
+                  ['storyBody', 'Story footer line'],
+                ] as const).map(([key, label]) => (
                   <label key={key} style={{ fontSize: 11 }}>
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
-                    <input 
-                      type="text" 
-                      value={value} 
+                    {label}
+                    <input
+                      type="text"
+                      value={String(heroSettings[key] ?? '')}
                       onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.value })}
-                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                    />
                   </label>
                 ))}
               </div>
@@ -3121,9 +3194,6 @@ export default function AdminPortal() {
                 </label>
               </div>
 
-              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
-                {settingsLoading ? 'Saving…' : 'Save All Settings'}
-              </button>
               <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
                 {settingsLoading ? 'Saving…' : 'Save All Settings'}
               </button>

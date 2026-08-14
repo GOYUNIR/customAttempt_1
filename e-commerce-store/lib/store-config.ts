@@ -87,6 +87,8 @@ export interface StoreConfig {
     headline: string;
     body: string;
     ctaLabel: string;
+    storyHeadline: string;
+    storyBody: string;
   };
   socialProof: {
     label: string;
@@ -165,10 +167,12 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     submitButtonLoadingText: 'Encrypting Entry Base...',
   },
   heroContent: {
-    eyebrow: 'The Architecture of Scent',
-    headline: 'A drop that moves faster than attention itself.',
-    body: 'We design fragrances that move faster than time itself.',
-    ctaLabel: '↓ Scroll To Explore',
+    eyebrow: 'HIGH-CADENCE RELEASES',
+    headline: 'Luxury releases with private-club energy, built for decisive collectors.',
+    body: 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.',
+    ctaLabel: 'Browse drops',
+    storyHeadline: 'Our Story',
+    storyBody: 'Low supply. Fast conversion. Quiet exclusivity.',
   },
   socialProof: {
     label: 'Limited drop access',

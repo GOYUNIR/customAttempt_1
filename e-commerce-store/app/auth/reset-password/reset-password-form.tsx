@@ -1,16 +1,33 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
+import { useLiveTheme } from '@/components/ThemeProvider';
 
 export default function ResetPasswordForm({ token }: { token: string }) {
   const router = useRouter();
-  const configPalette = GOYUNIR_STORE_SUITE.themeColors;
+  // Live theme palette — initialized from the server-baked theme (no flash) and
+  // refreshed from /api/store so the CTA matches the saved accent color.
+  const liveCtx = useLiveTheme();
+  const [configPalette, setConfigPalette] = useState<any>(
+    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+  );
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetchStoreJson('/api/store')
+      .then((data: any) => {
+        if (data?.config?.themeColors) {
+          setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const notify = (detail: { id?: string; type: string; message: string; persist?: boolean }) => {
     if (typeof window === 'undefined') return;

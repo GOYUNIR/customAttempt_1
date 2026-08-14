@@ -77,7 +77,7 @@ The store uses a **single source of truth** model — products and settings each
 | 404 on product page | Product not in Redis | Go to /admin → Products → Seed Defaults |
 | 404 on home page | No active products | Seed defaults or add a product via admin |
 | Admin not accessible | Basic Auth missing | Check environment variables |
-| Settings not applying | Need redeploy | Settings stored in Redis, but some theme changes require a build; use the Settings tab in admin and then redeploy |
+| Settings not applying | Stale TTL cache or old build | Theme is baked per-request now (dynamic layout). Settings save instantly; the storefront may lag a few seconds while the 10s/30s caches expire. If a change still doesn't show, re-run **Seed Defaults** or redeploy |
 | Size not showing | `availableSizes` not set | Go to /admin → Settings → Available Sizes |
 
 ### Testing New Changes
@@ -214,7 +214,7 @@ Public-facing display data is cached with short TTLs to keep the site snappy. Th
 
 - `lib/ttl-cache.ts` — server-side in-memory TTL cache (`withTtlCache(key, ttlMs, fetcher)`). Used by `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s), the heartbeat social-proof tally (15s), and `loadStoreConfigCached` (30s, used by layout metadata / favicon / OG image).
 - `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes in-flight requests and reuses results for 10s. HomePage and SiteChrome both fetch `/api/store`; this makes it a single round trip.
-- `app/layout.tsx` has **no** `force-dynamic` — the page shell is statically prerendered (`/`, `/catalog`, legal pages). Product slugs (`/[slug]`) and admin/account remain dynamic on purpose.
+- `app/layout.tsx` uses `export const dynamic = 'force-dynamic'` so the live `/admin → Settings` theme (colors/font/branding) is baked into the server HTML on every request — this eliminated the “build-time colors flash → live colors” FOUC. Redis reads stay cheap via `loadStoreConfigCached` (30s TTL). The layout also renders a `<script type="application/json">` theme blob (`window.__GOYUNIR_THEME__`) plus a synchronous inline script that applies the saved colors before first paint, and wraps the app in `ThemeProvider` (see `components/ThemeProvider.tsx` + `useLiveTheme()`) so client pages initialize their palette from the server-rendered theme instead of the build-time defaults.
 - `components/SiteChrome.tsx` animates the background glow via **direct DOM writes** (refs), never React state, so the ~60fps idle drift does not re-render the app. Keep it transform-only: do NOT add `filter: blur()` or `backdrop-filter` to animated/large elements — they force per-frame paints and cause Chrome lag. Glows are pre-blurred radial gradients instead.
 - Home (`app/page.tsx`) and Catalog (`app/catalog/page.tsx`) only run their 1-second countdown tickers while a live countdown is actually visible.
 - If you add a new public read endpoint, wrap its Redis reads in `withTtlCache` with a short TTL instead of hitting Redis on every request. If you change storefront config/settings, remember the public site may show cached values for up to 30s.

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 
@@ -64,6 +65,23 @@ function normalizeHex(color: any, fallback: string) {
 }
 
 /**
+ * Pick a readable foreground color for the top bar given its background.
+ * Text/border/icon colors on the header used to be hardcoded white, which made
+ * light presets (white header) unreadable. This computes relative luminance and
+ * returns near-black text on light backgrounds and near-white on dark ones.
+ */
+function readableTextOn(bg: string): string {
+  const hex = normalizeHex(bg, '');
+  if (!hex) return '#f5f5f7';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  if ([r, g, b].some((v) => Number.isNaN(v))) return '#f5f5f7';
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.58 ? '#0a0a0c' : '#f5f5f7';
+}
+
+/**
  * Mix a chrome/surface color to the configured transparency (0-100) via
  * color-mix. Chrome surfaces stay readable (min 40%); the drawer keeps ~92% so
  * the modal doesn't turn into a full-blown glass panel.
@@ -118,6 +136,10 @@ function writeCheckoutDetails(email: string, address: string) {
 }
 
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
+  // Live /admin → Settings theme is baked into SSR via the root layout's
+  // ThemeProvider, so the top bar and chrome render with the saved colors on
+  // the first paint (no flash), then the /api/store fetch keeps them fresh.
+  const liveCtx = useLiveTheme();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutEmail, setCheckoutEmail] = useState('');
@@ -126,9 +148,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [signedInEmail, setSignedInEmail] = useState('');
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [cartMsg, setCartMsg] = useState('');
-  const [theme, setTheme] = useState<any>(null);
-  const [branding, setBranding] = useState<any>(null);
-  const [orbs, setOrbs] = useState<any>(null);
+  const [theme, setTheme] = useState<any>(liveCtx?.themeColors || null);
+  const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
+  const [orbs, setOrbs] = useState<any>(liveCtx?.orbs || null);
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
@@ -640,6 +662,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const drawerBg = chromeBackground(liveTheme.cardBackground, Math.max(chromeAlpha, 92), '#0b0b0f', 92);
   const drawerText = liveTheme.cardTextMain || '#ffffff';
   const drawerTextMuted = liveTheme.cardTextMuted || '#a1a1aa';
+  // Readable foreground for the top bar: hardcoded white text is invisible on
+  // light presets (e.g. white header), so derive it from the header background.
+  const headerText = readableTextOn(liveTheme.cardBackground);
   const uiRadius = (fallback: number) => {
     const r = Number(liveTheme.borderRadius);
     return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
@@ -747,12 +772,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
           <Link
             href="/catalog"
-            aria-label="Browse catalog & search"
+            aria-label="Catalog & search"
             title="Catalog & search"
-            style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f5f5', textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
+            style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${headerText === '#0a0a0c' ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            Browse
+            Catalog
           </Link>
         </div>
 
@@ -766,7 +791,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             letterSpacing: '3.5px',
             fontSize: '11px',
             textTransform: 'uppercase',
-            color: '#ffffff',
+            color: headerText,
             textDecoration: 'none',
             maxWidth: '38%',
             whiteSpace: 'nowrap',
@@ -797,8 +822,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
               justifyContent: 'center',
               borderRadius: 999,
               background: 'rgba(255,255,255,0.07)',
-              border: signedIn ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(255,255,255,0.12)',
-              color: '#d4d4d8',
+              border: signedIn ? '1px solid rgba(34,197,94,0.35)' : (headerText === '#0a0a0c' ? '1px solid rgba(10,10,12,0.18)' : '1px solid rgba(255,255,255,0.12)'),
+              color: headerText,
               textDecoration: 'none',
               boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
               position: 'relative',
@@ -811,7 +836,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             onClick={() => setCartOpen(true)}
             aria-label={actionTitle}
             title={actionTitle}
-            style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : '#f5f5f5', cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
+            style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: headerText === '#0a0a0c' ? '1px solid rgba(10,10,12,0.18)' : '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : headerText, cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
           >
             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M3 4h2l2.4 9.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L17 7H7" /></svg>
             {cart.length > 0 ? <span style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, padding: '0 4px', fontSize: 10, borderRadius: 999, background: '#7dd3fc', color: '#07121f', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{cart.length}</span> : null}
