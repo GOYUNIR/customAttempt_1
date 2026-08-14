@@ -170,6 +170,12 @@ export const AUTH_SESSION_PREFIX = 'auth:session:';
 export function passwordResetKey(token: string): string {
   return `auth:reset:${token}`;
 }
+/** String w/ TTL — email-verification challenge for a customer account
+ * (`auth:verify:<email>`). Holds the hashed 6-digit code + attempt counter so
+ * signups can prove the inbox is real before welcome rewards are issued. */
+export function emailVerifyKey(email: string): string {
+  return `auth:verify:${email}`;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Admin
@@ -177,6 +183,28 @@ export function passwordResetKey(token: string): string {
 
 /** List — JSON audit trail of admin actions. */
 export const AUDIT_LOG_KEY = 'admin:audit_log';
+
+// Two-step admin verification (email one-time code + remembered devices).
+/** String w/ TTL — pending admin 2FA challenge for an email (`admin:verify:<email>`). */
+export function adminVerifyKey(email: string): string {
+  return `admin:verify:${email}`;
+}
+/** String w/ TTL — verified device token (`admin:device:<token>`). A valid token
+ * in this namespace is what the "remember device" / "this browser" cookie maps
+ * to, and proxy.ts checks it so every /api/admin request is 2FA-gated. */
+export function adminDeviceKey(token: string): string {
+  return `admin:device:${token}`;
+}
+/** String w/ TTL — wrong-code counter for brute-force lockout (`admin:verify_attempts:<email>`). */
+export function adminVerifyAttemptsKey(email: string): string {
+  return `admin:verify_attempts:${email}`;
+}
+/** String w/ TTL — resend throttle counter (`admin:send_attempts:<email>`). */
+export function adminSendAttemptsKey(email: string): string {
+  return `admin:send_attempts:${email}`;
+}
+/** Name of the httpOnly admin 2FA device cookie set after a successful code. */
+export const ADMIN_DEVICE_COOKIE = 'goyunir_admin_device';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Analytics (social proof counters + online visitors)

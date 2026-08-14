@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import Stripe from 'stripe';
+import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
@@ -629,6 +630,58 @@ export function getAdminPassword(): string {
   const configured = process.env.ADMIN_BASIC_AUTH_PASSWORD;
   if (configured) return configured;
   if (process.env.NODE_ENV !== 'production') return 'goyunir-admin-dev';
+  return '';
+}
+
+/**
+ * Constant-time admin password comparison. Every admin API route should use
+ * this instead of `attempt === getAdminPassword()` so a local attacker can
+ * never use response timing to learn the password one character at a time.
+ */
+export function verifyAdminPassword(attempt: string | null | undefined): boolean {
+  const master = getAdminPassword();
+  if (!master) return false;
+  const a = Buffer.from(String(attempt || ''));
+  const b = Buffer.from(master);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Authorize a request against the admin password using EITHER a supplied
+ * password (body/query — never put it in a URL anymore) or the HTTP Basic
+ * Authorization header the browser attaches after the proxy 401 challenge.
+ * Used as defense-in-depth inside admin routes on top of proxy.ts.
+ */
+export function adminRequestAuthorized(request: Request, suppliedPassword?: string): boolean {
+  if (verifyAdminPassword(suppliedPassword)) return true;
+  const authHeader = request.headers.get('authorization') || '';
+  if (!authHeader.startsWith('Basic ')) return false;
+  try {
+    const decoded = atob(authHeader.slice(6));
+    const colon = decoded.indexOf(':');
+    if (colon < 0) return false;
+    const user = decoded.slice(0, colon);
+    const pass = decoded.slice(colon + 1);
+    return user === (process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin') && verifyAdminPassword(pass);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The inbox the admin two-step verification codes are sent to. Buyers set
+ * ADMIN_VERIFY_EMAIL in the platform (Vercel); it falls back to the support
+ * inbox so a store that already configured support email gets 2FA for free.
+ */
+export function getAdminVerifyEmail(): string {
+  const direct = String(process.env.ADMIN_VERIFY_EMAIL || '').trim();
+  if (direct) return direct;
+  const support = String(process.env.SUPPORT_EMAIL || process.env.REPLY_TO_EMAIL || '').trim();
+  if (support) return support;
+  // Local development: no real inbox, but the verify-start route echoes the
+  // code as `devCode` so the portal stays usable on a fresh clone.
+  if (process.env.NODE_ENV !== 'production') return 'admin@localhost.dev';
   return '';
 }
 

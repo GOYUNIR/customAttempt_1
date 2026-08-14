@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword, USERS_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, verifyAdminPassword, adminRequestAuthorized, USERS_KEY} from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -45,8 +45,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const password = String(url.searchParams.get('password') || '');
-    const master = getAdminPassword() || '';
-    if (!master || password !== master) {
+    if (!adminRequestAuthorized(request, password)) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
@@ -70,8 +69,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    const master = getAdminPassword() || '';
-    if (!master || password !== master) {
+    if (!verifyAdminPassword(password)) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

@@ -473,9 +473,9 @@ function composeFullAddress(props: Record<string, unknown> | null | undefined): 
   if (s(props.full_address)) return s(props.full_address);
 
   const street = [props.address_line1, props.address_line2, props.address_line3].map(s).filter(Boolean);
-  const city = s(props.address_level2) || s(props.locality) || s(props.place);
-  const region = s(props.address_level1) || s(props.region);
-  const postcode = s(props.postcode) || s(props.postal_code);
+  const city = s(props.address_level2) || s(props.locality) || s(props.place) || s(props.neighborhood);
+  const region = s(props.address_level1) || s(props.region) || s(props.state);
+  const postcode = s(props.postcode) || s(props.postal_code) || s(props.zip);
   const country = s(props.country) || s(props.country_name);
   const locality = [city, region, postcode].filter(Boolean).join(', ');
 
@@ -485,7 +485,9 @@ function composeFullAddress(props: Record<string, unknown> | null | undefined): 
     ...(country ? [country] : []),
   ];
   if (parts.length > 0) return parts.join(', ');
-  return s(props.name);
+  // Suggestion-only fallback (no retrieve components yet).
+  const place = s(props.place_formatted) || s(props.name);
+  return place;
 }
 
 /**
@@ -513,6 +515,43 @@ function writeReactInputValue(el: HTMLInputElement, value: string): void {
   }
 }
 
+/**
+ * Defend the full-address fill against the SDK's own street-only form-fill.
+ *
+ * We verified in the search-js v1.6.0 bundle that its `retrieve` handler
+ * dispatches the event FIRST and then runs its form-fill (`oo` → `Ua`) which
+ * writes ONLY `address_line1+2+3` into a `street-address` input — and it
+ * dispatches React-simulated `input` events when it does. That clobbers both
+ * our composed full address AND the React state it just set. Instead of only
+ * relying on a timer, we also listen in the CAPTURE phase (before React) and
+ * write the full address back the instant the SDK truncates it, so the box
+ * never visibly regresses to a partial address.
+ */
+const FULL_FILL_WINDOW_MS = 8000;
+let fullFillGuardInstalled = false;
+
+function installFullFillGuard(): void {
+  if (fullFillGuardInstalled || typeof document === 'undefined') return;
+  fullFillGuardInstalled = true;
+  document.addEventListener(
+    'input',
+    (e) => {
+      const target = e.target as HTMLInputElement | null;
+      if (!target || !target.dataset) return;
+      const composed = target.dataset.mapboxFullFill;
+      const until = Number(target.dataset.mapboxFullFillUntil || 0);
+      if (!composed || !until || Date.now() > until) return;
+      const current = String(target.value || '').trim();
+      // Only override when the current value is SHORTER than the full address
+      // (i.e. the SDK truncated it). A longer manual edit is left alone.
+      if (current !== composed && current.length < composed.length) {
+        writeReactInputValue(target, composed);
+      }
+    },
+    true,
+  );
+}
+
 function handleRetrieve(event: any): void {
   // The SDK's `MapboxHTMLEvent` target can be the form or the input. Resolve to
   // an actual eligible address input (active one first) so we always write the
@@ -534,9 +573,19 @@ function handleRetrieve(event: any): void {
   // `event.features` for forward-compatibility).
   const props =
     event?.detail?.features?.[0]?.properties ||
-    event?.features?.[0]?.properties;
+    event?.features?.[0]?.properties ||
+    event?.detail?.feature?.properties ||
+    event?.detail?.properties;
   const composed = composeFullAddress(props);
   if (!composed || !input) return;
+
+  // Mark this input so the capture-phase guard (and any retry that re-resolves
+  // the element after a React re-render) keeps defending the full address for
+  // a short window. The dataset survives in-place React updates.
+  installFullFillGuard();
+  const fillUntil = Date.now() + FULL_FILL_WINDOW_MS;
+  input.setAttribute('data-mapbox-full-fill', composed);
+  input.setAttribute('data-mapbox-full-fill-until', String(fillUntil));
 
   // Apply the full address over a guarded schedule. The SDK's own form-fill can
   // land at any moment (and, worse, re-truncate the box back to street-only on
@@ -548,7 +597,16 @@ function handleRetrieve(event: any): void {
   const RETRY_SCHEDULE_MS = [0, 40, 120, 260, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400, 6600];
   const writeFull = () => {
     attempts += 1;
-    const el = input && input.isConnected ? input : null;
+    // Re-resolve the element each attempt: React can replace the DOM node on a
+    // re-render, orphaning a captured reference forever.
+    let el = input && input.isConnected ? input : null;
+    if (!el) {
+      const inputs = findAddressInputs();
+      el =
+        (inputs.find((candidate) => candidate.dataset && candidate.dataset.mapboxFullFill === composed) as HTMLInputElement | null) ||
+        (inputs[inputs.length - 1] || null);
+      if (el) input = el;
+    }
     if (!el) return;
     const current = String(el.value || '').trim();
     // Override when our composed address is strictly richer than what's in the
@@ -582,6 +640,12 @@ function watchManualEdits(): void {
     (e) => {
       const target = e.target as HTMLInputElement | null;
       if (!target || !target.dataset) return;
+      // A deliberate manual edit ends both the verified state and the
+      // full-address defence window (so the guard never fights the customer).
+      if (target.dataset.mapboxFullFill) {
+        target.dataset.mapboxFullFill = '';
+        target.dataset.mapboxFullFillUntil = '';
+      }
       if (target.dataset.mapboxVerified !== 'true') return;
       const expected = target.dataset.mapboxVerifiedValue || '';
       if (expected && target.value.trim() !== expected) {

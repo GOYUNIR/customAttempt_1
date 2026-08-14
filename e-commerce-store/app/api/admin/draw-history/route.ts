@@ -1,33 +1,34 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, DRAW_HISTORY_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, verifyAdminPassword, DRAW_HISTORY_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  const master = getAdminPassword() || '';
-  
-  // Check if browser is using middleware auth
+
+  // Defense-in-depth auth (proxy.ts already enforces Basic Auth + 2FA): accept
+  // either the query password or the HTTP Basic Authorization header, compared
+  // in constant time so response timing can never leak the password.
   const authHeader = request.headers.get('authorization');
-  if (!master) {
+  if (!getAdminPassword()) {
     return NextResponse.json({ error: 'Admin password not configured' }, { status: 500 });
   }
-  
+
   let isAuthorized = false;
-  if (password === master) {
+  if (password && verifyAdminPassword(password)) {
     isAuthorized = true;
   } else if (authHeader && authHeader.startsWith('Basic ')) {
     try {
       const encoded = authHeader.slice(6);
       const decoded = atob(encoded);
       const [user, pass] = decoded.split(':');
-      if (user === process.env.ADMIN_BASIC_AUTH_USERNAME && pass === master) {
+      if (user === process.env.ADMIN_BASIC_AUTH_USERNAME && verifyAdminPassword(pass)) {
         isAuthorized = true;
       }
     } catch {}
   }
-  
+
   if (!isAuthorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -67,8 +68,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  const master = getAdminPassword() || '';
-  if (!master || password !== master) {
+  if (!verifyAdminPassword(password)) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

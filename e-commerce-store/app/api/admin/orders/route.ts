@@ -6,20 +6,20 @@ import {
   adminCancelOrder,
   adminUpdateOrderAddress,
   loadProducts,
-  getAdminPassword,
+  verifyAdminPassword,
+  adminRequestAuthorized,
 } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 function checkAuth(password: string) {
-  const master = getAdminPassword() || '';
-  return Boolean(master) && password === master;
+  return verifyAdminPassword(password);
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!checkAuth(password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!adminRequestAuthorized(request, password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ orders: [] });

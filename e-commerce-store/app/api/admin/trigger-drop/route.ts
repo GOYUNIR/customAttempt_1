@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, verifyAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
@@ -23,8 +23,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const targetPool = body.targetPool || 'ALL_POOLS';
     const password = body.verificationKey || body.password || '';
-    const master = getAdminPassword() || '';
-    if (!master || password !== master) {
+    if (!verifyAdminPassword(password)) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

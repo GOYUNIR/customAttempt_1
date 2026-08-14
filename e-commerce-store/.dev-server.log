@@ -1405,3 +1405,15 @@ https://react.dev/link/hydration-mismatch
  GET /api/admin/settings 200 in 106ms (next.js: 6ms, proxy.ts: 6ms, application-code: 94ms)
  GET /api/admin/products?includeArchived=true 200 in 272ms (next.js: 6ms, proxy.ts: 6ms, application-code: 260ms)
  GET /api/admin/settings 200 in 595ms (next.js: 4ms, proxy.ts: 5ms, application-code: 586ms)
+✓ Compiled in 283ms
+✓ Compiled in 346ms
+✓ Compiled in 673ms
+✓ Compiled in 11ms
+○ Compiling proxy ...
+✓ Compiled in 167ms
+✓ Compiled in 4ms
+✓ Compiled in 62ms
+✓ Compiled in 89ms
+✓ Compiled in 102ms
+✓ Compiled in 77ms
+✓ Compiled in 75ms

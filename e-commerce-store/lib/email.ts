@@ -641,3 +641,70 @@ export async function sendWelcomeEmail(opts: {
     return { ok: false, error: err };
   }
 }
+
+/** Shared one-time-code email template (admin 2FA + customer email verification). */
+function sendCodeEmail(opts: {
+  to: string;
+  code: string;
+  subject: string;
+  headline: string;
+  body: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+}) {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true };
+  const brand = emailBrandName();
+  try {
+    return resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: opts.subject,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand}</p>
+          <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">${opts.headline}</h1>
+          <p style="margin:0 0 14px;color:#4b5563">${opts.body}</p>
+          <div style="margin:0 0 18px;padding:16px 18px;border-radius:18px;background:#111;color:#fff;display:inline-block;font-weight:800;letter-spacing:6px;font-size:26px;text-align:center">${opts.code}</div>
+          <p style="margin:0 0 8px;color:#6b7280;font-size:12px">The code expires in 10 minutes and can only be used once. If you didn't request it, you can safely ignore this email.</p>
+          ${opts.ctaUrl ? `<p style="margin:0 0 20px"><a href="${opts.ctaUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">${opts.ctaLabel || 'Open'}</a></p>` : ''}
+          <p style="margin:0;color:#6b7280;font-size:13px">Questions? Reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
+        </div>
+      `,
+    }).then(({ data, error }: { data?: any; error?: any }) => {
+      if (error) {
+        console.error('[email] code email error', error);
+        return { ok: false, error };
+      }
+      return { ok: true, id: data?.id };
+    });
+  } catch (err) {
+    console.error('[email] code email failed', err);
+    return { ok: false, error: err };
+  }
+}
+
+/** Admin portal two-step verification code (sent to ADMIN_VERIFY_EMAIL / SUPPORT_EMAIL). */
+export function sendAdminVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
+  return sendCodeEmail({
+    to: opts.to,
+    code: opts.code,
+    subject: `${emailBrandName()} — Admin sign-in code`,
+    headline: 'Admin sign-in verification',
+    body: 'A request was made to open the store admin portal. Enter this one-time code to finish signing in.',
+  });
+}
+
+/** Customer email-verification code (sent after signup so the inbox is real before rewards unlock). */
+export function sendCustomerVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
+  return sendCodeEmail({
+    to: opts.to,
+    code: opts.code,
+    subject: `${emailBrandName()} — Confirm your email`,
+    headline: 'Confirm your email address',
+    body: `We need to make sure ${opts.to} is really you before your welcome points and one-time member credit are unlocked. Enter this one-time code to verify your account.`,
+    ctaLabel: 'Verify my email',
+    ctaUrl: opts.siteUrl ? `${String(opts.siteUrl).replace(/\/+$/, '')}/account` : undefined,
+  });
+}

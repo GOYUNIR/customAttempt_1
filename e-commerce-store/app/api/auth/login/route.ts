@@ -55,11 +55,12 @@ export async function POST(request: Request) {
     email: user.email,
     role: user.role,
     rewards: user.rewards || 0,
+    emailVerified: user.emailVerified === true,
     expiresAt,
   }));
 
   // Set cookie
-  const response = NextResponse.json({ success: true, user: { id: user.id, email: user.email, role: user.role, rewards: user.rewards || 0 } });
+  const response = NextResponse.json({ success: true, user: { id: user.id, email: user.email, role: user.role, rewards: user.rewards || 0, emailVerified: user.emailVerified === true } });
   response.cookies.set('goyunir_session', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

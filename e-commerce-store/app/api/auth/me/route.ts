@@ -42,6 +42,7 @@ export async function GET(request: Request) {
   // even when the admin adjusts points from /admin → Users.
   let rewards = Number(session.rewards || 0);
   let welcomePromoCode: string | null = null;
+  let emailVerified = session.emailVerified === true;
   if (session.userId) {
     try {
       const rawUser = await redis.hget(USERS_KEY, session.userId);
@@ -49,6 +50,8 @@ export async function GET(request: Request) {
       if (user) {
         rewards = Number(user.rewards ?? rewards) || 0;
         welcomePromoCode = typeof user.welcomePromoCode === 'string' ? user.welcomePromoCode : null;
+        // Accounts created before email verification existed count as verified.
+        emailVerified = user.emailVerified !== false;
       }
     } catch {}
   }
@@ -60,6 +63,7 @@ export async function GET(request: Request) {
       role: session.role,
       rewards,
       welcomePromoCode,
+      emailVerified,
     },
   });
 }

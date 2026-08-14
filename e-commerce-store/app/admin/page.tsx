@@ -153,7 +153,23 @@ const buttonGhost: React.CSSProperties = {
 };
 
 function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
-  return fetch(input, { ...init, credentials: 'include' });
+  return fetch(input, { ...init, credentials: 'include' }).then((res) => {
+    // If the proxy's two-step device cookie is missing/expired, every /api/admin
+    // request returns 401 { error: 'ADMIN_2FA_REQUIRED' }. Surface that to the
+    // portal so it can re-show the verification screen instead of a silent error.
+    if (res.status === 401 && typeof window !== 'undefined') {
+      res
+        .clone()
+        .json()
+        .then((d) => {
+          if (d && d.error === 'ADMIN_2FA_REQUIRED') {
+            window.dispatchEvent(new CustomEvent('goyunir-admin-2fa-required'));
+          }
+        })
+        .catch(() => {});
+    }
+    return res;
+  });
 }
 
 // Default Stripe price ID prefilled in the product form. Mirrors the server-side
@@ -259,6 +275,18 @@ export default function AdminPortal() {
   // admin password typed AFTER streamer mode is off.
   const [streamerMode, setStreamerMode] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // TWO-STEP ADMIN VERIFICATION: after HTTP Basic Auth, the operator must also
+  // confirm a one-time code emailed to ADMIN_VERIFY_EMAIL before the portal
+  // (and every /api/admin request via proxy.ts) is unlocked. `adminVerified`
+  // starts null = still checking the device cookie; false renders the gate.
+  const [adminVerified, setAdminVerified] = useState<boolean | null>(null);
+  const [verifyEmail, setVerifyEmail] = useState('');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyRemember, setVerifyRemember] = useState(true);
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyDevCode, setVerifyDevCode] = useState('');
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -525,7 +553,7 @@ export default function AdminPortal() {
     }
     setAlertsLoading(true);
     try {
-      const res = await adminFetch(`/api/admin/alerts?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/alerts');
       const data = await res.json();
       setAlerts(Array.isArray(data.subscribers) ? data.subscribers : []);
     } catch {
@@ -540,7 +568,7 @@ export default function AdminPortal() {
       return;
     }
     try {
-      const res = await adminFetch(`/api/admin/audit?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/audit');
       const data = await res.json();
       setAudit(Array.isArray(data.entries) ? data.entries : []);
     } catch (err) {
@@ -620,7 +648,7 @@ export default function AdminPortal() {
     if (!password) return;
     setUsersLoading(true);
     try {
-      const res = await adminFetch(`/api/admin/users?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/users');
       const data = await res.json();
       setUsers(Array.isArray(data.users) ? data.users : []);
     } catch (err) {
@@ -981,7 +1009,7 @@ export default function AdminPortal() {
     if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
     setProductActionLoading(true);
     try {
-      const res = await adminFetch(`/api/admin/seed?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/seed');
       const data = await res.json();
       if (res.ok) {
         setProductMsg('✅ ' + data.message);
@@ -1171,7 +1199,7 @@ export default function AdminPortal() {
     setSelftestRunning(true);
     setSelftestResults(null);
     try {
-      const res = await adminFetch(`/api/admin/self-test?password=${encodeURIComponent(password)}`);
+      const res = await adminFetch('/api/admin/self-test');
       const data = await res.json();
       setSelftestResults(data);
     } catch {
@@ -1450,6 +1478,14 @@ export default function AdminPortal() {
       fourth: preset.orbs.fourth,
       fifth: preset.orbs.fifth,
     }));
+    // Design presets also drive the share-card (OG link preview) colors so the
+    // fancy box friends see when you paste a link matches the store theme.
+    setBrandingSettings((prev) => ({
+      ...prev,
+      shareBackground: preset.themeColors.primaryBackground || prev.shareBackground || '#0B0B0F',
+      shareAccent: preset.themeColors.checkoutCtaButton || preset.accent || prev.shareAccent || '#D4AF37',
+      shareText: preset.themeColors.textMain || prev.shareText || '#F5F2E9',
+    }));
     setActivePreset(presetId);
     showToast(`PRESET · ${preset.name} applied — press Save to publish`);
   };
@@ -1487,9 +1523,11 @@ export default function AdminPortal() {
   };
 
   // ============================================================
-  // USE EFFECTS (unchanged)
+  // USE EFFECTS
   // ============================================================
-  useEffect(() => {
+
+  // Load the portal data only after two-step verification has been confirmed.
+  const runInitialLoads = () => {
     fetchStatus();
     fetchCatalogStatus();
     fetchRecovery();
@@ -1497,6 +1535,38 @@ export default function AdminPortal() {
     fetchProducts();
     fetchUsers();
     fetchCatalogSettings();
+  };
+
+  useEffect(() => {
+    // Step 1 — check the two-step verification device cookie BEFORE loading
+    // anything. When the cookie is missing, /api/admin/* returns 401 and the
+    // portal must show the verification gate instead of a wall of errors.
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/verify-status', { credentials: 'include' });
+        const data = await res.json();
+        const verified = Boolean(data?.verified);
+        setAdminVerified(verified);
+        if (verified) runInitialLoads();
+      } catch {
+        // Network blip — never hard-lock the portal; let the 2FA screen appear
+        // only when the proxy actually rejects a request.
+        setAdminVerified(true);
+        runInitialLoads();
+      }
+    })();
+    const on2faRequired = () => setAdminVerified(false);
+    window.addEventListener('goyunir-admin-2fa-required', on2faRequired);
+    return () => window.removeEventListener('goyunir-admin-2fa-required', on2faRequired);
+    // Fetch helpers are intentionally stable per-mount; including them would
+    // restart the poll loop on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Poll only while verified (the 2FA gate has its own step; a locked portal
+    // should not hammer the API).
+    if (adminVerified !== true) return;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
     const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
@@ -1504,10 +1574,104 @@ export default function AdminPortal() {
     start();
     document.addEventListener('visibilitychange', vis);
     return () => { stop(); document.removeEventListener('visibilitychange', vis); };
-    // Fetch helpers are intentionally stable per-mount; including them would
-    // restart the poll loop on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [adminVerified]);
+
+  // TWO-STEP ADMIN VERIFICATION handlers — send/confirm the emailed code.
+  // The password travels via the browser's cached Basic Auth header (proxy.ts
+  // already verified it on this request), so no extra typing is needed here.
+  const sendAdminVerifyCode = async () => {
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const res = await adminFetch('/api/admin/verify-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyEmail(data.sentTo || '');
+        setVerifyMsg(`Code sent to ${data.sentTo || 'your admin inbox'}. Check your email (and spam).`);
+        setVerifyDevCode(data.devCode || '');
+      } else {
+        setVerifyMsg(data.error || 'Could not send the code.');
+      }
+    } catch (err: any) {
+      setVerifyMsg('Network error: ' + err.message);
+    }
+    setVerifyBusy(false);
+  };
+
+  const confirmAdminVerifyCode = async () => {
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const res = await adminFetch('/api/admin/verify-confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: verifyCode, remember: verifyRemember }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyCode('');
+        setVerifyMsg('');
+        setVerifyDevCode('');
+        setAdminVerified(true);
+        runInitialLoads();
+      } else {
+        setVerifyMsg(data.error || 'Verification failed.');
+      }
+    } catch (err: any) {
+      setVerifyMsg('Network error: ' + err.message);
+    }
+    setVerifyBusy(false);
+  };
+
+  const resendAdminVerifyCode = async () => {
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const res = await adminFetch('/api/admin/verify-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyMsg('A fresh code was sent. Check your email (and spam).');
+        setVerifyDevCode(data.devCode || '');
+      } else {
+        setVerifyMsg(data.error || 'Could not resend the code.');
+      }
+    } catch (err: any) {
+      setVerifyMsg('Network error: ' + err.message);
+    }
+    setVerifyBusy(false);
+  };
+
+  // CSV export uses fetch (not a plain <a>) so the admin password never travels
+  // in the URL — proxy.ts Basic Auth + the 2FA device cookie authorize it.
+  const downloadWinners = async () => {
+    try {
+      const res = await adminFetch('/api/admin/export-winners');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data?.error || 'Export failed.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `winners-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('Export failed: ' + err.message);
+    }
+  };
 
   useEffect(() => {
     const t = setInterval(() => { if (lastUpdatedAt) setSecondsAgo(Math.round((Date.now() - lastUpdatedAt) / 1000)); }, 1000);
@@ -1521,7 +1685,7 @@ export default function AdminPortal() {
     setIsSearching(true);
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}&password=${encodeURIComponent(password)}`);
+        const res = await adminFetch(`/api/admin/search?q=${encodeURIComponent(term)}`);
         const data = await res.json();
         setSearchResults(Array.isArray(data.results) ? data.results : []);
       } catch {
@@ -1532,9 +1696,6 @@ export default function AdminPortal() {
       }
     }, 400);
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
-    // `password` is intentionally read at debounce-fire time (kept out of deps
-    // so typing a new password doesn't reset the debounce mid-search).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   const pools = status?.pools || [];
@@ -1571,6 +1732,60 @@ export default function AdminPortal() {
   ];
 
   // ============================================================
+  // TWO-STEP VERIFICATION GATE — shown until the operator confirms an emailed code.
+  if (adminVerified === false) {
+    return (
+      <main style={{ minHeight: '100vh', padding: '24px 16px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ maxWidth: 420, width: '100%', background: '#101013', border: '1px solid #27272a', borderRadius: 18, padding: '26px 24px', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 999, background: '#edb210', boxShadow: '0 0 0 4px rgba(237,178,16,0.16)' }} />
+            <span style={{ fontSize: 11, letterSpacing: 3, textTransform: 'uppercase', color: '#edb210', fontWeight: 700 }}>Admin · Two-step verification</span>
+          </div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>Confirm it&apos;s really you</h1>
+          <p style={{ fontSize: 12, color: '#a1a1aa', lineHeight: 1.6, margin: '0 0 16px' }}>
+            Your password was accepted. To protect the admin portal, a one-time code is emailed to your admin inbox before the portal unlocks.
+            {verifyMsg && verifyMsg.toLowerCase().includes('sent') && verifyEmail && <span> Sending to <strong style={{ color: '#f7f7f7' }}>{verifyEmail}</strong>.</span>}
+          </p>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            <button onClick={sendAdminVerifyCode} disabled={verifyBusy} style={{ ...buttonPrimary, flex: 1, background: verifyBusy ? '#555' : '#fff' }}>
+              {verifyBusy ? 'Sending…' : 'Send me a code'}
+            </button>
+          </div>
+          {verifyDevCode && (
+            <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, background: 'rgba(237,178,16,0.1)', border: '1px solid rgba(237,178,16,0.35)', fontSize: 12, color: '#fbbf24', lineHeight: 1.5 }}>
+              <strong>Dev mode code:</strong> <span style={{ letterSpacing: 4, fontWeight: 800 }}>{verifyDevCode}</span> — use it below (production sends this only by email).
+            </div>
+          )}
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            value={verifyCode}
+            onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="6-digit code"
+            style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: 12, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 16, letterSpacing: 6, textAlign: 'center', marginBottom: 12 }}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#a1a1aa', marginBottom: 14, cursor: 'pointer' }}>
+            <input type="checkbox" checked={verifyRemember} onChange={(e) => setVerifyRemember(e.target.checked)} style={{ accentColor: '#fff' }} />
+            Remember this device for 30 days (otherwise this browser re-verifies every 24 hours)
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={confirmAdminVerifyCode} disabled={verifyBusy || verifyCode.length !== 6} style={{ ...buttonPrimary, flex: 1, background: verifyBusy || verifyCode.length !== 6 ? '#555' : '#fff' }}>
+              {verifyBusy ? 'Checking…' : 'Verify & unlock'}
+            </button>
+            <button onClick={resendAdminVerifyCode} disabled={verifyBusy} style={{ ...buttonGhost }}>
+              Resend
+            </button>
+          </div>
+          {verifyMsg && <p style={{ marginTop: 12, fontSize: 12, color: verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', lineHeight: 1.5 }}>{verifyMsg}</p>}
+          <p style={{ marginTop: 14, fontSize: 10, color: '#666', lineHeight: 1.5 }}>
+            Set <code style={{ color: '#999' }}>ADMIN_VERIFY_EMAIL</code> (or <code style={{ color: '#999' }}>SUPPORT_EMAIL</code>) in the platform environment to choose where these codes are delivered. Codes expire in 10 minutes; wrong codes lock the email for 15 minutes after 5 tries.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   // RENDER (UPDATED product form with dynamic categories, explanations, file upload)
   // ============================================================
   return (
@@ -1605,12 +1820,22 @@ export default function AdminPortal() {
               🎥 STREAMER MODE — customer data hidden
             </span>
           )}
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={streamerMode ? 'Password hidden while streaming' : 'Admin password'} disabled={streamerMode}
+          <input
+            type={streamerMode ? 'text' : 'password'}
+            value={streamerMode ? (password ? '••••••••' : '') : password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={streamerMode ? 'Password hidden while streaming' : 'Admin password'}
+            disabled={streamerMode}
             style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px', opacity: streamerMode ? 0.45 : 1 }} />
-          <button onClick={() => { if (streamerMode) { setRevealAddresses(false); } setStreamerMode(!streamerMode); }}
+          <button onClick={() => { setRevealAddresses(false); if (streamerMode) { setPassword(''); } setStreamerMode(!streamerMode); }}
             style={{ ...buttonGhost, padding: '10px 14px', background: streamerMode ? 'rgba(237,178,16,0.14)' : 'transparent', color: streamerMode ? '#edb210' : '#ccc' }}>
             {streamerMode ? '🎥 Streamer mode: ON' : '🎥 Streamer mode: OFF'}
           </button>
+          {streamerMode && (
+            <span style={{ width: '100%', fontSize: 10, color: '#888', lineHeight: 1.4 }}>
+              The password field is disabled and shows a fixed mask — nobody can read the real length while you stream. Type your password after switching Streamer Mode OFF.
+            </span>
+          )}
           {!streamerMode && (
             <button onClick={toggleReveal} disabled={revealBusy}
               style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
@@ -1724,10 +1949,10 @@ export default function AdminPortal() {
                   {isRunning ? 'Running…' : 'Authorize & Trigger Draw'}
                 </button>
                 {password && (
-                  <a href={`/api/admin/export-winners?password=${encodeURIComponent(password)}`}
-                    style={{ display: 'inline-block', marginTop: 12, fontSize: 12, color: '#60a5fa' }}>
+                  <button onClick={downloadWinners}
+                    style={{ display: 'inline-block', marginTop: 12, fontSize: 12, color: '#60a5fa', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
                     ↓ Download all-time winners CSV
-                  </a>
+                  </button>
                 )}
                 {resultMessage && <pre style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10, whiteSpace: 'pre-wrap', fontFamily: 'inherit', background: '#09090b', padding: 12, borderRadius: 10 }}>{resultMessage}</pre>}
                 

@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem, adminRequestAuthorized} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  const master = getAdminPassword() || '';
-  if (!master || password !== master) {
+  if (!adminRequestAuthorized(request, password)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

@@ -957,17 +957,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
             <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
-          {mapboxHint === 'autofill-on' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion and the full address (street, city, state, ZIP, country) is filled in for you.</div>
-          )}
-          {mapboxHint === 'autofill-off' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — enter your full address manually (street number + name, city, state, ZIP, country).</div>
-          )}
-          {mapboxHint === 'no-token' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your full address manually (street number + name, city, state, ZIP, country).</div>
-          )}
-          {mapboxHint === 'token-rejected' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
+          {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (
+          <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: mapboxHint === 'autofill-on' ? '#22c55e' : mapboxHint === 'autofill-off' ? '#f59e0b' : '#ef4444', boxShadow: `0 0 0 2px ${mapboxHint === 'autofill-on' ? 'rgba(34,197,94,0.16)' : mapboxHint === 'autofill-off' ? 'rgba(245,158,11,0.16)' : 'rgba(239,68,68,0.16)'}` }} />
+            {mapboxHint === 'autofill-on'
+              ? 'Address autofill on — pick a suggestion to fill the full address'
+              : mapboxHint === 'autofill-off'
+                ? 'Address autofill off — enter your full address manually'
+                : mapboxHint === 'no-token'
+                  ? 'Address autofill off (no Mapbox token) — enter manually'
+                  : mapboxHint === 'token-rejected'
+                    ? 'Address autofill error — enter manually'
+                    : ''}
+          </div>
           )}
 
           <div style={{ marginBottom: 8 }}>

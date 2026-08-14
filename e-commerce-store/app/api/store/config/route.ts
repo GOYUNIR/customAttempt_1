@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, SCHEDULE_OVERRIDE_KEY, SOCIAL_PROOF_OVERRIDE_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, SCHEDULE_OVERRIDE_KEY, SOCIAL_PROOF_OVERRIDE_KEY} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { mergeOrbsConfig } from '@/lib/storefront-config';
 
@@ -134,8 +134,7 @@ export async function GET(request: NextRequest) {
     const sessionUser = await getSessionUser(request);
     const authHeader = request.headers.get('authorization') || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    const adminPassword = getAdminPassword() || '';
-    const isAuthorized = Boolean((sessionUser && sessionUser.role === 'admin') || (adminPassword && bearer === adminPassword));
+    const isAuthorized = Boolean((sessionUser && sessionUser.role === 'admin') || verifyAdminPassword(bearer));
     if (!isAuthorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

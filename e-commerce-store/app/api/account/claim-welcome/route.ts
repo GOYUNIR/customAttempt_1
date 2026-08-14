@@ -48,6 +48,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Account not found.' }, { status: 404 });
     }
 
+    // Anti-exploitation: welcome rewards only unlock after the email is verified.
+    if (user.emailVerified === false) {
+      return NextResponse.json({ error: 'Confirm your email first — the verification code unlocks your welcome rewards.' }, { status: 403 });
+    }
+
     if (user.welcomePromoCode) {
       const used = await isWelcomeCodeUsed(redis, user.welcomePromoCode, user.email);
       return NextResponse.json({

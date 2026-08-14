@@ -184,6 +184,19 @@ export default function CatalogPage() {
                 : `ENTRIES OPEN — ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
             })()
           : 'ENTER BEFORE DROP';
+        // Archived releases get the same attention chip as upcoming ones, with
+        // wording that matches their real state (seeded archives carry a
+        // goLiveAt/soldOut story; manually archived items fall back gracefully).
+        const archiveBadge =
+          section === 'archive'
+            ? isEnterable
+              ? { text: 'STILL OPEN — ENTER NOW', green: true }
+              : isRaffle
+                ? { text: 'DRAW COMPLETE — SOLD OUT', green: false }
+                : soldOutDate
+                  ? { text: 'SOLD OUT — DROP COMPLETE', green: false }
+                  : { text: 'PREVIOUSLY RELEASED', green: false }
+            : null;
         return (
           <motion.button
             key={item.name}
@@ -231,9 +244,9 @@ export default function CatalogPage() {
                 {upcomingBadge}
               </div>
             )}
-            {section === 'archive' && isEnterable && (
-              <div style={{ marginTop: 8, display: 'inline-block', padding: '4px 8px', borderRadius: 999, fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }}>
-                STILL OPEN — ENTER NOW
+            {section === 'archive' && archiveBadge && (
+              <div style={{ marginTop: 8, display: 'inline-block', padding: '4px 8px', borderRadius: 999, fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', background: archiveBadge.green ? 'rgba(52,211,153,0.12)' : 'rgba(250,204,21,0.12)', color: archiveBadge.green ? '#34d399' : '#facc15', border: `1px solid ${archiveBadge.green ? 'rgba(52,211,153,0.35)' : 'rgba(250,204,21,0.35)'}` }}>
+                {archiveBadge.text}
               </div>
             )}
             {section === 'archive' && (isRaffle || checkoutMode === 'FCFS' || soldOutDate) && (

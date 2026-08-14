@@ -60,8 +60,8 @@ Redis data browser stays filterable and organised at any scale:
 | `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (sets), `entries:last_auto:<variant>:<size>` (string) |
 | `draws:` | Draw summaries + history | `draws:last` (string), `draws:history` (list) |
 | `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:override:schedule` / `ops:override:social_proof` / `ops:override:product:<id>` (strings) |
-| `auth:` | Auth tokens | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string) |
-| `admin:` | Admin-only data | `admin:audit_log` (list) |
+| `auth:` | Auth tokens + verification challenges | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string), `auth:verify:<email>` (ttl string) |
+| `admin:` | Admin-only data + two-step verification state | `admin:audit_log` (list), `admin:verify:<email>` (ttl string), `admin:device:<token>` (ttl string), `admin:verify_attempts:<email>` / `admin:send_attempts:<email>` (ttl strings) |
 | `analytics:` | Social-proof counters + online visitors | `analytics:online` (zset), `analytics:social_boost`, `analytics:ticks:last` / `ticks:today` / `ticks:day` (strings) |
 | `customer:` | Customer-submitted data | `customer:waitlist` (hash), `customer:addresses` (hash) |
 | `cache:` | Ephemeral caches (safe to delete anytime) | `cache:stripe_portal_config` (string) |
@@ -172,10 +172,21 @@ the ledger. Settings tabs include:
   `/api/admin/wipe`, which reuses `runSeedDefaults` from the seed route).
 - **SetUp** — environment-variable status dashboard (✓/✗, never values; backed
   by `/api/admin/env-status`) + production launch checklist.
+- **Two-step admin verification** — after Basic Auth, `/admin` requires a
+  one-time code emailed to `ADMIN_VERIFY_EMAIL` (falls back to
+  `SUPPORT_EMAIL`). proxy.ts validates a device cookie on EVERY `/api/admin`
+  request (30 days when "remember this device" is checked, else 24h), so a
+  leaked password alone can't reach the portal or its APIs. Codes are 6 digits,
+  expire in 10 min, lock after 5 wrong tries, and resends are throttled to 1/min.
 - **Streamer Mode** — default ON on load. Masks every customer email, shipping
-  address and card number and disables the password field so the portal is safe
-  to share on a livestream. Everything destructive still requires turning it
-  OFF first, then entering the admin password.
+  address and card number and disables the password field (fixed bullet mask —
+  the real password length is never visible) so the portal is safe to share on
+  a livestream. Everything destructive still requires turning it OFF first,
+  then entering the admin password.
+- **Admin security hygiene** — all `/admin` + `/api/admin` requests require
+  HTTP Basic Auth in `proxy.ts` (no more password-in-query bypasses), admin
+  routes compare the password with `verifyAdminPassword()` (timing-safe), and
+  the admin password never travels in URLs (CSV export uses a fetch + blob).
 
 
 ## Core Feature Reference (for agents)
@@ -261,8 +272,13 @@ pick a suggestion (the dropdown fills the full address).
 
 ### Rewards & points
 
-- Signup awards 250 points + a one-time 10% welcome promo bound to the email.
-  Earn rate / redeem rate / min/max / gifting are admin-configurable.
+- **Email verification unlocks rewards.** New signups are created unverified
+  with 0 points; a 6-digit code is emailed and must be confirmed
+  (`/api/auth/verify-email`, `auth:verify:<email>`) before the 250 welcome
+  points + one-time 10% welcome promo are issued and a session is created.
+  `/account` shows a verify card for unverified users and `/api/account/claim-welcome`
+  refuses to issue a code until verified. Earn rate / redeem rate / min/max /
+  gifting are admin-configurable.
 - `/account` shows the balance, redeem box (creates a unique one-time promo in
   `promo:codes`), the credits list, and a **custom redemption message** set in
   `/admin` → Rewards (falls back to built-in copy that includes the gift %).
@@ -295,7 +311,8 @@ pick a suggestion (the dropdown fills the full address).
 | `STRIPE_SECRET_KEY` | Stripe API |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 | `STRIPE_PRODUCT_ID` (optional) | Global default Stripe price ID when a product/size has none set in admin. Per-product IDs always win. No hardcoded Stripe ID anywhere — if unset, checkout fails loudly with `price_placeholder_not_configured`. |
-| `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD` | `/admin` protection |
+| `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD` | `/admin` protection (Basic Auth + two-step verification) |
+| `ADMIN_VERIFY_EMAIL` (recommended) | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL` / `REPLY_TO_EMAIL`. Without one, the admin portal locks behind the code step. |
 | `CRON_SECRET` | Cron endpoint auth |
 | `RESEND_API_KEY` / `RESEND_FROM` (optional) | Transactional email |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox address autofill (must be set in the SAME env as the deploy + redeploy) |
@@ -344,6 +361,64 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-14 — Multi-part storefront + admin hardening pass:**
+  - **Mapbox full-address fill fixed** (`lib/mapbox-autofill.ts`): confirmed in
+    the search-js v1.6.0 bundle that the SDK's `retrieve` handler dispatches the
+    event and THEN writes ONLY `address_line1+2+3` into a `street-address` input
+    (dispatching React-simulated input events that clobber state). `handleRetrieve`
+    now composes the full address, marks the input with a `data-mapbox-full-fill`
+    attribute, installs a **capture-phase document `input` guard** that rewrites
+    the full address the instant the SDK truncates it (8s window), and re-resolves
+    the input element on every retry so a React node replacement can't orphan it.
+    `composeFullAddress` gained more property fallbacks (`place_formatted`,
+    `neighborhood`, `state`, `zip`, `detail.feature.properties`).
+  - **Admin two-step verification (2FA)** — after Basic Auth, `/admin` now
+    requires a 6-digit code emailed to `ADMIN_VERIFY_EMAIL` (fallback
+    `SUPPORT_EMAIL`). New keys `admin:verify:<email>`, `admin:device:<token>`,
+    `admin:verify_attempts:<email>`, `admin:send_attempts:<email>`; new routes
+    `/api/admin/verify-start|send|confirm|status`; `proxy.ts` validates the
+    device cookie on every `/api/admin` request (30d remember / 24h browser-only),
+    rate-limits resends (1/min) and locks after 5 wrong codes (15 min). The admin
+    page shows a verification gate until confirmed and re-shows it whenever a
+    401 `ADMIN_2FA_REQUIRED` arrives mid-session.
+  - **Admin security hygiene** — `proxy.ts` now enforces Basic Auth on EVERY
+    `/admin` + `/api/admin` path (the password-in-query bypass for audit /
+    export / self-test is gone). All admin routes compare passwords via the new
+    timing-safe `verifyAdminPassword()` / `adminRequestAuthorized()` helpers in
+    `lib/server-config.ts`. The admin page no longer puts the password in URLs
+    (CSV export now uses a fetch + blob download) and `/api/store/config`'s
+    Bearer check is timing-safe too.
+  - **Streamer-mode password mask** (`app/admin/page.tsx`): the password field
+    shows a fixed `••••••••` mask (never the real length) while Streamer Mode is
+    ON, the field is disabled, and toggling it ON clears any typed value.
+  - **Customer email verification** (anti-exploitation) — new signups are
+    created unverified with 0 rewards; a 6-digit code is emailed and confirmed
+    via the new `/api/auth/verify-email` (code stored hashed under
+    `auth:verify:<email>`, 30-min TTL, 6-attempt lock, 60s resend throttle via
+    `/api/auth/resend-verification`). Welcome points + the one-time 10% promo +
+    session are issued only after verification. The signup page gained an inline
+    verify step, `/account` shows a verify card for unverified users, and
+    `/api/account/claim-welcome` refuses to issue rewards until verified.
+  - **Catalog archived chips** (`app/catalog/page.tsx`): archived cards now get
+    the same attention chip as upcoming ones — green "STILL OPEN — ENTER NOW"
+    when enterable, else a yellow chip with state-accurate wording
+    ("DRAW COMPLETE — SOLD OUT" for raffles, "SOLD OUT — DROP COMPLETE" when a
+    sold-out date exists, "PREVIOUSLY RELEASED" otherwise). The seeded-vs-manual
+    messaging difference (countdown vs "ENTER BEFORE DROP") comes from whether
+    the entry carries a `goLiveAt` date.
+  - **Address-autofill hint decluttered** (Storefront + SiteChrome cart drawer):
+    the verbose "✓ Address autofill is on — pick a suggestion and the full
+    address…" banner is now a tiny dot + label like the "Encrypted payment
+    setup" indicator, placed above it.
+  - **Share/OG card follows design presets** (`app/opengraph-image.tsx`,
+    `app/layout.tsx`, admin `applyThemePreset`): preset apply now also sets the
+    share-background/accent/text colors, the OG generator falls back to the live
+    theme colors, and `generateMetadata` emits an absolute OG image URL (env URL
+    → admin shareUrl → example.com) so messengers (WhatsApp/iMessage/Discord)
+    can fetch the card image.
+  - Docs: AGENTS.md updated (key map, admin section, rewards section, env table)
+    + README updated in the same change set.
 
 - **2026-08-14 — Admin portal console-error + settings-save fixes:**
   - **Site-wide hydration mismatch fixed** (`app/layout.tsx`): the layout's

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword, AUDIT_LOG_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, adminRequestAuthorized, AUDIT_LOG_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export async function appendAudit(
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (password !== getAdminPassword()) {
+  if (!adminRequestAuthorized(request, password)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
   const redis = createRedisClient();

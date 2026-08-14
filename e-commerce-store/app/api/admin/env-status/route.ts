@@ -88,6 +88,16 @@ export async function GET() {
       hint: 'Both username AND password must be set, otherwise /admin is disabled.',
     },
     {
+      key: 'Admin verify email',
+      label: 'Admin two-step inbox',
+      required: true,
+      set: has('ADMIN_VERIFY_EMAIL', 'SUPPORT_EMAIL', 'REPLY_TO_EMAIL'),
+      aliases: ['ADMIN_VERIFY_EMAIL', 'SUPPORT_EMAIL', 'REPLY_TO_EMAIL'],
+      buildTime: false,
+      sensitive: false,
+      hint: 'Inbox that receives the /admin two-step verification code (ADMIN_VERIFY_EMAIL, falling back to SUPPORT_EMAIL). Without one the portal locks behind the code step.',
+    },
+    {
       key: 'Cron secret',
       label: 'Cron endpoint secret',
       required: true,

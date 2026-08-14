@@ -1,18 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, WAITLIST_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts, verifyAdminPassword, adminRequestAuthorized, WAITLIST_KEY} from '@/lib/server-config';
 import { sendReleaseAnnouncementEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
 function authorized(password: string) {
-  const master = getAdminPassword() || '';
-  return Boolean(master) && password === master;
+  return verifyAdminPassword(password);
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = String(url.searchParams.get('password') || '');
-  if (!authorized(password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!adminRequestAuthorized(request, password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ subscribers: [], activeCount: 0 });

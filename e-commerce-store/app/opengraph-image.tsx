@@ -9,15 +9,27 @@ export default async function OpenGraphImage() {
   const redis = createRedisClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
+  const themeColors = config.themeColors || {};
   const logoUrl = String(branding.logoUrl || '').trim();
   const brandName = String(branding.brandName || branding.shareTitle || 'Store');
   const title = String(branding.shareTitle || brandName);
   const description = String(branding.shareDescription || 'Private releases, handled cleanly.');
   const tagline = String(branding.shareTagline || '');
   const shareImageUrl = String(branding.shareImageUrl || '').trim();
-  const background = String(branding.shareBackground || '#0B0B0F');
-  const accent = String(branding.shareAccent || '#D4AF37');
-  const text = String(branding.shareText || '#F5F2E9');
+  // Share colors fall back to the live /admin → Settings theme so applying a
+  // Design Preset updates the link-preview card too (explicit branding.share*
+  // values always win).
+  const background = String(
+    branding.shareBackground || themeColors.primaryBackground || '#0B0B0F',
+  );
+  const accent = String(
+    branding.shareAccent ||
+      themeColors.checkoutCtaButton ||
+      themeColors.accentBlue ||
+      themeColors.accentPurple ||
+      '#D4AF37',
+  );
+  const text = String(branding.shareText || themeColors.textMain || '#F5F2E9');
   // The URL shown on the card is NEVER hardcoded — derive it from the platform
   // env (NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL / SITE_URL) or the admin shareUrl.
   const siteUrl = String(getSiteUrl() || branding.shareUrl || '').replace(/^https?:\/\//, '').replace(/\/+$/, '') || 'example.com';

@@ -999,17 +999,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     <div style={{ fontSize: 10, color: drawerTextMuted, lineHeight: 1.4 }}>Signed in as {signedInEmail} — email can&apos;t be changed here.</div>
                   ) : null}
                   <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Full shipping address (street, city, state, ZIP, country)" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
-                  {mapboxHint === 'autofill-on' && (
-                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion and the full address (street, city, state, ZIP, country) is filled in for you.</div>
-                  )}
-                  {mapboxHint === 'autofill-off' && (
-                    <div style={{ fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>
-                  )}
-                  {mapboxHint === 'no-token' && (
-                    <div style={{ fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your address manually.</div>
-                  )}
-                  {mapboxHint === 'token-rejected' && (
-                    <div style={{ fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>
+                  {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 999, background: mapboxHint === 'autofill-on' ? '#22c55e' : mapboxHint === 'autofill-off' ? '#f59e0b' : '#ef4444' }} />
+                      {mapboxHint === 'autofill-on'
+                        ? 'Address autofill on'
+                        : mapboxHint === 'autofill-off'
+                          ? 'Address autofill off — enter manually'
+                          : mapboxHint === 'no-token'
+                            ? 'Address autofill off — enter manually'
+                            : 'Address autofill error — enter manually'}
+                    </div>
                   )}
                   {showPromoField ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

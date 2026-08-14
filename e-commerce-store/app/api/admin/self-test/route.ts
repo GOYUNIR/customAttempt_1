@@ -3,7 +3,7 @@ import {
   createRedisClient,
   createStripeClient,
   loadProducts,
-  getAdminPassword,
+  adminRequestAuthorized,
   safeParseRedisItem,
   PROMO_CODES_KEY,
   POOL_KEY_PREFIX,
@@ -47,8 +47,7 @@ function isHexColor(value: unknown): boolean {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  const master = getAdminPassword() || '';
-  if (!master || password !== master) {
+  if (!adminRequestAuthorized(request, password)) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

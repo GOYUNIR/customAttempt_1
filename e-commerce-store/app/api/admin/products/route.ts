@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts , getAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
+import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -122,8 +122,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = body.password || '';
-  const master = getAdminPassword() || '';
-  if (!master || password !== master) {
+  if (!verifyAdminPassword(password)) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

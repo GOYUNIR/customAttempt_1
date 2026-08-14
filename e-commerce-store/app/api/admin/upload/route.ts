@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , getAdminPassword, PRODUCTS_KEY} from '@/lib/server-config';
+import { createRedisClient , verifyAdminPassword, PRODUCTS_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +15,7 @@ export async function POST(request: Request) {
     const file = formData.get('file') as File;
     const password = formData.get('password') as string;
 
-    const master = getAdminPassword() || '';
-    if (!master || password !== master) {
+    if (!verifyAdminPassword(password)) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

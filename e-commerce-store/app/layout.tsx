@@ -45,10 +45,13 @@ export async function generateMetadata(): Promise<Metadata> {
   const shareDescription = String(branding.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || 'Private releases, handled cleanly.');
   // The site URL is NEVER hardcoded — set NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL /
   // SITE_URL in the platform (Vercel) and it flows into metadata, canonical, OG
-  // and emails. See lib/env.ts for the full alias chain.
-  const siteUrl = getSiteUrl();
-  const base = siteUrl || 'https://example.com';
+  // and emails. See lib/env.ts for the full alias chain. The admin shareUrl is
+  // the fallback so a buyer that only sets Branding → Share URL still gets a
+  // working link-preview card.
+  const envSiteUrl = getSiteUrl();
+  const base = envSiteUrl || (String(branding.shareUrl || '').replace(/\/+$/, '') || 'https://example.com');
   const canonicalUrl = branding.shareUrl && /^https?:\/\//i.test(String(branding.shareUrl)) ? String(branding.shareUrl).replace(/\/$/, '') : base;
+  const ogImageUrl = `${base.replace(/\/+$/, '')}/opengraph-image`;
 
   return {
     metadataBase: new URL(base),
@@ -69,14 +72,16 @@ export async function generateMetadata(): Promise<Metadata> {
       description: shareDescription,
       url: canonicalUrl,
       siteName: brandName,
-      images: ['/opengraph-image'],
+      // Absolute URL — messengers (WhatsApp / iMessage / Discord / Slack) fetch
+      // the image from the rendered card, so a relative path never works for them.
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName }],
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
       title: brandName,
       description: shareDescription,
-      images: ['/opengraph-image'],
+      images: [ogImageUrl],
     },
   };
 }

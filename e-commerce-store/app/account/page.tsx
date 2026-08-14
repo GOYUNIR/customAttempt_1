@@ -127,6 +127,60 @@ export default function AccountPage() {
     redemptionInfoMessage?: string;
   }>({});
   const didAutoLookup = useRef(false);
+  // Email-verification card (new accounts must prove the inbox before rewards).
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+
+  const handleAccountVerify = async () => {
+    if (!user?.email) return;
+    if (verifyCode.length !== 6) {
+      setVerifyMsg('Enter the 6-digit code from your email.');
+      return;
+    }
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, code: verifyCode }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyMsg('Email verified — your welcome rewards are unlocked.');
+        setVerifyCode('');
+        setUser({ ...user, emailVerified: true, rewards: data.user?.rewards ?? user.rewards, welcomePromoCode: data.user?.welcomePromoCode ?? user.welcomePromoCode });
+      } else {
+        setVerifyMsg(data.error || 'Verification failed.');
+      }
+    } catch {
+      setVerifyMsg('Network error.');
+    }
+    setVerifyBusy(false);
+  };
+
+  const handleAccountResend = async () => {
+    if (!user?.email) return;
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const res = await fetch('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyMsg(data.devCode ? `Dev-mode code: ${data.devCode}` : 'A fresh code was sent. Check your email (and spam).');
+      } else {
+        setVerifyMsg(data.error || 'Could not resend the code.');
+      }
+    } catch {
+      setVerifyMsg('Network error.');
+    }
+    setVerifyBusy(false);
+  };
 
   const copyCode = async (code: string) => {
     try {
@@ -330,6 +384,10 @@ export default function AccountPage() {
   const [claimingWelcome, setClaimingWelcome] = useState(false);
 
   const claimWelcome = async () => {
+    if (user && user.emailVerified === false) {
+      notify({ id: 'account-welcome', type: 'alert', message: 'Confirm your email first — the code above unlocks your welcome rewards.' });
+      return;
+    }
     setClaimingWelcome(true);
     notify({ id: 'account-welcome', type: 'loading', message: 'Issuing your welcome credit...', persist: true });
     try {
@@ -534,6 +592,34 @@ export default function AccountPage() {
               : 'Sign in to securely view and manage your entries and rewards.'}
           </p>
         </div>
+
+        {isLoggedIn && user && user.emailVerified === false && (
+          <div style={{ background: configPalette.cardBackground, border: '1px solid rgba(250,204,21,0.35)', borderRadius: 20, padding: 18, marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: '#facc15', boxShadow: '0 0 0 3px rgba(250,204,21,0.16)' }} />
+              <div style={{ fontSize: 13, fontWeight: 700, color: configPalette.cardTextMain }}>Confirm your email to unlock rewards</div>
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
+              We emailed a 6-digit code to <strong style={{ color: configPalette.cardTextMain }}>{user.email}</strong> when you signed up. Enter it below to verify the inbox is real — your 250 welcome points and one-time 10% credit unlock right after.
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={verifyCode}
+                onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="6-digit code"
+                style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
+              />
+              <button onClick={handleAccountVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : '#facc15', color: '#1a1a06', fontWeight: 700, fontSize: 12, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer' }}>
+                {verifyBusy ? 'Verifying…' : 'Verify'}
+              </button>
+              <button onClick={handleAccountResend} disabled={verifyBusy} style={{ padding: '9px 14px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: verifyBusy ? 'not-allowed' : 'pointer' }}>Resend code</button>
+            </div>
+            {verifyMsg && <p style={{ margin: '10px 0 0', fontSize: 12, color: verifyMsg.toLowerCase().includes('verified') || verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', lineHeight: 1.5 }}>{verifyMsg}</p>}
+          </div>
+        )}
 
         {!isLoggedIn && (
           <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 20, padding: 20, marginBottom: 18 }}>

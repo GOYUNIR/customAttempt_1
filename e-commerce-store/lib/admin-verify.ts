@@ -1,0 +1,163 @@
+/**
+ * Server-side helpers for the admin portal's two-step email verification.
+ *
+ * Flow: the operator's browser must already pass HTTP Basic Auth (proxy.ts).
+ * proxy.ts then requires a valid device cookie (`goyunir_admin_device`) for
+ * every /api/admin request EXCEPT the verify-* endpoints and the /admin page
+ * itself. To get that cookie the operator types their admin email, receives a
+ * 6-digit one-time code, and confirms it here. The device token is stored in
+ * Redis (`admin:device:<token>`) so a stolen cookie can be revoked by deleting
+ * the key — and it is scoped per browser with an httpOnly cookie.
+ *
+ * Rate limiting: wrong-code attempts are capped (5 per email per 15 min) and
+ * resends are throttled (1 per 60s), so the code cannot be brute-forced.
+ */
+
+import { randomBytes, createHash } from 'crypto';
+import {
+  adminVerifyKey,
+  adminDeviceKey,
+  adminVerifyAttemptsKey,
+  adminSendAttemptsKey,
+} from '@/lib/redis-keys';
+import { sendAdminVerificationEmail } from '@/lib/email';
+
+const CODE_TTL_SECONDS = 10 * 60; // 10 minutes
+const MAX_ATTEMPTS = 5;
+const ATTEMPT_WINDOW_SECONDS = 15 * 60; // 15 minute lockout window
+const RESEND_THROTTLE_SECONDS = 60;
+const DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days ("remember device")
+const SESSION_DEVICE_TTL_SECONDS = 24 * 60 * 60; // 1 day ("this browser only")
+
+export function generateAdminCode(): string {
+  // 6 digits, zero-padded so "042913" style codes are valid too.
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+}
+
+function hashCode(code: string): string {
+  const salt = randomBytes(8).toString('hex');
+  return `${salt}:${createHash('sha256').update(salt + ':' + code).digest('hex')}`;
+}
+
+function verifyCodeHash(hashed: string, code: string): boolean {
+  const [salt, expected] = String(hashed || '').split(':');
+  if (!salt || !expected) return false;
+  const actual = createHash('sha256').update(salt + ':' + code).digest('hex');
+  return actual === expected;
+}
+
+/**
+ * Create (or refresh) an admin sign-in challenge for `email` and email the
+ * code. Throttled to one send per email per 60 seconds. In non-production
+ * environments the code is also returned as `devCode` so local development
+ * works without a configured inbox.
+ */
+export async function issueAdminCode(
+  redis: any,
+  email: string,
+): Promise<{ ok: boolean; devCode?: string; error?: string; throttled?: boolean }> {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return { ok: false, error: 'Email required.' };
+
+  // Resend throttle.
+  const sendKey = adminSendAttemptsKey(normalized);
+  const lastSend = await redis.get(sendKey).catch(() => null);
+  if (lastSend && Date.now() - Number(lastSend) < RESEND_THROTTLE_SECONDS * 1000) {
+    const remaining = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(lastSend)) / 1000));
+    return { ok: false, throttled: true, error: `Please wait ${remaining}s before requesting another code.` };
+  }
+
+  const code = generateAdminCode();
+  await redis.setex(adminVerifyKey(normalized), CODE_TTL_SECONDS, JSON.stringify({
+    codeHash: hashCode(code),
+    createdAt: Date.now(),
+  }));
+  await redis.setex(sendKey, RESEND_THROTTLE_SECONDS, String(Date.now()));
+
+  const res = await sendAdminVerificationEmail({ to: normalized, code });
+  if (res && res.ok === false && !('skipped' in res && res.skipped === true)) {
+    // Email provider failed — don't silently strand the operator.
+    return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY / ADMIN_VERIFY_EMAIL.' };
+  }
+  let devCode: string | undefined;
+  if (process.env.NODE_ENV !== 'production') {
+    devCode = code;
+  }
+  return { ok: true, devCode };
+}
+
+/**
+ * Validate a submitted one-time code for `email`. Consumes the challenge on
+ * success; on repeated failures the email is locked for 15 minutes.
+ */
+export async function consumeAdminCode(
+  redis: any,
+  email: string,
+  code: string,
+): Promise<{ ok: boolean; error?: string; locked?: boolean }> {
+  const normalized = String(email || '').trim().toLowerCase();
+  const attemptsKey = adminVerifyAttemptsKey(normalized);
+  const attempts = Number(await redis.get(attemptsKey).catch(() => 0)) || 0;
+  if (attempts >= MAX_ATTEMPTS) {
+    return { ok: false, locked: true, error: 'Too many failed attempts. Try again in 15 minutes.' };
+  }
+
+  const raw = await redis.get(adminVerifyKey(normalized)).catch(() => null);
+  if (!raw) {
+    return { ok: false, error: 'No active code. Request a new one.' };
+  }
+  let payload: { codeHash?: string } = {};
+  try { payload = JSON.parse(String(raw)); } catch { payload = {}; }
+
+  if (!verifyCodeHash(payload.codeHash || '', String(code || '').trim())) {
+    const next = attempts + 1;
+    await redis.setex(attemptsKey, ATTEMPT_WINDOW_SECONDS, String(next));
+    return {
+      ok: false,
+      error:
+        next >= MAX_ATTEMPTS
+          ? 'Too many failed attempts. Try again in 15 minutes.'
+          : `Incorrect code. ${MAX_ATTEMPTS - next} attempt${MAX_ATTEMPTS - next === 1 ? '' : 's'} left.`,
+    };
+  }
+
+  await redis.del(adminVerifyKey(normalized));
+  await redis.del(attemptsKey);
+  return { ok: true };
+}
+
+/** Issue a fresh device token for the 2FA-gated admin requests. */
+export async function issueAdminDevice(
+  redis: any,
+  email: string,
+  remember: boolean,
+): Promise<{ token: string; maxAgeSeconds: number }> {
+  const token = randomBytes(32).toString('hex');
+  const maxAgeSeconds = remember ? DEVICE_TTL_SECONDS : SESSION_DEVICE_TTL_SECONDS;
+  await redis.setex(adminDeviceKey(token), maxAgeSeconds, JSON.stringify({
+    email: String(email || '').trim().toLowerCase(),
+    createdAt: Date.now(),
+  }));
+  return { token, maxAgeSeconds };
+}
+
+/** Whether a device token is currently valid (used by proxy.ts on every admin request). */
+export async function isAdminDeviceValid(redis: any, token: string): Promise<boolean> {
+  if (!token) return false;
+  const raw = await redis.get(adminDeviceKey(token)).catch(() => null);
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Boolean(parsed && (parsed.email || parsed.createdAt));
+  } catch {
+    return false;
+  }
+}
+
+/** Extract the device token from a Request's cookie header (proxy + routes). */
+export function adminDeviceTokenFromRequest(request: Request): string {
+  const cookie = request.headers.get('cookie') || '';
+  const match = cookie.match(/(?:^|;\s*)goyunir_admin_device=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+

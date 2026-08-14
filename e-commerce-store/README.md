@@ -31,7 +31,8 @@ without touching a single file.
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Redis (the data store — everything lives here) |
 | `STRIPE_SECRET_KEY` | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
-| `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` |
+| `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification) |
+| `ADMIN_VERIFY_EMAIL` | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`. |
 | `CRON_SECRET` | Protects cron endpoints |
 | `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. |
 
@@ -164,10 +165,15 @@ the whole address. See `lib/address-validation.ts`.
 
 ### Admin extras
 
+- **Two-step admin verification**: after the Basic Auth password, `/admin`
+  emails a 6-digit code to `ADMIN_VERIFY_EMAIL` (fallback `SUPPORT_EMAIL`) that
+  you must enter before the portal unlocks. Check "remember this device" to
+  skip the code for 30 days on that browser. Wrong codes lock out for 15 minutes
+  after 5 tries, so a leaked password alone can't get into `/admin`.
 - **Streamer Mode** (default ON): masks customer emails, shipping addresses and
-  card numbers and disables the password field so you can safely share the
-  portal on a livestream (draw reveals, winner announcements). Turn it off only
-  when you need to work on live data.
+  card numbers, and the password field shows a fixed mask (never the real
+  length) so you can safely share the portal on a livestream (draw reveals,
+  winner announcements). Turn it off only when you need to work on live data.
 - **SetUp tab**: environment-variable status dashboard (✓ set / ✗ missing, never
   the values) plus a production launch checklist.
 - **System → Wipe & Rebuild Redis**: destructive full wipe with **two-step

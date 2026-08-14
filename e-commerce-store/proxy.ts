@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getAdminPassword } from '@/lib/server-config';
+import { getAdminPassword, createRedisClient } from '@/lib/server-config';
+import { isAdminDeviceValid, adminDeviceTokenFromRequest } from '@/lib/admin-verify';
 
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
 const ADMIN_PASSWORD = getAdminPassword();
 
-const PASSWORD_GATE_ONLY = [
-  '/api/admin/self-test',
-  '/api/admin/selftest',
-  '/api/admin/audit',
-  '/api/admin/export-winners',
+/**
+ * These endpoints ARE the two-step verification flow, so they are reachable
+ * with Basic Auth alone. Every OTHER /api/admin request additionally requires
+ * a valid device cookie (issued by verify-confirm after an emailed code).
+ */
+const TWO_FA_EXEMPT = [
+  '/api/admin/verify-start',
+  '/api/admin/verify-send',
+  '/api/admin/verify-confirm',
+  '/api/admin/verify-status',
 ];
 
 function verifyBasicAuth(authorization: string | null) {
@@ -28,12 +34,8 @@ function verifyBasicAuth(authorization: string | null) {
   return user === ADMIN_USER && pass === ADMIN_PASSWORD;
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-
-  if (PASSWORD_GATE_ONLY.some((item) => pathname === item || pathname.startsWith(item + '/'))) {
-    return NextResponse.next();
-  }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     if (!ADMIN_USER || !ADMIN_PASSWORD) {
@@ -43,12 +45,43 @@ export function proxy(request: NextRequest) {
       });
     }
 
+    // Gate 1 — HTTP Basic Auth on EVERY admin path (page + all APIs). There is
+    // no password-in-query bypass anymore: the audit / export / self-test
+    // routes used to be reachable with `?password=…`, which leaks the password
+    // into server logs, browser history and Referer headers.
     const authHeader = request.headers.get('authorization');
     if (!verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
       });
+    }
+
+    // Gate 2 — two-step email verification. The /admin page itself and the
+    // verify-* endpoints are exempt so the operator can reach the 2FA screen;
+    // everything else requires a valid device cookie from a verified browser.
+    const isPage = pathname === '/admin' || pathname === '/admin/';
+    const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
+    if (!isPage && !isVerifyEndpoint) {
+      const token = adminDeviceTokenFromRequest(request);
+      const redis = createRedisClient();
+      let verified = false;
+      if (redis) {
+        try {
+          verified = await isAdminDeviceValid(redis, token);
+        } catch {
+          verified = false;
+        }
+      } else {
+        // No Redis configured — nothing to protect, never lock the portal.
+        verified = true;
+      }
+      if (!verified) {
+        return new NextResponse(JSON.stringify({ error: 'ADMIN_2FA_REQUIRED' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
     }
   }
 
