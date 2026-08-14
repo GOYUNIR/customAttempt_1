@@ -64,7 +64,7 @@ export default function LoginPage() {
         setError(data.error || 'Login failed');
         notify({ id: 'auth-login', type: 'error', message: data.error || 'Login failed.' });
       }
-    } catch (err) {
+    } catch {
       setError('Network error');
       notify({ id: 'auth-login', type: 'error', message: 'Network error.' });
     } finally {
@@ -91,7 +91,7 @@ export default function LoginPage() {
           <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 10, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Logging in…' : 'Log In'}</button>
         </form>
         <p style={{ marginTop: 16, fontSize: 13, color: configPalette.cardTextMuted, textAlign: 'center' }}>
-          Don't have an account? <Link href="/auth/signup" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Sign up</Link>
+          Don&apos;t have an account? <Link href="/auth/signup" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Sign up</Link>
         </p>
       </div>
     </main>

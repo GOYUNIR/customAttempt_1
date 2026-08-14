@@ -33,7 +33,7 @@ without touching a single file.
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
 | `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` |
 | `CRON_SECRET` | Protects cron endpoints |
-| `NEXT_PUBLIC_SITE_URL` or `SITE_URL` | Your canonical domain (used for links, social cards, emails) |
+| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. |
 
 ### Recommended environment variables
 
@@ -154,6 +154,26 @@ Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
 | `/story` | Brand story (admin copy + legal company name) |
 | `/admin` | The control room |
 
+### Shipping addresses are validated — strictly
+
+Every entry, cart checkout, waitlist and address update requires a **complete,
+shippable address** (street number + street name, city, state/region, ZIP/postal
+code and country). Garbage like `123 realstreet` is rejected with a clear
+message. Mapbox Address Autofill is the fast path: picking a suggestion fills
+the whole address. See `lib/address-validation.ts`.
+
+### Admin extras
+
+- **Streamer Mode** (default ON): masks customer emails, shipping addresses and
+  card numbers and disables the password field so you can safely share the
+  portal on a livestream (draw reveals, winner announcements). Turn it off only
+  when you need to work on live data.
+- **SetUp tab**: environment-variable status dashboard (✓ set / ✗ missing, never
+  the values) plus a production launch checklist.
+- **System → Wipe & Rebuild Redis**: destructive full wipe with **two-step
+  confirmation** (admin password + typing `WIPE`), optionally rebuilding the
+  seeded defaults. Use it to reset a demo or hand a clean slate to a new buyer.
+
 ---
 
 ## 8. Development
@@ -162,7 +182,9 @@ Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
 npm install
 npm run dev      # http://localhost:3000
 npm run build    # production build (type-checks + compiles)
-npm run lint     # eslint
+npm run lint     # eslint (100% clean — 0 errors, 0 warnings)
+npm test         # unit tests (node --test on tests/*.test.ts)
+npm run typecheck # tsc --noEmit
 ```
 
 Useful files:

@@ -9,8 +9,7 @@ import {
   loadProducts, // new helper to fetch product from Redis
   resolveStripePriceId,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getAvailableSizes, isConfiguredPrice } from '@/lib/storefront-config';
+import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -37,7 +36,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Product not found.' }, { status: 404 });
     }
 
-    const availableSizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
     // Also check if the size exists in the product's priceCategories
     const priceCategories = product.priceCategories || [];
     const category = priceCategories.find((cat: any) => cat.size === size);

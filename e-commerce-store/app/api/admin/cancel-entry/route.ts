@@ -3,7 +3,6 @@ import {
   createRedisClient,
   findAllOpenOrders,
   adminCancelOrder,
-  ArchiveRecord,
   loadProducts,
   getAdminPassword,
   PROMO_CODES_KEY,

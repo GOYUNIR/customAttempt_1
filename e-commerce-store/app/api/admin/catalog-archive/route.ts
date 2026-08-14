@@ -13,11 +13,6 @@ import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
-function primarySize() {
-  const sizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
-  return sizes[0] || '50ml';
-}
-
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();

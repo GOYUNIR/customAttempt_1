@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
+import { getSupportEmail } from '@/lib/env';
 
 /**
  * Server-rendered policy page (/terms, /privacy, /shipping).
@@ -20,7 +21,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
   const branding = config.branding || {};
   const brandName = String(branding.brandName || branding.shareTitle || legal.companyName || DEFAULT_LEGAL.companyName);
   const companyName = String(legal.companyName || brandName);
-  const supportEmail = String(legal.supportEmail || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
+  const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
   const blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
 
   const titles: Record<LegalPageKey, string> = {

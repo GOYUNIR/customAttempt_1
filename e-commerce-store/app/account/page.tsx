@@ -108,7 +108,7 @@ export default function AccountPage() {
     liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
   );
   const [email, setEmail] = useState('');
-  const [last4, setLast4] = useState('');
+  const [last4] = useState('');
   const [entries, setEntries] = useState<EntryRecord[] | null>(null);
   const [message, setMessage] = useState('');
   const [isBusy, setIsBusy] = useState(false);
@@ -164,16 +164,6 @@ export default function AccountPage() {
     }
   }, [isLoggedIn, user]);
 
-  // Logged-in accounts get their entries loaded automatically — no need to
-  // hunt for a "find my entries" button.
-  useEffect(() => {
-    if (isLoggedIn && user?.email && !didAutoLookup.current) {
-      didAutoLookup.current = true;
-      lookup(user.email);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn, user]);
-
   const lookup = async (emailArg?: string) => {
     const lookupEmail = String(emailArg || email || '').trim().toLowerCase();
     if (!lookupEmail) {
@@ -223,6 +213,17 @@ export default function AccountPage() {
       setIsBusy(false);
     }
   };
+
+  // Logged-in accounts get their entries loaded automatically — no need to
+  // hunt for a "find my entries" button. Lives AFTER `lookup` so the closure
+  // references the const before it runs (declared above — no TDZ access).
+  useEffect(() => {
+    if (isLoggedIn && user?.email && !didAutoLookup.current) {
+      didAutoLookup.current = true;
+      lookup(user.email);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, user]);
 
   const cancelEntry = async (entry: EntryRecord) => {
     if (!confirm(`Cancel your entry for ${entry.variant} (${entry.size})?`)) return;

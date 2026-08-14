@@ -252,11 +252,11 @@ const defaultSocialProof = {
 };
 
 const defaultFooter = {
-  instagramLink: 'https://instagram.com/goyunir',
-  tiktokLink: 'https://tiktok.com/goyunir',
-  supportEmail: 'goyunir.support@gmail.com',
+  instagramLink: '',
+  tiktokLink: '',
+  supportEmail: '',
   shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-  corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+  corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
 };
 
 // Default orb system — background glow orbs plus the animated top-bar orb.
@@ -684,7 +684,7 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
   // 'weekly' (default)
   const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   const currentDay = weekdayMap[map.weekday];
-  let daysUntil = (schedule.drawDayOfWeek - currentDay + 7) % 7;
+  const daysUntil = (schedule.drawDayOfWeek - currentDay + 7) % 7;
   let candidate = zonedTimeToTimestamp({
     timezone: schedule.timezone, year, month, day: day + daysUntil,
     hour: schedule.drawHour, minute: schedule.drawMinute, second: schedule.drawSecond ?? 0,

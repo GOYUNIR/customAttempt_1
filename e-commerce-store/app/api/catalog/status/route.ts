@@ -75,7 +75,7 @@ async function buildCatalogPayload() {
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
 
-    let allProducts: any[] = [];
+    const allProducts: any[] = [];
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
     if (allRaw) {
       for (const value of Object.values(allRaw)) {

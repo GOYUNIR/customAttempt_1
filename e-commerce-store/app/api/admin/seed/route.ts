@@ -223,12 +223,12 @@ const DEFAULT_CONFIG = {
     logoWidth: 28,
     logoHeight: 28,
     logoTransparent: false,
-    brandName: 'GOYUNIR',
+    brandName: '',
     brandFontFamily: '',
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
-    shareTitle: 'GOYUNIR',
+    shareTitle: '',
     shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
     shareBackground: '#0B0B0F',
     shareAccent: '#D4AF37',
@@ -310,11 +310,11 @@ const DEFAULT_CONFIG = {
     autoIncrementMinHourGap: 3,
   },
   brandFooterData: {
-    instagramLink: 'https://instagram.com/goyunir',
-    tiktokLink: 'https://tiktok.com/goyunir',
-    supportEmail: 'goyunir.support@gmail.com',
+    instagramLink: '',
+    tiktokLink: '',
+    supportEmail: '',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+    corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
   },
   catalogPreview: {
     upcomingDrops: [
@@ -346,6 +346,51 @@ const DEFAULT_CONFIG = {
   legal: DEFAULT_LEGAL,
 };
 
+export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liveSeeded: number; verifyCount: number }> {
+  const existing = await redis.hgetall(PRODUCTS_KEY);
+  if (existing && Object.keys(existing).length > 0) {
+    return { seeded: 0, liveSeeded: 0, verifyCount: Object.keys(existing).length };
+  }
+
+  let seeded = 0;
+  for (const product of DEFAULT_PRODUCTS) {
+    await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+    seeded++;
+  }
+
+  await redis.set(STORE_CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
+
+  // Seed live states for every product/size so a fresh store is immediately
+  // ready (the storefront + self-test expect active products to have live
+  // states). getLiveProductState is idempotent and mirrors product stock.
+  let liveSeeded = 0;
+  for (const product of DEFAULT_PRODUCTS) {
+    const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
+    const stock = Math.max(0, Number(product.totalInventory) || 0);
+    if (raffleLimit <= 0 && stock <= 0) continue; // intentional sold-out placeholder
+    const categories = Array.isArray(product.priceCategories) && product.priceCategories.length > 0
+      ? product.priceCategories
+      : [{ size: 'Standard' }];
+    for (const cat of categories) {
+      try {
+        await getLiveProductState(redis, product, String(cat.size || 'Standard'));
+        liveSeeded++;
+      } catch (err: any) {
+        console.warn(`[seed] Could not seed live state for ${product.name} (${cat.size}):`, err);
+      }
+    }
+  }
+
+  const verify = await redis.hgetall(PRODUCTS_KEY);
+  const verifyCount = verify ? Object.keys(verify).length : 0;
+
+  try {
+    await appendAudit(redis, { action: 'DEFAULTS_SEEDED', detail: `Seeded ${seeded} products · live states ${liveSeeded}`, actor: 'admin' });
+  } catch {}
+
+  return { seeded, liveSeeded, verifyCount };
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -361,50 +406,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
     }
 
-    const existing = await redis.hgetall(PRODUCTS_KEY);
-    if (existing && Object.keys(existing).length > 0) {
+    const { seeded, liveSeeded, verifyCount } = await runSeedDefaults(redis);
+
+    if (seeded === 0 && verifyCount > 0) {
       return NextResponse.json({
         success: true,
-        message: `Products already exist in Redis (${Object.keys(existing).length} products). No seeding needed.`,
-        count: Object.keys(existing).length,
+        message: `Products already exist in Redis (${verifyCount} products). No seeding needed.`,
+        count: verifyCount,
       });
     }
-
-    let seeded = 0;
-    for (const product of DEFAULT_PRODUCTS) {
-      await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-      seeded++;
-    }
-
-    await redis.set(STORE_CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
-
-    // Seed live states for every product/size so a fresh store is immediately
-    // ready (the storefront + self-test expect active products to have live
-    // states). getLiveProductState is idempotent and mirrors product stock.
-    let liveSeeded = 0;
-    for (const product of DEFAULT_PRODUCTS) {
-      const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
-      const stock = Math.max(0, Number(product.totalInventory) || 0);
-      if (raffleLimit <= 0 && stock <= 0) continue; // intentional sold-out placeholder
-      const categories = Array.isArray(product.priceCategories) && product.priceCategories.length > 0
-        ? product.priceCategories
-        : [{ size: 'Standard' }];
-      for (const cat of categories) {
-        try {
-          await getLiveProductState(redis, product, String(cat.size || 'Standard'));
-          liveSeeded++;
-        } catch (err: any) {
-          console.warn(`[seed] Could not seed live state for ${product.name} (${cat.size}):`, err);
-        }
-      }
-    }
-
-    const verify = await redis.hgetall(PRODUCTS_KEY);
-    const verifyCount = verify ? Object.keys(verify).length : 0;
-
-    try {
-      await appendAudit(redis, { action: 'DEFAULTS_SEEDED', detail: `Seeded ${seeded} products · live states ${liveSeeded}`, actor: 'admin' });
-    } catch {}
 
     return NextResponse.json({
       success: true,

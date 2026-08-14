@@ -47,7 +47,7 @@ export default function CatalogPage() {
   const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
   const [archiveScents, setArchiveScents] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [clock, setClock] = useState(Date.now());
+  const [clock, setClock] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
   // Live /api/store product payload (lifecycle-enriched) so upcoming/archive
   // cards can show real entry state, drop type, and sold-out dates.
@@ -59,12 +59,14 @@ export default function CatalogPage() {
     const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || '');
     if (!target) return false;
     const ms = new Date(target).getTime();
-    return Number.isFinite(ms) && ms > Date.now();
+    return Number.isFinite(ms) && ms > clock;
   });
 
   useEffect(() => {
     if (!needsClock) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    const tick = () => setClock(Date.now());
+    tick();
+    const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [needsClock]);
 
@@ -122,7 +124,7 @@ export default function CatalogPage() {
       slug = match?.slug;
     }
     if (slug) {
-      window.location.href = `/${slug}`;
+      window.location.assign(`/${slug}`);
       return;
     }
     setSelectedItem(item);
@@ -269,7 +271,7 @@ export default function CatalogPage() {
             </p>
           </div>
           <Link href="/" style={{ padding: '10px 14px', borderRadius: 999, background: '#f3efe6', color: '#09090b', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
-            View what's active
+            View what&apos;s active
           </Link>
         </div>
         <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.02)'), fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>

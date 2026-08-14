@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 function getResend() {
   const key = process.env.RESEND_API_KEY;
@@ -7,12 +8,12 @@ function getResend() {
   return new Resend(key);
 }
 
-/** Brand name used inside transactional emails. Falls back to the environment
- * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and then a neutral 'Store' so template
- * buyers can rename the brand without touching email markup. Set BRAND_NAME in
- * the platform for production sends. */
+/** Brand name used inside transactional emails. Prefers the platform env
+ * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and falls back to a neutral 'Store' so
+ * template buyers can rename the brand without touching email markup. Set
+ * BRAND_NAME in the platform for production sends. */
 function emailBrandName(): string {
-  return process.env.BRAND_NAME || process.env.NEXT_PUBLIC_SITE_NAME || 'Store';
+  return getBrandName() || 'Store';
 }
 
 const from = () => process.env.RESEND_FROM || `${emailBrandName()} <onboarding@resend.dev>`;
@@ -21,7 +22,7 @@ const replyTo = () => process.env.REPLY_TO_EMAIL || process.env.SUPPORT_EMAIL ||
 /** Customer support address used inside transactional emails. Customers cannot
  * reply to the automated Resend sender, so every template points them here.
  * Set SUPPORT_EMAIL in the platform (Vercel) — never hardcode a brand's inbox. */
-const supportEmail = () => process.env.SUPPORT_EMAIL || 'support@example.com';
+const supportEmail = () => getSupportEmail() || 'support@example.com';
 
 /** One confirmation when raffle entry is secured (card saved, not charged yet). */
 export async function sendEntryConfirmedEmail(opts: {
@@ -94,7 +95,7 @@ export async function sendEntryConfirmedEmail(opts: {
 
   const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
 
-  const siteBase = (opts.siteUrl || '').replace(/\/$/, '') || process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
+  const siteBase = (opts.siteUrl || '').replace(/\/+$/, '') || getSiteUrl() || fallbackSiteUrl();
   const purchasePointsPerDollar = Math.max(0, Number(opts.purchasePointsPerDollar) || 10);
   const expectedPoints =
     typeof opts.listPrice === 'number' && opts.listPrice > 0
@@ -399,7 +400,7 @@ export async function sendReleaseAnnouncementEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
+  const siteUrl = getSiteUrl() || fallbackSiteUrl();
   const productUrl = siteUrl ? `${siteUrl.replace(/\/$/, '')}/${opts.slug}` : `/${opts.slug}`;
   try {
     const { data, error } = await resend.emails.send({
@@ -529,7 +530,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
-  const siteBase = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
+  const siteBase = getSiteUrl() || fallbackSiteUrl();
   const eligibleProducts = Array.isArray(opts.eligibleProductSlugs) ? opts.eligibleProductSlugs.join(', ') : '';
   const eligibleSizes = Array.isArray(opts.eligibleSizes) ? opts.eligibleSizes.join(', ') : '';
   try {
@@ -607,7 +608,7 @@ export async function sendWelcomeEmail(opts: {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
   const brand = emailBrandName();
-  const siteUrl = String(opts.siteUrl || process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || '').replace(/\/$/, '');
+  const siteUrl = String(opts.siteUrl || getSiteUrl() || '').replace(/\/+$/, '');
   try {
     const { data, error } = await resend.emails.send({
       from: from(),

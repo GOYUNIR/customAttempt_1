@@ -11,11 +11,10 @@ import {
   resetPoolAndBlocks,
   LAST_DRAW_KEY,
   loadProducts,
-  resolveStripePriceId,
 } from '@/lib/server-config';
-import { getProductStripeId, getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
+import { getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
 import { poolKey, intentPoolKey } from '@/lib/redis-keys';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { buildOrderRef } from '@/lib/order-ref';
 
 export interface DrawResult {
   email: string;

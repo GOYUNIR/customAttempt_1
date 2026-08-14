@@ -5,6 +5,7 @@ import ThemeProvider, { type LiveThemeValue } from '@/components/ThemeProvider';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
+import { getSiteUrl, neutralBrandName } from '@/lib/env';
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
@@ -40,11 +41,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const redis = createRedisClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
-  const brandName = String(branding.brandName || branding.shareTitle || GOYUNIR_STORE_SUITE.brandFooterData.corporateEntityCopyright.replace(/\s*ALL RIGHTS RESERVED\.?$/i, '').trim() || 'Store');
+  const brandName = String(branding.brandName || branding.shareTitle || neutralBrandName());
   const shareDescription = String(branding.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || 'Private releases, handled cleanly.');
-  // The site URL is NEVER hardcoded — set NEXT_PUBLIC_SITE_URL / SITE_URL in the
-  // platform (Vercel) and it flows into metadata, canonical, OG and emails.
-  const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || '').replace(/\/$/, '');
+  // The site URL is NEVER hardcoded — set NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL /
+  // SITE_URL in the platform (Vercel) and it flows into metadata, canonical, OG
+  // and emails. See lib/env.ts for the full alias chain.
+  const siteUrl = getSiteUrl();
   const base = siteUrl || 'https://example.com';
   const canonicalUrl = branding.shareUrl && /^https?:\/\//i.test(String(branding.shareUrl)) ? String(branding.shareUrl).replace(/\/$/, '') : base;
 

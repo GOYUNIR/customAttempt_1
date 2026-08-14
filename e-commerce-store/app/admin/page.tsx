@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -38,6 +37,18 @@ function typeLabel(type: string | undefined) {
   return map[type || ''] || type || 'Unknown';
 }
 
+/** Mask an email for streamer mode: first char + domain hint, never the full inbox. */
+function maskEmail(email: string | undefined | null): string {
+  const value = String(email || '').trim();
+  if (!value) return '';
+  const at = value.indexOf('@');
+  if (at <= 0) return '••••';
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  const localHead = local.slice(0, Math.min(1, local.length));
+  return `${localHead}•••@${domain}`;
+}
+
 /** Colored badge for the audit log actor (admin=blue, user=green, system=grey). */
 function auditActorStyle(actor?: string): React.CSSProperties {
   const a = String(actor || 'admin').toLowerCase();
@@ -56,7 +67,7 @@ function formatAuditTime(at?: string): string {
   }
 }
 
-function stableOrderRef(entry: any, index: number) {
+function stableOrderRef(entry: any) {
   const existing = formatOrderRef(entry?.orderRef || entry?.ref || '');
   if (existing) return existing;
   return buildOrderRef(entry?.email || 'anon', entry?.variant || 'product', entry?.size || 'size');
@@ -223,24 +234,19 @@ export default function AdminPortal() {
   const [status, setStatus] = useState<any>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [secondsAgo, setSecondsAgo] = useState(0);
-  const [pulseTick, setPulseTick] = useState(0);
   const [revealAddresses, setRevealAddresses] = useState(false);
   const [revealBusy, setRevealBusy] = useState(false);
+  // STREAMER MODE: default ON. Masks all customer PII (addresses, emails, card
+  // numbers) and disables the password field so the portal is safe to share on
+  // a livestream (draw reveal, winner announcements). Operators toggle it off
+  // when they need to act on data — everything destructive still needs the
+  // admin password typed AFTER streamer mode is off.
+  const [streamerMode, setStreamerMode] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [authFailed, setAuthFailed] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   const [selectedDrawTarget, setSelectedDrawTarget] = useState('ALL_POOLS');
-
-  const [invEdits, setInvEdits] = useState<Record<string, string>>({});
-  const [winnersEdits, setWinnersEdits] = useState<Record<string, string>>({});
-  const [invMessage, setInvMessage] = useState('');
-  const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [availableFromInput, setAvailableFromInput] = useState('');
-  const [archiveNotes, setArchiveNotes] = useState('');
-  const [catalogMessage, setCatalogMessage] = useState('');
-  const [archivedIds, setArchivedIds] = useState<string[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
@@ -278,13 +284,18 @@ export default function AdminPortal() {
   const [selftestResults, setSelftestResults] = useState<any>(null);
   const [selftestRunning, setSelftestRunning] = useState(false);
   const [organizeMsg, setOrganizeMsg] = useState('');
+  const [wipeMsg, setWipeMsg] = useState('');
+  const [wipeBusy, setWipeBusy] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState('');
+  const [wipeRebuild, setWipeRebuild] = useState(true);
+  const [envStatus, setEnvStatus] = useState<any>(null);
+  const [envStatusLoading, setEnvStatusLoading] = useState(false);
   
   const [drawHistory, setDrawHistory] = useState<any[]>([]);
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
   const [expandedDraw, setExpandedDraw] = useState<number | null>(null);
 
   // ===== Products state (UPDATED) =====
-  const [products, setProducts] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<string | null>(null);
@@ -348,14 +359,14 @@ export default function AdminPortal() {
     logoWidth: 28,
     logoHeight: 28,
     logoTransparent: false,
-    brandName: 'GOYUNIR',
+    brandName: '',
     brandFontFamily: '',
     brandFontSize: 14,
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
-    shareTitle: 'GOYUNIR',
-    shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
+    shareTitle: '',
+    shareDescription: '',
     shareTagline: '',
     shareUrl: '',
     shareBackground: '#0B0B0F',
@@ -426,16 +437,20 @@ export default function AdminPortal() {
   // ============================================================
   const fetchStatus = async () => {
     try {
+      // Date.now is used here as a cache-buster in an async handler (called
+      // from effects + the refresh button), never during render — the React
+      // Compiler cannot classify async handlers that are both effect- and
+      // event-driven, so this is a documented false positive.
+      // eslint-disable-next-line react-hooks/purity
       const res = await adminFetch(`/api/admin/status?t=${Date.now()}`);
       if (res.status === 401 || res.status === 403) {
-        setAuthFailed(true);
-        window.location.href = '/';
+        window.location.assign('/');
         return;
       }
       const data = await res.json();
       setStatus(data);
+      // eslint-disable-next-line react-hooks/purity -- real wall-clock stamp for the "Updated Xs ago" label; async handler, not render.
       setLastUpdatedAt(Date.now());
-      setPulseTick((t) => t + 1);
     } catch {
       setStatus({ error: 'Unable to fetch status' });
     }
@@ -462,9 +477,7 @@ export default function AdminPortal() {
 
   const fetchCatalogStatus = async () => {
     try {
-      const res = await fetch('/api/catalog/status');
-      const data = await res.json();
-      if (Array.isArray(data.archivedProductIds)) setArchivedIds(data.archivedProductIds);
+      await fetch('/api/catalog/status');
     } catch {}
   };
 
@@ -580,7 +593,6 @@ export default function AdminPortal() {
       if (data.products) {
         const sorted = [...data.products].sort((a, b) => ((a.sortOrder || 0) - (b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
         setAllProducts(sorted);
-        setProducts(sorted.filter((p: any) => !p.isArchived && !p.isUpcoming));
       }
     } catch (err) {
       console.error('[Products] Fetch error:', err);
@@ -1192,10 +1204,10 @@ export default function AdminPortal() {
           ds.executionTime ? `Time: ${ds.executionTime}` : '',
           revenue > 0 ? `Revenue: $${revenue.toFixed(2)}` : '',
           ...charged.slice(0, 8).map((w: any) =>
-            `${w.email} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
+            `${streamerMode ? maskEmail(w.email) : w.email} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
           ),
           ...winners.filter((w: any) => w.status && w.status !== 'SUCCESS_CHARGED' && w.status !== 'charged').slice(0, 5).map((w: any) =>
-            `${w.email}: ${w.status}`
+            `${streamerMode ? maskEmail(w.email) : w.email}: ${w.status}`
           ),
         ].filter(Boolean);
         setResultMessage(lines.join('\n'));
@@ -1207,83 +1219,6 @@ export default function AdminPortal() {
       setResultMessage('Connection failed');
     } finally {
       setIsRunning(false);
-    }
-  };
-
-  const saveInventory = async (productName: string, size: string, productId: string) => {
-    if (!password) return alert('Enter password');
-    const key = `${productName}:${size}`;
-    const payload: any = { password, productName, size, productId };
-    if (invEdits[key] !== undefined && invEdits[key] !== '') {
-      const value = Number(invEdits[key]);
-      if (!Number.isFinite(value) || value < 0) return alert('Invalid inventory number');
-      payload.inventoryRemaining = value;
-    }
-    if (winnersEdits[key] !== undefined && winnersEdits[key] !== '') {
-      let w = Number(winnersEdits[key]);
-      if (!Number.isFinite(w) || w < 0) return alert('Winners per draw must be 0 or more');
-      w = Math.floor(w);
-      const invCap = payload.inventoryRemaining !== undefined
-        ? payload.inventoryRemaining
-        : Number(pools.find((p: any) => p.product === productName && p.size === size)?.maxLimit ?? 0);
-      if (w > invCap && invCap > 0) {
-        alert(`Winners per draw cannot exceed inventory left (${invCap}). Capping to ${Math.max(0, invCap)}.`);
-        w = Math.max(0, invCap);
-      }
-      payload.winnersPerDraw = w;
-    }
-    if (payload.inventoryRemaining === undefined && payload.winnersPerDraw === undefined) {
-      return alert('Enter inventory and/or winners per draw');
-    }
-    try {
-      const res = await adminFetch('/api/admin/inventory', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const parts = [];
-        if (payload.inventoryRemaining !== undefined) parts.push(`${payload.inventoryRemaining} left`);
-        if (payload.winnersPerDraw !== undefined) parts.push(`${payload.winnersPerDraw} winners/draw`);
-        setInvMessage(`Saved ${productName} ${size} → ${parts.join(' · ')}`);
-        showToast('UPDATED · Inventory / draw size');
-        await fetchStatus();
-      } else setInvMessage(data.error || 'Failed');
-    } catch {
-      setInvMessage('Connection failed');
-    }
-  };
-
-  const archiveProduct = async (product: any) => {
-    if (!password) return alert('Enter password');
-    if (!confirm(`Archive ${product.name}? It moves to the public Catalog page's archive section immediately.`)) return;
-    try {
-      const res = await adminFetch('/api/admin/catalog-archive', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'archive', productId: product.id, name: product.name, description: product.desc,
-          image: `/images/${product.prefix}/1.jpeg`, availableFrom: availableFromInput || 'Unknown',
-          notes: archiveNotes || '', verificationKey: password,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) { setCatalogMessage(`${product.name} archived.`); setArchivingId(null); await fetchCatalogStatus(); } else setCatalogMessage(data.error || 'Failed');
-    } catch {
-      setCatalogMessage('Connection failed');
-    }
-  };
-
-  const unarchiveProduct = async (product: any) => {
-    if (!password) return alert('Enter password');
-    try {
-      const res = await adminFetch('/api/admin/catalog-archive', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'unarchive', productId: product.id, verificationKey: password }),
-      });
-      const data = await res.json();
-      if (res.ok) { setCatalogMessage(`${product.name} restored to active.`); await fetchCatalogStatus(); } else setCatalogMessage(data.error || 'Failed');
-    } catch {
-      setCatalogMessage('Connection failed');
     }
   };
 
@@ -1399,6 +1334,54 @@ export default function AdminPortal() {
     }
   };
 
+  /** Wipe & Rebuild Redis — requires the password AND typing the confirmation phrase. */
+  const runWipe = async () => {
+    if (streamerMode) {
+      alert('Turn streamer mode OFF before running a destructive wipe — the password entry must not be visible on stream.');
+      return;
+    }
+    if (!password) return alert('Enter password');
+    if (wipeConfirm.trim().toUpperCase() !== 'WIPE') {
+      return alert('Type WIPE in the confirmation box to erase Redis.');
+    }
+    setWipeBusy(true);
+    setWipeMsg('Wiping Redis... this permanently deletes every key.');
+    try {
+      const res = await adminFetch('/api/admin/wipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, confirm: wipeConfirm.trim(), rebuild: wipeRebuild }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWipeMsg(data.message || 'Redis wiped.');
+        showToast('REDIS WIPED' + (wipeRebuild ? ' · REBUILT' : ''));
+        setWipeConfirm('');
+        await refreshAll();
+      } else {
+        setWipeMsg(data.error || 'Wipe failed.');
+      }
+    } catch (err: any) {
+      setWipeMsg(err.message || 'Wipe failed.');
+    } finally {
+      setWipeBusy(false);
+    }
+  };
+
+  /** Load env-var status for the SetUp tab (never returns secret values). */
+  const fetchEnvStatus = async () => {
+    setEnvStatusLoading(true);
+    try {
+      const res = await adminFetch('/api/admin/env-status');
+      const data = await res.json();
+      setEnvStatus(data || null);
+    } catch {
+      setEnvStatus(null);
+    } finally {
+      setEnvStatusLoading(false);
+    }
+  };
+
   const saveSettings = async () => {
     if (!password) return alert('Enter password');
     setSettingsLoading(true);
@@ -1497,6 +1480,9 @@ export default function AdminPortal() {
     start();
     document.addEventListener('visibilitychange', vis);
     return () => { stop(); document.removeEventListener('visibilitychange', vis); };
+    // Fetch helpers are intentionally stable per-mount; including them would
+    // restart the poll loop on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1522,6 +1508,9 @@ export default function AdminPortal() {
       }
     }, 400);
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+    // `password` is intentionally read at debounce-fire time (kept out of deps
+    // so typing a new password doesn't reset the debounce mid-search).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   const pools = status?.pools || [];
@@ -1541,6 +1530,9 @@ export default function AdminPortal() {
 
   const totalOwed = promos.reduce((s, p) => s + (p.payoutOwedCents || 0), 0);
 
+  // Streamer mode forces every sensitive display off regardless of reveal state.
+  const sensitiveVisible = !streamerMode && revealAddresses;
+
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'drops', label: 'Drops' },
@@ -1551,6 +1543,7 @@ export default function AdminPortal() {
     { id: 'growth', label: 'Growth' },
     { id: 'system', label: 'System' },
     { id: 'settings', label: 'Settings' },
+    { id: 'setup', label: 'SetUp' },
   ];
 
   // ============================================================
@@ -1561,7 +1554,7 @@ export default function AdminPortal() {
       <div style={{ maxWidth: 860, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
           <div>
-            <h1 style={{ fontSize: 22, margin: 0, fontWeight: 700, letterSpacing: '-0.02em' }}>GOYUNIR Admin</h1>
+            <h1 style={{ fontSize: 22, margin: 0, fontWeight: 700, letterSpacing: '-0.02em' }}>Store Admin</h1>
             {toast ? (
               <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 200, background: '#14532d', color: '#bbf7d0', border: '1px solid #22c55e', padding: '10px 16px', borderRadius: 12, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>
                 {toast}
@@ -1583,12 +1576,23 @@ export default function AdminPortal() {
         </div>
 
         <div style={{ ...cardStyle, marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Admin password"
-            style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px' }} />
-          <button onClick={toggleReveal} disabled={revealBusy}
-            style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
-            {revealAddresses ? 'Hide addresses' : 'Reveal addresses'}
+          {streamerMode && (
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, padding: '6px 10px', borderRadius: 999, background: 'rgba(237,178,16,0.14)', color: '#edb210', border: '1px solid rgba(237,178,16,0.4)' }}>
+              🎥 STREAMER MODE — customer data hidden
+            </span>
+          )}
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={streamerMode ? 'Password hidden while streaming' : 'Admin password'} disabled={streamerMode}
+            style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px', opacity: streamerMode ? 0.45 : 1 }} />
+          <button onClick={() => { if (streamerMode) { setRevealAddresses(false); } setStreamerMode(!streamerMode); }}
+            style={{ ...buttonGhost, padding: '10px 14px', background: streamerMode ? 'rgba(237,178,16,0.14)' : 'transparent', color: streamerMode ? '#edb210' : '#ccc' }}>
+            {streamerMode ? '🎥 Streamer mode: ON' : '🎥 Streamer mode: OFF'}
           </button>
+          {!streamerMode && (
+            <button onClick={toggleReveal} disabled={revealBusy}
+              style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
+              {revealAddresses ? 'Hide addresses' : 'Reveal addresses'}
+            </button>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -1601,6 +1605,7 @@ export default function AdminPortal() {
                 if (t.id === 'drops') fetchConfig();
                 if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                 if (t.id === 'settings') fetchSettings();
+                if (t.id === 'setup') fetchEnvStatus();
                 if (t.id === 'products') fetchProducts();
                 if (t.id === 'users') fetchUsers();
               }}
@@ -1742,7 +1747,7 @@ export default function AdminPortal() {
                               {winners.length === 0 && <div style={{ color: '#555', fontSize: 11 }}>No winners recorded.</div>}
                               {winners.map((w: any, wi: number) => (
                                 <div key={wi} style={{ fontSize: 11, color: '#666', marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #222' }}>
-                                  {w.email} · {w.product || w.variant || ''} {w.size || ''}
+                                  {streamerMode ? maskEmail(w.email) : w.email} · {w.product || w.variant || ''} {w.size || ''}
                                   {w.status === 'SUCCESS_CHARGED' || w.status === 'charged' ? (
                                     <span style={{ color: '#34d399' }}> ✓ ${((w.amountCents || 0) / 100).toFixed(2)}</span>
                                   ) : (
@@ -1856,7 +1861,7 @@ export default function AdminPortal() {
 
                 <h4 style={{ fontSize: 11, color: '#aaa', margin: '20px 0 8px', textTransform: 'uppercase' }}>Abandoned Entry Recovery</h4>
                 <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                  When someone starts an entry (enters email + address) but doesn't complete card setup in Stripe, this system sends them reminder emails to finish. The "early nudge" goes out a few hours after they start, and the "pre-draw reminder" goes out before the allocation closes (default 6 hours before). Each person gets at most one of each type per product, so they won't be spammed.
+                  When someone starts an entry (enters email + address) but doesn&apos;t complete card setup in Stripe, this system sends them reminder emails to finish. The &quot;early nudge&quot; goes out a few hours after they start, and the &quot;pre-draw reminder&quot; goes out before the allocation closes (default 6 hours before). Each person gets at most one of each type per product, so they won&apos;t be spammed.
                 </p>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                   <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1914,12 +1919,12 @@ export default function AdminPortal() {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
                 const isEditingAddress = editingAddressEntry === entryKey;
                 const isEditingShipping = editingShippingEntry === entryKey;
-                const orderRef = e.orderRef || stableOrderRef(e, i);
+                const orderRef = e.orderRef || stableOrderRef(e);
                 const displayPrice = e.amountCents ? (e.amountCents / 100).toFixed(2) : (e.listPrice || 0).toFixed(2);
                 
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
-                    <div style={{ fontWeight: 600 }}>{e.email}</div>
+                    <div style={{ fontWeight: 600 }}>{streamerMode ? maskEmail(e.email) : e.email}</div>
                     <div style={{ color: '#666', fontSize: 10 }}>Ref: {orderRef}</div>
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
@@ -1929,7 +1934,7 @@ export default function AdminPortal() {
                       )}
                     </div>
                     <div style={{ color: '#666', marginTop: 4 }}>
-                      📍 {revealAddresses ? e.shippingAddress || 'n/a' : '•••• hidden'}
+                      📍 {sensitiveVisible ? e.shippingAddress || 'n/a' : '•••• hidden'}
                       {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 ••{e.cardLast4}</span>}
                       {e.type === 'WINNER_CHARGED' && (
                         <span style={{ marginLeft: 6 }}>
@@ -2006,7 +2011,7 @@ export default function AdminPortal() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage all products. <strong>New products default to hidden</strong> – publish them by setting "Active" to true. Archived and Upcoming are now mutually exclusive, each product can carry its own go-live/countdown timing, and sold-out handling can either stay visible as proof of demand or auto-archive later.
+              Manage all products. <strong>New products default to hidden</strong> – publish them by setting &quot;Active&quot; to true. Archived and Upcoming are now mutually exclusive, each product can carry its own go-live/countdown timing, and sold-out handling can either stay visible as proof of demand or auto-archive later.
               {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
             </p>
             
@@ -2256,7 +2261,7 @@ export default function AdminPortal() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {allProducts.length === 0 && !productsLoading && (
                 <div style={{ textAlign: 'center', padding: 30, color: '#555', border: '1px dashed #333', borderRadius: 12 }}>
-                  No products yet. Click "Seed Defaults" to add placeholder products or "Add Product" to create your own.
+                  No products yet. Click &quot;Seed Defaults&quot; to add placeholder products or &quot;Add Product&quot; to create your own.
                 </div>
               )}
               {allProducts.length > 0 && allProducts.map((product) => {
@@ -2359,7 +2364,7 @@ export default function AdminPortal() {
                 <div key={user.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: '1px solid #1c1c1e' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{user.email}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{streamerMode ? maskEmail(user.email) : user.email}</div>
                       <div style={{ fontSize: 10, color: '#666' }}>
                         Role: {user.role} · Rewards: {user.rewards || 0}
                       </div>
@@ -2381,7 +2386,7 @@ export default function AdminPortal() {
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Promotions & Affiliate Codes</h2>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
               Create promo codes with time limits, max uses, and special discounts for the first X winners.
-              <strong style={{ color: '#ccc' }}> Codes now work on raffle entries too</strong> — a percentage discount is applied "if selected" when the draw charges a winner, and direct purchases get the discount immediately at checkout. Set <code style={{ color: '#7dd3fc' }}>eligibleProductSlugs</code>/<code style={{ color: '#7dd3fc' }}>eligibleSizes</code> to restrict, or leave empty to work on everything.
+              <strong style={{ color: '#ccc' }}> Codes now work on raffle entries too</strong> — a percentage discount is applied &quot;if selected&quot; when the draw charges a winner, and direct purchases get the discount immediately at checkout. Set <code style={{ color: '#7dd3fc' }}>eligibleProductSlugs</code>/<code style={{ color: '#7dd3fc' }}>eligibleSizes</code> to restrict, or leave empty to work on everything.
             </p>
             
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -2449,7 +2454,7 @@ export default function AdminPortal() {
           <div style={cardStyle}>
             <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Catalog Management</h2>
             <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage the "Upcoming Releases" and "Past Archives" sections shown on the catalog page.
+              Manage the &quot;Upcoming Releases&quot; and &quot;Past Archives&quot; sections shown on the catalog page.
               These appear in addition to products pulled from Redis.
             </p>
 
@@ -2458,7 +2463,7 @@ export default function AdminPortal() {
 
             <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>📅 Upcoming Drops</h4>
             <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>
-              These appear in the "Upcoming Releases" grid on the catalog page. Fill in name, ETA, and image URL.
+              These appear in the &quot;Upcoming Releases&quot; grid on the catalog page. Fill in name, ETA, and image URL.
             </p>
             <div style={{ marginBottom: 12 }}>
               {catalogUpcoming.map((item, idx) => (
@@ -2514,7 +2519,7 @@ export default function AdminPortal() {
 
             <h4 style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>📦 Past Archives</h4>
             <p style={{ fontSize: 10, color: '#666', marginBottom: 8 }}>
-              These appear in the "Past Archives" grid. Provide name, image, and a short description.
+              These appear in the &quot;Past Archives&quot; grid. Provide name, image, and a short description.
             </p>
             <div style={{ marginBottom: 12 }}>
               {catalogArchive.map((item, idx) => (
@@ -2622,7 +2627,7 @@ export default function AdminPortal() {
                   <div key={subscriber.email} style={{ background: '#09090b', padding: 12, borderRadius: 10, fontSize: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                       <div>
-                        <div style={{ fontWeight: 700 }}>{subscriber.email}</div>
+                        <div style={{ fontWeight: 700 }}>{streamerMode ? maskEmail(subscriber.email) : subscriber.email}</div>
                         <div style={{ color: '#888', fontSize: 10, marginTop: 2 }}>
                           Sources: {(subscriber.sources || []).join(', ') || 'site'} · joined {subscriber.createdAt ? new Date(subscriber.createdAt).toLocaleDateString() : 'n/a'}
                         </div>
@@ -2647,7 +2652,7 @@ export default function AdminPortal() {
                 </button>
               </div>
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
-                Checks every environment variable (including the Mapbox token), Redis/Stripe connectivity, store config + theme integrity, every product's price/Stripe ID/images, slug uniqueness, winner tiers, inventory, live states, drop pools, and legacy-key hygiene — run this after any config change or before a big drop.
+                Checks every environment variable (including the Mapbox token), Redis/Stripe connectivity, store config + theme integrity, every product&apos;s price/Stripe ID/images, slug uniqueness, winner tiers, inventory, live states, drop pools, and legacy-key hygiene — run this after any config change or before a big drop.
               </p>
               {selftestResults?.error && <p style={{ color: '#f87171', fontSize: 12 }}>{selftestResults.error}</p>}
               {selftestResults?.results && (
@@ -2705,6 +2710,84 @@ export default function AdminPortal() {
               </p>
               <button onClick={organizeRedis} style={buttonGhost}>Tidy &amp; Migrate Redis Schema</button>
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
+            </div>
+
+            <div style={{ ...cardStyle, borderColor: 'rgba(248,113,113,0.35)' }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase', color: '#f87171' }}>Wipe &amp; Rebuild Redis</h2>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
+                <strong style={{ color: '#f87171' }}>DESTRUCTIVE.</strong> Deletes <em>every key</em> in this Redis database — products, config, entries, ledger, promos, users, sessions, analytics, everything. Use it to reset a demo store or hand a clean slate to a new buyer. Requires the admin password <em>and</em> typing <strong>WIPE</strong> to confirm (two-step verification). Streamer mode must be OFF.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input type="text" value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="Type WIPE to confirm"
+                  style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+                <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
+                  Rebuild with Seed Defaults after wipe
+                </label>
+                <button onClick={runWipe} disabled={wipeBusy}
+                  style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
+                  {wipeBusy ? 'Wiping…' : 'Wipe Redis'}
+                </button>
+              </div>
+              {wipeMsg && <p style={{ fontSize: 11, color: wipeMsg.includes('Failed') || wipeMsg.includes('Type') ? '#f87171' : '#34d399', marginTop: 10 }}>{wipeMsg}</p>}
+            </div>
+          </div>
+        )}
+
+        {/* ============ SETUP (env vars / production checklist) ============ */}
+        {tab === 'setup' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Environment Variables</h2>
+                <button onClick={fetchEnvStatus} disabled={envStatusLoading} style={buttonGhost}>
+                  {envStatusLoading ? 'Checking…' : 'Refresh'}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
+                Shows whether each variable is configured in this deployment. <strong>Values are never shown</strong> — only ✓ set / ✗ missing. Secrets (Redis token, Stripe keys, cron secret, Resend key) must be set in your platform (Vercel) Environment Variables; they are write-only and can never be read back.
+              </p>
+              {envStatus && (
+                <div style={{ fontSize: 12, marginBottom: 12 }}>
+                  Environment: <strong>{envStatus.environment}</strong> · Configured <strong>{envStatus.summary.configured}/{envStatus.summary.total}</strong>
+                  {envStatus.summary.requiredMissing.length > 0 ? (
+                    <span style={{ color: '#f87171' }}> · Missing required: {envStatus.summary.requiredMissing.join(', ')}</span>
+                  ) : (
+                    <span style={{ color: '#34d399' }}> · All required variables present ✓</span>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(envStatus?.items || []).map((item: any, index: number) => (
+                  <div key={item.key || index} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid #1c1c1e' }}>
+                    <span style={{ fontSize: 13, marginTop: 1, color: item.set ? '#34d399' : '#f87171' }}>{item.set ? '✓' : '✗'}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>
+                        {item.label}
+                        {item.required ? <span style={{ marginLeft: 6, fontSize: 9, color: '#f87171' }}>REQUIRED</span> : <span style={{ marginLeft: 6, fontSize: 9, color: '#888' }}>optional</span>}
+                        {item.buildTime && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>build-time · redeploy to change</span>}
+                        {item.sensitive && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>secret · write-only</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{item.hint}</div>
+                      <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>Reads: {item.aliases.join(' → ')}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Production Launch Checklist</h2>
+              <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
+                <p style={{ margin: '6px 0' }}>1. Set the environment variables above in your platform (Vercel) for Production + Preview, then redeploy.</p>
+                <p style={{ margin: '6px 0' }}>2. In <strong>/admin → Settings → Branding &amp; Share</strong>: set your brand name, logo, favicon colors, share card, and header mode.</p>
+                <p style={{ margin: '6px 0' }}>3. In <strong>/admin → Settings → Legal &amp; Policies</strong>: replace the company name + support email and review Terms / Privacy / Shipping.</p>
+                <p style={{ margin: '6px 0' }}>4. In <strong>/admin → Products</strong>: set real Stripe price IDs per size, real prices, inventory, and winner tiers. The seeded placeholder prices will refuse to charge until real IDs/prices are set.</p>
+                <p style={{ margin: '6px 0' }}>5. Point your Stripe webhook at <code>https://YOUR_DOMAIN/api/stripe/webhook</code> and set <strong>STRIPE_WEBHOOK_SECRET</strong>.</p>
+                <p style={{ margin: '6px 0' }}>6. Add <strong>NEXT_PUBLIC_MAPBOX_TOKEN</strong> (public pk.* token) and redeploy to turn on full-address autofill at checkout — the dropdown fills street, city, state, ZIP and country.</p>
+                <p style={{ margin: '6px 0' }}>7. Run <strong>/admin → System → Site Self-Test</strong> before a drop. It verifies every env var, product price/Stripe ID, live state, and key-space hygiene.</p>
+                <p style={{ margin: '6px 0' }}>8. This portal opens in <strong>Streamer Mode</strong> (customer data hidden). Turn it off only when you need to work on live data — it is ideal for showing draws/winners on a livestream.</p>
+              </div>
             </div>
           </div>
         )}
@@ -3032,7 +3115,7 @@ export default function AdminPortal() {
                     type="text"
                     value={brandingSettings.brandName || ''}
                     onChange={(e) => setBrandingSettings((prev) => ({ ...prev, brandName: e.target.value }))}
-                    placeholder="GOYUNIR"
+                    placeholder="Your Brand"
                     style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
                   />
                 </label>
@@ -3067,7 +3150,7 @@ export default function AdminPortal() {
                 </label>
                 <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                   <input type="checkbox" checked={Boolean(brandingSettings.logoTransparent)} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, logoTransparent: e.target.checked }))} />
-                  Transparent logo (keep corners, don't crop)
+                  Transparent logo (keep corners, don&apos;t crop)
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Top-bar name font (optional)
@@ -3135,7 +3218,7 @@ export default function AdminPortal() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   {brandingSettings.logoUrl ? <img src={brandingSettings.logoUrl} alt="Brand preview" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover' }} /> : <div style={{ width: 40, height: 40, borderRadius: 10, background: brandingSettings.shareAccent || '#3b82f6' }} />}
                   <div>
-                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>{brandingSettings.brandName || brandingSettings.shareTitle || 'GOYUNIR'}</div>
+                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>{brandingSettings.brandName || brandingSettings.shareTitle || 'Your Brand'}</div>
                     <div style={{ fontSize: 16, fontWeight: 700 }}>{brandingSettings.shareTitle}</div>
                   </div>
                 </div>

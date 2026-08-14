@@ -7,6 +7,7 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground } from '@/lib/storefront-config';
+import { neutralBrandName } from '@/lib/env';
 
 /**
  * Home-page surface helper. Keeps the admin surfaceTransparency setting, but
@@ -27,7 +28,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
-  const [nowTick, setNowTick] = useState(Date.now());
+  const [nowTick, setNowTick] = useState<number>(0);
   const [authUser, setAuthUser] = useState<any>(null);
   const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
   // Live theme palette. Initialized from the server-baked /admin → Settings
@@ -39,18 +40,20 @@ export default function HomePage() {
   // Hero copy is fully editable from /admin → Settings → Hero Content.
   const [heroContent, setHeroContent] = useState<any>(liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
 
-  const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
+  const brandName = String(branding?.brandName || branding?.shareTitle || neutralBrandName());
 
   // Only tick the clock while at least one release shows a live countdown —
   // otherwise the whole page re-renders every second for nothing.
   const needsCountdown = activeProducts.some((product: any) => {
     const releaseEndsAt = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
-    return Number.isFinite(releaseEndsAt) && releaseEndsAt > Date.now();
+    return Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick;
   });
 
   useEffect(() => {
     if (!needsCountdown) return;
-    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    const tick = () => setNowTick(Date.now());
+    tick();
+    const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [needsCountdown]);
 

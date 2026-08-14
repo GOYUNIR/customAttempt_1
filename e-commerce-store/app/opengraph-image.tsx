@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { getSiteUrl } from '@/lib/env';
 
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -18,8 +19,8 @@ export default async function OpenGraphImage() {
   const accent = String(branding.shareAccent || '#D4AF37');
   const text = String(branding.shareText || '#F5F2E9');
   // The URL shown on the card is NEVER hardcoded — derive it from the platform
-  // env (NEXT_PUBLIC_SITE_URL / SITE_URL) or the admin shareUrl.
-  const siteUrl = String(process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || branding.shareUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '') || 'example.com';
+  // env (NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL / SITE_URL) or the admin shareUrl.
+  const siteUrl = String(getSiteUrl() || branding.shareUrl || '').replace(/^https?:\/\//, '').replace(/\/+$/, '') || 'example.com';
 
   return new ImageResponse(
     (

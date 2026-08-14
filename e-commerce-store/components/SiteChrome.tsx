@@ -5,8 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { neutralBrandName } from '@/lib/env';
 
 type CartItem = {
   productId: string;
@@ -18,13 +19,18 @@ type CartItem = {
 };
 
 /**
- * Address quality gate for checkout. Structural checks block garbage like
- * "asdf" or "1234567890". Customers can either pick from the Mapbox autofill
- * suggestions (fastest, pre-verified) or type a complete address manually —
- * autofill is an accelerator, never a lock-in.
+ * Address quality gate for checkout. The validator requires a COMPLETE
+ * shippable address (street # + name, city, state, ZIP, country) — see
+ * lib/address-validation.ts. Mapbox autofill suggestions fill the whole
+ * address, so when autofill is live we add a hint to pick a suggestion.
  */
 function addressValidationError(address: string): string | null {
-  return validateShippingAddress(address);
+  const error = validateShippingAddress(address);
+  if (!error) return null;
+  const hint = isMapboxAutofillActive()
+    ? ' Tip: pick a complete address from the autofill suggestions as you type — partial addresses can\'t be shipped to.'
+    : '';
+  return error + hint;
 }
 
 const CART_KEY = 'goyunir-cart';
@@ -133,6 +139,22 @@ function readCheckoutDetails() {
 function writeCheckoutDetails(email: string, address: string) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CHECKOUT_DETAILS_KEY, JSON.stringify({ email, address }));
+}
+
+/**
+ * Remove cart lines whose product no longer exists in Redis (e.g. after the
+ * operator wipes/rebuilds the store) or whose size was removed. The bag must
+ * never show items that don't exist anywhere on the backend.
+ */
+function pruneStaleCart(items: CartItem[], products: any[]): CartItem[] {
+  if (!Array.isArray(items)) return [];
+  const byId = new Map(products.map((p) => [String(p?.id || ''), p]));
+  return items.filter((item) => {
+    const product = byId.get(String(item?.productId || ''));
+    if (!product) return false;
+    const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+    return cats.some((c: any) => String(c?.size) === String(item?.size));
+  });
 }
 
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
@@ -352,7 +374,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       const now = Date.now();
       const motion = cfg?.motion || DEFAULT_ORBS.motion;
-      const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, reducedMotion ? 0.5 : 2.5);
       const speedFactor = clamp((motion.speed ?? 100) / 100, 0.3, reducedMotion ? 0.7 : 2.2);
       const momentumFactor = clamp((motion.momentum ?? 40) / 100, 0, 1);
 
@@ -456,10 +477,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     } else {
       const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
       if (storedPromo) {
-        // Keep the code applied for checkout, but keep the promo UI COLLAPSED —
-        // customers tap the button to reveal it instead of being faced with an
-        // open input on every visit.
-        setPromoCode(storedPromo);
+        // Re-validate against the LIVE promo table so a code that no longer
+        // exists (e.g. after a Redis wipe/rebuild) never shows as applied.
+        fetch(`/api/promo/validate?code=${encodeURIComponent(storedPromo)}&quiet=1`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data?.valid === true) {
+              setPromoCode(storedPromo);
+            } else {
+              try { window.localStorage.removeItem('goyunir-promo-code'); } catch { /* noop */ }
+              setPromoCode('');
+            }
+          })
+          .catch(() => setPromoCode(''));
       }
     }
 
@@ -469,6 +499,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         setBranding(data?.config?.branding || null);
         setOrbs(data?.config?.orbs || null);
         if (data?.config?.brandFooterData) setFooterSettings(data.config.brandFooterData);
+        // Prune cart lines whose product/size no longer exists on the backend
+        // (wipe/rebuild or archive) so the bag never shows ghost items.
+        const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
+        const current = readCart();
+        const pruned = pruneStaleCart(current, products);
+        if (pruned.length !== current.length) {
+          setCart(pruned);
+          writeCart(pruned);
+        }
       })
       .catch(() => {});
 
@@ -685,7 +724,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const showBrandLogo = headerMode !== 'text';
   const headerActionMode = String(branding?.headerActionMode || 'cart').toLowerCase();
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
-  const brandName = String(branding?.brandName || branding?.shareTitle || 'GOYUNIR');
+  // Top-bar brand: admin → Settings → Branding wins; the env fallback (BRAND_NAME /
+  // NEXT_PUBLIC_SITE_NAME) is used when Redis is empty; never a hardcoded brand.
+  const brandName = String(branding?.brandName || branding?.shareTitle || neutralBrandName());
   const brandFont = String(branding?.brandFontFamily || '').trim() || undefined;
   // Admin-configurable logo size. When the top bar shows ONLY the logo we use a
   // larger default so it reads like a proper wordmark instead of a favicon.
@@ -955,11 +996,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: signedIn ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.3)', color: signedIn ? drawerTextMuted : drawerText, fontSize: 12, cursor: signedIn ? 'not-allowed' : 'text' }}
                   />
                   {signedIn && signedInEmail ? (
-                    <div style={{ fontSize: 10, color: drawerTextMuted, lineHeight: 1.4 }}>Signed in as {signedInEmail} — email can't be changed here.</div>
+                    <div style={{ fontSize: 10, color: drawerTextMuted, lineHeight: 1.4 }}>Signed in as {signedInEmail} — email can&apos;t be changed here.</div>
                   ) : null}
-                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Shipping address" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
+                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Full shipping address (street, city, state, ZIP, country)" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
                   {mapboxHint === 'autofill-on' && (
-                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion to fill it instantly, or type your address manually.</div>
+                    <div style={{ fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion and the full address (street, city, state, ZIP, country) is filled in for you.</div>
                   )}
                   {mapboxHint === 'autofill-off' && (
                     <div style={{ fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>

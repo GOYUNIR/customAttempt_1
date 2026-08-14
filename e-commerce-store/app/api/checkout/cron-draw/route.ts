@@ -24,6 +24,7 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount, shouldRunDraw, isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
@@ -226,7 +227,7 @@ async function runAutoDraw(request: Request) {
                 discountPercent: winnerDiscountPercent > 0 ? winnerDiscountPercent : undefined,
                 orderRef,
                 shippingAddress: shippingAddress || undefined,
-                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://goyunir.com',
+                siteUrl: getSiteUrl() || fallbackSiteUrl(),
               });
 
               processedWinners.push({

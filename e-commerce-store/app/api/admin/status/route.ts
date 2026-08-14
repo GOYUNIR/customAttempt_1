@@ -12,8 +12,6 @@ import {
   ANALYTICS_ONLINE_KEY,
   getAdminPassword,
 } from '@/lib/server-config';
-import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { getWinnerCount, getAvailableSizes } from '@/lib/storefront-config';
 
 function parseWinnerTier(value: unknown): number {
   if (Array.isArray(value)) {
@@ -97,7 +95,6 @@ export async function GET() {
 
     try {
       const statsHash = (await redis.hgetall(POOL_STATS_KEY)) as Record<string, string> | null;
-      const sizes = getAvailableSizes(GOYUNIR_STORE_SUITE);
       const allProducts = await loadProducts(redis);
       const productsList = Object.values(allProducts);
 

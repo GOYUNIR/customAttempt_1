@@ -4,13 +4,12 @@ import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
 function siteUrlFromEnv() {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
-  if (env) return env.replace(/\/$/, '');
-  return 'https://example.com';
+  return getSiteUrl() || fallbackSiteUrl();
 }
 
 export async function POST(request: Request) {

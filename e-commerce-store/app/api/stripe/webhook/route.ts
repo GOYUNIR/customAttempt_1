@@ -24,13 +24,12 @@ import {
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
 function siteUrlFromEnv() {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
-  if (env) return env.replace(/\/$/, '');
-  return 'https://example.com';
+  return getSiteUrl() || fallbackSiteUrl();
 }
 
 /**
@@ -69,7 +68,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     if (!email) return { hasAccount: false, rewardsBalance: 0 };
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };

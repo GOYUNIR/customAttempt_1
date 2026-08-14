@@ -186,11 +186,11 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     autoIncrementMinHourGap: 3,
   },
   brandFooterData: {
-    instagramLink: 'https://instagram.com/goyunir',
-    tiktokLink: 'https://tiktok.com/goyunir',
-    supportEmail: 'goyunir.support@gmail.com',
+    instagramLink: '',
+    tiktokLink: '',
+    supportEmail: '',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
-    corporateEntityCopyright: 'GOYUNIR ALL RIGHTS RESERVED.',
+    corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
   },
   catalogPreview: {
     upcomingDrops: [],

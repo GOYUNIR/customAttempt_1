@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   let user: any = null;
-  for (const [key, value] of Object.entries(raw)) {
+  for (const [, value] of Object.entries(raw)) {
     const u = safeParseRedisItem<any>(value);
     if (u && String(u.email || '').toLowerCase() === normalizedEmail) {
       user = u;

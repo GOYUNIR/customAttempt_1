@@ -30,8 +30,11 @@ export type StoreLegalConfig = {
 };
 
 export const DEFAULT_LEGAL: Required<StoreLegalConfig> = {
-  companyName: 'GOYUNIR',
-  supportEmail: 'goyunir.support@gmail.com',
+  // Neutral white-label defaults. Template buyers set their real company name
+  // and support inbox in /admin → Settings → Legal & Policies (or env vars
+  // SUPPORT_EMAIL / REPLY_TO_EMAIL). Nothing here is a brand.
+  companyName: 'Your Brand',
+  supportEmail: 'support@example.com',
   terms: `## 1. Allocation system
 {companyName} operates limited product allocations. Entry does not guarantee receipt of product. Selection is at our discretion under published draw rules. One entry per email per product allocation unless we state otherwise.
 

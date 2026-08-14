@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
   STORE_CONFIG_KEY,
@@ -34,10 +33,8 @@ export async function POST(request: Request) {
     }
 
     const redis = createRedisClient();
-    const stripe = createStripeClient();
     if (!redis) return NextResponse.json({ error: 'Database offline.' }, { status: 500 });
 
-    const body = await request.json();
     const email = sessionUser.email;
     const liveProducts = await loadProducts(redis);
     const allProducts = Object.values(liveProducts) as any[];
@@ -167,7 +164,7 @@ export async function POST(request: Request) {
     try {
       const rawUsers = await redis.hgetall(USERS_KEY);
       if (rawUsers) {
-        for (const [k, v] of Object.entries(rawUsers)) {
+        for (const [, v] of Object.entries(rawUsers)) {
           const u = safeParseRedisItem<any>(v);
           if (u && String(u.email || '').toLowerCase() === email) {
             userRecord = u;

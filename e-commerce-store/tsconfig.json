@@ -6,6 +6,9 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // The Node test runner (npm test) loads *.test.ts files with explicit
+    // `.ts` extensions, which requires this flag (safe because noEmit is on).
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

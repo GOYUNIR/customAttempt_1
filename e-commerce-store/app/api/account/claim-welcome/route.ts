@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
+import { getSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
         points: updatedUser.rewards,
         promoCode: welcomeCode,
         discountPercent: WELCOME_DISCOUNT_PERCENT,
-        siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || '',
+        siteUrl: getSiteUrl(),
       });
     } catch (emailErr) {
       console.error('[claim-welcome] welcome email failed', emailErr);

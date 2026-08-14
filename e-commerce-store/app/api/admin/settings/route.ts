@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 const SETTINGS_KEY = STORE_CONFIG_KEY;
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });

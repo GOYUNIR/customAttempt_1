@@ -24,6 +24,7 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount, getNextDrawTimestampForSchedule, resolveProductSchedule, isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -72,7 +73,7 @@ async function runAutoDraw(request: Request) {
 
     // Check if any draw should run based on schedule
     let shouldRun = false;
-    let targetPoolSignature = 'ALL_POOLS';
+    const targetPoolSignature = 'ALL_POOLS';
     
     // Check each product's schedule
     for (const product of GOYUNIR_STORE_SUITE.productCatalog) {
@@ -265,7 +266,7 @@ async function runAutoDraw(request: Request) {
                 originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
                 discountPercent: winnerDiscountPercent > 0 ? winnerDiscountPercent : undefined,
                 shippingAddress: shippingAddress || undefined,
-                siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com',
+                siteUrl: getSiteUrl() || fallbackSiteUrl(),
               });
               if (!(emailResult as any)?.ok) {
                 console.error('[auto-draw] winner email failed', winnerEmail, emailResult);

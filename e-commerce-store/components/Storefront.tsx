@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
@@ -13,12 +13,18 @@ const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 
 /**
- * Address quality gate for checkout. Structural checks block garbage like
- * "asdf" or "1234567890". Autofill suggestions are the fastest way to enter a
- * verified address, but customers can always type a complete address manually.
+ * Address quality gate for checkout. The validator requires a COMPLETE
+ * shippable address (street # + name, city, state, ZIP, country) — see
+ * lib/address-validation.ts. Mapbox autofill suggestions fill the whole
+ * address, so when autofill is live we add a hint to pick a suggestion.
  */
 function addressValidationError(address: string): string | null {
-  return validateShippingAddress(address);
+  const error = validateShippingAddress(address);
+  if (!error) return null;
+  const hint = isMapboxAutofillActive()
+    ? ' Tip: pick a complete address from the autofill suggestions as you type — partial addresses can\'t be shipped to.'
+    : '';
+  return error + hint;
 }
 
 function getProductPriceCategory(product: any, size: string) {
@@ -129,7 +135,6 @@ function notify(detail: { id?: string; type: string; message: string; persist?: 
 export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const router = useRouter();
   const [product, setProduct] = useState<any>(null);
-  const [allProducts, setAllProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>('');
@@ -236,7 +241,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       } else {
         setError('Product not found');
       }
-    } catch (e) {
+    } catch {
       setError('Failed to load product');
     } finally {
       setLoading(false);
@@ -252,9 +257,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
-      setAllProducts(sorted);
       return sorted;
-    } catch (e) {
+    } catch {
       return [];
     }
   }, []);
@@ -332,20 +336,66 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  /**
+   * Remove cart lines whose product no longer exists in Redis (e.g. after the
+   * operator wipes/rebuilds the store) or whose size was removed. The bag must
+   * never show items that don't exist anywhere on the backend.
+   */
+  const pruneStaleCart = (items: any[], products: any[]): any[] => {
+    if (!Array.isArray(items)) return [];
+    const byId = new Map(products.map((p) => [String(p?.id || ''), p]));
+    return items.filter((item) => {
+      const product = byId.get(String(item?.productId || ''));
+      if (!product) return false;
+      const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+      return cats.some((c: any) => String(c?.size) === String(item?.size));
+    });
+  };
+
   useEffect(() => {
-    setCart(readStoredCart());
-    if (typeof window !== 'undefined') {
-      const draft = readCheckoutDetails();
-      if (draft.email) setEmail(draft.email);
-      if (draft.address) setAddress(draft.address);
-      const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
-      if (storedPromo) {
-        // Keep the code applied (it is sent to checkout automatically) but keep
-        // the promo UI COLLAPSED — customers opt in to see the input by tapping
-        // the "Add promo" button, they are never faced with an open field.
-        setPromoCode(storedPromo);
-      }
+    if (typeof window === 'undefined') return;
+    const stored = readStoredCart();
+    setCart(stored);
+
+    const draft = readCheckoutDetails();
+    if (draft.email) setEmail(draft.email);
+    if (draft.address) setAddress(draft.address);
+
+    // Re-validate a stored promo against the LIVE promo table. After a Redis
+    // wipe/rebuild the old code no longer exists, so the "✓ applied" state must
+    // not survive — otherwise the UI claims a promo is applied that isn't.
+    const storedPromo = String(window.localStorage.getItem('goyunir-promo-code') || '').trim().toUpperCase();
+    if (storedPromo) {
+      fetch(`/api/promo/validate?code=${encodeURIComponent(storedPromo)}&quiet=1`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.valid === true) {
+            setPromoCode(storedPromo);
+          } else {
+            try { window.localStorage.removeItem('goyunir-promo-code'); } catch { /* noop */ }
+            setPromoCode('');
+            setPromoValid(false);
+          }
+        })
+        .catch(() => {
+          // Network hiccup — keep the code but don't claim it's applied.
+          setPromoCode('');
+        });
     }
+
+    // Prune cart lines that no longer exist (products/sizes gone after a
+    // wipe/rebuild or archive). Runs against the live /api/store snapshot.
+    fetch('/api/store')
+      .then((res) => res.json())
+      .then((data) => {
+        const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
+        const pruned = pruneStaleCart(stored, products);
+        if (pruned.length !== stored.length) {
+          setCart(pruned);
+          writeStoredCart(pruned);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -639,7 +689,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         setMessage(data.error || 'Failed to start checkout');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Failed to start checkout.' });
       }
-    } catch (e) {
+    } catch {
       clearPendingEntry();
       setEncryptionHealthy(false);
       setMessage('Connection error');
@@ -683,7 +733,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         setMessage(data.error || 'Checkout failed');
         notify({ id: 'product-submit', type: 'error', message: data.error || 'Checkout failed.' });
       }
-    } catch (e) {
+    } catch {
       setEncryptionHealthy(false);
       setMessage('Connection error');
       notify({ id: 'product-submit', type: 'error', message: 'Connection error.' });
@@ -905,16 +955,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           {/* Mapbox address autofill requires the field to live inside a <form>. */}
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
-            <input type="text" autoComplete="shipping street-address" placeholder="Shipping address" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {mapboxHint === 'autofill-on' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion to fill it instantly, or type your address manually.</div>
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#34d399' }}>✓ Address autofill is on — pick a suggestion and the full address (street, city, state, ZIP, country) is filled in for you.</div>
           )}
           {mapboxHint === 'autofill-off' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — you can enter your address manually.</div>
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#fbbf24' }}>Address autofill could not attach right now — enter your full address manually (street number + name, city, state, ZIP, country).</div>
           )}
           {mapboxHint === 'no-token' && (
-            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your address manually.</div>
+            <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Address autofill is off (Mapbox token not configured) — enter your full address manually (street number + name, city, state, ZIP, country).</div>
           )}
           {mapboxHint === 'token-rejected' && (
             <div style={{ marginBottom: 10, fontSize: 10, color: '#f87171' }}>Mapbox is rejecting the autofill token — open the console / <code>window.__GOYUNIR_MAPBOX__</code> for the exact error, or enter your address manually.</div>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, sessionKey } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { sendWelcomeEmail } from '@/lib/email';
+import { getSiteUrl } from '@/lib/env';
 
 function hashPassword(password: string, salt: string): string {
   return scryptSync(password, salt, 64).toString('hex');
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
   const raw = await redis.hgetall(USERS_KEY);
   let existing = false;
   if (raw) {
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === normalizedEmail) { existing = true; break; }
     }
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
       points: WELCOME_POINTS,
       promoCode: welcomeCode,
       discountPercent: WELCOME_DISCOUNT_PERCENT,
-      siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || '',
+      siteUrl: getSiteUrl(),
     });
   } catch (emailErr) {
     console.error('[signup] welcome email failed', emailErr);

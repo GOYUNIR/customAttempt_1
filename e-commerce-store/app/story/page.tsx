@@ -3,6 +3,7 @@ import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { isLegacyHeroContent } from '@/lib/storefront-config';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
+import { getSupportEmail } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,7 @@ export default async function StoryPage() {
     ? GOYUNIR_STORE_SUITE.heroContent
     : { ...GOYUNIR_STORE_SUITE.heroContent, ...(config.heroContent || {}) };
   const companyName = String(legal.companyName || branding.brandName || branding.shareTitle || DEFAULT_LEGAL.companyName);
-  const supportEmail = String(legal.supportEmail || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support@example.com');
+  const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support@example.com');
 
   return (
     <main style={{

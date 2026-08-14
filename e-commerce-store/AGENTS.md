@@ -114,6 +114,11 @@ Never rebuild them.
    key string in a route/component. When you add or rename a key: (a) edit the
    registry, (b) add a migration row in `/api/admin/organize-redis/route.ts`,
    (c) update this file + README in the same change.
+6. **Brand/URL/support values come from `lib/env.ts`** (`getSiteUrl()`,
+   `getBrandName()`, `getSupportEmail()`, `neutralBrandName()`,
+   `fallbackSiteUrl()`). Read env vars through these helpers, never
+   `process.env.*` directly, so buyer aliases (`NEXT_PUBLIC_URL` etc.) keep
+   working.
 
 ### Caching (read before touching storefront perf)
 
@@ -161,7 +166,16 @@ the ledger. Settings tabs include:
 - **Promos** — customer + promoter codes, discounts, caps, per-product/size eligibility.
 - **Draws / Ledger** — trigger draws, draw history, permanent entry search.
 - **Users** — adjust points, view accounts.
-- **Developer** — Seed Defaults, Site Self-Test, Tidy Redis Schema.
+- **Developer** — Seed Defaults, Site Self-Test, Tidy Redis Schema,
+  **Wipe & Rebuild Redis** (full key-space wipe with TWO-step confirmation:
+  admin password + typing `WIPE`; optionally re-seeds defaults. Backed by
+  `/api/admin/wipe`, which reuses `runSeedDefaults` from the seed route).
+- **SetUp** — environment-variable status dashboard (✓/✗, never values; backed
+  by `/api/admin/env-status`) + production launch checklist.
+- **Streamer Mode** — default ON on load. Masks every customer email, shipping
+  address and card number and disables the password field so the portal is safe
+  to share on a livestream. Everything destructive still requires turning it
+  OFF first, then entering the admin password.
 
 
 ## Core Feature Reference (for agents)
@@ -181,6 +195,10 @@ the ledger. Settings tabs include:
   product+size line from the bag immediately. A cart-drawer checkout sets
   `sessionStorage 'goyunir-cart-checkout'` so the confirm-setup success handler
   clears the WHOLE bag (and marks every secured raffle line in the ledger).
+- **Ghost-cart pruning on load**: both `Storefront` and `SiteChrome` re-check
+  the saved bag against the live `/api/store` snapshot on mount and drop any
+  line whose product/size no longer exists (e.g. after a Redis wipe/rebuild or
+  archive). The bag never shows items that don't exist on the backend.
 - A direct entry tracks `sessionStorage 'goyunir-pending-entry'` so Stripe
   setup success can mark it entered and setup cancel can forget it.
 
@@ -210,6 +228,19 @@ the ledger. Settings tabs include:
 - `getAutofillAddressValue()` reads the DOM (truth), not React state, because
   programmatic fills don't fire React `onChange`.
 
+### Shipping address validation (lib/address-validation.ts)
+
+**STRICT.** This is a fulfilment-quality gate, not a UX nicety. Every entry,
+cart checkout, waitlist, standalone address form and account address update
+must be a COMPLETE address: street number + street name, city, state/region,
+ZIP/postal code and country. `parseShippingAddress()` returns a specific
+`missing_*` reason; `validateShippingAddress()` maps it to a helpful message.
+US addresses require a state + 5-digit ZIP; common international formats
+(UK/CA postals, 4-6 digit postals, ~40 countries) are recognised. Anything
+unrecognised is rejected — `123 realstreet` can never be saved. When Mapbox
+autofill is live and validation fails, the submit handlers append a hint to
+pick a suggestion (the dropdown fills the full address).
+
 ### Promo codes
 
 - Codes stored in `promo:codes` (hash). Customer discount %, promoter payout
@@ -222,6 +253,11 @@ the ledger. Settings tabs include:
   drawer): a compact "Add promo or promoter credit" button (or "✓ CODE applied"
   chip with Change/Remove) that expands on tap. Never auto-expand it.
 - `fixedDiscountCents` codes (store credit) vs `customerDiscountPercent` codes.
+- **On load, a stored promo is re-validated against the live `promo:codes`
+  table** (`/api/promo/validate?code=…&quiet=1` — the `quiet` param skips the
+  click tracker). If the code no longer exists (e.g. after a Redis wipe/rebuild)
+  it is removed from localStorage so the UI never claims a promo is applied
+  that isn't. Only an explicit "Apply" tap tracks a click.
 
 ### Rewards & points
 
@@ -245,8 +281,11 @@ the ledger. Settings tabs include:
 - Brand name from `BRAND_NAME` → `NEXT_PUBLIC_SITE_NAME` → neutral "Store".
   Support address from `SUPPORT_EMAIL` → `REPLY_TO_EMAIL` → neutral placeholder.
   Buyers set these in the platform (Vercel). **Do not hardcode a brand inbox.**
-- Site URLs in emails/metadata come from `NEXT_PUBLIC_SITE_URL` / `SITE_URL`
-  with a neutral fallback.
+- Site URLs in emails/metadata come from **`lib/env.ts`** (`getSiteUrl()`), which
+  resolves `NEXT_PUBLIC_URL` → `NEXT_PUBLIC_SITE_URL` → `SITE_URL` with a neutral
+  fallback. `getBrandName()` / `getSupportEmail()` / `neutralBrandName()` /
+  `fallbackSiteUrl()` are the other brand-safe helpers — **use them instead of
+  reading `process.env.*` directly** in customer-facing code.
 
 ## Environment Variables (set in Vercel)
 
@@ -260,9 +299,13 @@ the ledger. Settings tabs include:
 | `CRON_SECRET` | Cron endpoint auth |
 | `RESEND_API_KEY` / `RESEND_FROM` (optional) | Transactional email |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox address autofill (must be set in the SAME env as the deploy + redeploy) |
-| `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain) |
+| `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. |
 | `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` (optional) | Email send-from brand |
 | `SUPPORT_EMAIL` / `REPLY_TO_EMAIL` (optional) | Support address in emails |
+
+The admin **SetUp tab** (`/admin → SetUp`) shows live ✓/✗ status for every
+variable (never the values) plus a production launch checklist. `/api/admin/env-status`
+is the backing endpoint.
 
 
 ## Testing Checklist (run before every change ships)
@@ -286,7 +329,12 @@ the ledger. Settings tabs include:
    confirm the header, footer, OG card, favicon, emails metadata and Stripe
    descriptions reflect the change (no brand-name leakage).
 9. **Build** — `npm run build` passes type-check and production compile.
-10. **Lint** — `npm run lint` passes (eslint).
+10. **Lint** — `npm run lint` is 100% clean (0 errors, 0 warnings).
+11. **Tests** — `npm test` passes (`node --test` on `tests/*.test.ts`:
+    address validation, env helpers, order-ref).
+12. **Stale-state after wipe** — after a Redis wipe/rebuild, a reloaded
+    storefront shows an empty bag and NO "promo applied" chip (stored promo
+    was re-validated and dropped).
 
 ## Files to NEVER Modify
 
@@ -334,6 +382,55 @@ the ledger. Settings tabs include:
     ledger loop in Storefront relies on inferred types instead of an explicit
     `any` annotation. The changed files now lint one error CLEANER than the
     previous commit (the story page also dropped a stale error).
+
+- **2026-08-14 — Production-readiness pass (env aliases, address enforcement,
+  wipe/rebuild, streamer mode, SetUp tab, lint + tests):**
+  - **Env vars**: new `lib/env.ts` resolves `NEXT_PUBLIC_URL` →
+    `NEXT_PUBLIC_SITE_URL` → `SITE_URL` for the canonical site URL (so buyers
+    whose platform provides `NEXT_PUBLIC_URL` no longer see broken links),
+    plus `getBrandName()` / `getSupportEmail()` / `neutralBrandName()` /
+    `fallbackSiteUrl()`. Every `process.env.NEXT_PUBLIC_SITE_URL` read was
+    replaced with these helpers.
+  - **Brand leakage removed**: the top bar / home page / layout metadata no
+    longer fall back to a hardcoded `'GOYUNIR'`; neutral defaults (env brand →
+    "Store", "Your Brand", "support@example.com") are used. The
+    `https://goyunir.com` email fallback is gone. Seed/footer defaults are
+    neutral so a freshly seeded template never shows GOYUNIR. The seed route
+    now exposes `runSeedDefaults(redis)` for reuse.
+  - **Shipping address is now STRICTLY validated** (`lib/address-validation.ts`):
+    every entry / cart / waitlist / address update must be a complete address
+    (street # + name, city, state, ZIP/postal, country). Partial input like
+    `123 realstreet` is rejected with a targeted message on both client
+    (Storefront + cart drawer, with a Mapbox "pick a suggestion" hint when
+    autofill is live) and server (all checkout/address routes share the same
+    validator). Mapbox autofill still fills the full composed address.
+  - **Stale state after a Redis wipe fixed**: stored promo codes are
+    re-validated on load (`/api/promo/validate?quiet=1` — new `quiet` param
+    skips the click tracker) and dropped when invalid; the saved bag is pruned
+    against the live `/api/store` snapshot so ghost items (products/sizes that
+    no longer exist) never appear.
+  - **Admin → System → Wipe & Rebuild Redis** (`/api/admin/wipe`): full
+    key-space wipe with TWO-step confirmation (admin password + typing `WIPE`),
+    optional rebuild via the shared `runSeedDefaults`. Streamer mode must be
+    off first.
+  - **Admin Streamer Mode** (default ON): masks customer emails, addresses and
+    card numbers and disables the password field so the portal is safe on a
+    livestream; a toggle turns it off for real work.
+  - **Admin → SetUp tab** (`/api/admin/env-status`): ✓/✗ status for every
+    environment variable (values never returned), build-time vs secret badges,
+    and a production launch checklist.
+  - **Tests**: `npm test` runs `node --test` on `tests/*.test.ts`
+    (address-validation, env helpers, order-ref). `tsconfig.json` gained
+    `allowImportingTsExtensions` for the test runner.
+  - **Lint is 100% clean** (0 errors, 0 warnings): fixed `prefer-const`,
+    `Date.now()` during render (countdown clocks now read state, tick
+    immediately in the effect), a TDZ bug (`lookup` before declaration),
+    dead `window.location.href` assignments (`assign()`), ~30 unescaped
+    entities, and ~45 unused imports/vars/dead admin functions. Two React
+    Compiler rules are deliberately OFF with documented rationale
+    (`no-explicit-any`, `set-state-in-effect`, and the `no-img-element` perf
+    advisory) — see `eslint.config.mjs`.
+
 
 - **2026-08-14 — Redis schema finalization (TIDY + MIGRATE):**
   - Created **`lib/redis-keys.ts`** — the single source of truth for every Redis

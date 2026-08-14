@@ -14,6 +14,9 @@ export async function GET(request: Request) {
   const productId = String(url.searchParams.get('productId') || '').trim();
   const size = String(url.searchParams.get('size') || '').trim();
   const orderSubtotalCents = Math.max(0, Math.round(Number(url.searchParams.get('orderSubtotal') || 0) * 100));
+  // Load-time re-validation (stored promo sanity check on page load) must NOT
+  // inflate the click counter — only explicit user actions should track.
+  const quiet = url.searchParams.get('quiet') === '1';
 
   if (!code) return NextResponse.json({ valid: false, error: 'No code' });
 
@@ -36,11 +39,9 @@ export async function GET(request: Request) {
     typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
 
   // Check if this email has already used this promo
-  let alreadyUsed = false;
   if (email && maxPerEmail > 0) {
     const used = await redis.sismember(promoUsedKey(code), email);
     if (used === 1) {
-      alreadyUsed = true;
       return NextResponse.json({
         valid: false,
         error: 'This code has already been used with this email address',
@@ -81,7 +82,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ valid: false, error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}` });
   }
 
-  await trackPromoClick(redis, code);
+  if (!quiet) {
+    await trackPromoClick(redis, code);
+  }
 
   return NextResponse.json({
     valid: true,

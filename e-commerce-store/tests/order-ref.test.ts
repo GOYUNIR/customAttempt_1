@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildOrderRef, formatOrderRef } from '../lib/order-ref';
+import { buildOrderRef, formatOrderRef } from '../lib/order-ref.ts';
 
 test('buildOrderRef uses the GY prefix and preserves a stable reference', () => {
   const first = buildOrderRef('buyer@example.com', 'prod-1', 'Standard');

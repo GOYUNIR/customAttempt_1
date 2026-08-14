@@ -71,7 +71,7 @@ export default function SignupPage() {
         setError(data.error || 'Signup failed');
         notify({ id: 'auth-signup', type: 'error', message: data.error || 'Signup failed.' });
       }
-    } catch (err) {
+    } catch {
       setError('Network error');
       notify({ id: 'auth-signup', type: 'error', message: 'Network error.' });
     } finally {

@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
-import { randomBytes, scryptSync } from 'crypto';
+import { randomBytes } from 'crypto';
 import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
 import { sendPasswordResetEmail } from '@/lib/email';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
-
-function hashPassword(password: string, salt: string): string {
-  return scryptSync(password, salt, 64).toString('hex');
-}
 
 function resetKey(token: string) {
   return passwordResetKey(token);
@@ -44,7 +41,7 @@ export async function POST(request: Request) {
       createdAt: Date.now(),
     }));
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL || 'https://example.com';
+    const siteUrl = getSiteUrl() || fallbackSiteUrl();
     await sendPasswordResetEmail({
       to: normalizedEmail,
       resetUrl: `${siteUrl.replace(/\/$/, '')}/auth/reset-password?token=${token}`,

@@ -21,12 +21,13 @@ import {
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { getSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
 function siteUrlFromRequest(request: Request) {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
-  if (env) return env.replace(/\/$/, '');
+  const env = getSiteUrl();
+  if (env) return env;
   try {
     const u = new URL(request.url);
     return `${u.protocol}//${u.host}`;
@@ -86,7 +87,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     if (!email) return { hasAccount: false, rewardsBalance: 0 };
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
@@ -348,7 +349,7 @@ export async function POST(request: Request) {
     }
 
     const allProducts = await loadProducts(redis);
-    const maxPerEmailFor = (productId: string, size: string) => {
+    const maxPerEmailFor = (productId: string) => {
       const p = allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === String(meta.variant || ''));
       return Math.max(1, Number((p as any)?.maxPerEmail || 1));
     };
@@ -374,7 +375,7 @@ export async function POST(request: Request) {
         const size = String(line.size || 'Standard');
         if (!variant) continue;
         const qty = Math.max(1, Math.floor(Number(line.quantity || 1) || 1));
-        const maxPerEmail = maxPerEmailFor(String(line.productId || ''), size);
+        const maxPerEmail = maxPerEmailFor(String(line.productId || ''));
         for (let i = 0; i < qty; i += 1) {
           orderRefIndex += 1;
           const lineOrderRef = formatOrderRef(String(meta.orderRef || ''))
@@ -441,7 +442,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });
     }
 
-    const maxPerEmail = maxPerEmailFor(String(meta.productId || ''), size);
+    const maxPerEmail = maxPerEmailFor(String(meta.productId || ''));
     const result = await lockOneEntry({
       redis,
       stripe,
