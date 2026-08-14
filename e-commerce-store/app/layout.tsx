@@ -103,8 +103,22 @@ export default async function RootLayout({
   const colors = liveValue.themeColors || {};
   // Keep the inline JSON safe for a <script> block (escape any "</" sequences).
   const safeJson = JSON.stringify(liveValue).replace(/</g, '\\u003c');
+  // The CSS custom properties applied by the synchronous inline script below
+  // (and consumed by the storefront CSS) are baked into the server HTML too, so
+  // React hydration sees the same <html> style the inline script leaves behind.
+  // suppressHydrationWarning is required because the inline script mutates the
+  // live DOM BEFORE React hydrates — without it every page logs a React 418
+  // "A tree hydrated but some attributes ... didn't match" error.
+  const radiusRaw = Number(colors.borderRadius);
+  const htmlStyle = {
+    '--ui-radius': `${Number.isFinite(radiusRaw) && radiusRaw >= 0 ? radiusRaw : 12}px`,
+    '--background': colors.primaryBackground || '#0a0a0a',
+    '--foreground': colors.textMain || '#ffffff',
+    '--ui-chrome-alpha': String(Math.max(40, Math.min(100, Number(colors.chromeTransparency) || 94))),
+    '--ui-surface-alpha': String(Math.max(40, Math.min(100, Number(colors.surfaceTransparency) || 100))),
+  } as React.CSSProperties;
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning style={htmlStyle}>
       <body
         style={{
           margin: 0,

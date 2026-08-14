@@ -73,6 +73,22 @@ function stableOrderRef(entry: any) {
   return buildOrderRef(entry?.email || 'anon', entry?.variant || 'product', entry?.size || 'size');
 }
 
+/**
+ * Normalize a "Winners / draw" value into a comma-separated list of positive
+ * integers (e.g. "3, 2, 2"). Winner tiers are per-draw counts, so the field is
+ * a text input that accepts CSV — never a <input type="number">, which throws
+ * "The specified value '3,2,2' cannot be parsed" for seeded multi-tier drops.
+ */
+function normalizeWinnerTiersCsv(value: string): string {
+  const nums = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => Number(part))
+    .filter((n) => Number.isFinite(n) && n >= 1);
+  return nums.length > 0 ? nums.join(',') : '1';
+}
+
 function Bar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max <= 0 ? 0 : Math.round((value / max) * 100);
   return (
@@ -1383,7 +1399,15 @@ export default function AdminPortal() {
   };
 
   const saveSettings = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) {
+      // Streamer Mode disables the password field, so a bare "Enter password"
+      // alert reads as "saving is broken". Tell the operator exactly what to do.
+      if (streamerMode) {
+        setSettingsMsg('Turn OFF Streamer Mode first, then enter the admin password to save settings.');
+        return;
+      }
+      return alert('Enter password');
+    }
     setSettingsLoading(true);
     try {
       const res = await adminFetch('/api/admin/settings', {
@@ -2177,11 +2201,10 @@ export default function AdminPortal() {
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
                       <input
-                        type="number"
-                        min={1}
-                        placeholder="Winners / draw"
-                        value={cat.winnerTiers}
-                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', String(Math.max(1, Number(e.target.value) || 1)))}
+                        type="text"
+                        placeholder="Winners / draw (e.g. 3,2,2)"
+                        value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
+                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
                         style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
                       />
                       <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>

@@ -345,6 +345,29 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — Admin portal console-error + settings-save fixes:**
+  - **Site-wide hydration mismatch fixed** (`app/layout.tsx`): the layout's
+    synchronous inline theme script mutates `document.documentElement.style`
+    (CSS vars `--ui-radius`, `--background`, `--foreground`,
+    `--ui-chrome-alpha`, `--ui-surface-alpha`) *before* React hydrates, so the
+    live DOM differed from the SSR HTML and every page threw
+    `Minified React error #418` ("A tree hydrated but some attributes of the
+    server rendered HTML didn't match the client properties"). The CSS vars are
+    now baked into the server `<html style>` AND the element carries
+    `suppressHydrationWarning`, so hydration always matches.
+  - **"Winners / draw" number-input warnings fixed** (`app/admin/page.tsx`):
+    the per-size field was `<input type="number">` but seeded products store
+    multi-tier CSV values (`'3,2,2'`, `'2,2,1'`), which made the browser log
+    `The specified value '3,2,2' cannot be parsed, or is out of range` dozens
+    of times on every render. It is now a text input (placeholder
+    `Winners / draw (e.g. 3,2,2)`) with a `normalizeWinnerTiersCsv()` helper
+    that accepts comma-separated positive integers.
+  - **Settings-save UX when Streamer Mode is ON** (`app/admin/page.tsx`): the
+    default-on Streamer Mode disables the password field, so clicking
+    "Save All Settings" just fired a bare `alert('Enter password')` (read as
+    "saving is broken"). It now shows an inline message: "Turn OFF Streamer
+    Mode first, then enter the admin password to save settings."
+
 - **2026-08-14 — Template finalization pass:**
   - Catalog page: "Currently Available" section now renders BELOW the archives
     (order: Upcoming → Past Archives → Currently Available).

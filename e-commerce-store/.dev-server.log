@@ -1123,3 +1123,285 @@ operable program or batch file.
 ✓ Compiled in 257ms
 ✓ Compiled in 141ms
 ✓ Compiled in 257ms
+ GET /api/admin/upload 405 in 1086ms (next.js: 1047ms, proxy.ts: 9ms, application-code: 30ms)
+ GET /api/admin/settings 200 in 839ms (next.js: 427ms, proxy.ts: 8ms, application-code: 404ms)
+ GET /api/admin/status 200 in 2.4s (next.js: 343ms, proxy.ts: 8ms, application-code: 2.0s)
+ GET /api/admin/settings 200 in 205ms (next.js: 5ms, proxy.ts: 5ms, application-code: 196ms)
+ POST /api/admin/settings 200 in 1163ms (next.js: 14ms, proxy.ts: 9ms, application-code: 1140ms)
+ GET /admin 200 in 2.9s (next.js: 2.3s, proxy.ts: 5ms, application-code: 605ms)
+ GET /api/admin/settings 200 in 443ms (next.js: 110ms, proxy.ts: 115ms, application-code: 218ms)
+ GET /admin 200 in 412ms (next.js: 19ms, proxy.ts: 16ms, application-code: 377ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/admin" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"1px",--background:"#FFFFFF",--foreground:"#111111",--ui-chrome-alpha:"96", ...}}
+                        >
+                  ...
+ 
+ GET /icon 200 in 1163ms (next.js: 253ms, application-code: 910ms)
+ GET /api/admin/recovery-config 200 in 1314ms (next.js: 1023ms, proxy.ts: 43ms, application-code: 247ms)
+ GET /api/admin/promos 200 in 1318ms (next.js: 1117ms, proxy.ts: 44ms, application-code: 157ms)
+ GET /api/auth/me 200 in 454ms (next.js: 421ms, application-code: 34ms)
+ GET /api/catalog/status 200 in 1897ms (next.js: 267ms, application-code: 1630ms)
+ GET /api/admin/catalog-settings 200 in 1229ms (next.js: 499ms, proxy.ts: 21ms, application-code: 709ms)
+ GET /api/store 200 in 1702ms (next.js: 193ms, application-code: 1509ms)
+ GET /api/admin/products?includeArchived=true 200 in 3.4s (next.js: 959ms, proxy.ts: 326ms, application-code: 2.1s)
+ GET /api/admin/status?t=1786717839202 200 in 4.5s (next.js: 720ms, proxy.ts: 43ms, application-code: 3.7s)
+ GET /api/admin/products?includeArchived=true 200 in 1194ms (next.js: 7ms, proxy.ts: 5ms, application-code: 1182ms)
+ GET /api/admin/settings 200 in 75ms (next.js: 6ms, proxy.ts: 5ms, application-code: 64ms)
+ POST /api/admin/settings 200 in 443ms (next.js: 7ms, proxy.ts: 7ms, application-code: 429ms)
+ GET /admin 200 in 500ms (next.js: 11ms, proxy.ts: 12ms, application-code: 478ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/admin" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"12px",--background:"#0a0a0a",--foreground:"#ffffff",--ui-chrome-alpha:"94", ...}}
+                        >
+                  ...
+ 
+ GET /icon 200 in 201ms (next.js: 5ms, application-code: 196ms)
+ GET /api/admin/promos 200 in 268ms (next.js: 41ms, proxy.ts: 63ms, application-code: 164ms)
+ GET /api/admin/catalog-settings 200 in 256ms (next.js: 5ms, proxy.ts: 5ms, application-code: 247ms)
+ GET /api/auth/me 200 in 16ms (next.js: 7ms, application-code: 9ms)
+ GET /api/admin/recovery-config 200 in 757ms (next.js: 45ms, proxy.ts: 49ms, application-code: 664ms)
+ GET /api/admin/products?includeArchived=true 200 in 866ms (next.js: 56ms, proxy.ts: 63ms, application-code: 747ms)
+ GET /api/store 200 in 894ms (next.js: 6ms, application-code: 888ms)
+ GET /api/admin/status?t=1786717896297 200 in 1851ms (next.js: 29ms, proxy.ts: 49ms, application-code: 1773ms)
+ GET /api/admin/settings 200 in 123ms (next.js: 7ms, proxy.ts: 5ms, application-code: 111ms)
+ GET /api/catalog/status 200 in 2.9s (next.js: 21ms, application-code: 2.9s)
+ POST /api/admin/settings 200 in 976ms (next.js: 4ms, proxy.ts: 4ms, application-code: 967ms)
+ GET /api/admin/settings 200 in 360ms (next.js: 6ms, proxy.ts: 4ms, application-code: 350ms)
+ GET / 200 in 1071ms (next.js: 299ms, application-code: 771ms)
+ GET /api/auth/me 200 in 27ms (next.js: 17ms, application-code: 10ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"1px",--background:"#FFFFFF",--foreground:"#111111",--ui-chrome-alpha:"96", ...}}
+                        >
+                  ...
+ 
+ GET /api/auth/me 200 in 14ms (next.js: 5ms, application-code: 9ms)
+ GET /icon 200 in 361ms (next.js: 6ms, application-code: 355ms)
+ GET /api/analytics/heartbeat?visitorId=mst1rmpy-9pj8fv 200 in 416ms (next.js: 220ms, application-code: 196ms)
+ GET /api/store 200 in 2.2s (next.js: 7ms, application-code: 2.2s)
+ GET /images/baseItem2/1.jpeg 404 in 608ms (next.js: 353ms, application-code: 255ms)
+ GET /images/obsidian-void/1.jpeg 404 in 620ms (next.js: 308ms, application-code: 312ms)
+ GET /images/elysian-white/1.jpeg 404 in 630ms (next.js: 244ms, application-code: 386ms)
+ GET /images/baseItem1/1.jpeg 404 in 626ms (next.js: 483ms, application-code: 143ms)
+ GET /admin 200 in 446ms (next.js: 24ms, proxy.ts: 39ms, application-code: 383ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/admin" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <script>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+-                         style={{--ui-radius:"1px",--background:"#FFFFFF",--foreground:"#111111",--ui-chrome-alpha:"96", ...}}
+                        >
+                  ...
+ 
+ GET /api/admin/recovery-config 200 in 193ms (next.js: 34ms, proxy.ts: 52ms, application-code: 107ms)
+ GET /api/admin/promos 200 in 199ms (next.js: 47ms, proxy.ts: 52ms, application-code: 99ms)
+ GET /api/store 200 in 50ms (next.js: 13ms, application-code: 37ms)
+ GET /api/admin/catalog-settings 200 in 247ms (next.js: 105ms, proxy.ts: 45ms, application-code: 97ms)
+ GET /api/auth/me 200 in 18ms (next.js: 7ms, application-code: 11ms)
+ GET /api/catalog/status 200 in 656ms (next.js: 22ms, application-code: 635ms)
+ GET /api/admin/products?includeArchived=true 200 in 695ms (next.js: 56ms, proxy.ts: 51ms, application-code: 587ms)
+ GET /api/admin/status?t=1786718007011 200 in 2.3s (next.js: 17ms, proxy.ts: 52ms, application-code: 2.2s)
+ GET /api/admin/settings 200 in 38ms (next.js: 9ms, proxy.ts: 6ms, application-code: 23ms)
+✓ Compiled in 161ms
+ GET / 200 in 816ms (next.js: 196ms, application-code: 620ms)
+ GET /api/auth/me 200 in 96ms (next.js: 87ms, application-code: 9ms)
+ GET /api/auth/me 200 in 10ms (next.js: 4ms, application-code: 6ms)
+ GET /icon 200 in 312ms (next.js: 100ms, application-code: 212ms)
+ GET /api/analytics/heartbeat?visitorId=mst1vcyd-v2ixtm 200 in 331ms (next.js: 117ms, application-code: 214ms)
+ GET /api/store 200 in 627ms (next.js: 41ms, application-code: 586ms)
+ GET /images/obsidian-void/1.jpeg 404 in 998ms (next.js: 255ms, application-code: 742ms)
+ GET /images/elysian-white/1.jpeg 404 in 1518ms (next.js: 336ms, application-code: 1182ms)
+ GET /images/baseItem2/1.jpeg 404 in 1510ms (next.js: 512ms, application-code: 998ms)
+ GET /images/baseItem1/1.jpeg 404 in 1517ms (next.js: 377ms, application-code: 1140ms)
+ GET /admin 200 in 775ms (next.js: 195ms, proxy.ts: 142ms, application-code: 438ms)
+ GET /api/admin/recovery-config 200 in 397ms (next.js: 131ms, proxy.ts: 103ms, application-code: 163ms)
+ GET /api/admin/promos 200 in 393ms (next.js: 176ms, proxy.ts: 102ms, application-code: 115ms)
+ GET /api/store 200 in 25ms (next.js: 4ms, application-code: 21ms)
+ GET /api/auth/me 200 in 40ms (next.js: 29ms, application-code: 10ms)
+ GET /api/admin/catalog-settings 200 in 466ms (next.js: 262ms, proxy.ts: 100ms, application-code: 104ms)
+ GET /api/admin/products?includeArchived=true 200 in 723ms (next.js: 226ms, proxy.ts: 98ms, application-code: 399ms)
+ GET /api/catalog/status 200 in 800ms (next.js: 64ms, application-code: 737ms)
+ GET /api/admin/status?t=1786718181049 200 in 2.1s (next.js: 73ms, proxy.ts: 105ms, application-code: 1907ms)
+ GET /api/admin/settings 200 in 140ms (next.js: 67ms, proxy.ts: 7ms, application-code: 66ms)
+ GET /api/admin/products 200 in 517ms (next.js: 5ms, proxy.ts: 4ms, application-code: 508ms)
+ GET / 200 in 555ms (next.js: 14ms, application-code: 541ms)
+ GET /api/auth/me 200 in 30ms (next.js: 19ms, application-code: 11ms)
+ GET /api/auth/me 200 in 16ms (next.js: 7ms, application-code: 9ms)
+ GET /icon 200 in 250ms (next.js: 5ms, application-code: 245ms)
+ GET /api/analytics/heartbeat?visitorId=mst1wgo5-0nrxe9 200 in 376ms (next.js: 36ms, application-code: 340ms)
+ GET /api/store 200 in 464ms (next.js: 7ms, application-code: 457ms)
+ GET /images/elysian-white/1.jpeg 404 in 413ms (next.js: 41ms, application-code: 373ms)
+ GET /images/obsidian-void/1.jpeg 404 in 1191ms (next.js: 76ms, application-code: 1114ms)
+ GET /images/baseItem1/1.jpeg 404 in 1210ms (next.js: 129ms, application-code: 1082ms)
+ GET /images/baseItem2/1.jpeg 404 in 1210ms (next.js: 169ms, application-code: 1041ms)
+ GET /admin 200 in 333ms (next.js: 14ms, proxy.ts: 7ms, application-code: 312ms)
+ GET /api/admin/promos 200 in 137ms (next.js: 45ms, proxy.ts: 40ms, application-code: 52ms)
+ GET /api/admin/recovery-config 200 in 148ms (next.js: 29ms, proxy.ts: 41ms, application-code: 77ms)
+ GET /api/store 200 in 58ms (next.js: 18ms, application-code: 41ms)
+ GET /api/auth/me 200 in 90ms (next.js: 78ms, application-code: 12ms)
+ GET /api/admin/catalog-settings 200 in 257ms (next.js: 70ms, proxy.ts: 34ms, application-code: 153ms)
+ GET /api/admin/products?includeArchived=true 200 in 366ms (next.js: 52ms, proxy.ts: 39ms, application-code: 275ms)
+ GET /api/catalog/status 200 in 569ms (next.js: 15ms, application-code: 554ms)
+ GET /api/admin/status?t=1786718232079 200 in 1966ms (next.js: 17ms, proxy.ts: 43ms, application-code: 1906ms)
+ GET /api/admin/settings 200 in 84ms (next.js: 5ms, proxy.ts: 5ms, application-code: 74ms)
+ GET /admin 200 in 507ms (next.js: 11ms, proxy.ts: 9ms, application-code: 486ms)
+ GET /icon 200 in 220ms (next.js: 7ms, application-code: 213ms)
+ GET /api/admin/catalog-settings 200 in 123ms (next.js: 7ms, proxy.ts: 7ms, application-code: 109ms)
+ GET /api/admin/promos 200 in 290ms (next.js: 51ms, proxy.ts: 54ms, application-code: 185ms)
+ GET /api/auth/me 200 in 15ms (next.js: 5ms, application-code: 10ms)
+ GET /api/admin/products?includeArchived=true 200 in 651ms (next.js: 70ms, proxy.ts: 51ms, application-code: 530ms)
+ GET /api/catalog/status 200 in 787ms (next.js: 12ms, application-code: 775ms)
+ GET /api/store 200 in 523ms (next.js: 12ms, application-code: 511ms)
+ GET /api/admin/recovery-config 200 in 980ms (next.js: 33ms, proxy.ts: 55ms, application-code: 892ms)
+ GET /api/admin/status?t=1786718292571 200 in 1995ms (next.js: 29ms, proxy.ts: 43ms, application-code: 1923ms)
+ GET /admin 200 in 139ms (next.js: 15ms, proxy.ts: 10ms, application-code: 115ms)
+ GET /icon 200 in 104ms (next.js: 5ms, application-code: 99ms)
+ GET /api/admin/recovery-config 200 in 229ms (next.js: 33ms, proxy.ts: 37ms, application-code: 159ms)
+ GET /api/admin/promos 200 in 267ms (next.js: 47ms, proxy.ts: 38ms, application-code: 182ms)
+ GET /api/auth/me 200 in 14ms (next.js: 4ms, application-code: 9ms)
+ GET /api/admin/catalog-settings 200 in 390ms (next.js: 7ms, proxy.ts: 71ms, application-code: 313ms)
+ GET /api/admin/products?includeArchived=true 200 in 597ms (next.js: 59ms, proxy.ts: 37ms, application-code: 500ms)
+ GET /api/catalog/status 200 in 1911ms (next.js: 13ms, application-code: 1898ms)
+ GET /api/store 200 in 1803ms (next.js: 6ms, application-code: 1797ms)
+ GET /api/admin/status?t=1786718314186 200 in 2.6s (next.js: 18ms, proxy.ts: 39ms, application-code: 2.6s)
+ GET /api/admin/products?includeArchived=true 200 in 402ms (next.js: 9ms, proxy.ts: 5ms, application-code: 388ms)
+ GET / 200 in 419ms (next.js: 11ms, application-code: 408ms)
+ GET /api/auth/me 200 in 29ms (next.js: 19ms, application-code: 10ms)
+ GET /api/auth/me 200 in 14ms (next.js: 6ms, application-code: 8ms)
+ GET /icon 200 in 247ms (next.js: 5ms, application-code: 243ms)
+ GET /api/analytics/heartbeat?visitorId=mst1yopd-ljf5pd 200 in 291ms (next.js: 34ms, application-code: 257ms)
+ GET /api/store 200 in 392ms (next.js: 7ms, application-code: 384ms)
+ GET /images/elysian-white/1.jpeg 404 in 1075ms (next.js: 46ms, application-code: 1029ms)
+ GET /images/obsidian-void/1.jpeg 404 in 1226ms (next.js: 118ms, application-code: 1108ms)
+ GET /images/baseItem2/1.jpeg 404 in 1231ms (next.js: 244ms, application-code: 986ms)
+ GET /images/baseItem1/1.jpeg 404 in 1238ms (next.js: 168ms, application-code: 1069ms)
+ GET /admin 200 in 327ms (next.js: 9ms, proxy.ts: 8ms, application-code: 310ms)
+ GET /api/admin/recovery-config 200 in 130ms (next.js: 29ms, proxy.ts: 45ms, application-code: 56ms)
+ GET /api/store 200 in 32ms (next.js: 6ms, application-code: 26ms)
+ GET /api/admin/promos 200 in 168ms (next.js: 39ms, proxy.ts: 44ms, application-code: 84ms)
+ GET /api/auth/me 200 in 16ms (next.js: 6ms, application-code: 9ms)
+ GET /api/admin/catalog-settings 200 in 198ms (next.js: 60ms, proxy.ts: 39ms, application-code: 100ms)
+ GET /api/admin/products?includeArchived=true 200 in 523ms (next.js: 50ms, proxy.ts: 41ms, application-code: 433ms)
+ GET /api/catalog/status 200 in 545ms (next.js: 15ms, application-code: 530ms)
+ GET /api/admin/status?t=1786718335558 200 in 1784ms (next.js: 18ms, proxy.ts: 46ms, application-code: 1720ms)
+ GET /api/admin/settings 200 in 106ms (next.js: 6ms, proxy.ts: 6ms, application-code: 94ms)
+ GET /api/admin/products?includeArchived=true 200 in 272ms (next.js: 6ms, proxy.ts: 6ms, application-code: 260ms)
+ GET /api/admin/settings 200 in 595ms (next.js: 4ms, proxy.ts: 5ms, application-code: 586ms)
