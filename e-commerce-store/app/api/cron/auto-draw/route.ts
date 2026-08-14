@@ -15,6 +15,11 @@ import {
   archiveProductToCatalog,
   getProductOverride,
   getAdminPassword,
+  PROMO_CODES_KEY,
+  DRAW_HISTORY_KEY,
+  POOL_KEY_PREFIX,
+  intentPoolKey,
+  lastAutoDrawKey,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getProductPrice, getWinnerCount, getNextDrawTimestampForSchedule, resolveProductSchedule, isConfiguredPrice } from '@/lib/storefront-config';
@@ -22,9 +27,6 @@ import { sendWinnerEmail, sendPromoterPayoutEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-const PROMOS_KEY = 'config:promos';
-const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 function authorized(request: Request) {
   const url = new URL(request.url);
@@ -51,7 +53,7 @@ async function runAutoDraw(request: Request) {
       }
       const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
       const lastDraw = safeParseRedisItem<any>(lastDrawRaw);
-      const hasPools = await redis.keys('*drop_pool*');
+      const hasPools = await redis.keys(`${POOL_KEY_PREFIX}*`);
       return NextResponse.json({ 
         ok: true, 
         lastDraw: lastDraw || null,
@@ -87,7 +89,7 @@ async function runAutoDraw(request: Request) {
 
     // Also run if there are entries and it's been more than 24 hours since last draw
     if (!shouldRun) {
-      const hasPools = await redis.keys('*drop_pool*');
+      const hasPools = await redis.keys(`${POOL_KEY_PREFIX}*`);
       if (hasPools && hasPools.length > 0) {
         const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
         const lastDraw = safeParseRedisItem<any>(lastDrawRaw);
@@ -103,7 +105,7 @@ async function runAutoDraw(request: Request) {
 
     const processedWinners: any[] = [];
     let grandRevenueChargesCount = 0;
-    let allPoolKeys = await redis.keys('*drop_pool*');
+    let allPoolKeys = await redis.keys(`${POOL_KEY_PREFIX}*`);
     if (targetPoolSignature !== 'ALL_POOLS') {
       allPoolKeys = allPoolKeys.filter((k: string) => k === targetPoolSignature);
     }
@@ -115,8 +117,8 @@ async function runAutoDraw(request: Request) {
       try {
         const listLength = await redis.llen(poolKey);
         const keyParts = poolKey.split(':');
-        const productName = String(keyParts[1] || '');
-        const productSize = String(keyParts[2] || '50ml');
+        const productName = String(keyParts[2] || '');
+        const productSize = String(keyParts[3] || '50ml');
         const productDefinition = GOYUNIR_STORE_SUITE.productCatalog.find((p) => p.name === productName);
         if (!productDefinition || listLength === 0) continue;
 
@@ -182,7 +184,7 @@ async function runAutoDraw(request: Request) {
 
               if (promoCode) {
                 try {
-                  const raw = await redis.hget(PROMOS_KEY, promoCode);
+                  const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
                   promoForCharge = safeParseRedisItem<any>(raw);
                   if (promoForCharge && promoForCharge.active !== false) {
                     const self =
@@ -231,7 +233,7 @@ async function runAutoDraw(request: Request) {
                   const payoutAmountCents = Math.round((priceCents * payoutPct) / 100);
                   promoForCharge.revenueAttributed = (Number(promoForCharge.revenueAttributed) || 0) + priceCents / 100;
                   promoForCharge.payoutOwedCents = (Number(promoForCharge.payoutOwedCents) || 0) + payoutAmountCents;
-                  await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(promoForCharge) });
+                  await redis.hset(PROMO_CODES_KEY, { [promoCode]: JSON.stringify(promoForCharge) });
 
                   if (promoForCharge.promoterEmail) {
                     await sendPromoterPayoutEmail({
@@ -308,7 +310,7 @@ async function runAutoDraw(request: Request) {
           if (parsed.cardFingerprint) await redis.sadd(cardBlockKey(productName, productSize), String(parsed.cardFingerprint));
         }
 
-        const intentKey = `intent_pool:${productName}:${productSize}`;
+        const intentKey = intentPoolKey(productName, productSize);
         try {
           const remainingIntents = await redis.lrange(intentKey, 0, -1);
           for (const item of remainingIntents) {
@@ -329,7 +331,7 @@ async function runAutoDraw(request: Request) {
           [poolStatField('int', productName, productSize)]: '0',
         });
 
-        await redis.set(`draw:last_auto:${productName}:${productSize}`, String(Date.now()));
+        await redis.set(lastAutoDrawKey(productName, productSize), String(Date.now()));
 
         if (live.inventoryRemaining <= 0) {
           await archiveProductToCatalog(redis, {

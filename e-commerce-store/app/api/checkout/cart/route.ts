@@ -7,22 +7,17 @@ import {
   ARCHIVE_LEDGER_KEY,
   safeParseRedisItem,
   emailBlockKey,
+  PROMO_CODES_KEY,
+  promoUsedKey,
+  promoPendingKey,
+  poolKey,
 } from '@/lib/server-config';
 import { buildOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
-const PROMOS_KEY = 'config:promos';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
-
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
-
-function pendingPromoKey(code: string, email: string) {
-  return `promo:pending:${code}:${email}`;
-}
 
 type CartInputItem = {
   productId: string;
@@ -57,7 +52,7 @@ async function countChargedByEmail(redis: any, email: string, variant: string, s
 
 async function countActivePoolEntries(redis: any, variant: string, size: string, email: string) {
   try {
-    const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+    const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
     let count = 0;
     for (const row of poolItems) {
       const parsed = safeParseRedisItem<any>(row);
@@ -191,7 +186,7 @@ export async function POST(request: Request) {
       fcfsPromoNormalized = normalizedPromo;
 
       if (normalizedPromo) {
-        const rawPromo = await redis.hget(PROMOS_KEY, normalizedPromo);
+        const rawPromo = await redis.hget(PROMO_CODES_KEY, normalizedPromo);
         const promo = safeParseRedisItem<any>(rawPromo);
         if (!promo || promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
@@ -206,12 +201,12 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: 'This code has been fully claimed.' }, { status: 409 });
         }
         if (Number(promo.maxUsesPerEmail || 0) > 0) {
-          const used = await redis.sismember(usedEmailsKey(normalizedPromo), email);
+          const used = await redis.sismember(promoUsedKey(normalizedPromo), email);
           if (used === 1) {
             return NextResponse.json({ error: 'This code has already been used with this email address.' }, { status: 409 });
           }
         }
-        const pendingKey = pendingPromoKey(normalizedPromo, email);
+        const pendingKey = promoPendingKey(normalizedPromo, email);
         const pending = await redis.get(pendingKey);
         if (pending) {
           return NextResponse.json({ error: 'This code already has a checkout in progress for this email. Finish that checkout or wait a bit before trying again.' }, { status: 409 });
@@ -326,7 +321,7 @@ export async function POST(request: Request) {
         },
       });
       if (fcfsPromoNormalized) {
-        await redis.set(pendingPromoKey(fcfsPromoNormalized, email), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
+        await redis.set(promoPendingKey(fcfsPromoNormalized, email), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
       }
       fcfsUrl = session.url || undefined;
     }

@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient , getAdminPassword, PRODUCTS_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-const PRODUCTS_KEY = 'store:products';
 
 export async function POST(request: Request) {
   try {

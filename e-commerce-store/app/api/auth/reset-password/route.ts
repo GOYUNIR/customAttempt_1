@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes, scryptSync } from 'crypto';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,12 +18,13 @@ export async function POST(request: Request) {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
-    const resetData = safeParseRedisItem<any>(await redis.get(`reset:${token}`));
+    const resetKeyName = passwordResetKey(token);
+    const resetData = safeParseRedisItem<any>(await redis.get(resetKeyName));
     if (!resetData?.email) {
       return NextResponse.json({ error: 'Reset link expired or invalid' }, { status: 400 });
     }
 
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     let userId: string | null = null;
     let user: any = null;
     for (const [key, value] of Object.entries(raw || {})) {
@@ -41,8 +42,8 @@ export async function POST(request: Request) {
 
     const salt = randomBytes(16).toString('hex');
     user.password = `${salt}:${hashPassword(password, salt)}`;
-    await redis.hset('store:users', { [userId]: JSON.stringify(user) });
-    await redis.del(`reset:${token}`);
+    await redis.hset(USERS_KEY, { [userId]: JSON.stringify(user) });
+    await redis.del(resetKeyName);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

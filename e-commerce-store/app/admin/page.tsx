@@ -1376,7 +1376,7 @@ export default function AdminPortal() {
 
   const organizeRedis = async () => {
     if (!password) return alert('Enter password');
-    setOrganizeMsg('Cleaning up redundant Redis keys...');
+    setOrganizeMsg('Migrating legacy keys and tidying the Redis schema...');
     try {
       const res = await adminFetch('/api/admin/organize-redis', {
         method: 'POST',
@@ -1385,16 +1385,17 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        const detail = Array.isArray(data.removed) && data.removed.length > 0 ? ` Removed: ${data.removed.join(', ')}` : '';
-        setOrganizeMsg((data.message || 'Redis cleanup complete.') + detail);
-        showToast('UPDATED · Redis cleaned');
+        const migrated = Array.isArray(data.migrated) && data.migrated.length > 0 ? ` Migrated: ${data.migrated.length} key(s).` : '';
+        const removed = Array.isArray(data.removed) && data.removed.length > 0 ? ` Removed legacy: ${data.removed.join(', ')}.` : '';
+        setOrganizeMsg((data.message || 'Redis schema is tidy.') + migrated + removed);
+        showToast('UPDATED · Redis schema tidy');
         await fetchProducts();
         await fetchCatalogSettings();
       } else {
-        setOrganizeMsg(data.error || 'Failed to clean up Redis.');
+        setOrganizeMsg(data.error || 'Failed to tidy Redis.');
       }
     } catch (err: any) {
-      setOrganizeMsg(err.message || 'Failed to clean up Redis.');
+      setOrganizeMsg(err.message || 'Failed to tidy Redis.');
     }
   };
 
@@ -1685,7 +1686,7 @@ export default function AdminPortal() {
                   <option value="ALL_POOLS">All pools</option>
                   {allProducts.map((p) =>
                     (p.priceCategories || []).map((cat: any) => (
-                      <option key={`${p.name}-${cat.size}`} value={`drop_pool:${p.name}:${cat.size}`}>{p.name} — {cat.size}</option>
+                      <option key={`${p.name}-${cat.size}`} value={`entries:pool:${p.name}:${cat.size}`}>{p.name} — {cat.size}</option>
                     ))
                   )}
                 </select>
@@ -2698,11 +2699,11 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Redis Cleanup</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Tidy Redis Schema</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                Deletes legacy redundant keys (product mirror hashes, standalone image keys, and the old catalog_config copy). Products and settings live in single source-of-truth keys, so nothing here removes real data.
+                Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys. It is lossless (data is renamed, never dropped) and safe to re-run anytime. Runs the same migration a fresh install starts with — see AGENTS.md for the key map.
               </p>
-              <button onClick={organizeRedis} style={buttonGhost}>Clean Up Redis</button>
+              <button onClick={organizeRedis} style={buttonGhost}>Tidy &amp; Migrate Redis Schema</button>
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
             </div>
           </div>

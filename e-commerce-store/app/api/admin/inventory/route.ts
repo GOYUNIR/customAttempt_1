@@ -4,14 +4,14 @@ import {
   getOrSeedLiveState,
   saveLiveState,
   loadProducts,
+  PRODUCTS_KEY,
+
   getAdminPassword,
 } from '@/lib/server-config';
 import { getWinnerCount } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
-
-const PRODUCTS_KEY = 'store:products';
 
 export async function POST(request: Request) {
   try {

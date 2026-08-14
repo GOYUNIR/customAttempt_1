@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, PRODUCTS_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
 // Images live INSIDE the product object in store:products (single source of
 // truth). No separate `store:product_images:*` keys exist anymore.
-const PRODUCTS_KEY = 'store:products';
 
 export async function GET(request: Request) {
   try {

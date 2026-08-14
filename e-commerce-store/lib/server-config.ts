@@ -3,8 +3,30 @@ import Stripe from 'stripe';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
+import {
+  PRODUCTS_KEY,
+  STORE_CONFIG_KEY,
+  ARCHIVE_LEDGER_KEY,
+  POOL_STATS_KEY,
+  poolStatField,
+  CATALOG_ARCHIVE_KEY,
+  LIVE_STATE_KEY,
+  emailBlockKey,
+  cardBlockKey,
+  poolKey,
+  intentPoolKey,
+  POOL_KEY_PREFIX,
+  INTENT_KEY_PREFIX,
+  SCHEDULE_OVERRIDE_KEY,
+  SOCIAL_PROOF_OVERRIDE_KEY,
+  productOverrideKey,
+  PROMO_CODES_KEY,
+} from '@/lib/redis-keys';
 
-export const STORE_CONFIG_KEY = 'store:config';
+// All Redis key names/helpers are defined once in lib/redis-keys.ts and
+// re-exported here so every route can keep importing from '@/lib/server-config'.
+// NEVER redefine a Redis key string in this file — add it to lib/redis-keys.ts.
+export * from '@/lib/redis-keys';
 
 export type StoreBrandingConfig = {
   logoUrl?: string;
@@ -64,8 +86,6 @@ export function resolveCustomerId(entry: any): string {
   return String(entry?.customerId || entry?.stripeCustomerId || '');
 }
 
-export const ARCHIVE_LEDGER_KEY = 'archive:ledger';
-
 export interface ArchiveRecord {
   email: string;
   variant: string;
@@ -103,26 +123,7 @@ export async function loadStoreConfig(redis: Redis | null | undefined): Promise<
  * from every request on warm instances.
  */
 export function loadStoreConfigCached(redis: Redis | null | undefined): Promise<Record<string, any>> {
-  return withTtlCache('store:config', 30_000, () => loadStoreConfig(redis));
-}
-
-export const POOL_STATS_KEY = 'stats:pools';
-export function poolStatField(kind: 'sub' | 'int', variant: string, size: string) {
-  return `${kind}:${variant}:${size}`;
-}
-
-export const SOCIAL_PROOF_BOOST_KEY = 'stats:social_proof_boost';
-export const PROCESSED_SESSIONS_KEY = 'drop_processed_sessions';
-export const LAST_DRAW_KEY = 'drop_last_draw_summary';
-export const CATALOG_ARCHIVE_KEY = 'catalog:archive_state';
-export const LIVE_STATE_KEY = 'live_state';
-export const PROMOS_KEY = 'config:promos';
-
-export function emailBlockKey(variant: string, size: string) {
-  return `drop_fraud_block:${variant}:${size}:emails`;
-}
-export function cardBlockKey(variant: string, size: string) {
-  return `drop_fraud_block:${variant}:${size}:cards`;
+  return withTtlCache(STORE_CONFIG_KEY, 30_000, () => loadStoreConfig(redis));
 }
 
 export function liveStateField(productId: string, slug: string, size: string) {
@@ -363,10 +364,10 @@ export function getWinnerCountForDraw(sizeOrConfig?: any, configWinners50 = 1, c
 }
 
 export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
-  const poolKey = `drop_pool:${productName}:${size}`;
-  const intentKey = `intent_pool:${productName}:${size}`;
+  const pool = poolKey(productName, size);
+  const intent = intentPoolKey(productName, size);
   await Promise.all([
-    redis.del(poolKey), redis.del(intentKey),
+    redis.del(pool), redis.del(intent),
     redis.del(emailBlockKey(productName, size)), redis.del(cardBlockKey(productName, size)),
     redis.hset(POOL_STATS_KEY, {
       [poolStatField('sub', productName, size)]: '0',
@@ -376,7 +377,7 @@ export async function resetPoolAndBlocks(redis: Redis, productName: string, size
 }
 
 export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string) {
-  const intentKey = `intent_pool:${variant}:${size}`;
+  const intentKey = intentPoolKey(variant, size);
   let removedCount = 0;
   try {
     const intentItems = await redis.lrange(intentKey, 0, -1);
@@ -433,22 +434,36 @@ export async function findLedgerEntriesByEmailVariant(
   }
 }
 
-async function listPoolKeysForProduct(redis: Redis, prefix: 'drop_pool' | 'intent_pool', productName: string): Promise<string[]> {
+async function listPoolKeysForProduct(redis: Redis, prefix: 'pool' | 'intent', productName: string): Promise<string[]> {
   try {
-    const keys = await redis.keys(`${prefix}:${productName}:*`);
+    const scanPrefix = prefix === 'pool' ? POOL_KEY_PREFIX : INTENT_KEY_PREFIX;
+    const keys = await redis.keys(`${scanPrefix}${productName}:*`);
     return Array.isArray(keys) ? keys : [];
   } catch {
     return [];
   }
 }
 
+/** Extract the `size` segment from an `entries:pool:<variant>:<size>` key. */
+export function sizeFromPoolKey(poolKey: string): string {
+  // `entries:pool:<variant>:<size>` — variant may itself contain colons, so we
+  // only strip the fixed 2-segment namespace prefix, not split from the left.
+  const withoutPrefix = poolKey.startsWith(POOL_KEY_PREFIX)
+    ? poolKey.slice(POOL_KEY_PREFIX.length)
+    : poolKey.startsWith(INTENT_KEY_PREFIX)
+      ? poolKey.slice(INTENT_KEY_PREFIX.length)
+      : poolKey;
+  const colon = withoutPrefix.indexOf(':');
+  return colon > 0 ? withoutPrefix.slice(colon + 1) : 'Standard';
+}
+
 export async function findPoolEntriesByEmail(redis: Redis, productNames: string[], email: string): Promise<FoundPoolEntry[]> {
   const normalizedEmail = email.trim().toLowerCase();
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
-    const poolKeys = await listPoolKeysForProduct(redis, 'drop_pool', productName);
+    const poolKeys = await listPoolKeysForProduct(redis, 'pool', productName);
     for (const poolKey of poolKeys) {
-      const size = String(poolKey.split(':').slice(2).join(':') || 'Standard');
+      const size = sizeFromPoolKey(poolKey);
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
         const parsed = safeParseRedisItem<any>(raw);
@@ -471,9 +486,9 @@ export async function findPoolEntriesByEmail(redis: Redis, productNames: string[
 export async function findAllOpenOrders(redis: Redis, productNames: string[]): Promise<FoundPoolEntry[]> {
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
-    const poolKeys = await listPoolKeysForProduct(redis, 'drop_pool', productName);
+    const poolKeys = await listPoolKeysForProduct(redis, 'pool', productName);
     for (const poolKey of poolKeys) {
-      const size = String(poolKey.split(':').slice(2).join(':') || 'Standard');
+      const size = sizeFromPoolKey(poolKey);
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
         const parsed = safeParseRedisItem<any>(raw);
@@ -664,24 +679,21 @@ export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
 
 // ============================================================
 // LIVE CONFIG OVERRIDES — lets /admin change schedule, social
-// proof, and pricing without a redeploy.
+// proof, and pricing without a redeploy. Key names live in
+// lib/redis-keys.ts under the `ops:override:` namespace.
 // ============================================================
-export const CONFIG_DROP_SCHEDULE_KEY = 'config:drop_schedule';
-export const CONFIG_SOCIAL_PROOF_KEY = 'config:social_proof';
-export const CONFIG_PRODUCT_OVERRIDE_PREFIX = 'config:product:';
-
 export async function getGlobalScheduleOverride(redis: Redis): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.get(CONFIG_DROP_SCHEDULE_KEY));
+  return safeParseRedisItem<any>(await redis.get(SCHEDULE_OVERRIDE_KEY));
 }
 export async function saveGlobalScheduleOverride(redis: Redis, value: Record<string, any>) {
-  await redis.set(CONFIG_DROP_SCHEDULE_KEY, JSON.stringify(value));
+  await redis.set(SCHEDULE_OVERRIDE_KEY, JSON.stringify(value));
 }
 
 export async function getSocialProofOverride(redis: Redis): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.get(CONFIG_SOCIAL_PROOF_KEY));
+  return safeParseRedisItem<any>(await redis.get(SOCIAL_PROOF_OVERRIDE_KEY));
 }
 export async function saveSocialProofOverride(redis: Redis, value: Record<string, any>) {
-  await redis.set(CONFIG_SOCIAL_PROOF_KEY, JSON.stringify(value));
+  await redis.set(SOCIAL_PROOF_OVERRIDE_KEY, JSON.stringify(value));
 }
 
 export interface ProductOverride {
@@ -690,10 +702,10 @@ export interface ProductOverride {
   price100ml?: number;
 }
 export async function getProductOverride(redis: Redis, productId: string): Promise<ProductOverride | null> {
-  return safeParseRedisItem<ProductOverride>(await redis.get(CONFIG_PRODUCT_OVERRIDE_PREFIX + productId));
+  return safeParseRedisItem<ProductOverride>(await redis.get(productOverrideKey(productId)));
 }
 export async function saveProductOverride(redis: Redis, productId: string, value: ProductOverride) {
-  await redis.set(CONFIG_PRODUCT_OVERRIDE_PREFIX + productId, JSON.stringify(value));
+  await redis.set(productOverrideKey(productId), JSON.stringify(value));
 }
 export async function getAllProductOverrides(redis: Redis, productIds: string[]): Promise<Record<string, ProductOverride>> {
   const out: Record<string, ProductOverride> = {};
@@ -705,11 +717,11 @@ export async function getAllProductOverrides(redis: Redis, productIds: string[])
 }
 
 export async function trackPromoClick(redis: Redis, code: string) {
-  const raw = await redis.hget(PROMOS_KEY, code);
+  const raw = await redis.hget(PROMO_CODES_KEY, code);
   const promo = safeParseRedisItem<any>(raw);
   if (!promo) return false;
   promo.clicks = (promo.clicks || 0) + 1;
-  await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
+  await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(promo) });
   return true;
 }
 
@@ -778,7 +790,7 @@ export async function loadProducts(redis: any): Promise<Record<string, any>> {
   if (!redis) return {};
 
   try {
-    const raw = await redis.hgetall('store:products');
+    const raw = await redis.hgetall(PRODUCTS_KEY);
     if (!raw || Object.keys(raw).length === 0) return {};
 
     const out: Record<string, any> = {};

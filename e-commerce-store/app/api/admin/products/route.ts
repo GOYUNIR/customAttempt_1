@@ -1,14 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts , getAdminPassword, defaultStripePriceId} from '@/lib/server-config';
+import { createRedisClient, loadProducts , getAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
-
-const PRODUCTS_KEY = 'store:products';
-// Catalog preview (upcoming/archive groupings) is stored inside store:config
-// (single source of truth). There is intentionally NO separate key for it.
-const STORE_CONFIG_KEY = 'store:config';
 
 function toBool(value: any, fallback = false) {
   if (typeof value === 'boolean') return value;

@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, WAITLIST_KEY } from '@/lib/server-config';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
-
-const WAITLIST_KEY = 'alerts:waitlist';
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);

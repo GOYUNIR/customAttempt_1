@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, sessionKey } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { sendWelcomeEmail } from '@/lib/email';
 
@@ -13,7 +13,6 @@ const SESSION_DURATION = 7 * 24 * 60 * 60;
  * card on the home page). Editable per-user later from /admin → Users. */
 const WELCOME_POINTS = 250;
 const WELCOME_DISCOUNT_PERCENT = 10;
-const PROMOS_KEY = 'config:promos';
 
 function generateWelcomeCode(email: string) {
   const seed = email.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'MBR';
@@ -45,7 +44,7 @@ export async function POST(request: Request) {
   const normalizedEmail = String(email).trim().toLowerCase();
 
   // check if user exists
-  const raw = await redis.hgetall('store:users');
+  const raw = await redis.hgetall(USERS_KEY);
   let existing = false;
   if (raw) {
     for (const [k, v] of Object.entries(raw)) {
@@ -89,7 +88,7 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString(),
   };
   try {
-    await redis.hset(PROMOS_KEY, { [welcomeCode]: JSON.stringify(welcomePromo) });
+    await redis.hset(PROMO_CODES_KEY, { [welcomeCode]: JSON.stringify(welcomePromo) });
   } catch (promoErr) {
     console.error('[signup] welcome promo save failed', promoErr);
   }
@@ -106,10 +105,10 @@ export async function POST(request: Request) {
     termsAgreedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
-  await redis.hset('store:users', { [id]: JSON.stringify(user) });
+  await redis.hset(USERS_KEY, { [id]: JSON.stringify(user) });
   const token = randomBytes(32).toString('hex');
   const expiresAt = Date.now() + SESSION_DURATION * 1000;
-  await redis.setex(`session:${token}`, SESSION_DURATION, JSON.stringify({
+  await redis.setex(sessionKey(token), SESSION_DURATION, JSON.stringify({
     userId: user.id,
     email: user.email,
     role: user.role,

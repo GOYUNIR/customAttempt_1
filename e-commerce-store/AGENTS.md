@@ -43,26 +43,55 @@ pages and the site URL all read from admin config or environment variables.
 
 ### Data Storage — Redis is the source of truth
 
-- **`store:products`** (hash) — THE canonical product records. All fields
-  (name, slug, `priceCategories`, images, `isActive`, `isArchived`,
-  `isUpcoming`, `maxPerEmail`, etc.) live here. Created/edited via `/admin`.
-- **`store:config`** (string) — THE canonical site configuration:
-  `themeColors`, `branding`, `heroContent`, `socialProof`, `brandFooterData`,
-  `catalogPreview`, `orbs`, `rewards`, `gallery`, `copy`, `legal`,
-  `raffleRegistrationForm`, `animationMechanics`, `dropSchedule`, `productNotes`.
-- **`drop_pool:*`** – live entry pools per product+size.
-- **`intent_pool:*`** – pre-payment intent pools per product+size.
-- **`archive:ledger`** – permanent entry/charge history (searchable in `/admin`).
-- **`config:promos`** – promo codes (customer discount + promoter payout).
-- **`store:users`** – accounts (email, password hash, rewards points, welcome promo).
-- **`address:submissions`** – addresses from the standalone address form.
-- **`live_state` / `catalog:archive_state` / `stats:*` / `drop_fraud_block:*` / `email:*`** – operational data, not display data.
-- **Live states** are seeded lazily by `getLiveProductState()`, eagerly by
-  `/api/admin/seed` (Seed Defaults), and repaired by the admin **Site Self-Test**.
-  The storefront falls back to `totalInventory` when a live state is missing.
+**Every Redis key is defined ONCE in `lib/redis-keys.ts`.** That file is the
+mandatory single source of truth for key names, helpers, and the namespace map.
+Routes import keys/helpers from `@/lib/server-config` (which re-exports the
+registry). **NEVER hardcode a Redis key string anywhere else** — a schema
+change must be a one-line edit plus the migration row in `/api/admin/organize-redis`.
 
-**Legacy keys that no longer exist** (removed via `/admin` → Developer → Clean
-Up Redis): `store:active_products`, `store:archived_products`,
+The key space uses one tidy `domain:subdomain:…` convention so the Upstash /
+Redis data browser stays filterable and organised at any scale:
+
+| Namespace | Contents | Keys |
+| --- | --- | --- |
+| `store:` | Canonical, admin-edited data (the ONLY data a buyer configures) | `store:products` (hash), `store:config` (string), `store:users` (hash) |
+| `archive:` | Permanent entry/charge history (append-only) | `archive:ledger` (list) |
+| `promo:` | Promo code records + operational state | `promo:codes` (hash), `promo:used:<code>` (set), `promo:pending:<code>:<email>` (ttl string), `promo:credit:<orderRef>` (string) |
+| `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (sets), `entries:last_auto:<variant>:<size>` (string) |
+| `draws:` | Draw summaries + history | `draws:last` (string), `draws:history` (list) |
+| `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:override:schedule` / `ops:override:social_proof` / `ops:override:product:<id>` (strings) |
+| `auth:` | Auth tokens | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string) |
+| `admin:` | Admin-only data | `admin:audit_log` (list) |
+| `analytics:` | Social-proof counters + online visitors | `analytics:online` (zset), `analytics:social_boost`, `analytics:ticks:last` / `ticks:today` / `ticks:day` (strings) |
+| `customer:` | Customer-submitted data | `customer:waitlist` (hash), `customer:addresses` (hash) |
+| `cache:` | Ephemeral caches (safe to delete anytime) | `cache:stripe_portal_config` (string) |
+
+Highlights of what changed in the tidy schema (and why it matters at scale):
+
+- **Pools** live under `entries:pool:` / `entries:intent:` / `entries:waitlist:`
+  (was `drop_pool:` / `intent_pool:` / `waitlist:`), fraud blocks under
+  `entries:block:email:` / `entries:block:card:` (was `drop_fraud_block:*:emails|cards`).
+- **Sessions** live under `auth:session:` (was `session:`); password resets under
+  `auth:reset:` (was `reset:`). Sessions expire on their own TTL and are grouped
+  under one prefix so the browser stays tidy with thousands of customers.
+- **Live states / catalog archive** moved under `ops:` (`ops:live_state`,
+  `ops:catalog_archive`); promos consolidated under `promo:` (`promo:codes`,
+  `promo:used:`, `promo:pending:`, `promo:credit:`).
+- **Overrides** (admin live-apply) moved under `ops:override:*`.
+- **Analytics/social-proof counters** moved under `analytics:*`.
+
+**Live states** are seeded lazily by `getLiveProductState()`, eagerly by
+`/api/admin/seed` (Seed Defaults), and repaired by the admin **Site Self-Test**.
+The storefront falls back to `totalInventory` when a live state is missing.
+
+**Migrating older data**: `/admin → Developer → Tidy Redis Schema` losslessly
+renames any legacy-prefix keys (drop_pool:*, intent_pool:*, session:*, live_state,
+stats:*, config:promos, …) to the tidy schema via RENAMENX (atomic, TTL-preserving,
+never overwrites). It is safe to re-run. The admin **Site Self-Test** includes a
+"Redis schema tidy" check that flags any legacy prefixes that are still present.
+
+**Legacy keys that no longer exist** (removed via `/admin → Developer → Tidy
+Redis Schema`): `store:active_products`, `store:archived_products`,
 `store:upcoming_products`, `store:product_images:*`, `store:catalog_config`.
 Never rebuild them.
 
@@ -81,6 +110,10 @@ Never rebuild them.
    value or a neutral fallback.
 4. **The admin portal is the product.** `/admin` is protected by
    `ADMIN_BASIC_AUTH_USERNAME`/`ADMIN_BASIC_AUTH_PASSWORD`.
+5. **Every Redis key comes from `lib/redis-keys.ts`.** Never hardcode a Redis
+   key string in a route/component. When you add or rename a key: (a) edit the
+   registry, (b) add a migration row in `/api/admin/organize-redis/route.ts`,
+   (c) update this file + README in the same change.
 
 ### Caching (read before touching storefront perf)
 
@@ -128,7 +161,7 @@ the ledger. Settings tabs include:
 - **Promos** — customer + promoter codes, discounts, caps, per-product/size eligibility.
 - **Draws / Ledger** — trigger draws, draw history, permanent entry search.
 - **Users** — adjust points, view accounts.
-- **Developer** — Seed Defaults, Site Self-Test, Clean Up Redis.
+- **Developer** — Seed Defaults, Site Self-Test, Tidy Redis Schema.
 
 
 ## Core Feature Reference (for agents)
@@ -179,7 +212,7 @@ the ledger. Settings tabs include:
 
 ### Promo codes
 
-- Codes stored in `config:promos` (hash). Customer discount %, promoter payout
+- Codes stored in `promo:codes` (hash). Customer discount %, promoter payout
   %, per-email/per-total use caps, per-product/size eligibility, min order,
   giftable (transferable) flag, `issuedForEmail` reservation.
 - `?ref=` / `?promo=` links lock a promoter code for the session
@@ -195,7 +228,7 @@ the ledger. Settings tabs include:
 - Signup awards 250 points + a one-time 10% welcome promo bound to the email.
   Earn rate / redeem rate / min/max / gifting are admin-configurable.
 - `/account` shows the balance, redeem box (creates a unique one-time promo in
-  `config:promos`), the credits list, and a **custom redemption message** set in
+  `promo:codes`), the credits list, and a **custom redemption message** set in
   `/admin` → Rewards (falls back to built-in copy that includes the gift %).
 
 ### Legal & policies pages (/terms, /privacy, /shipping)
@@ -301,4 +334,46 @@ the ledger. Settings tabs include:
     ledger loop in Storefront relies on inferred types instead of an explicit
     `any` annotation. The changed files now lint one error CLEANER than the
     previous commit (the story page also dropped a stale error).
+
+- **2026-08-14 — Redis schema finalization (TIDY + MIGRATE):**
+  - Created **`lib/redis-keys.ts`** — the single source of truth for every Redis
+    key. All keys now follow one `domain:subdomain:…` convention
+    (`store:`, `archive:`, `promo:`, `entries:`, `draws:`, `ops:`, `auth:`,
+    `admin:`, `analytics:`, `customer:`, `cache:`). The Redis data browser is
+    filterable by namespace at any scale.
+  - Renamed legacy key families: `drop_pool:*`→`entries:pool:*`,
+    `intent_pool:*`→`entries:intent:*`, `waitlist:*`→`entries:waitlist:*`,
+    `drop_fraud_block:*`→`entries:block:*`, `drop_processed_sessions`→`entries:processed`,
+    `email:entry_confirmed`→`entries:email_sent`, `draw:last_auto:*`→`entries:last_auto:*`,
+    `live_state`→`ops:live_state`, `catalog:archive_state`→`ops:catalog_archive`,
+    `config:recovery`→`ops:recovery_config`, `recovery:sent`→`ops:recovery_sent`,
+    `config:drop_schedule`/`config:social_proof`/`config:product:*`→`ops:override:*`,
+    `session:*`→`auth:session:*`, `reset:*`→`auth:reset:*`,
+    `config:promos`→`promo:codes`, `promo:used_emails:*`→`promo:used:*`,
+    `promo:delivery_credit_issued:*`→`promo:credit:*`,
+    `stats:pools`→`entries:stats`, `stats:social_proof_*`→`analytics:*`,
+    `analytics:active_users_online`→`analytics:online`,
+    `admin:draw_history`→`draws:history`, `drop_last_draw_summary`→`draws:last`,
+    `alerts:waitlist`→`customer:waitlist`, `address:submissions`→`customer:addresses`,
+    `stripe:portal_config_id`→`cache:stripe_portal_config`.
+  - **Removed every duplicated local key constant/helper** across ~25 API routes
+    (local `PROMOS_KEY`, `usedEmailsKey`, `pendingPromoKey`, `issueKey`, etc.) —
+    everything imports from `@/lib/server-config` → `lib/redis-keys.ts`.
+  - **Upgraded `/api/admin/organize-redis`** into **"Tidy & Migrate Redis
+    Schema"** (admin → Developer): losslessly renames legacy-prefix keys to the
+    tidy schema via `RENAMENX` (atomic, TTL-preserving, never overwrites) with a
+    type-aware copy+delete fallback, then removes the true legacy duplicate keys.
+  - **Self-Test** now includes a "Redis schema tidy" check that scans for legacy
+    prefixes and reports them, and the promos check now uses `HGETALL` on
+    `promo:codes` (was a broken `GET` on the hash).
+  - **Fixed a brand-name leak**: the Stripe billing-portal headline now reads the
+    admin brand name (`branding.brandName` → `shareTitle`) with a neutral fallback
+    instead of the hardcoded "GOYUNIR".
+  - Admin "Draws" pool selector + trigger-drop use the new `entries:pool:*` keys;
+    pool-key parsing (product name / size extraction) was updated for the 2-segment
+    namespace and centralised in `sizeFromPoolKey()`.
+  - Docs: AGENTS.md + README rewritten with the new key map, the migration path,
+    and the mandatory rule that every future key change must update
+    `lib/redis-keys.ts`, the migration table, and both docs in the same change set.
+
 

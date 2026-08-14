@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY } from '@/lib/server-config';
+import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY, ANALYTICS_ONLINE_KEY } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 
     if (redis) {
       if (visitorId) {
-        const trafficKey = 'analytics:active_users_online';
+        const trafficKey = ANALYTICS_ONLINE_KEY;
         const now = Date.now();
         await redis.zadd(trafficKey, { score: now, member: visitorId });
         if (now % 3 === 0) await redis.zremrangebyscore(trafficKey, 0, now - 60 * 1000);

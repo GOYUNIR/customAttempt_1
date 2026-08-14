@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, WAITLIST_KEY} from '@/lib/server-config';
 import { sendReleaseAnnouncementEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
-
-const WAITLIST_KEY = 'alerts:waitlist';
 
 function authorized(password: string) {
   const master = getAdminPassword() || '';

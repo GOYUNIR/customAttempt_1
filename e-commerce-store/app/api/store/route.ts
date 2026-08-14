@@ -6,6 +6,9 @@ import {
   listLiveStates,
   loadStoreConfigCached,
   safeParseRedisItem,
+  PRODUCTS_KEY,
+  SCHEDULE_OVERRIDE_KEY,
+  SOCIAL_PROOF_OVERRIDE_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
@@ -222,7 +225,7 @@ async function buildStorePayload(requestedSlug: string) {
   const liveStates = await listLiveStates(redis);
 
   let allProducts: PublicStoreProduct[] = [];
-  const allRaw = await redis.hgetall('store:products');
+  const allRaw = await redis.hgetall(PRODUCTS_KEY);
   if (allRaw) {
     for (const value of Object.values(allRaw)) {
       const p = safeParseRedisItem<any>(value);
@@ -240,9 +243,9 @@ async function buildStorePayload(requestedSlug: string) {
     ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
     : null;
 
-  const scheduleRaw = await redis.get('config:drop_schedule');
+  const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
   const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
-  const socialRaw = await redis.get('config:social_proof');
+  const socialRaw = await redis.get(SOCIAL_PROOF_OVERRIDE_KEY);
   const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
   return {

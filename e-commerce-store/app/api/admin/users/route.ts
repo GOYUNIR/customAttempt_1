@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, USERS_KEY} from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
-
-const USERS_KEY = 'store:users';
 
 type StoreUser = {
   id: string;

@@ -1,16 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, getAdminPassword } from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, getAdminPassword, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
 
 const ALLOWED = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'];
-const PROMOS_KEY = 'config:promos';
-
-function issueKey(orderRef: string) {
-  return `promo:delivery_credit_issued:${orderRef}`;
-}
 
 function generatePromoCode(prefix: string) {
   const root = (prefix || 'GOY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'GOY';
@@ -102,7 +97,7 @@ export async function POST(request: Request) {
             const triggerSizes = Array.isArray(product?.deliveryIncentiveTriggerSizes) ? product.deliveryIncentiveTriggerSizes.map(String) : [];
             const shouldIssue = product?.deliveryIncentiveEnabled === true && (triggerSizes.length === 0 || triggerSizes.includes(String(e.size || size)));
             const ref = String(e.orderRef || `${email}:${variant}:${size}`);
-            const alreadyIssued = await redis.get(issueKey(ref));
+            const alreadyIssued = await redis.get(promoCreditKey(ref));
             if (shouldIssue && !alreadyIssued) {
               const fixedDiscountCents = Math.max(0, Number(product.deliveryIncentiveCreditCents || 0));
               if (fixedDiscountCents > 0) {
@@ -134,8 +129,8 @@ export async function POST(request: Request) {
                   payoutPaidCents: 0,
                   createdAt: new Date().toISOString(),
                 };
-                await redis.hset(PROMOS_KEY, { [promoCode]: JSON.stringify(record) });
-                await redis.set(issueKey(ref), promoCode);
+                await redis.hset(PROMO_CODES_KEY, { [promoCode]: JSON.stringify(record) });
+                await redis.set(promoCreditKey(ref), promoCode);
                 await sendDeliveryIncentiveEmail({
                   to: email,
                   product: variant,
@@ -157,13 +152,13 @@ export async function POST(request: Request) {
 
     // Also update the live pool entry if it exists
     try {
-      const poolKey = `drop_pool:${variant}:${size}`;
-      const items = await redis.lrange(poolKey, 0, -1);
+      const pool = poolKey(variant, size);
+      const items = await redis.lrange(pool, 0, -1);
       for (let i = 0; i < items.length; i++) {
         const parsed = safeParseRedisItem<any>(items[i]);
         if (parsed && String(parsed.email || '').toLowerCase() === email) {
           const updated = { ...parsed, shippingStatus, trackingNumber: trackingNumber || parsed.trackingNumber };
-          await redis.lset(poolKey, i, JSON.stringify(updated));
+          await redis.lset(pool, i, JSON.stringify(updated));
           break;
         }
       }

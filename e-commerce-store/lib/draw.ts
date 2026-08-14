@@ -14,6 +14,7 @@ import {
   resolveStripePriceId,
 } from '@/lib/server-config';
 import { getProductStripeId, getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
+import { poolKey, intentPoolKey } from '@/lib/redis-keys';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export interface DrawResult {
@@ -44,11 +45,11 @@ export async function runDropDraw(request: Request | NextRequest) {
         ? Math.round(Number(category.price) * 100)
         : 0;
       if (categoryPriceCents <= 0) continue;
-      const poolKey = `drop_pool:${product.name}:${size}`;
-      const totalEntries = await redis.llen(poolKey);
+      const pool = poolKey(product.name, size);
+      const totalEntries = await redis.llen(pool);
       if (totalEntries === 0) continue;
 
-      const allRegistrations = await redis.lrange(poolKey, 0, -1);
+      const allRegistrations = await redis.lrange(pool, 0, -1);
       const parsedPool = allRegistrations
         .map((entry) => safeParseRedisItem<Record<string, unknown>>(entry))
         .filter(Boolean) as Record<string, unknown>[];
@@ -201,7 +202,7 @@ export async function runDropDraw(request: Request | NextRequest) {
         }
       }
 
-      const intentKey = `intent_pool:${product.name}:${size}`;
+      const intentKey = intentPoolKey(product.name, size);
       try {
         const remainingIntents = await redis.lrange(intentKey, 0, -1);
         for (const item of remainingIntents) {

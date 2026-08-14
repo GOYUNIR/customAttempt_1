@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-const RECOVERY_CONFIG_KEY = 'config:recovery';
-const RECOVERY_SENT_KEY = 'recovery:sent';
 
 async function getConfig(redis: any) {
   const raw = await redis.get(RECOVERY_CONFIG_KEY);
@@ -62,7 +59,7 @@ export async function GET(request: Request) {
       const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
       for (const category of priceCategories) {
         const size = String(category?.size || 'Standard');
-        const intentKey = `intent_pool:${product.name}:${size}`;
+        const intentKey = intentPoolKey(product.name, size);
         let items: string[] = [];
         try {
           items = await redis.lrange(intentKey, 0, -1);

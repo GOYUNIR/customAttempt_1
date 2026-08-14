@@ -6,6 +6,8 @@ import {
   getCatalogArchiveRecords,
   listLiveStates,
   safeParseRedisItem,
+  STORE_CONFIG_KEY,
+  PRODUCTS_KEY,
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
 
@@ -66,7 +68,7 @@ async function buildCatalogPayload() {
     const archivedProductIds = archived.map((r) => r.productId);
     // Catalog groupings are stored inside store:config.catalogPreview (single
     // source of truth) — there is no separate `store:catalog_config` key.
-    const storeConfig = safeParseRedisItem<any>(await redis.get('store:config')) || {};
+    const storeConfig = safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
     const catalogPreview = storeConfig.catalogPreview || {};
     const configuredUpcoming = Array.isArray(catalogPreview.upcomingDrops) ? catalogPreview.upcomingDrops : [];
     const configuredArchive = Array.isArray(catalogPreview.archiveScents) ? catalogPreview.archiveScents : [];
@@ -74,7 +76,7 @@ async function buildCatalogPayload() {
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
 
     let allProducts: any[] = [];
-    const allRaw = await redis.hgetall('store:products');
+    const allRaw = await redis.hgetall(PRODUCTS_KEY);
     if (allRaw) {
       for (const value of Object.values(allRaw)) {
         const product = safeParseRedisItem<any>(value);

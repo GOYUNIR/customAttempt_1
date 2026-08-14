@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, DRAW_HISTORY_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

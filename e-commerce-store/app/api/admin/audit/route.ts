@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, AUDIT_LOG_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-export const AUDIT_KEY = 'admin:audit_log';
 
 export async function appendAudit(
   redis: any,
@@ -11,7 +9,7 @@ export async function appendAudit(
 ) {
   try {
     await redis.rpush(
-      AUDIT_KEY,
+      AUDIT_LOG_KEY,
       JSON.stringify({
         action: entry.action,
         detail: entry.detail,
@@ -21,8 +19,8 @@ export async function appendAudit(
       }),
     );
     // keep last 200
-    const len = await redis.llen(AUDIT_KEY);
-    if (len > 200) await redis.ltrim(AUDIT_KEY, len - 200, -1);
+    const len = await redis.llen(AUDIT_LOG_KEY);
+    if (len > 200) await redis.ltrim(AUDIT_LOG_KEY, len - 200, -1);
   } catch {}
 }
 
@@ -34,7 +32,7 @@ export async function GET(request: Request) {
   }
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ entries: [] });
-  const rows = await redis.lrange(AUDIT_KEY, -100, -1);
+  const rows = await redis.lrange(AUDIT_LOG_KEY, -100, -1);
   const entries = rows.map((r) => safeParseRedisItem(r)).filter(Boolean).reverse();
   return NextResponse.json({ entries });
 }

@@ -1,12 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride , getAdminPassword, TICKS_LAST_KEY, TICKS_TODAY_KEY, TICKS_DAY_STAMP_KEY} from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
-
-const LAST_TICK_KEY = 'stats:social_proof_last_tick';
-const TICKS_TODAY_KEY = 'stats:social_proof_ticks_today';
-const TICKS_DAY_STAMP_KEY = 'stats:social_proof_ticks_day_stamp';
 
 function authorized(request: Request) {
   const url = new URL(request.url);
@@ -49,7 +45,7 @@ export async function GET(request: Request) {
   }
 
   const now = Date.now();
-  const last = Number((await redis.get(LAST_TICK_KEY)) ?? 0);
+  const last = Number((await redis.get(TICKS_LAST_KEY)) ?? 0);
   const minGapMs = (cfg.autoIncrementMinHourGap ?? 3) * 60 * 60 * 1000;
   const maxGapMs = Math.max(minGapMs, (cfg.autoIncrementMaxHourGap ?? 8) * 60 * 60 * 1000);
   if (last && now - last < minGapMs) {
@@ -67,7 +63,7 @@ export async function GET(request: Request) {
 
   const amount = (cfg.autoIncrementAmount ?? 1) * (1 + Math.floor(Math.random() * 3));
   const boost = await redis.incrby(SOCIAL_PROOF_BOOST_KEY, amount);
-  await redis.set(LAST_TICK_KEY, String(now));
+  await redis.set(TICKS_LAST_KEY, String(now));
   await redis.incr(TICKS_TODAY_KEY);
 
   return NextResponse.json({ ok: true, boost, amount, ticksToday: ticksToday + 1 });

@@ -1,14 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, SCHEDULE_OVERRIDE_KEY, SOCIAL_PROOF_OVERRIDE_KEY} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { mergeOrbsConfig } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
-
-const CONFIG_KEY = 'store:config';
-// Products live ONLY in store:products — active/archived/upcoming are derived
-// by filtering on their flags, so no mirror hashes are read here.
-const PRODUCTS_KEY = 'store:products';
 
 type StoreProduct = {
   id: string;
@@ -151,7 +146,7 @@ export async function GET(request: NextRequest) {
     const redis = createRedisClient();
     const sortProducts = (items: StoreProduct[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
 
-    const configRaw = redis ? await redis.get(CONFIG_KEY) : null;
+    const configRaw = redis ? await redis.get(STORE_CONFIG_KEY) : null;
     const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
     const effectiveConfig = {
       ...DEFAULT_CONFIG,
@@ -208,11 +203,11 @@ export async function GET(request: NextRequest) {
       : null;
 
     // Get global schedule override
-    const scheduleRaw = await redis.get('config:drop_schedule');
+    const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
     const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
 
     // Get social proof override
-    const socialRaw = await redis.get('config:social_proof');
+    const socialRaw = await redis.get(SOCIAL_PROOF_OVERRIDE_KEY);
     const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
     return NextResponse.json({

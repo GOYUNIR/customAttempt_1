@@ -4,22 +4,31 @@ import {
   createStripeClient,
   findPoolEntriesByEmail,
   loadProducts,
+  loadStoreConfig,
+  STRIPE_PORTAL_CACHE_KEY,
 } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
 
-const PORTAL_CONFIG_CACHE_KEY = 'stripe:portal_config_id';
-
 async function getOrCreatePortalConfigId(stripe: any, redis: any) {
   try {
-    const cached = await redis.get(PORTAL_CONFIG_CACHE_KEY);
+    const cached = await redis.get(STRIPE_PORTAL_CACHE_KEY);
     if (cached) return String(cached);
+  } catch {}
+
+  // Brand the portal headline with the admin-set store name (never a hardcoded
+  // template brand). Falls back to a neutral label when branding is unset.
+  let brandName = '';
+  try {
+    const config = await loadStoreConfig(redis);
+    const branding = config?.branding || {};
+    brandName = String(branding.brandName || branding.shareTitle || '').trim();
   } catch {}
 
   const configuration = await stripe.billingPortal.configurations.create({
     business_profile: {
-      headline: 'Update your GOYUNIR payment method',
+      headline: brandName ? `Update your ${brandName} payment method` : 'Update your payment method',
     },
     features: {
       payment_method_update: { enabled: true },
@@ -35,7 +44,7 @@ async function getOrCreatePortalConfigId(stripe: any, redis: any) {
   });
 
   try {
-    await redis.set(PORTAL_CONFIG_CACHE_KEY, configuration.id);
+    await redis.set(STRIPE_PORTAL_CACHE_KEY, configuration.id);
   } catch {}
 
   return configuration.id;

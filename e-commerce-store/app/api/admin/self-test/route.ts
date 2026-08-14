@@ -5,7 +5,9 @@ import {
   loadProducts,
   getAdminPassword,
   safeParseRedisItem,
-  PROMOS_KEY,
+  PROMO_CODES_KEY,
+  POOL_KEY_PREFIX,
+  STORE_CONFIG_KEY,
   listLiveStates,
   getLiveProductState,
   liveStateField,
@@ -112,7 +114,7 @@ export async function GET(request: Request) {
     // ------------------------------------------------------------------
     // store:config integrity
     // ------------------------------------------------------------------
-    const configRaw = await redis.get('store:config');
+    const configRaw = await redis.get(STORE_CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw);
     push('store:config parseable', Boolean(config), config ? 'ok' : 'missing or invalid JSON');
 
@@ -176,15 +178,16 @@ export async function GET(request: Request) {
       legacyFound.length === 0,
       legacyFound.length === 0
         ? 'clean (single source of truth in store:products)'
-        : `found: ${legacyFound.join(', ')} — run Clean Up Redis in /admin → Developer`
+        : `found: ${legacyFound.join(', ')} — run Tidy Redis Schema in /admin → Developer`
     );
 
     // ------------------------------------------------------------------
     // Promos presence
     // ------------------------------------------------------------------
     try {
-      const promosRaw = await redis.get(PROMOS_KEY);
-      push('Promos key readable', true, promosRaw ? 'configured' : 'empty (no promos yet)');
+      const promosRaw = await redis.hgetall(PROMO_CODES_KEY);
+      const promoCount = promosRaw ? Object.keys(promosRaw).length : 0;
+      push('Promos key readable', true, promoCount > 0 ? `${promoCount} promo(s) configured` : 'empty (no promos yet)');
     } catch (e: any) {
       push('Promos key readable', false, e.message || 'read failed');
     }
@@ -349,10 +352,77 @@ export async function GET(request: Request) {
       push('Live states seeded', false, e.message || 'read failed');
     }
     try {
-      const poolKeys = await redis.keys('drop_pool:*');
+      const poolKeys = await redis.keys(`${POOL_KEY_PREFIX}*`);
       push('Drop pool keys readable', true, poolKeys.length > 0 ? `${poolKeys.length} pool(s) present` : 'no pools yet (no entries)');
     } catch {
       push('Drop pool keys readable', true, 'read skipped (SCAN not supported)');
+    }
+
+    // ------------------------------------------------------------------
+    // Redis schema tidiness (tidy key names; legacy prefixes should be gone)
+    // ------------------------------------------------------------------
+    try {
+      const tidyPrefixes = [
+        `${POOL_KEY_PREFIX}`,
+        'entries:intent:',
+        'entries:block:',
+        'entries:waitlist:',
+        'auth:session:',
+        'promo:used:',
+        'promo:pending:',
+        'draws:',
+        'ops:',
+        'analytics:',
+        'customer:',
+        'cache:',
+        'promo:codes',
+        'entries:stats',
+        'entries:processed',
+        'entries:email_sent',
+      ];
+      const legacyPrefixes = [
+        'drop_pool:',
+        'intent_pool:',
+        'drop_fraud_block:',
+        'session:',
+        'live_state',
+        'catalog:archive_state',
+        'stats:',
+        'config:promos',
+        'promo:used_emails:',
+        'alerts:',
+        'address:submissions',
+        'admin:draw_history',
+        'config:recovery',
+        'recovery:sent',
+        'email:entry_confirmed',
+        'stripe:portal_config_id',
+        'analytics:active_users_online',
+        'config:drop_schedule',
+        'config:social_proof',
+        'config:product:',
+        'reset:',
+        'draw:last_auto:',
+        'waitlist:',
+      ];
+      const foundLegacy: string[] = [];
+      for (const prefix of legacyPrefixes) {
+        try {
+          const matches = await redis.keys(`${prefix}*`);
+          if (Array.isArray(matches) && matches.length > 0) foundLegacy.push(`${prefix}* (${matches.length})`);
+        } catch {
+          /* pattern may not be supported — ignore */
+        }
+      }
+      push(
+        'Redis schema tidy (no legacy prefixes)',
+        foundLegacy.length === 0,
+        foundLegacy.length === 0
+          ? `clean — key space uses the tidy ${tidyPrefixes.length} namespaces from lib/redis-keys.ts`
+          : `found legacy keys: ${foundLegacy.join(', ')} — run Tidy Redis Schema in /admin → Developer`
+      );
+    } catch (e: any) {
+      push('Redis schema tidy', false, e.message || 'scan failed');
     }
   }
 

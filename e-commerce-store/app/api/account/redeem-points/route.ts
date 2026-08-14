@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY, USERS_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
-
-const PROMOS_KEY = 'config:promos';
 
 const DEFAULT_REWARDS = {
   pointsPerDollar: 100, // 100 points = $1.00 of credit
@@ -48,7 +46,7 @@ export async function POST(request: Request) {
     }
 
     // Find the user record
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     let user: any = null;
     let userId = '';
     if (raw) {
@@ -115,7 +113,7 @@ export async function POST(request: Request) {
     };
 
     try {
-      await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(promo) });
+      await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(promo) });
     } catch (err) {
       console.error('[redeem-points] save promo failed', err);
       return NextResponse.json({ error: 'Unable to create your credit right now.' }, { status: 500 });
@@ -123,7 +121,7 @@ export async function POST(request: Request) {
 
     // Deduct the points actually consumed.
     user.rewards = Math.max(0, balance - usedPoints);
-    await redis.hset('store:users', { [userId]: JSON.stringify(user) });
+    await redis.hset(USERS_KEY, { [userId]: JSON.stringify(user) });
 
     return NextResponse.json({
       success: true,

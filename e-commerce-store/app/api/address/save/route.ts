@@ -4,13 +4,13 @@ import {
   findAllOpenOrders,
   adminUpdateOrderAddress,
   loadProducts,
+  ADDRESS_SUBMISSIONS_KEY,
 } from '@/lib/server-config';
 import { formatOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 
 export const dynamic = 'force-dynamic';
 
-const ADDRESS_SUBMISSIONS_KEY = 'address:submissions';
 const MAX_ADDRESS_LENGTH = 500;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -24,7 +24,7 @@ function isBlankAddress(value: string): boolean {
  * Public address-capture endpoint used by the standalone address page
  * (public/address-checkout-form.html).
  *
- * - Always logs the raw submission to Redis (address:submissions) so no
+ * - Always logs the raw submission to Redis (customer:addresses) so no
  *   address is ever lost.
  * - When the request identifies an open entry (exact email + variant + size),
  *   it attaches the address to that entry. To avoid letting a third party

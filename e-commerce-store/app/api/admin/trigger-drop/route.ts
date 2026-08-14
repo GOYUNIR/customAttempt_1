@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId } from '@/lib/server-config';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, getAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
-
-const DRAW_HISTORY_KEY = 'admin:draw_history';
 
 function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
@@ -31,7 +29,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    let poolKeys = await redis.keys('drop_pool:*');
+    let poolKeys = await redis.keys(`${POOL_KEY_PREFIX}*`);
     if (targetPool !== 'ALL_POOLS') {
       poolKeys = poolKeys.filter(k => k === targetPool);
     }
@@ -43,8 +41,8 @@ export async function POST(request: Request) {
 
     for (const poolKey of poolKeys) {
       const parts = poolKey.split(':');
-      const productName = parts[1];
-      const size = parts.slice(2).join(':') || 'Standard';
+      const productName = parts[2];
+      const size = parts.slice(3).join(':') || 'Standard';
 
       const product = Object.values(allProducts).find((p: any) => p.name === productName);
       if (!product) continue;
@@ -142,7 +140,7 @@ export async function POST(request: Request) {
         }
       }
 
-      const waitlistKey = `waitlist:${product.name}:${size}`;
+      const waitlistKey = waitlistPoolKey(product.name, size);
       const waitlistEntries = await redis.lrange(waitlistKey, 0, -1);
       if (waitlistEntries.length > 0 && !product.isRaffle) {
         const available = Math.max(0, live.inventoryRemaining);
@@ -193,7 +191,7 @@ export async function POST(request: Request) {
       // counts after the draw (the old code never reset POOL_STATS_KEY here).
       try {
         const remainingList = await redis.lrange(poolKey, 0, -1);
-        const intentList = await redis.lrange(`intent_pool:${productName}:${size}`, 0, -1);
+        const intentList = await redis.lrange(intentPoolKey(productName, size), 0, -1);
         await redis.hset(POOL_STATS_KEY, {
           [poolStatField('sub', productName, size)]: String(remainingList.length),
           [poolStatField('int', productName, size)]: String(intentList.length),

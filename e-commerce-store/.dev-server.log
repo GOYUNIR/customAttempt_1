@@ -1099,3 +1099,14 @@ operable program or batch file.
  GET /does-not-exist-test 200 in 60ms (next.js: 12ms, application-code: 49ms)
  GET /does-not-exist-test 200 in 68ms (next.js: 13ms, application-code: 55ms)
  GET /catalog 200 in 3.1s (next.js: 7ms, application-code: 3.1s)
+○ Compiling proxy ...
+✓ Compiled in 878ms
+✓ Compiled in 4ms
+✓ Compiled in 153ms
+✓ Compiled in 161ms
+✓ Compiled in 146ms
+✓ Compiled in 146ms
+✓ Compiled in 138ms
+✓ Compiled in 158ms
+✓ Compiled in 144ms
+✓ Compiled in 173ms

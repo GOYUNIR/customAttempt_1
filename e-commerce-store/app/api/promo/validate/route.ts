@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, safeParseRedisItem, trackPromoClick } from '@/lib/server-config';
+import { createRedisClient, loadProducts, safeParseRedisItem, trackPromoClick, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-const PROMOS_KEY = 'config:promos';
-
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -26,7 +20,7 @@ export async function GET(request: Request) {
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ valid: false, error: 'Offline' });
 
-  const raw = await redis.hget(PROMOS_KEY, code);
+  const raw = await redis.hget(PROMO_CODES_KEY, code);
   const promo = safeParseRedisItem<any>(raw);
   if (!promo || promo.active === false) {
     return NextResponse.json({ valid: false, error: 'Invalid or inactive code' });
@@ -44,7 +38,7 @@ export async function GET(request: Request) {
   // Check if this email has already used this promo
   let alreadyUsed = false;
   if (email && maxPerEmail > 0) {
-    const used = await redis.sismember(usedEmailsKey(code), email);
+    const used = await redis.sismember(promoUsedKey(code), email);
     if (used === 1) {
       alreadyUsed = true;
       return NextResponse.json({

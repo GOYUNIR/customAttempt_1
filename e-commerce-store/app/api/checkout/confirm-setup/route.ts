@@ -12,18 +12,17 @@ import {
   cleanupMatchingIntent,
   loadProducts,
   STORE_CONFIG_KEY,
+  USERS_KEY,
+  PROMO_CODES_KEY,
+  promoUsedKey,
+  poolKey,
+  waitlistPoolKey,
+  ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
-
-const PROMOS_KEY = 'config:promos';
-const ENTRY_EMAIL_SENT_KEY = 'email:entry_confirmed';
-
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
 
 function siteUrlFromRequest(request: Request) {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
@@ -40,7 +39,7 @@ async function resolvePromo(redis: any, rawCode: string, email: string) {
   const promoCode = String(rawCode || '').trim().toUpperCase();
   if (!promoCode) return { appliedPromo: undefined as string | undefined, discountPercent: 0 };
   try {
-    const raw = await redis.hget(PROMOS_KEY, promoCode);
+    const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
     const promo = safeParseRedisItem<any>(raw);
     if (!promo || promo.active === false) {
       return { appliedPromo: undefined, discountPercent: 0 };
@@ -51,7 +50,7 @@ async function resolvePromo(redis: any, rawCode: string, email: string) {
       return { appliedPromo: undefined, discountPercent: 0 };
     }
     if (maxPer > 0) {
-      const used = await redis.sismember(usedEmailsKey(promoCode), email);
+      const used = await redis.sismember(promoUsedKey(promoCode), email);
       if (used === 1) {
         return { appliedPromo: undefined, discountPercent: 0 };
       }
@@ -68,7 +67,7 @@ async function resolvePromo(redis: any, rawCode: string, email: string) {
 
 async function countActivePoolEntries(redis: any, variant: string, size: string, email: string) {
   try {
-    const poolItems = await redis.lrange(`drop_pool:${variant}:${size}`, 0, -1);
+    const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
     let count = 0;
     for (const row of poolItems) {
       const parsed = safeParseRedisItem<any>(row);
@@ -85,7 +84,7 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
 async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
   try {
     if (!email) return { hasAccount: false, rewardsBalance: 0 };
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [k, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
@@ -168,7 +167,7 @@ async function lockOneEntry(opts: {
   };
 
   if (entryType === 'waitlist') {
-    await redis.rpush(`waitlist:${variant}:${size}`, JSON.stringify({ ...entry, registrationType: 'waitlist' }));
+    await redis.rpush(waitlistPoolKey(variant, size), JSON.stringify({ ...entry, registrationType: 'waitlist' }));
     await archiveEntry(redis, {
       email,
       variant,
@@ -180,7 +179,7 @@ async function lockOneEntry(opts: {
       orderRef,
     } as any);
   } else {
-    await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+    await redis.rpush(poolKey(variant, size), JSON.stringify(entry));
   }
   await redis.sadd(emailBlockKey(variant, size), email);
   if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
@@ -201,12 +200,12 @@ async function lockOneEntry(opts: {
 
   if (appliedPromo) {
     try {
-      await redis.sadd(usedEmailsKey(appliedPromo), email);
-      const raw = await redis.hget(PROMOS_KEY, appliedPromo);
+      await redis.sadd(promoUsedKey(appliedPromo), email);
+      const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
       const promo = safeParseRedisItem<any>(raw);
       if (promo) {
         promo.uses = (promo.uses || 0) + 1;
-        await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
+        await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });
       }
     } catch {}
   }

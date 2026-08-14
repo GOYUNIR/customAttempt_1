@@ -5,6 +5,9 @@ import {
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
   STORE_CONFIG_KEY,
+  USERS_KEY,
+  PROMO_CODES_KEY,
+  promoUsedKey,
   safeParseRedisItem,
   loadProducts,
 } from '@/lib/server-config';
@@ -157,12 +160,12 @@ export async function POST(request: Request) {
 
     // ── Account-bound promos (welcome credit + anything issued to this email) ──
     // The user record carries the welcome code; the promo records live in
-    // config:promos. We surface every promo the customer can actually use so the
+    // promo:codes. We surface every promo the customer can actually use so the
     // /account "Your credits & codes" section can render them with a used/available
     // badge without the admin portal.
     let userRecord: any = null;
     try {
-      const rawUsers = await redis.hgetall('store:users');
+      const rawUsers = await redis.hgetall(USERS_KEY);
       if (rawUsers) {
         for (const [k, v] of Object.entries(rawUsers)) {
           const u = safeParseRedisItem<any>(v);
@@ -181,7 +184,7 @@ export async function POST(request: Request) {
 
     const promos: any[] = [];
     try {
-      const rawPromos = await redis.hgetall('config:promos');
+      const rawPromos = await redis.hgetall(PROMO_CODES_KEY);
       if (rawPromos) {
         for (const [code, raw] of Object.entries(rawPromos)) {
           const p = safeParseRedisItem<any>(raw);
@@ -192,7 +195,7 @@ export async function POST(request: Request) {
 
           let used = false;
           try {
-            const inSet = await redis.sismember(`promo:used_emails:${code}`, email);
+            const inSet = await redis.sismember(promoUsedKey(code), email);
             const maxTotal = Number(p.maxUsesTotal || 0);
             used = inSet === 1 || (maxTotal > 0 && Number(p.uses || 0) >= maxTotal);
           } catch {}

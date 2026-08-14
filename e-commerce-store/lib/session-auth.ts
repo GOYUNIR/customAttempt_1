@@ -1,4 +1,5 @@
 import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { sessionKey } from '@/lib/redis-keys';
 
 type SessionUser = {
   userId: string;
@@ -24,12 +25,13 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
   const redis = createRedisClient();
   if (!redis) return null;
 
-  const sessionRaw = await redis.get(`session:${token}`);
+  const sessionKeyName = sessionKey(token);
+  const sessionRaw = await redis.get(sessionKeyName);
   const session = safeParseRedisItem<any>(sessionRaw);
   if (!session) return null;
 
   if (session.expiresAt && Date.now() > Number(session.expiresAt)) {
-    await redis.del(`session:${token}`);
+    await redis.del(sessionKeyName);
     return null;
   }
 

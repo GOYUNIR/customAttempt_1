@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, RECOVERY_CONFIG_KEY} from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
-
-const RECOVERY_CONFIG_KEY = 'config:recovery';
 
 function defaultConfig() {
   return {

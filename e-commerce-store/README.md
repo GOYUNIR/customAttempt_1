@@ -81,8 +81,10 @@ Everything happens in `/admin`:
   set per-email/per-total caps and per-product/size eligibility.
 - **Users** — adjust rewards points, view accounts.
 - **Developer** — **Seed Defaults** (populates a starter store), **Site
-  Self-Test** (health check that repairs missing live states), and **Clean Up
-  Redis** (removes legacy keys if an older version of the template was used).
+  Self-Test** (health check that repairs missing live states), and **Tidy Redis
+  Schema** (losslessly migrates any legacy key names from older template
+  versions into the tidy `domain:subdomain:` schema and removes redundant
+  keys — safe to re-run anytime).
 
 > The storefront shows **0 items until you seed or add products** — that is
 > intentional. Product slugs only resolve for products that exist in Redis.
@@ -165,6 +167,8 @@ npm run lint     # eslint
 
 Useful files:
 
+- `lib/redis-keys.ts` — **the single source of truth for every Redis key**
+  (tidy `domain:subdomain:` schema + helpers). Never hardcode a key elsewhere.
 - `lib/server-config.ts` — Redis helpers, config loaders, Stripe clients.
 - `lib/storefront-config.ts` — defaults + shared storefront helpers.
 - `lib/legal-config.ts` — legal/policy defaults + content parser.
@@ -173,6 +177,27 @@ Useful files:
 - `components/Storefront.tsx` — product page, entry form, cart logic.
 - `lib/mapbox-autofill.ts` — Mapbox address autofill wiring.
 - `goyunir.config.ts` — starter defaults (brand seed value, theme, products).
+
+### A note on Redis
+
+Everything lives in Redis (Upstash). The key space is intentionally tidy so the
+Redis data browser stays readable even at thousands of customers:
+
+- `store:*` — catalog, site config, user accounts (the data you edit in `/admin`)
+- `archive:ledger` — permanent entry/charge history
+- `promo:*` — promo codes and their usage state
+- `entries:*` — live entry/intent/waitlist pools, fraud blocks, dedupe sets
+- `draws:*` — draw summaries + history
+- `ops:*` — live inventory state, catalog archive, recovery, admin overrides
+- `auth:*` — sessions and password-reset tokens
+- `analytics:*` — social-proof counters, online visitors
+- `customer:*` — waitlist subscribers and standalone address submissions
+- `cache:*` — ephemeral caches (safe to delete anytime)
+
+If you ever see legacy key names (`drop_pool:*`, `session:*`, `live_state`,
+`stats:*`, `config:promos`, …) in the browser — e.g. after upgrading an older
+install — run **/admin → Developer → Tidy Redis Schema** and they will be
+renamed in place with no data loss.
 
 ---
 

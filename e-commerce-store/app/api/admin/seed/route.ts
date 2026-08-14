@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , getAdminPassword, defaultStripePriceId, getLiveProductState} from '@/lib/server-config';
+import { createRedisClient , getAdminPassword, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
 
@@ -8,8 +8,6 @@ export const dynamic = 'force-dynamic';
 // Single source of truth: products live ONLY in `store:products`. The
 // storefront derives active/archived/upcoming by filtering these flags at read
 // time (see /api/store and /api/catalog/status), so no mirror hashes exist.
-const PRODUCTS_KEY = 'store:products';
-const CONFIG_KEY = 'store:config';
 
 // Seeded products – now using priceCategories, no price50ml/100ml.
 const NOW = new Date().toISOString();
@@ -378,7 +376,7 @@ export async function GET(request: Request) {
       seeded++;
     }
 
-    await redis.set(CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
+    await redis.set(STORE_CONFIG_KEY, JSON.stringify(DEFAULT_CONFIG));
 
     // Seed live states for every product/size so a fresh store is immediately
     // ready (the storefront + self-test expect active products to have live

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, sessionKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,14 +26,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'System error' }, { status: 500 });
   }
 
-  const sessionData = await redis.get(`session:${token}`);
+  const sessionKeyName = sessionKey(token);
+  const sessionData = await redis.get(sessionKeyName);
   if (!sessionData) {
     return NextResponse.json({ user: null });
   }
 
   const session = safeParseRedisItem<any>(sessionData);
   if (!session || Date.now() > session.expiresAt) {
-    await redis.del(`session:${token}`);
+    await redis.del(sessionKeyName);
     return NextResponse.json({ user: null });
   }
 
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
   let welcomePromoCode: string | null = null;
   if (session.userId) {
     try {
-      const rawUser = await redis.hget('store:users', session.userId);
+      const rawUser = await redis.hget(USERS_KEY, session.userId);
       const user = safeParseRedisItem<any>(rawUser);
       if (user) {
         rewards = Number(user.rewards ?? rewards) || 0;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
 
@@ -7,19 +7,14 @@ export const dynamic = 'force-dynamic';
 
 const WELCOME_POINTS = 250;
 const WELCOME_DISCOUNT_PERCENT = 10;
-const PROMOS_KEY = 'config:promos';
-
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
 
 /** True when the code was already consumed by this email (used_emails set or
  * uses >= maxUsesTotal) — lets /account show "Used" instead of "Ready to use". */
 async function isWelcomeCodeUsed(redis: any, code: string, email: string): Promise<boolean> {
   try {
-    const inSet = await redis.sismember(usedEmailsKey(code), email);
+    const inSet = await redis.sismember(promoUsedKey(code), email);
     if (inSet === 1) return true;
-    const raw = await redis.hget(PROMOS_KEY, code);
+    const raw = await redis.hget(PROMO_CODES_KEY, code);
     const promo = safeParseRedisItem<any>(raw);
     const maxTotal = Number(promo?.maxUsesTotal || 0);
     return maxTotal > 0 && Number(promo?.uses || 0) >= maxTotal;
@@ -46,7 +41,7 @@ export async function POST(request: Request) {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
-    const rawUser = await redis.hget('store:users', sessionUser.userId);
+    const rawUser = await redis.hget(USERS_KEY, sessionUser.userId);
     const user = safeParseRedisItem<any>(rawUser);
     if (!user || String(user.email || '').toLowerCase() !== sessionUser.email) {
       return NextResponse.json({ error: 'Account not found.' }, { status: 404 });
@@ -90,7 +85,7 @@ export async function POST(request: Request) {
       payoutPaidCents: 0,
       createdAt: new Date().toISOString(),
     };
-    await redis.hset(PROMOS_KEY, { [welcomeCode]: JSON.stringify(promo) });
+    await redis.hset(PROMO_CODES_KEY, { [welcomeCode]: JSON.stringify(promo) });
 
     const points = Math.max(0, Number(user.rewards || 0) || 0);
     const updatedUser = {
@@ -100,7 +95,7 @@ export async function POST(request: Request) {
       welcomePromoIssuedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await redis.hset('store:users', { [user.id]: JSON.stringify(updatedUser) });
+    await redis.hset(USERS_KEY, { [user.id]: JSON.stringify(updatedUser) });
 
     try {
       await sendWelcomeEmail({

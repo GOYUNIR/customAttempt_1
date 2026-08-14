@@ -61,7 +61,7 @@ export async function POST(request: Request) {
         notes,
       });
 
-      // Mark live_state inactive for all sizes (hands-free consistency)
+      // Mark ops:live_state inactive for all sizes (hands-free consistency)
       for (const size of getAvailableSizes(GOYUNIR_STORE_SUITE)) {
         try {
           const winners = getWinnerCount(GOYUNIR_STORE_SUITE, size);

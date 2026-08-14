@@ -14,23 +14,18 @@ import {
   getLiveProductState,
   saveLiveState,
   STORE_CONFIG_KEY,
+  USERS_KEY,
+  PRODUCTS_KEY,
+  PROMO_CODES_KEY,
+  promoUsedKey,
+  promoPendingKey,
+  poolKey,
+  ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 
 export const dynamic = 'force-dynamic';
-
-const PROMOS_KEY = 'config:promos';
-const ENTRY_EMAIL_SENT_KEY = 'email:entry_confirmed';
-const PRODUCTS_KEY = 'store:products';
-
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
-
-function pendingPromoKey(code: string, email: string) {
-  return `promo:pending:${code}:${email}`;
-}
 
 function siteUrlFromEnv() {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
@@ -51,13 +46,13 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
     if (rate <= 0) return;
     const pointsEarned = Math.floor((Number(amountCents) / 100) * rate);
     if (pointsEarned <= 0) return;
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return;
     for (const [k, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         u.rewards = Math.max(0, Number(u.rewards || 0)) + pointsEarned;
-        await redis.hset('store:users', { [k]: JSON.stringify(u) });
+        await redis.hset(USERS_KEY, { [k]: JSON.stringify(u) });
         console.log('[webhook] awarded points', email, pointsEarned);
         break;
       }
@@ -72,7 +67,7 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
 async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
   try {
     if (!email) return { hasAccount: false, rewardsBalance: 0 };
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [k, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
@@ -100,7 +95,7 @@ async function resolvePromo(
   }
 
   try {
-    const raw = await redis.hget(PROMOS_KEY, promoCode);
+    const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
     const promo = safeParseRedisItem<any>(raw);
     if (!promo || promo.active === false) {
       console.warn('[webhook] promo not found or inactive', promoCode);
@@ -114,7 +109,7 @@ async function resolvePromo(
       return { appliedPromo: undefined, discountPercent: 0 };
     }
     if (maxPer > 0) {
-      const used = await redis.sismember(usedEmailsKey(promoCode), email);
+      const used = await redis.sismember(promoUsedKey(promoCode), email);
       if (used === 1) {
         console.warn('[webhook] promo already used by email', promoCode, email);
         return { appliedPromo: undefined, discountPercent: 0 };
@@ -214,8 +209,8 @@ export async function POST(request: Request) {
           }
         }
 
-        const poolKey = `drop_pool:${variant}:${size}`;
-        const existingEntries = await redis.lrange(poolKey, 0, -1);
+        const pool = poolKey(variant, size);
+        const existingEntries = await redis.lrange(pool, 0, -1);
         const activeCountForEmail = existingEntries.reduce((count: number, row: any) => {
           const parsed = safeParseRedisItem<any>(row);
           if (String(parsed?.email || '').toLowerCase() === email) return count + 1;
@@ -251,7 +246,7 @@ export async function POST(request: Request) {
             orderRef,
           };
 
-          await redis.rpush(`drop_pool:${variant}:${size}`, JSON.stringify(entry));
+          await redis.rpush(poolKey(variant, size), JSON.stringify(entry));
           await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
           await redis.sadd(emailBlockKey(variant, size), email);
           if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
@@ -273,12 +268,12 @@ export async function POST(request: Request) {
 
           if (appliedPromo) {
             try {
-              await redis.sadd(usedEmailsKey(appliedPromo), email);
-              const raw = await redis.hget(PROMOS_KEY, appliedPromo);
+              await redis.sadd(promoUsedKey(appliedPromo), email);
+              const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
               const promo = safeParseRedisItem<any>(raw);
               if (promo) {
                 promo.uses = (promo.uses || 0) + 1;
-                await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
+                await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });
               }
             } catch {}
           }
@@ -422,13 +417,13 @@ export async function POST(request: Request) {
 
       if (appliedPromo) {
         try {
-          await redis.sadd(usedEmailsKey(appliedPromo), email);
-          await redis.del(pendingPromoKey(appliedPromo, email));
-          const raw = await redis.hget(PROMOS_KEY, appliedPromo);
+          await redis.sadd(promoUsedKey(appliedPromo), email);
+          await redis.del(promoPendingKey(appliedPromo, email));
+          const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
           const promo = safeParseRedisItem<any>(raw);
           if (promo) {
             promo.uses = (Number(promo.uses) || 0) + 1;
-            await redis.hset(PROMOS_KEY, { [appliedPromo]: JSON.stringify(promo) });
+            await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });
           }
         } catch (e) {
           console.error('[webhook] payment promo accounting failed', e);

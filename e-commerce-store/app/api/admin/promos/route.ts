@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , getAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem , getAdminPassword, PROMO_CODES_KEY, promoUsedKey} from '@/lib/server-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
-
-const PROMOS_KEY = 'config:promos';
 
 export type PromoRecord = {
   code: string;
@@ -34,12 +32,9 @@ export type PromoRecord = {
   createdAt: string;
 };
 
-function usedEmailsKey(code: string) {
-  return `promo:used_emails:${code}`;
-}
 
 async function loadPromos(redis: any): Promise<Record<string, PromoRecord>> {
-  const raw = await redis.hgetall(PROMOS_KEY);
+  const raw = await redis.hgetall(PROMO_CODES_KEY);
   if (!raw) return {};
   const out: Record<string, PromoRecord> = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -74,8 +69,8 @@ export async function POST(request: Request) {
   if (!code) return NextResponse.json({ error: 'Missing code' }, { status: 400 });
 
   if (action === 'delete') {
-    await redis.hdel(PROMOS_KEY, code);
-    await redis.del(usedEmailsKey(code));
+    await redis.hdel(PROMO_CODES_KEY, code);
+    await redis.del(promoUsedKey(code));
     try {
       await appendAudit(redis, { action: 'PROMO_DELETED', detail: code, actor: 'admin' });
     } catch {}
@@ -88,7 +83,7 @@ export async function POST(request: Request) {
   if (action === 'toggle') {
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     existing.active = !existing.active;
-    await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(existing) });
     try {
       await appendAudit(redis, { action: 'PROMO_TOGGLED', detail: `${code} → ${existing.active ? 'active' : 'inactive'}`, actor: 'admin' });
     } catch {}
@@ -99,7 +94,7 @@ export async function POST(request: Request) {
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     existing.payoutPaidCents = existing.payoutOwedCents || 0;
     existing.payoutOwedCents = 0;
-    await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(existing) });
+    await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(existing) });
     try {
       await appendAudit(redis, { action: 'PROMO_MARKED_PAID', detail: code, actor: 'admin' });
     } catch {}
@@ -142,7 +137,7 @@ export async function POST(request: Request) {
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
 
-  await redis.hset(PROMOS_KEY, { [code]: JSON.stringify(record) });
+  await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(record) });
     try {
       await appendAudit(redis, { action: existing ? 'PROMO_UPDATED' : 'PROMO_CREATED', detail: code, actor: 'admin' });
     } catch {}

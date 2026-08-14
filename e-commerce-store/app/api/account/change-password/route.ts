@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, AUTH_SESSION_PREFIX } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { scryptSync, randomBytes } from 'crypto';
 
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     }
 
     // Find the user record
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     let user: any = null;
     let userId = sessionUser.userId;
     if (raw) {
@@ -68,11 +68,11 @@ export async function POST(request: Request) {
 
     const newSalt = randomBytes(16).toString('hex');
     user.password = `${newSalt}:${hashPassword(newPassword, newSalt)}`;
-    await redis.hset('store:users', { [userId]: JSON.stringify(user) });
+    await redis.hset(USERS_KEY, { [userId]: JSON.stringify(user) });
 
     // Invalidate other sessions for this user so a leaked session dies on reset.
     try {
-      const keys = await redis.keys('session:*');
+      const keys = await redis.keys(`${AUTH_SESSION_PREFIX}*`);
       for (const key of keys) {
         const sessionRaw = await redis.get(key);
         const session = safeParseRedisItem<any>(sessionRaw);

@@ -9,6 +9,7 @@ import {
   LAST_DRAW_KEY,
   ARCHIVE_LEDGER_KEY,
   loadProducts,
+  ANALYTICS_ONLINE_KEY,
   getAdminPassword,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -87,7 +88,7 @@ export async function GET() {
 
     if (!redis) return NextResponse.json(status);
 
-    const trafficKey = 'analytics:active_users_online';
+    const trafficKey = ANALYTICS_ONLINE_KEY;
     try {
       await redis.zremrangebyscore(trafficKey, 0, Date.now() - 45 * 1000);
       status.liveActiveUsersOnline = await redis.zcard(trafficKey);

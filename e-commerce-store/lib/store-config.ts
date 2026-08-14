@@ -1,5 +1,6 @@
 import { createRedisClient } from './server-config';
 import { mergeOrbsConfig } from './storefront-config';
+import { STORE_CONFIG_KEY } from './redis-keys';
 
 export interface OrbVisualConfig {
   enabled: boolean;
@@ -224,7 +225,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
   }
 
   try {
-    const configRaw = await redis.get('store:config');
+    const configRaw = await redis.get(STORE_CONFIG_KEY);
     const config = safeParseRedisItem<any>(configRaw) || {};
     
     // Merge with defaults

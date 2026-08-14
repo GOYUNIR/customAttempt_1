@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, sessionKey } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 
 const SESSION_DURATION = 7 * 24 * 60 * 60; // 7 days in seconds
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const normalizedEmail = String(email).trim().toLowerCase();
 
   // Get all users from Redis
-  const raw = await redis.hgetall('store:users');
+  const raw = await redis.hgetall(USERS_KEY);
   if (!raw) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
@@ -48,9 +48,9 @@ export async function POST(request: Request) {
 
   // Create session
   const token = randomBytes(32).toString('hex');
-  const sessionKey = `session:${token}`;
+  const sessionKeyName = sessionKey(token);
   const expiresAt = Date.now() + SESSION_DURATION * 1000;
-  await redis.setex(sessionKey, SESSION_DURATION, JSON.stringify({
+  await redis.setex(sessionKeyName, SESSION_DURATION, JSON.stringify({
     userId: user.id,
     email: user.email,
     role: user.role,

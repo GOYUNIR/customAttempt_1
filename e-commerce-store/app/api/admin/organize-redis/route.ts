@@ -4,19 +4,62 @@ import { createRedisClient, getAdminPassword, safeParseRedisItem } from '@/lib/s
 export const dynamic = 'force-dynamic';
 
 // ============================================================
-// REDIS CLEANUP — removes legacy redundant keys.
+// REDIS SCHEMA — TIDY & MIGRATE
 //
-// The store has a single source of truth for products (`store:products`) and
-// settings (`store:config`). These legacy keys were mirror copies or
-// duplicates that used to be kept in sync on every write:
-//   - store:active_products / store:archived_products / store:upcoming_products
-//       Full JSON copies of products already stored in store:products.
-//       The storefront derives these by filtering product flags at read time.
-//   - store:product_images:* — copies of the images array already embedded in
-//       each product object.
-//   - store:catalog_config — a third copy of catalog groupings now stored in
-//       store:config.catalogPreview.
+// Redis is the primary data store, and every key now follows the tidy
+// `domain:subdomain:…` schema defined in lib/redis-keys.ts (see that file for
+// the namespace map + the mandatory rules for future agents).
+//
+// This endpoint is the ADMIN-DRIVEN migration path:
+//   1. MIGRATE — any key still using a legacy name (drop_pool:*, intent_pool:*,
+//      session:*, live_state, stats:*, config:promos, …) is RENAMED to its tidy
+//      equivalent. Rename is atomic, preserves the value + TTL, and is skipped
+//      when the target key already exists (never overwrites). Data is never
+//      dropped — only moved.
+//   2. CLEAN — removes the true legacy duplicate keys (product mirror hashes,
+//      standalone image keys, the old catalog_config copy) that have no tidy
+//      equivalent because they are redundant by design.
+//
+// The same migration a fresh install starts with. Safe to re-run anytime.
 // ============================================================
+
+/** old-key regex → new-key builder (keep in sync with lib/redis-keys.ts). */
+const LEGACY_MIGRATIONS: { pattern: RegExp; to: (match: RegExpMatchArray) => string }[] = [
+  { pattern: /^drop_pool:(.*)$/, to: (m) => `entries:pool:${m[1]}` },
+  { pattern: /^intent_pool:(.*)$/, to: (m) => `entries:intent:${m[1]}` },
+  { pattern: /^waitlist:(.*)$/, to: (m) => `entries:waitlist:${m[1]}` },
+  { pattern: /^drop_fraud_block:(.*):emails$/, to: (m) => `entries:block:email:${m[1]}` },
+  { pattern: /^drop_fraud_block:(.*):cards$/, to: (m) => `entries:block:card:${m[1]}` },
+  { pattern: /^stats:pools$/, to: () => 'entries:stats' },
+  { pattern: /^stats:social_proof_boost$/, to: () => 'analytics:social_boost' },
+  { pattern: /^stats:social_proof_last_tick$/, to: () => 'analytics:ticks:last' },
+  { pattern: /^stats:social_proof_ticks_today$/, to: () => 'analytics:ticks:today' },
+  { pattern: /^stats:social_proof_ticks_day_stamp$/, to: () => 'analytics:ticks:day' },
+  { pattern: /^drop_processed_sessions$/, to: () => 'entries:processed' },
+  { pattern: /^drop_last_draw_summary$/, to: () => 'draws:last' },
+  { pattern: /^admin:draw_history$/, to: () => 'draws:history' },
+  { pattern: /^live_state$/, to: () => 'ops:live_state' },
+  { pattern: /^catalog:archive_state$/, to: () => 'ops:catalog_archive' },
+  { pattern: /^config:promos$/, to: () => 'promo:codes' },
+  { pattern: /^config:recovery$/, to: () => 'ops:recovery_config' },
+  { pattern: /^recovery:sent$/, to: () => 'ops:recovery_sent' },
+  { pattern: /^alerts:waitlist$/, to: () => 'customer:waitlist' },
+  { pattern: /^address:submissions$/, to: () => 'customer:addresses' },
+  { pattern: /^email:entry_confirmed$/, to: () => 'entries:email_sent' },
+  { pattern: /^promo:used_emails:(.*)$/, to: (m) => `promo:used:${m[1]}` },
+  { pattern: /^promo:delivery_credit_issued:(.*)$/, to: (m) => `promo:credit:${m[1]}` },
+  { pattern: /^promo:pending:(.*)$/, to: (m) => `promo:pending:${m[1]}` },
+  { pattern: /^session:(.*)$/, to: (m) => `auth:session:${m[1]}` },
+  { pattern: /^reset:(.*)$/, to: (m) => `auth:reset:${m[1]}` },
+  { pattern: /^analytics:active_users_online$/, to: () => 'analytics:online' },
+  { pattern: /^stripe:portal_config_id$/, to: () => 'cache:stripe_portal_config' },
+  { pattern: /^config:drop_schedule$/, to: () => 'ops:override:schedule' },
+  { pattern: /^config:social_proof$/, to: () => 'ops:override:social_proof' },
+  { pattern: /^config:product:(.*)$/, to: (m) => `ops:override:product:${m[1]}` },
+  { pattern: /^draw:last_auto:(.*)$/, to: (m) => `entries:last_auto:${m[1]}` },
+];
+
+/** True legacy duplicate keys that have NO tidy equivalent — safe to delete. */
 const MIRROR_KEYS = [
   'store:active_products',
   'store:archived_products',
@@ -24,6 +67,49 @@ const MIRROR_KEYS = [
 ];
 const CATALOG_CONFIG_KEY = 'store:catalog_config';
 const PRODUCT_IMAGES_PREFIX = 'store:product_images:';
+
+/** Rename an existing key to a new name, preserving TTL. Returns true on success. */
+async function renamePreservingTtl(redis: any, oldKey: string, newKey: string): Promise<boolean> {
+  try {
+    const ttlMs = Number((await redis.pttl(oldKey)) ?? -1);
+    // RENAMENX refuses to overwrite an existing target (no data loss).
+    const renamed = await redis.renamenx(oldKey, newKey);
+    if (!renamed) return false;
+    // Re-apply the TTL explicitly so very old servers / REST shims behave identically.
+    if (ttlMs > 0) {
+      try {
+        await redis.pexpire(newKey, ttlMs);
+      } catch {}
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Type-aware copy+delete fallback for REST clients without RENAMENX. */
+async function copyDeleteFallback(redis: any, oldKey: string, newKey: string): Promise<boolean> {
+  try {
+    const type = String((await redis.type(oldKey)) || '').toLowerCase();
+    if (type === 'list') {
+      const items = (await redis.lrange(oldKey, 0, -1)) || [];
+      if (items.length > 0) await redis.rpush(newKey, ...items);
+    } else if (type === 'set') {
+      const members = (await redis.smembers(oldKey)) || [];
+      if (members.length > 0) await redis.sadd(newKey, ...members);
+    } else if (type === 'hash') {
+      const hash = (await redis.hgetall(oldKey)) || {};
+      if (Object.keys(hash).length > 0) await redis.hset(newKey, hash);
+    } else {
+      const value = await redis.get(oldKey);
+      if (value != null) await redis.set(newKey, value);
+    }
+    await redis.del(oldKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -37,59 +123,107 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
+    const migrated: string[] = [];
+    const skipped: string[] = [];
     const removed: string[] = [];
 
-    // 1) Drop the product mirror hashes (full duplicate payloads).
+    // ── 1) Migrate every legacy-prefix key to the tidy schema ─────────────
+    // Scan with the regex's fixed prefix (a key may match more than one
+    // pattern, so dedupe with a Map<oldKey, newKey>).
+    const pending = new Map<string, string>();
+    for (const { pattern, to } of LEGACY_MIGRATIONS) {
+      try {
+        const prefix = pattern.source.replace(/[$^]/g, '');
+        const found = (await redis.keys(`${prefix}*`)) as string[] | null;
+        if (Array.isArray(found)) {
+          for (const key of found) {
+            const match = key.match(pattern);
+            if (match && !pending.has(key)) pending.set(key, to(match));
+          }
+        }
+      } catch {
+        /* individual pattern failures are non-fatal */
+      }
+    }
+
+    for (const [oldKey, newKey] of pending) {
+      if (oldKey === newKey) continue;
+      try {
+        const targetExists = (await redis.exists(newKey)) > 0;
+        if (targetExists) {
+          skipped.push(`${oldKey} → ${newKey} (target already exists)`);
+          continue;
+        }
+        const ok = (await renamePreservingTtl(redis, oldKey, newKey)) || (await copyDeleteFallback(redis, oldKey, newKey));
+        if (ok) migrated.push(`${oldKey} → ${newKey}`);
+        else skipped.push(`${oldKey} (could not migrate)`);
+      } catch {
+        skipped.push(`${oldKey} (migration error)`);
+      }
+    }
+
+    // ── 2) Remove the true legacy duplicate keys (redundant by design) ─────
     for (const key of MIRROR_KEYS) {
-      const exists = await redis.exists(key);
-      if (exists) {
-        await redis.del(key);
-        removed.push(key);
-      }
+      try {
+        const exists = await redis.exists(key);
+        if (exists) {
+          await redis.del(key);
+          removed.push(key);
+        }
+      } catch {}
     }
 
-    // 2) Drop the standalone per-product image keys (images live in products).
-    const imageKeys = await redis.keys(`${PRODUCT_IMAGES_PREFIX}*`);
-    if (Array.isArray(imageKeys) && imageKeys.length > 0) {
-      await redis.del(...imageKeys);
-      removed.push(`${PRODUCT_IMAGES_PREFIX}* (${imageKeys.length} keys)`);
-    }
-
-    // 3) Migrate then drop the legacy catalog config copy. Manual entries
-    //    edited in the admin Catalog tab are folded into store:config.catalogPreview
-    //    (the canonical location) so nothing is lost before the old key is removed.
-    const catalogExists = await redis.exists(CATALOG_CONFIG_KEY);
-    if (catalogExists) {
-      const legacyCatalog = safeParseRedisItem<any>(await redis.get(CATALOG_CONFIG_KEY)) || {};
-      const configRaw = await redis.get('store:config');
-      const storeConfig = safeParseRedisItem<any>(configRaw) || {};
-      const preview = storeConfig.catalogPreview || {};
-      const upcomingDrops = Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [];
-      const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];
-      const legacyUpcoming = Array.isArray(legacyCatalog.upcomingDrops) ? legacyCatalog.upcomingDrops : [];
-      const legacyArchive = Array.isArray(legacyCatalog.archiveScents) ? legacyCatalog.archiveScents : [];
-      const dedupeBySlug = (items: any[]) =>
-        items.filter((item, index, all) => all.findIndex((other) => String(other.slug || other.name) === String(item.slug || item.name)) === index);
-      const migratedUpcoming = dedupeBySlug([...upcomingDrops, ...legacyUpcoming]);
-      const migratedArchive = dedupeBySlug([...archiveScents, ...legacyArchive]);
-      const merged = {
-        ...storeConfig,
-        catalogPreview: { upcomingDrops: migratedUpcoming, archiveScents: migratedArchive },
-        updatedAt: new Date().toISOString(),
-      };
-      if (JSON.stringify(merged) !== configRaw) {
-        await redis.set('store:config', JSON.stringify(merged));
+    try {
+      const imageKeys = await redis.keys(`${PRODUCT_IMAGES_PREFIX}*`);
+      if (Array.isArray(imageKeys) && imageKeys.length > 0) {
+        await redis.del(...imageKeys);
+        removed.push(`${PRODUCT_IMAGES_PREFIX}* (${imageKeys.length} keys)`);
       }
-      await redis.del(CATALOG_CONFIG_KEY);
-      removed.push(`${CATALOG_CONFIG_KEY} (migrated into store:config.catalogPreview)`);
-    }
+    } catch {}
+
+    // 3) Migrate then drop the legacy catalog config copy. Manual entries edited
+    //    in the admin Catalog tab are folded into store:config.catalogPreview
+    //    (the canonical location) so nothing is lost before the old key dies.
+    try {
+      const catalogExists = await redis.exists(CATALOG_CONFIG_KEY);
+      if (catalogExists) {
+        const legacyCatalog = safeParseRedisItem<any>(await redis.get(CATALOG_CONFIG_KEY)) || {};
+        const configRaw = await redis.get('store:config');
+        const storeConfig = safeParseRedisItem<any>(configRaw) || {};
+        const preview = storeConfig.catalogPreview || {};
+        const upcomingDrops = Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [];
+        const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];
+        const legacyUpcoming = Array.isArray(legacyCatalog.upcomingDrops) ? legacyCatalog.upcomingDrops : [];
+        const legacyArchive = Array.isArray(legacyCatalog.archiveScents) ? legacyCatalog.archiveScents : [];
+        const dedupeBySlug = (items: any[]) =>
+          items.filter((item, index, all) => all.findIndex((other) => String(other.slug || other.name) === String(item.slug || item.name)) === index);
+        const merged = {
+          ...storeConfig,
+          catalogPreview: {
+            upcomingDrops: dedupeBySlug([...upcomingDrops, ...legacyUpcoming]),
+            archiveScents: dedupeBySlug([...archiveScents, ...legacyArchive]),
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        if (JSON.stringify(merged) !== configRaw) {
+          await redis.set('store:config', JSON.stringify(merged));
+        }
+        await redis.del(CATALOG_CONFIG_KEY);
+        removed.push(`${CATALOG_CONFIG_KEY} (migrated into store:config.catalogPreview)`);
+      }
+    } catch {}
 
     return NextResponse.json({
       success: true,
-      message: removed.length > 0 ? `Removed ${removed.length} redundant key group(s).` : 'Nothing to clean — Redis is already tidy.',
+      message: migrated.length > 0
+        ? `Migrated ${migrated.length} legacy key(s) to the tidy schema.`
+        : 'Redis schema is already tidy.',
+      migrated,
+      skipped,
       removed,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Unable to clean up Redis' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Unable to tidy Redis' }, { status: 500 });
   }
 }
+

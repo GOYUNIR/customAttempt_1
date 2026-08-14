@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes, scryptSync } from 'crypto';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
 import { sendPasswordResetEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ function hashPassword(password: string, salt: string): string {
 }
 
 function resetKey(token: string) {
-  return `reset:${token}`;
+  return passwordResetKey(token);
 }
 
 export async function POST(request: Request) {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
-    const raw = await redis.hgetall('store:users');
+    const raw = await redis.hgetall(USERS_KEY);
     let user: any = null;
     for (const value of Object.values(raw || {})) {
       const parsed = safeParseRedisItem<any>(value);
