@@ -189,12 +189,13 @@ export const AUDIT_LOG_KEY = 'admin:audit_log';
 export function adminVerifyKey(email: string): string {
   return `admin:verify:${email}`;
 }
-/** String w/ TTL — verified device token (`admin:device:<token>`). A valid token
- * in this namespace is what the "remember device" / "this browser" cookie maps
- * to, and proxy.ts checks it so every /api/admin request is 2FA-gated. */
-export function adminDeviceKey(token: string): string {
-  return `admin:device:${token}`;
-}
+/** Hash of verified admin device tokens (field = token, value = JSON with an
+ * explicit `expiresAt`). A valid token in this hash is what the "remember
+ * device" / "this browser" cookie maps to, and proxy.ts checks it so every
+ * /api/admin request is 2FA-gated. A SINGLE hash (not one key per token) keeps
+ * the Redis data browser tidy — expired tokens are lazy-deleted the next time
+ * they're checked, and revoking a device is a one-field HDEL. */
+export const ADMIN_DEVICES_KEY = 'admin:devices';
 /** String w/ TTL — wrong-code counter for brute-force lockout (`admin:verify_attempts:<email>`). */
 export function adminVerifyAttemptsKey(email: string): string {
   return `admin:verify_attempts:${email}`;

@@ -218,6 +218,7 @@ Redis data browser stays readable even at thousands of customers:
 - `draws:*` — draw summaries + history
 - `ops:*` — live inventory state, catalog archive, recovery, admin overrides
 - `auth:*` — sessions and password-reset tokens
+- `admin:*` — audit log + two-step verification state (device tokens live in one `admin:devices` hash)
 - `analytics:*` — social-proof counters, online visitors
 - `customer:*` — waitlist subscribers and standalone address submissions
 - `cache:*` — ephemeral caches (safe to delete anytime)

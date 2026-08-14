@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, verifyAdminPassword, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -180,7 +180,44 @@ export async function POST(request: Request) {
       }
     } catch {}
 
-    // 3) Migrate then drop the legacy catalog config copy. Manual entries edited
+    // ── 3) Fold legacy `admin:device:<token>` string keys into the single
+    // `admin:devices` hash (field = token). Hash fields can't carry a per-field
+    // TTL, so each folded value gains an explicit `expiresAt` derived from the
+    // key's remaining TTL. Safe to re-run — tokens already folded are skipped.
+    try {
+      const deviceKeys = (await redis.keys('admin:device:*')) as string[] | null;
+      if (Array.isArray(deviceKeys) && deviceKeys.length > 0) {
+        const now = Date.now();
+        for (const key of deviceKeys) {
+          const token = key.slice('admin:device:'.length);
+          try {
+            // Already folded by a previous run — just drop the legacy key.
+            const existing = await redis.hget(ADMIN_DEVICES_KEY, token);
+            if (existing) {
+              await redis.del(key);
+              removed.push(`${key} (already folded into ${ADMIN_DEVICES_KEY})`);
+              continue;
+            }
+            const raw = await redis.get(key);
+            const ttlMs = Number((await redis.pttl(key).catch(() => -1)) ?? -1);
+            const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw) || {};
+            await redis.hset(ADMIN_DEVICES_KEY, {
+              [token]: JSON.stringify({
+                email: String(parsed.email || ''),
+                createdAt: Number(parsed.createdAt) || now,
+                expiresAt: ttlMs > 0 ? now + ttlMs : now + 30 * 24 * 60 * 60 * 1000,
+              }),
+            });
+            await redis.del(key);
+            migrated.push(`${key} → ${ADMIN_DEVICES_KEY}#${token.slice(0, 8)}…`);
+          } catch {
+            skipped.push(`${key} (could not fold into ${ADMIN_DEVICES_KEY})`);
+          }
+        }
+      }
+    } catch {}
+
+    // 4) Migrate then drop the legacy catalog config copy. Manual entries edited
     //    in the admin Catalog tab are folded into store:config.catalogPreview
     //    (the canonical location) so nothing is lost before the old key dies.
     try {

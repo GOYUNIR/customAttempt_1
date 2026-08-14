@@ -61,7 +61,7 @@ Redis data browser stays filterable and organised at any scale:
 | `draws:` | Draw summaries + history | `draws:last` (string), `draws:history` (list) |
 | `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:override:schedule` / `ops:override:social_proof` / `ops:override:product:<id>` (strings) |
 | `auth:` | Auth tokens + verification challenges | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string), `auth:verify:<email>` (ttl string) |
-| `admin:` | Admin-only data + two-step verification state | `admin:audit_log` (list), `admin:verify:<email>` (ttl string), `admin:device:<token>` (ttl string), `admin:verify_attempts:<email>` / `admin:send_attempts:<email>` (ttl strings) |
+| `admin:` | Admin-only data + two-step verification state | `admin:audit_log` (list), `admin:verify:<email>` (ttl string), `admin:devices` (hash of verified device tokens — one key, not one per browser), `admin:verify_attempts:<email>` / `admin:send_attempts:<email>` (ttl strings) |
 | `analytics:` | Social-proof counters + online visitors | `analytics:online` (zset), `analytics:social_boost`, `analytics:ticks:last` / `ticks:today` / `ticks:day` (strings) |
 | `customer:` | Customer-submitted data | `customer:waitlist` (hash), `customer:addresses` (hash) |
 | `cache:` | Ephemeral caches (safe to delete anytime) | `cache:stripe_portal_config` (string) |
@@ -361,6 +361,33 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-14 — Admin device tokens + 2FA gate UX (hash cleanup, no-flash gate, auto-send):**
+  - **`admin:device:<token>` folder spam is gone.** Verified admin devices now live in a
+    SINGLE Redis hash `admin:devices` (field = token, value = JSON with an explicit
+    `expiresAt`), instead of one top-level key per browser (which made the Redis data
+    browser fill with `admin:device:...` rows). `lib/redis-keys.ts` dropped
+    `adminDeviceKey()` for `ADMIN_DEVICES_KEY`; `lib/admin-verify.ts` writes via
+    `HSET` and validates via `HGET` with lazy expiry (an expired token is `HDEL`-ed
+    the first time it's checked, so the hash self-cleans). Revoking a stolen device is
+    now a one-field delete instead of hunting a random key. `/admin → Developer →
+    Tidy Redis Schema` gained a migration step that folds any legacy `admin:device:*`
+    string keys into the hash (expiry derived from each key's remaining TTL; safe to
+    re-run). The cookie name (`goyunir_admin_device`) is unchanged, so existing
+    browsers stay verified.
+  - **The 6-digit 2FA screen now appears BEFORE any secret info.** `/admin` previously
+    SSR'd the full portal while the device cookie check ran, so the portal flashed
+    first and *then* the gate replaced it — and that portal hydration caused a React
+    418 "server rendered text didn't match the client" error in F12. While
+    `adminVerified === null` the page now renders a small deterministic "Checking
+    admin verification…" screen; the portal only ever renders after verification
+    succeeds. No flash, no hydration mismatch, no secret data before 2FA.
+  - **A code is emailed automatically** the moment the 2FA gate appears (guarded by a
+    ref so it fires once per gate open; the 60s server throttle prevents spam, and a
+    mid-session re-lock auto-sends again). The gate's primary button flips to "Send a
+    new code" after the auto-send. No more "nothing happens until I press Send".
+  - Docs: AGENTS.md namespace map + this changelog + README key list updated in the
+    same change set.
 
 - **2026-08-14 — 2FA / verification code flow fixed (Upstash deserialization bug):**
   - **Root cause**: `@upstash/redis` enables `automaticDeserialization` by default, so

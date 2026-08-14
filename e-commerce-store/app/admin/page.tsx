@@ -287,6 +287,10 @@ export default function AdminPortal() {
   const [verifyMsg, setVerifyMsg] = useState('');
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyDevCode, setVerifyDevCode] = useState('');
+  // Guards the AUTO-SEND so the code is emailed exactly ONCE per gate open (not
+  // on every re-render). Reset when the gate closes so a mid-session re-lock
+  // (401 ADMIN_2FA_REQUIRED) auto-sends a fresh code again.
+  const verifyAutoSentRef = useRef(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -1649,6 +1653,22 @@ export default function AdminPortal() {
     setVerifyBusy(false);
   };
 
+  // AUTO-SEND the 6-digit code the moment the 2FA gate appears — the operator
+  // should never have to press "Send me a code" before an email is sent. The
+  // server's 60s resend throttle means this can't spam the inbox even if the
+  // gate is re-opened quickly.
+  useEffect(() => {
+    if (adminVerified === false && !verifyAutoSentRef.current) {
+      verifyAutoSentRef.current = true;
+      sendAdminVerifyCode();
+    }
+    if (adminVerified !== false) verifyAutoSentRef.current = false;
+    // sendAdminVerifyCode is stable per-mount (it only touches setters), so
+    // keying on the gate state alone is intentional — re-running exactly when
+    // the gate opens/closes is the desired behaviour.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminVerified]);
+
   // CSV export uses fetch (not a plain <a>) so the admin password never travels
   // in the URL — proxy.ts Basic Auth + the 2FA device cookie authorize it.
   const downloadWinners = async () => {
@@ -1733,6 +1753,23 @@ export default function AdminPortal() {
 
   // ============================================================
   // TWO-STEP VERIFICATION GATE — shown until the operator confirms an emailed code.
+  // While the device cookie is still being checked (`adminVerified === null`) we
+  // render a NEUTRAL screen, never the portal: the secret admin data can't flash
+  // before verification, AND SSR + hydration always agree on a small,
+  // deterministic tree (the full portal markup used to hydrate first and threw a
+  // React 418 "server rendered text didn't match the client" error on /admin).
+  if (adminVerified === null) {
+    return (
+      <main style={{ minHeight: '100vh', padding: '24px 16px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 999, margin: '0 auto 16px', background: 'radial-gradient(circle, #edb210 0%, #a855f7 55%, transparent 72%)', animation: 'goyunirSpin 1.1s linear infinite' }} />
+          <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.5px' }}>Checking admin verification…</div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 8 }}>Confirming this browser&apos;s two-step device cookie.</div>
+        </div>
+      </main>
+    );
+  }
+
   if (adminVerified === false) {
     return (
       <main style={{ minHeight: '100vh', padding: '24px 16px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1748,7 +1785,7 @@ export default function AdminPortal() {
           </p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
             <button onClick={sendAdminVerifyCode} disabled={verifyBusy} style={{ ...buttonPrimary, flex: 1, background: verifyBusy ? '#555' : '#fff' }}>
-              {verifyBusy ? 'Sending…' : 'Send me a code'}
+              {verifyBusy ? 'Sending…' : (verifyMsg && verifyMsg.toLowerCase().includes('sent') ? 'Send a new code' : 'Send me a code')}
             </button>
           </div>
           {verifyDevCode && (

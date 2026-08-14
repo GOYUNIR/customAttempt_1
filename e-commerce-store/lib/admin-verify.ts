@@ -6,8 +6,9 @@
  * every /api/admin request EXCEPT the verify-* endpoints and the /admin page
  * itself. To get that cookie the operator types their admin email, receives a
  * 6-digit one-time code, and confirms it here. The device token is stored in
- * Redis (`admin:device:<token>`) so a stolen cookie can be revoked by deleting
- * the key — and it is scoped per browser with an httpOnly cookie.
+ * a single Redis hash (`admin:devices`, field = token) so verified browsers can
+ * be revoked by deleting one field — and it is scoped per browser with an
+ * httpOnly cookie.
  *
  * Rate limiting: wrong-code attempts are capped (5 per email per 15 min) and
  * resends are throttled (1 per 60s), so the code cannot be brute-forced.
@@ -15,8 +16,8 @@
 
 import { randomBytes, createHash } from 'crypto';
 import {
+  ADMIN_DEVICES_KEY,
   adminVerifyKey,
-  adminDeviceKey,
   adminVerifyAttemptsKey,
   adminSendAttemptsKey,
 } from '@/lib/redis-keys';
@@ -136,7 +137,10 @@ export async function consumeAdminCode(
   return { ok: true };
 }
 
-/** Issue a fresh device token for the 2FA-gated admin requests. */
+/** Issue a fresh device token for the 2FA-gated admin requests. Tokens live in
+ * the single `admin:devices` hash (field = token) with an explicit `expiresAt`
+ * timestamp — hash fields can't carry a per-field TTL, so expiry is enforced
+ * lazily by `isAdminDeviceValid` on the next check. */
 export async function issueAdminDevice(
   redis: any,
   email: string,
@@ -144,24 +148,34 @@ export async function issueAdminDevice(
 ): Promise<{ token: string; maxAgeSeconds: number }> {
   const token = randomBytes(32).toString('hex');
   const maxAgeSeconds = remember ? DEVICE_TTL_SECONDS : SESSION_DEVICE_TTL_SECONDS;
-  await redis.setex(adminDeviceKey(token), maxAgeSeconds, JSON.stringify({
-    email: String(email || '').trim().toLowerCase(),
-    createdAt: Date.now(),
-  }));
+  await redis.hset(ADMIN_DEVICES_KEY, {
+    [token]: JSON.stringify({
+      email: String(email || '').trim().toLowerCase(),
+      createdAt: Date.now(),
+      expiresAt: Date.now() + maxAgeSeconds * 1000,
+    }),
+  });
   return { token, maxAgeSeconds };
 }
 
 /** Whether a device token is currently valid (used by proxy.ts on every admin request). */
 export async function isAdminDeviceValid(redis: any, token: string): Promise<boolean> {
   if (!token) return false;
-  const raw = await redis.get(adminDeviceKey(token)).catch(() => null);
+  const raw = await redis.hget(ADMIN_DEVICES_KEY, token).catch(() => null);
   if (!raw) return false;
   // Same Upstash deserialization nuance as consumeAdminCode — `raw` may already
   // be the parsed object, so JSON.parse(String(raw)) would throw on
   // "[object Object]" and make every /api/admin request return 401
   // ADMIN_2FA_REQUIRED even after a successful code confirm.
-  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw);
-  return Boolean(parsed && (parsed.email || parsed.createdAt));
+  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number; expiresAt?: number }>(raw);
+  if (!parsed) return false;
+  // Lazy expiry: hash fields can't expire on their own, so an expired token is
+  // removed the first time it is checked — keeps `admin:devices` self-cleaning.
+  if (Number(parsed.expiresAt) > 0 && Date.now() > Number(parsed.expiresAt)) {
+    try { await redis.hdel(ADMIN_DEVICES_KEY, token); } catch { /* best-effort */ }
+    return false;
+  }
+  return Boolean(parsed.email || parsed.createdAt);
 }
 
 /** Extract the device token from a Request's cookie header (proxy + routes). */
