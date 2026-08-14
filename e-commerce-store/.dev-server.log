@@ -1417,3 +1417,35 @@ https://react.dev/link/hydration-mismatch
 ✓ Compiled in 102ms
 ✓ Compiled in 77ms
 ✓ Compiled in 75ms
+ GET / 200 in 831ms (next.js: 181ms, application-code: 651ms)
+ GET /api/auth/me 200 in 220ms (next.js: 209ms, application-code: 10ms)
+ GET /api/auth/me 200 in 130ms (next.js: 123ms, application-code: 8ms)
+ GET /icon 200 in 207ms (next.js: 111ms, application-code: 96ms)
+ GET /api/analytics/heartbeat?visitorId=mst3r2u6-ge5chn 200 in 967ms (next.js: 336ms, application-code: 631ms)
+ GET /api/store 200 in 973ms (next.js: 114ms, application-code: 859ms)
+ GET /admin 200 in 533ms (next.js: 124ms, proxy.ts: 4ms, application-code: 405ms)
+ GET /icon 200 in 16ms (next.js: 4ms, application-code: 12ms)
+[browser] [Products] Fetch error: TypeError: Failed to execute 'fetch' on 'Window': Request cannot be constructed from a URL that includes credentials: /api/admin/products?includeArchived=true
+    at adminFetch (app/admin/page.tsx:156:10)
+    at fetchProducts (app/admin/page.tsx:634:25)
+    at runInitialLoads (app/admin/page.tsx:1535:5)
+    at AdminPortal.useEffect (app/admin/page.tsx:1555:9)
+  154 |
+  155 | function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+> 156 |   return fetch(input, { ...init, credentials: 'include' }).then((res) => {
+      |          ^
+  157 |     // If the proxy's two-step device cookie is missing/expired, every /api/admin
+  158 |     // request returns 401 { error: 'ADMIN_2FA_REQUIRED' }. Surface that to the
+  159 |     // portal so it can re-show the verification screen instead of a silent error. (app/admin/page.tsx:642:15)
+[browser] Failed to load catalog settings: TypeError: Failed to execute 'fetch' on 'Window': Request cannot be constructed from a URL that includes credentials: /api/admin/catalog-settings
+    at adminFetch (app/admin/page.tsx:156:10)
+    at fetchCatalogSettings (app/admin/page.tsx:663:25)
+    at runInitialLoads (app/admin/page.tsx:1537:5)
+    at AdminPortal.useEffect (app/admin/page.tsx:1555:9)
+  154 |
+  155 | function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+> 156 |   return fetch(input, { ...init, credentials: 'include' }).then((res) => {
+      |          ^
+  157 |     // If the proxy's two-step device cookie is missing/expired, every /api/admin
+  158 |     // request returns 401 { error: 'ADMIN_2FA_REQUIRED' }. Surface that to the
+  159 |     // portal so it can re-show the verification screen instead of a silent error. (app/admin/page.tsx:668:15)
