@@ -163,7 +163,7 @@ export default function SignupPage() {
       <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 16), padding: '24px 20px', maxWidth: 360, width: '100%', boxSizing: 'border-box' }}>
         {step === 'form' ? (
           <>
-            <h2 style={{ fontSize: 20, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 6px' }}>Create your account</h2>
+            <h2 style={{ fontSize: 20, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 6px', color: configPalette.cardTextMain }}>Create your account</h2>
             <p style={{ fontSize: 13, margin: '0 0 24px', color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
               Track entries and earn rewards. New accounts get 250 welcome points and a one-time 10% credit on your first release — unlocked after you confirm your email.
             </p>

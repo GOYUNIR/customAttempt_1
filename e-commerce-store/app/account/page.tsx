@@ -860,12 +860,12 @@ export default function AccountPage() {
         </div>
         {isLoggedIn && (
           <div style={{ fontSize: 11, color: configPalette.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
-            Your entries load automatically from <strong style={{ color: configPalette.cardTextMain }}>{email}</strong>.
+            Your entries load automatically from <strong style={{ color: configPalette.textMain }}>{email}</strong>.
           </div>
         )}
 
         {message && (
-          <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: configPalette.cardTextMuted }}>{message}</p>
+          <p style={{ marginTop: 16, fontSize: 12, textAlign: 'center', color: configPalette.textMuted }}>{message}</p>
         )}
 
         {entries && entries.length > 0 && (
@@ -893,7 +893,7 @@ export default function AccountPage() {
                     {statusLabel(entry.status)}
                   </div>
                   {entry.orderRef && (
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: configPalette.textMuted, marginTop: 4 }}>
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: configPalette.cardTextMuted, marginTop: 4 }}>
                       Order ref: {entry.orderRef}
                     </div>
                   )}
@@ -1073,7 +1073,7 @@ export default function AccountPage() {
                   )}
 
                   {isWinner && (
-                    <p style={{ margin: '10px 0 0', fontSize: 11, color: '#666' }}>
+                    <p style={{ margin: '10px 0 0', fontSize: 11, color: configPalette.cardTextMuted }}>
                       Address and payment are locked after a successful allocation.
                     </p>
                   )}

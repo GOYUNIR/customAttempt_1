@@ -78,6 +78,14 @@ p {
     0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
+/* Theme-aware placeholder: mixes the input's own text color down to a muted
+   tone, so placeholder copy stays readable on BOTH light and dark card
+   surfaces without a hardcoded gray. Inputs opt in via className="goyunir-ph". */
+.goyunir-ph::placeholder {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  opacity: 1;
+}
+
 /* Soft Apple card shadow (the admin cardShadow slider is applied inline by the
    components via cardShadowStyle(); this class is the fixed CSS equivalent). */
 .soft-shadow {

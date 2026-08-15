@@ -1116,7 +1116,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: soldOut ? '#fbbf24' : configPalette.accentBlue }}>{activeProductLabel}</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{checkoutMode}</div>
+              <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{checkoutMode}</div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
             <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
@@ -1242,7 +1242,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
-          <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
+          <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
               <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, padding: 14, border: `1px solid ${configPalette.cardBorder}` }}>
@@ -1256,7 +1256,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
         {showCart && cart.length > 0 && (
           <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
-            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
+            <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>Cart</div>
             {cart.map((item, index) => (
               <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>
                 <span>{item.name} · {item.size}</span>

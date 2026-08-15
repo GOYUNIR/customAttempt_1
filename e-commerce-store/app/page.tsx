@@ -135,7 +135,7 @@ export default function HomePage() {
     return (
       <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 13, letterSpacing: '4px', textTransform: 'uppercase', color: '#666' }}>Loading live drops</div>
+          <div style={{ fontSize: 13, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.textMuted }}>Loading live drops</div>
           <div style={{ marginTop: 12, width: 44, height: 2, background: configPalette.accentPurple, marginLeft: 'auto', marginRight: 'auto' }} />
         </div>
       </main>

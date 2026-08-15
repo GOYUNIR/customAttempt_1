@@ -344,12 +344,12 @@ export default function CatalogPage() {
             </div>
             <div style={{ padding: '10px 12px' }}>
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{item.name}</div>
-              <div style={{ fontSize: '10px', color: configPalette.textMuted || '#a1a1aa', marginTop: '2px' }}>
+              <div style={{ fontSize: '10px', color: configPalette.cardTextMuted || '#a1a1aa', marginTop: '2px' }}>
                 {item.status}
                 {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
             </div>
             {item.description && (
-              <div style={{ fontSize: '10px', color: configPalette.textMuted || '#a1a1aa', marginTop: '4px', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '10px', color: configPalette.cardTextMuted || '#a1a1aa', marginTop: '4px', lineHeight: 1.5 }}>
                 {item.description}
               </div>
             )}
@@ -364,7 +364,7 @@ export default function CatalogPage() {
               </div>
             )}
             {(section === 'upcoming' || section === 'archive') && (isRaffle || checkoutMode === 'FCFS' || (section === 'archive' && soldOutDate)) && (
-              <div style={{ marginTop: 6, fontSize: 9, color: configPalette.textMuted || '#a1a1aa', letterSpacing: '0.5px' }}>
+              <div style={{ marginTop: 6, fontSize: 9, color: configPalette.cardTextMuted || '#a1a1aa', letterSpacing: '0.5px' }}>
                 {(isRaffle || checkoutMode === 'FCFS') && (isRaffle ? 'Raffle' : 'FCFS')}
                 {section === 'archive' && soldOutDate && ((isRaffle || checkoutMode === 'FCFS') ? ` · ${soldOutDate}` : soldOutDate)}
               </div>
@@ -419,10 +419,11 @@ export default function CatalogPage() {
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Search releases"
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: configPalette.textMain, fontSize: 12 }}
+            className="goyunir-ph"
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: configPalette.cardTextMain, fontSize: 12 }}
           />
           {searchQuery ? (
-            <button onClick={() => setSearchQuery('')} style={{ border: 'none', background: 'transparent', color: configPalette.textMuted, cursor: 'pointer', fontSize: 12 }}>
+            <button onClick={() => setSearchQuery('')} style={{ border: 'none', background: 'transparent', color: configPalette.cardTextMuted, cursor: 'pointer', fontSize: 12 }}>
               Clear
             </button>
           ) : null}
@@ -436,7 +437,7 @@ export default function CatalogPage() {
         )}
 
         {isLoading && filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '40px 0', color: '#777' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '40px 0', color: configPalette.textMuted }}>
             <div style={{ width: 30, height: 30, borderRadius: 999, background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 55%, transparent 72%)', animation: 'goyunirSpin 1.1s linear infinite, goyunirPulse 1.6s ease-in-out infinite' }} />
             <div style={{ fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase' }}>Loading the catalog</div>
           </div>
@@ -478,7 +479,7 @@ export default function CatalogPage() {
                       >
                         <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
                         <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
-                        <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
+                        <div style={{ fontSize: '10px', color: drop.soldOut ? '#eab308' : configPalette.cardTextMuted, marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
                         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
                           {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
                         </div>
