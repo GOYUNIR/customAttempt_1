@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { surfaceBackground } from '@/lib/storefront-config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 
 interface EntryRecord {
@@ -558,9 +559,9 @@ export default function AccountPage() {
               borderRadius: 999,
               fontSize: 13,
               fontWeight: 600,
-              color: configPalette.textMain,
+              color: configPalette.cardTextMain,
               textDecoration: 'none',
-              background: 'rgba(255,255,255,0.06)',
+              background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency),
               border: `1px solid ${configPalette.cardBorder}`,
             }}
           >
@@ -586,7 +587,7 @@ export default function AccountPage() {
 
         {/* Page header */}
         <div style={{ marginBottom: 22 }}>
-          <h1 style={{ fontSize: 28, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px', color: configPalette.cardTextMain }}>My Account</h1>
+          <h1 style={{ fontSize: 28, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 4px', color: configPalette.textMain }}>My Account</h1>
           <p style={{ fontSize: 13, color: configPalette.textMuted, margin: 0, lineHeight: 1.6 }}>
             {isLoggedIn
               ? `Signed in as ${user?.email} — manage your entries, rewards and credits.`

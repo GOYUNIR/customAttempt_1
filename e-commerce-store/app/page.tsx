@@ -159,7 +159,7 @@ export default function HomePage() {
                 </Link>
               )
             )}
-            <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardTextMain === '#0a0a0c' ? 'rgba(10,10,12,0.25)' : 'rgba(255,255,255,0.22)'}`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+            <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 32%, transparent)`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
               {heroContent.storyHeadline || 'Our Story'}
             </Link>
             <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
@@ -187,8 +187,8 @@ export default function HomePage() {
                       </div>
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4, color: configPalette.cardTextMain }}>{product.name}</div>
                       <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
-                      <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? 'rgba(59,130,246,0.16)' : 'rgba(255,255,255,0.06)', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? '#dbeafe' : '#e7e7eb', fontWeight: 700, border: product.isUpcoming ? '1px solid rgba(59,130,246,0.24)' : '1px solid rgba(255,255,255,0.08)' }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? '#60a5fa' : (product.soldOut ? '#fbbf24' : '#7dd3fc'), animation: 'goyunirPulse 1s ease-in-out infinite' }} />
+                      <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? `color-mix(in srgb, ${configPalette.accentBlue} 16%, transparent)` : `color-mix(in srgb, ${configPalette.cardTextMain} 10%, transparent)`, display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? configPalette.accentBlue : configPalette.cardTextMain, fontWeight: 700, border: product.isUpcoming ? `1px solid color-mix(in srgb, ${configPalette.accentBlue} 30%, transparent)` : `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 22%, transparent)` }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? configPalette.accentBlue : (product.soldOut ? '#fbbf24' : configPalette.accentBlue), boxShadow: '0 0 0 3px rgba(255,255,255,0.08)', animation: 'goyunirPulse 1s ease-in-out infinite' }} />
                         {product.isUpcoming ? `Release opens: ${formatCountdown(product)}` : formatCountdown(product)}
                       </div>
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>

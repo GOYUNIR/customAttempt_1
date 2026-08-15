@@ -388,7 +388,48 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-15 — Theme-consistent contrast pass (story page + all content pages):**
+  - **Story page is readable on EVERY design preset.** Root cause: `app/story/page.tsx`
+    rendered `cardTextMain`/`cardTextMuted` (tokens designed for CARD surfaces)
+    directly on `primaryBackground`. On the light-theme presets (Luxury, Wellness,
+    Editorial, Monochrome) the page background is white/cream while `cardTextMain`
+    is also near-white → the whole page was effectively invisible. The page now
+    uses the same token discipline as every other page: `textMain`/`textMuted` on
+    the page background, and the story body lives in the same themed card surface
+    (`surfaceBackground(cardBackground, surfaceTransparency)` +
+    `cardTextMain`/`cardTextMuted`) as the home/catalog/account cards, so it is
+    guaranteed readable on light AND dark presets. Border radius now follows the
+    admin `borderRadius` token via a `radius()` helper (matches Storefront/SiteChrome).
+  - **Story buttons are now visible.** The "Back to store" pill previously used a
+    hardcoded `rgba(255,255,255,0.06)` fill — literally white-on-white on light
+    themes. It now uses the site-wide secondary-button style (`cardBackground`
+    surface + `cardTextMain` + `cardBorder`). The CATALOG/STORY breadcrumb was
+    tiny 12px plain text; both entries are now proper pills (CATALOG = outlined,
+    STORY = filled current-page state).
+  - **Same contrast bug fixed in the rest of the site** (`make everything more
+    consistent`):
+    - `components/LegalPage.tsx` (/terms, /privacy, /shipping): same
+      `cardTextMain`-on-page-background + invisible back-button bugs — fixed to
+      `textMain`/`textMuted` on the page bg, content wrapped in the themed card
+      surface, back button in the visible secondary style, radius follows the token.
+    - `app/account/page.tsx`: "My Account" H1 used `cardTextMain` on the page
+      background (invisible on light presets) → `textMain`; "Back to store" pill
+      now uses the visible surface style instead of the white 6% tint.
+    - `components/NotFoundView.tsx`: 404 H1 used `cardTextMain` on the page
+      background → `textMain`.
+    - `app/page.tsx`: the home hero "Our Story" button border used a brittle
+      `cardTextMain === '#0a0a0c'` equality check (wrong border color on several
+      presets, e.g. Warm Paper's white-on-white card) → now a theme-derived
+      `color-mix(in srgb, cardTextMain 32%, transparent)` border that adapts to
+      any preset. The product status pill ("Release opens…" / countdown) swapped
+      its hardcoded white tint + `#e7e7eb`/`#dbeafe` text for theme-aware
+      `color-mix` backgrounds and `accentBlue`/`cardTextMain` text so it stays
+      readable on light preset cards too.
+  - Docs: this changelog entry. No Redis keys were added or changed. Verified:
+    `tsc --noEmit` clean, full `eslint` clean (0/0), `npm test` 14/14 pass.
+
 - **2026-08-14 — Tap feedback, slow-connection hardening + catalog consistency**
+
   (final "make it feel fast" pass):
   - **Universal tap feedback** (`app/globals.css`): every `button`/`[role=button]`
     now visibly depresses the instant it is pressed (`:active` scale + fade,

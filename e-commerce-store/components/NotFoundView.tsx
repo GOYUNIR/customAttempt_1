@@ -32,7 +32,7 @@ export default function NotFoundView() {
           fontFamily: 'serif',
           margin: '0 0 12px',
           fontWeight: 'normal',
-          color: c.cardTextMain,
+          color: c.textMain,
         }}>
           Page Not Found
         </h1>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
+import { surfaceBackground } from '@/lib/storefront-config';
 import { getSupportEmail } from '@/lib/env';
 
 /**
@@ -24,27 +25,17 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
   const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
   const blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
 
+  // Follow the admin border-radius token so the page matches the storefront.
+  const radius = (fallback: number) => {
+    const r = Number(colors.borderRadius);
+    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
+  };
+
   const titles: Record<LegalPageKey, string> = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     shipping: 'Shipping & Sales Policy',
   };
-
-  const backLinkStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-    padding: '0 18px',
-    borderRadius: 999,
-    fontSize: 13,
-    fontWeight: 600,
-    color: colors.textMain,
-    textDecoration: 'none',
-    background: 'rgba(255,255,255,0.06)',
-    border: `1px solid ${colors.cardBorder}`,
-    marginBottom: 24,
-  } as const;
 
   return (
     <main
@@ -52,7 +43,8 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
         maxWidth: 680,
         margin: '0 auto',
         padding: '80px 20px 60px',
-        color: colors.cardTextMain,
+        boxSizing: 'border-box',
+        color: colors.textMain,
         background: colors.primaryBackground,
         minHeight: 'calc(100vh - 56px)',
         fontFamily: colors.fontFamily || 'system-ui,sans-serif',
@@ -60,18 +52,52 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
         fontSize: 14,
       }}
     >
-      <Link href="/" prefetch={false} style={backLinkStyle}>
+      <Link
+        href="/"
+        prefetch={false}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 44,
+          padding: '0 18px',
+          borderRadius: radius(999),
+          fontSize: 13,
+          fontWeight: 600,
+          color: colors.cardTextMain,
+          textDecoration: 'none',
+          background: surfaceBackground(colors.cardBackground, colors.surfaceTransparency),
+          border: `1px solid ${colors.cardBorder}`,
+          marginBottom: 24,
+        }}
+      >
         ← Back to store
       </Link>
-      <h1 style={{ fontSize: 28, margin: '24px 0 8px' }}>{titles[page]}</h1>
+      <h1 style={{ fontSize: 28, margin: '24px 0 8px', color: colors.textMain }}>{titles[page]}</h1>
       <p style={{ color: colors.textMuted, fontSize: 12 }}>
         {companyName} · Last updated: {new Date().toISOString().slice(0, 10)}
       </p>
-      <div>
+      <div
+        style={{
+          marginTop: 16,
+          borderRadius: radius(22),
+          border: `1px solid ${colors.cardBorder}`,
+          background: surfaceBackground(colors.cardBackground, colors.surfaceTransparency),
+          padding: '20px 22px',
+          color: colors.cardTextMain,
+        }}
+      >
         {blocks.map((block, index) => {
           if (block.kind === 'heading') {
             return (
-              <h2 key={index} style={{ fontSize: 16, marginTop: 28, color: colors.cardTextMain }}>
+              <h2
+                key={index}
+                style={{
+                  fontSize: 16,
+                  margin: index === 0 ? '0 0 8px' : '28px 0 8px',
+                  color: colors.cardTextMain,
+                }}
+              >
                 {block.text}
               </h2>
             );
