@@ -25,14 +25,15 @@ function sanitizeItems(input: unknown): Array<Record<string, string | number>> {
   const seen = new Set<string>();
   const out: Array<Record<string, string | number>> = [];
   for (const raw of input) {
+    if (out.length >= 100) break; // never let a payload bloat the stored cart
     if (!raw || typeof raw !== 'object') continue;
     const item: Record<string, string | number> = {
-      productId: String((raw as any).productId || ''),
-      name: String((raw as any).name || ''),
-      size: String((raw as any).size || 'Standard'),
+      productId: String((raw as any).productId || '').slice(0, 200),
+      name: String((raw as any).name || '').slice(0, 200),
+      size: String((raw as any).size || 'Standard').slice(0, 50),
       price: Math.max(0, Number((raw as any).price) || 0),
-      productType: String((raw as any).productType || ''),
-      checkoutMode: String((raw as any).checkoutMode || ''),
+      productType: String((raw as any).productType || '').slice(0, 40),
+      checkoutMode: String((raw as any).checkoutMode || '').slice(0, 20),
     };
     if (!item.productId || !item.size) continue;
     const key = `${item.productId}::${item.size}`;

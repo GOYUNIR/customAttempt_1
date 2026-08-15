@@ -23,10 +23,10 @@ export async function GET() {
     const payload = await withTtlCache('catalog:status:v1', 15_000, () => buildCatalogPayload());
     return NextResponse.json(payload);
   } catch (err: any) {
-    console.error('[catalog/status] Error:', err);
+    console.error('[catalog/status] Error:', err?.message || err);
     return NextResponse.json(
       {
-        error: err?.message || 'Unknown error',
+        error: 'Catalog unavailable.',
         activeDrops: [],
         upcomingDrops: [],
         archiveScents: [],
@@ -280,9 +280,9 @@ async function buildCatalogPayload() {
       storeTimezone,
     };
   } catch (err: any) {
-    console.error('[catalog/status] Error:', err);
+    console.error('[catalog/status] Error:', err?.message || err);
     return {
-      error: err?.message || 'Unknown error',
+      error: 'Catalog unavailable.',
       activeDrops: [],
       upcomingDrops: [],
       archiveScents: [],

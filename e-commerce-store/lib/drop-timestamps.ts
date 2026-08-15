@@ -162,3 +162,61 @@ export function formatStoreWallClock(ms: number, timezone?: string): string {
     return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
   }
 }
+
+/** The parsed `registeredAt` of a pool entry as epoch-ms (0 when absent). */
+export function entryRegisteredAtMs(raw: unknown): number {
+  const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const iso = String(record?.registeredAt || record?.registered_at || '');
+  const ms = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Split a raffle pool's entries by the cycle boundary (`cycleEndMs`).
+ *
+ * WHY: a raffle pool is a FIFO of intent. Entries carry `registeredAt` (the
+ * moment the customer secured their card). When the product's countdown ends
+ * (`releaseEndsAt` = the cycle boundary) ONLY the entries that were made
+ * before that instant are eligible for that cycle's draw. Entries made AFTER
+ * the boundary belong to the NEXT raffle round (the "new countdown" the
+ * storefront already shows) and must NEVER be drawn — and therefore never
+ * charged — before the timer they saw reaches zero. This is the core guard
+ * that stops "I entered after the countdown restarted and got charged
+ * instantly".
+ *
+ * - An entry with a parseable `registeredAt` <= `cycleEndMs` → eligible.
+ * - An entry with NO timestamp (written by very old code) is treated as
+ *   eligible so it can never be stranded in a pool forever.
+ * - Everything else carries over to the next cycle untouched.
+ */
+export function splitEntriesByCycleEnd(
+  entries: Array<string | Record<string, unknown>>,
+  cycleEndMs: number | null,
+): { eligible: string[]; carriedOver: string[] } {
+  const eligible: string[] = [];
+  const carriedOver: string[] = [];
+  if (cycleEndMs === null || !Number.isFinite(cycleEndMs)) {
+    // No explicit cycle boundary → every entry is eligible (cadence-mode draw).
+    return { eligible: entries.map((e) => (typeof e === 'string' ? e : JSON.stringify(e))), carriedOver: [] };
+  }
+  for (const entry of entries) {
+    let raw: Record<string, unknown> | null = null;
+    if (typeof entry === 'string') {
+      try {
+        raw = JSON.parse(entry) as Record<string, unknown>;
+      } catch {
+        raw = null;
+      }
+    } else {
+      raw = entry;
+    }
+    const registeredMs = entryRegisteredAtMs(raw);
+    const serialized = typeof entry === 'string' ? entry : JSON.stringify(entry);
+    if (registeredMs === 0 || registeredMs <= cycleEndMs) {
+      eligible.push(serialized);
+    } else {
+      carriedOver.push(serialized);
+    }
+  }
+  return { eligible, carriedOver };
+}

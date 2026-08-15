@@ -3,6 +3,15 @@ import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem, adminRequest
 
 export const dynamic = 'force-dynamic';
 
+/** CSV cell sanitation: quote the value AND defuse spreadsheet formula
+ *  injection (=, +, -, @, tab, CR) so a customer-supplied email/address can
+ *  never execute as a formula in Excel/Sheets when the admin opens the file. */
+function csvCell(value: unknown): string {
+  let text = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
@@ -29,14 +38,14 @@ export async function GET(request: Request) {
       w.shippingStatus || 'PENDING_FULFILLMENT',
       w.registeredAt,
       w.id,
-    ].map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`);
+    ].map(csvCell);
     lines.push(cols.join(','));
   }
 
   return new NextResponse(lines.join('\n'), {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="goyunir-winners-${Date.now()}.csv"`,
+      'Content-Disposition': `attachment; filename="winners-${Date.now()}.csv"`,
     },
   });
 }

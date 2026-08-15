@@ -1,14 +1,24 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY, AUTH_SESSION_PREFIX } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
-import { scryptSync, randomBytes } from 'crypto';
+import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
+import { isValidPassword } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
+
+/** Constant-time comparison of two hex strings (password hashes). */
+function safeEqualHex(a: string, b: string): boolean {
+  const bufA = Buffer.from(String(a || ''), 'hex');
+  const bufB = Buffer.from(String(b || ''), 'hex');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 function verifyPassword(password: string, salt: string, expectedHash: string): boolean {
   try {
     const hash = scryptSync(password, salt, 64).toString('hex');
-    return hash === expectedHash;
+    return safeEqualHex(hash, expectedHash);
   } catch {
     return false;
   }
@@ -28,19 +38,27 @@ export async function POST(request: Request) {
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const currentPassword = String(body?.currentPassword || '');
     const newPassword = String(body?.newPassword || '');
 
     if (currentPassword.length < 1) {
       return NextResponse.json({ error: 'Enter your current password.' }, { status: 400 });
     }
-    if (newPassword.length < 6) {
-      return NextResponse.json({ error: 'New password must be at least 6 characters.' }, { status: 400 });
+    if (!isValidPassword(newPassword)) {
+      return NextResponse.json({ error: 'New password must be between 6 and 128 characters.' }, { status: 400 });
     }
     if (currentPassword === newPassword) {
       return NextResponse.json({ error: 'New password must be different from the current one.' }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('change_password', request, 10, 60);
+    if (limited) return limited;
 
     // Find the user record
     const raw = await redis.hgetall(USERS_KEY);
@@ -84,6 +102,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: 'Password updated. Please log in again with your new password.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Unable to change password.' }, { status: 500 });
+    console.error('[account/change-password] failed', err?.message || err);
+    return NextResponse.json({ error: 'Unable to change password.' }, { status: 500 });
   }
 }

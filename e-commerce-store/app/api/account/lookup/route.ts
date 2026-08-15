@@ -241,6 +241,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ entries, promos, welcomePromoCode, rewards: rewardsConfig });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[account/lookup] failed', err?.message || err);
+    return NextResponse.json({ error: 'Could not load your account. Please try again.' }, { status: 500 });
   }
 }

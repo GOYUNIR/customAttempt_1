@@ -117,6 +117,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, url: portalSession.url });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[account/payment-portal] failed', err?.message || err);
+    return NextResponse.json({ error: 'Could not open the payment portal. Please try again.' }, { status: 500 });
   }
 }

@@ -38,6 +38,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     drawDayOfMonth: 1,
     drawHour: 0,
     drawMinute: 0,
+    customIntervalHours: 24,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',

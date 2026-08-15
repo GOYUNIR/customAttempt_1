@@ -8,7 +8,7 @@ export interface StorefrontNote {
 }
 
 export interface DropScheduleConfig {
-  mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+  mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | 'custom';
   timezone: string;
   targetEndDateTime: string; // used when mode is 'fixed', and as the anchor date/time for 'biweekly' and 'yearly'
   drawDayOfWeek: number;     // 0=Sun...6=Sat, used when mode is 'weekly'
@@ -17,6 +17,9 @@ export interface DropScheduleConfig {
   drawMinute: number;
   /** 0-59, used by hourly/daily/weekly/monthly (optional, default 0) */
   drawSecond?: number;
+  /** Used when mode is 'custom' — how many hours each raffle round lasts
+   *  (e.g. 6 → a new draw every 6 hours). Any positive whole number. */
+  customIntervalHours?: number;
   countdownExpiredText: string;
   daysLabel: string;
   hoursLabel: string;
@@ -231,6 +234,7 @@ const defaultDropSchedule: DropScheduleConfig = {
   drawHour: 21,
   drawMinute: 0,
   drawSecond: 0,
+  customIntervalHours: 24,
   countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
   daysLabel: 'd',
   hoursLabel: 'h',
@@ -585,6 +589,10 @@ export function getDrawIntervalMs(schedule: Partial<DropScheduleConfig> | undefi
     case 'biweekly': return 14 * 24 * 60 * 60 * 1000;
     case 'monthly': return 30 * 24 * 60 * 60 * 1000;
     case 'yearly': return 365 * 24 * 60 * 60 * 1000;
+    case 'custom': {
+      const hours = Math.max(1, Number(schedule?.customIntervalHours) || 0);
+      return hours > 0 ? hours * 60 * 60 * 1000 : null;
+    }
     default: return null;
   }
 }
@@ -729,6 +737,23 @@ export function scheduledDateToTimestamp(isoWallClock: string, timezone: string)
 export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig, afterMs: number = Date.now()): number {
   if (schedule.mode === 'fixed') {
     return scheduledDateToTimestamp(schedule.targetEndDateTime, schedule.timezone);
+  }
+
+  if (schedule.mode === 'custom') {
+    const intervalMs = getDrawIntervalMs(schedule);
+    if (intervalMs === null || intervalMs <= 0) return afterMs + 24 * 60 * 60 * 1000;
+    // Rolling fixed-interval cycles: the next draw is `interval` after the
+    // base. When the base (the previous cycle end) has slipped into the past
+    // (missed draws / stale releaseEndsAt), roll forward to the next multiple
+    // so the new timer is always in the future.
+    const base = Number.isFinite(afterMs) && afterMs > 0 ? afterMs : Date.now();
+    let next = base + intervalMs;
+    const now = Date.now();
+    if (next <= now) {
+      const cycles = Math.floor((now - base) / intervalMs) + 1;
+      next = base + cycles * intervalMs;
+    }
+    return next;
   }
 
   const now = new Date(afterMs);

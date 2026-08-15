@@ -87,6 +87,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: 'Your entry has been cancelled.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[account/cancel] failed', err?.message || err);
+    return NextResponse.json({ error: 'Could not cancel the entry. Please try again.' }, { status: 500 });
   }
 }

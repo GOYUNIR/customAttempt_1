@@ -3,6 +3,8 @@ import { randomBytes } from 'crypto';
 import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,11 +14,22 @@ function resetKey(token: string) {
 
 export async function POST(request: Request) {
   try {
-    const { email } = await request.json();
-    const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (!normalizedEmail) {
-      return NextResponse.json({ error: 'Email required' }, { status: 400 });
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
+    const { email } = body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!isValidEmail(normalizedEmail)) {
+      // Same generic response for unknown AND invalid emails — never reveal
+      // whether an address has an account.
+      return NextResponse.json({ success: true });
+    }
+
+    const limited = await rateLimitedResponse('auth_forgot_password', request, 10, 60);
+    if (limited) return limited;
 
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
@@ -49,6 +62,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Unable to send reset email' }, { status: 500 });
+    console.error('[forgot-password] failed', error?.message || error);
+    return NextResponse.json({ success: true });
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts, safeParseRedisItem, trackPromoClick, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
+import { isRateLimited } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,18 +8,25 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = String(url.searchParams.get('code') || '')
     .trim()
-    .toUpperCase();
+    .toUpperCase()
+    .slice(0, 40);
   const email = String(url.searchParams.get('email') || '')
     .trim()
     .toLowerCase();
-  const productId = String(url.searchParams.get('productId') || '').trim();
-  const size = String(url.searchParams.get('size') || '').trim();
+  const productId = String(url.searchParams.get('productId') || '').trim().slice(0, 200);
+  const size = String(url.searchParams.get('size') || '').trim().slice(0, 50);
   const orderSubtotalCents = Math.max(0, Math.round(Number(url.searchParams.get('orderSubtotal') || 0) * 100));
   // Load-time re-validation (stored promo sanity check on page load) must NOT
   // inflate the click counter — only explicit user actions should track.
   const quiet = url.searchParams.get('quiet') === '1';
 
   if (!code) return NextResponse.json({ valid: false, error: 'No code' });
+
+  // The non-quiet path increments the click counter (writes state), so cap
+  // abuse while leaving page-load re-validation (quiet=1) untouched.
+  if (!quiet && (await isRateLimited('promo_validate', request, 60, 60))) {
+    return NextResponse.json({ valid: false, error: 'Too many requests' }, { status: 429 });
+  }
 
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ valid: false, error: 'Offline' });

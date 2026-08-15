@@ -21,8 +21,7 @@ export async function GET() {
 
     return NextResponse.json({ activePriceMap: availabilityMap });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown Stripe error';
-    console.error('Stripe Automation Fetch Error:', message);
-    return NextResponse.json({ activePriceMap: {}, error: message });
+    console.error('Stripe Automation Fetch Error:', error instanceof Error ? error.message : error);
+    return NextResponse.json({ activePriceMap: {}, error: 'Availability status is unavailable.' });
   }
 }

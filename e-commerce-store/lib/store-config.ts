@@ -64,7 +64,7 @@ export interface StoreConfig {
   availableSizes: string[];
   homeRedirectSlug?: string;
   dropSchedule: {
-    mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+    mode: 'fixed' | 'hourly' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | 'custom';
     timezone: string;
     targetEndDateTime: string;
     drawDayOfWeek: number;
@@ -72,6 +72,7 @@ export interface StoreConfig {
     drawHour: number;
     drawMinute: number;
     drawSecond?: number;
+    customIntervalHours?: number;
     countdownExpiredText: string;
     daysLabel: string;
     hoursLabel: string;
@@ -178,6 +179,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     drawHour: 21,
     drawMinute: 0,
     drawSecond: 0,
+    customIntervalHours: 24,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',

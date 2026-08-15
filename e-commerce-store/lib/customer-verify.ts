@@ -12,7 +12,7 @@
  * code locks after 6 wrong guesses.
  */
 
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
 import { emailVerifyKey } from '@/lib/redis-keys';
 import { safeParseRedisItem } from '@/lib/server-config';
 import { sendCustomerVerificationEmail } from '@/lib/email';
@@ -21,8 +21,10 @@ const VERIFY_TTL_SECONDS = 30 * 60; // 30 minutes
 const MAX_ATTEMPTS = 6;
 const RESEND_THROTTLE_SECONDS = 60;
 
+/** Cryptographically random 6-digit code (crypto.randomInt — never Math.random,
+ *  which is predictable and lets an attacker guess codes). */
 export function generateVerifyCode(): string {
-  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 function hashCode(code: string): string {
@@ -33,7 +35,11 @@ function hashCode(code: string): string {
 function verifyCodeHash(hashed: string, code: string): boolean {
   const [salt, expected] = String(hashed || '').split(':');
   if (!salt || !expected) return false;
-  return createHash('sha256').update(salt + ':' + code).digest('hex') === expected;
+  const actual = createHash('sha256').update(salt + ':' + code).digest('hex');
+  const a = Buffer.from(actual, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 /** Email a fresh verification code to `email`, throttled to one per 60 seconds. */

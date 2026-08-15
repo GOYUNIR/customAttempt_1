@@ -234,7 +234,8 @@ export async function GET(request: Request) {
     const payload = await withTtlCache(`store:${requestedSlug || '*'}:v1`, 10_000, () => buildStorePayload(requestedSlug));
     return NextResponse.json(payload);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[store] failed', err?.message || err);
+    return NextResponse.json({ error: 'Store unavailable. Please try again.' }, { status: 500 });
   }
 }
 

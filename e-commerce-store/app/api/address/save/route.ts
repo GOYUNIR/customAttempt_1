@@ -8,6 +8,7 @@ import {
 } from '@/lib/server-config';
 import { formatOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const email = String(body?.email || '').trim().toLowerCase();
     const address = String(body?.address || '').trim();
     const variant = String(body?.variant || '').trim();
@@ -59,6 +65,9 @@ export async function POST(request: Request) {
     if (address.length > MAX_ADDRESS_LENGTH) {
       return NextResponse.json({ error: 'Shipping address is too long.' }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('address_save', request, 20, 60);
+    if (limited) return limited;
 
     // Always capture the raw submission so nothing is ever lost.
     const record = {
@@ -120,6 +129,7 @@ export async function POST(request: Request) {
           : 'Address received.',
     });
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Server error' }, { status: 500 });
+    console.error('[address/save] failed', err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: 'Could not save the address. Please try again.' }, { status: 500 });
   }
 }

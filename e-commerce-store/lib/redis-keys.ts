@@ -240,10 +240,19 @@ export const WAITLIST_KEY = 'customer:waitlist';
 
 /** String — cached Stripe billing-portal configuration id. */
 export const STRIPE_PORTAL_CACHE_KEY = 'cache:stripe_portal_config';
+/** String w/ TTL — per-IP request counter for a public rate-limited endpoint
+ *  (`cache:rate:<namespace>:<ip>`). Ephemeral; lives under `cache:` because it
+ *  can be deleted anytime without affecting correctness (it only throttles
+ *  abuse). Every public endpoint that writes state should use this via
+ *  `lib/rate-limit.ts` (`isRateLimited`) so a script can never hammer a route. */
+export function rateLimitKey(namespace: string, ip: string): string {
+  const ns = String(namespace || 'api').replace(/[^a-z0-9_]/gi, '').slice(0, 32) || 'api';
+  return `cache:rate:${ns}:${String(ip || 'unknown').slice(0, 64)}`;
+}
+
 /** String w/ TTL — per-IP request counter for the PUBLIC `/api/checkout/auto-draw`
- *  trigger. Ephemeral; lives under `cache:` because it can be deleted anytime
- *  without affecting correctness (it only throttles abuse). */
+ *  trigger (kept as an alias of the generic helper for back-compat). */
 export function autoDrawRateLimitKey(ip: string): string {
-  return `cache:rate:auto_draw:${String(ip || 'unknown').slice(0, 64)}`;
+  return rateLimitKey('auto_draw', ip);
 }
 

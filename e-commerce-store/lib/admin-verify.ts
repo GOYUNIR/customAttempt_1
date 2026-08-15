@@ -14,7 +14,7 @@
  * resends are throttled (1 per 60s), so the code cannot be brute-forced.
  */
 
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
 import {
   ADMIN_DEVICES_KEY,
   adminVerifyKey,
@@ -61,8 +61,9 @@ async function writeChallenge(redis: any, email: string, challenge: AdminChallen
 }
 
 export function generateAdminCode(): string {
-  // 6 digits, zero-padded so "042913" style codes are valid too.
-  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+  // 6 digits, zero-padded so "042913" style codes are valid too. crypto.randomInt
+  // (never Math.random) so the code can't be predicted.
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 function hashCode(code: string): string {
@@ -74,7 +75,10 @@ function verifyCodeHash(hashed: string, code: string): boolean {
   const [salt, expected] = String(hashed || '').split(':');
   if (!salt || !expected) return false;
   const actual = createHash('sha256').update(salt + ':' + code).digest('hex');
-  return actual === expected;
+  const a = Buffer.from(actual, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 /**

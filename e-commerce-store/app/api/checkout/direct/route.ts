@@ -10,6 +10,8 @@ import {
   resolveStripePriceId,
 } from '@/lib/server-config';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -22,12 +24,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });
     }
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const { productId, size, email, shippingAddress, paymentMethodId, promoCode, customerId } = body;
 
     if (!productId || !size || !email || !shippingAddress || !paymentMethodId) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
+    }
+
+    const limited = await rateLimitedResponse('checkout_direct', request, 10, 60);
+    if (limited) return limited;
 
     // Fetch the product from Redis – this gives us the live priceCategories.
     const allProducts = await loadProducts(redis);
@@ -118,7 +131,7 @@ export async function POST(request: Request) {
       amount: priceCents / 100,
     });
   } catch (err: any) {
-    console.error('[direct/route] Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[direct/route] Error:', err?.message || err);
+    return NextResponse.json({ error: 'Payment could not be completed. Please try again.' }, { status: 500 });
   }
 }

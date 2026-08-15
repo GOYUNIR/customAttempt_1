@@ -61,7 +61,7 @@ import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
-import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
+import { dropTimestampToMs, formatStoreWallClock, splitEntriesByCycleEnd } from '@/lib/drop-timestamps';
 
 export { productNameFromPoolKey };
 
@@ -122,8 +122,23 @@ export interface AutoDrawResult {
 const toMs = (value: unknown, timezone?: string): number | null =>
   dropTimestampToMs(value, timezone);
 
+export interface PoolDueInfo {
+  /** Should this pool be drawn right now? */
+  due: boolean;
+  /** The persisted cycle boundary (`releaseEndsAt`) as epoch-ms, or null when
+   *  the product has no explicit countdown end. */
+  cycleEndMs: number | null;
+  /** The next recurring draw anchor after the cycle end, or null for one-shot
+   *  drops / products without a recurring schedule. */
+  nextAnchorMs: number | null;
+  /** True when due-ness came from the global cadence (no explicit cycle). */
+  cadence: boolean;
+}
+
 /**
- * Decide whether a pool is due for a draw right now.
+ * Decide whether a pool is due for a draw right now, AND expose the timing
+ * facts the draw itself needs (cycle boundary + next anchor) so the runner can
+ * draw cycle-safely:
  * - force → yes
  * - product archived → yes (final allocation of any stragglers)
  * - product has an explicit `releaseEndsAt` → that is the CYCLE boundary. The
@@ -139,16 +154,20 @@ const toMs = (value: unknown, timezone?: string): number | null =>
  * - no explicit `releaseEndsAt` → fall back to the global schedule cadence
  *   (interval since the last auto-draw).
  */
-async function shouldRunPoolDraw(opts: {
+async function evaluatePoolDue(opts: {
   redis: any;
   product: any;
   size: string;
   now: number;
   force: boolean;
   globalSchedule?: Record<string, any> | null;
-}): Promise<boolean> {
-  if (opts.force) return true;
-  if (opts.product?.isArchived === true) return true;
+}): Promise<PoolDueInfo> {
+  if (opts.force) {
+    return { due: true, cycleEndMs: null, nextAnchorMs: null, cadence: false };
+  }
+  if (opts.product?.isArchived === true) {
+    return { due: true, cycleEndMs: null, nextAnchorMs: null, cadence: false };
+  }
 
   const effectiveSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
@@ -161,19 +180,27 @@ async function shouldRunPoolDraw(opts: {
 
   if (endMs !== null) {
     // The product's own countdown end is the current cycle boundary.
-    if (opts.now < endMs) return false;
+    if (opts.now < endMs) return { due: false, cycleEndMs: endMs, nextAnchorMs: null, cadence: false };
     const nextAnchor = getNextRecurringAnchorMs(effectiveSchedule as any, endMs);
     if (nextAnchor === null) {
       // One-shot: draw at most once after the cycle ended (lastAuto >= endMs
       // means this pool was already drawn for this cycle).
-      return lastAuto < endMs;
+      return { due: lastAuto < endMs, cycleEndMs: endMs, nextAnchorMs: null, cadence: false };
     }
-    if (opts.now >= nextAnchor) return true; // rolled past the next boundary → catch up
-    return lastAuto < endMs;                 // this cycle ended but hasn't been drawn yet
+    // Recurring. Due when this cycle hasn't been drawn yet (lastAuto < endMs),
+    // OR when we have rolled PAST the next boundary (catch-up after a missed
+    // draw/roll-forward). NEVER due before endMs.
+    const due = lastAuto < endMs || opts.now >= nextAnchor;
+    return { due, cycleEndMs: endMs, nextAnchorMs: nextAnchor, cadence: false };
   }
 
   // No explicit countdown end → the global cadence defines the cycle.
-  return shouldRunDraw(effectiveSchedule, lastAuto, opts.now);
+  return {
+    due: shouldRunDraw(effectiveSchedule, lastAuto, opts.now),
+    cycleEndMs: null,
+    nextAnchorMs: null,
+    cadence: true,
+  };
 }
 
 export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoDrawResult> {
@@ -279,10 +306,9 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       if (!product) continue; // pool for a deleted/renamed product — leave untouched
 
       const listLength = await redis.llen(poolKey);
-      if (listLength === 0) continue;
 
-      const due = await shouldRunPoolDraw({ redis, product, size: productSize, now, force: options.force === true, globalSchedule });
-      if (!due) continue;
+      const dueInfo = await evaluatePoolDue({ redis, product, size: productSize, now, force: options.force === true, globalSchedule });
+      if (!dueInfo.due) continue;
 
       // Client "timer hit zero" pings should never re-draw the same pool in a
       // tight loop. A just-drawn pool (within the cooldown) is skipped unless
@@ -306,12 +332,37 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       const live = await getOrSeedLiveState(redis, product, productSize, winnersPerDraw);
       if (live.inventoryRemaining <= 0) continue;
 
+      // ── Cycle-aware eligibility ────────────────────────────────────────────
+      // Only entries registered before this cycle's end may be drawn now. A
+      // pool whose cycle ended but contains ONLY entries for the NEXT round (a
+      // "restarted countdown" the storefront already shows) is NOT drawn — the
+      // runner just rolls the product's releaseEndsAt forward so the next
+      // timer becomes the real due date. This is the guard that makes "I
+      // entered after the countdown restarted" never get charged early. An
+      // empty stale pool is advanced the same way.
+      if (listLength === 0) {
+        if (dueInfo.nextAnchorMs !== null && !dryRun) {
+          productsToAdvance.set(String(product.id), product);
+        }
+        continue;
+      }
+
       const entries = await redis.lrange(poolKey, 0, -1);
-      const shuffled = [...entries];
+      const { eligible, carriedOver } = splitEntriesByCycleEnd(entries, dueInfo.cycleEndMs);
+      if (eligible.length === 0) {
+        if (dueInfo.nextAnchorMs !== null && !dryRun) {
+          productsToAdvance.set(String(product.id), product);
+        }
+        continue;
+      }
+
+      const shuffled = [...eligible];
       for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
+      // Next-cycle entries always survive this run untouched.
+      const remainingEntries: string[] = [...carriedOver];
 
       const rawWinners = live.winnersPerDraw ?? winnersPerDraw;
       // Winner count for THIS draw. The per-size "Winners / draw" tiers on the
@@ -336,7 +387,6 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       }
       const inventoryLimit = Math.min(winnersThisDraw, live.inventoryRemaining);
       let successfulPoolCaptures = 0;
-      const remainingEntries: string[] = [];
 
       const siteUrl = getSiteUrl() || (options.request ? buildAbsoluteUrl(options.request, '') : '') || fallbackSiteUrl();
 
@@ -559,7 +609,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         // freezing on "Raffle closed"/"Until sold out", and the pool becomes due
         // again exactly when that timer hits zero. One-shot drops (no future
         // anchor) keep the past releaseEndsAt and are marked done by the
-        // `lastAuto` guard in shouldRunPoolDraw.
+        // `lastAuto` guard in evaluatePoolDue.
         if (live.inventoryRemaining > 0 && !product.isArchived) {
           productsToAdvance.set(String(product.id), product);
         }
@@ -592,7 +642,11 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         const productSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
         const productTz = String(productSchedule?.timezone || storeTimezone || 'America/Los_Angeles');
         const currentEndMs = toMs(product.releaseEndsAt, productTz);
-        const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? currentEndMs : now;
+        // Advance from the LATER of (cycle end, now) so the new timer is ALWAYS
+        // in the future — a run that catches a stale cycle late (missed draws,
+        // empty-pool advance) skips straight past any intermediate anchors
+        // instead of chasing them one at a time.
+        const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? Math.max(currentEndMs, now) : now;
         const nextAnchorMs = getNextRecurringAnchorMs(productSchedule as any, baseForAdvance);
         if (nextAnchorMs !== null) {
           const nextRelease = formatStoreWallClock(nextAnchorMs, productTz);

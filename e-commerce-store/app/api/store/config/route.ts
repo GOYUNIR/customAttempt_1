@@ -59,6 +59,7 @@ const DEFAULT_CONFIG = {
     drawHour: 21,
     drawMinute: 0,
     drawSecond: 0,
+    customIntervalHours: 24,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',
@@ -230,9 +231,9 @@ export async function GET(request: NextRequest) {
       fromCache: false,
     });
   } catch (err: any) {
-    console.error('[store/config] Error:', err);
+    console.error('[store/config] Error:', err?.message || err);
     return NextResponse.json({
-      error: err.message,
+      error: 'Store config unavailable.',
       config: DEFAULT_CONFIG,
       activeProducts: [],
       archivedProducts: [],

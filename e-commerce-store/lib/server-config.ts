@@ -33,7 +33,8 @@ export * from '@/lib/redis-keys';
 export type StoreBrandingConfig = {
   logoUrl?: string;
   /** Public brand name shown in the top bar, footer, titles and emails.
-   * Falls back to `shareTitle`, then `GOYUNIR`. Set from /admin → Settings. */
+   * Falls back to `shareTitle`, then the env BRAND_NAME / a neutral fallback
+   * (`neutralBrandName()`). Set from /admin → Settings. */
   brandName?: string;
   /** CSS font stack for the brand name in the top bar only. Leave empty to
    * inherit the storefront font (themeColors.fontFamily). */

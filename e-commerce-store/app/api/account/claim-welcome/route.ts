@@ -3,6 +3,7 @@ import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, prom
 import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
+import { randomBytes } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,9 @@ async function isWelcomeCodeUsed(redis: any, code: string, email: string): Promi
 
 function generateWelcomeCode(email: string) {
   const seed = email.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'MBR';
-  return `WELCOME-${seed}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  // crypto.randomBytes — the credit suffix must be unguessable (never Math.random).
+  const suffix = randomBytes(3).toString('hex').toUpperCase().slice(0, 5);
+  return `WELCOME-${seed}-${suffix}`;
 }
 
 /**
@@ -122,6 +125,7 @@ export async function POST(request: Request) {
       used: false,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[account/claim-welcome] failed', err?.message || err);
+    return NextResponse.json({ error: 'Could not claim the welcome credit. Please try again.' }, { status: 500 });
   }
 }

@@ -277,6 +277,7 @@ const DEFAULT_CONFIG = {
     drawHour: 21,
     drawMinute: 0,
     drawSecond: 0,
+    customIntervalHours: 24,
     countdownExpiredText: 'ALLOCATION. CLOSED • VARIANT ARCHIVED',
     daysLabel: 'd',
     hoursLabel: 'h',
@@ -439,7 +440,7 @@ export async function GET(request: Request) {
       verified: verifyCount,
     });
   } catch (err: any) {
-    console.error('[seed] Error:', err);
-    return NextResponse.json({ error: err.message, stack: err.stack }, { status: 500 });
+    console.error('[seed] Error:', err?.message || err);
+    return NextResponse.json({ error: 'Seeding failed' }, { status: 500 });
   }
 }

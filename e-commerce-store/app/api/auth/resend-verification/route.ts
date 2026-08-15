@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +11,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const email = String(body?.email || '').trim().toLowerCase();
-    if (!email) return NextResponse.json({ error: 'Email required.' }, { status: 400 });
+    if (!isValidEmail(email)) return NextResponse.json({ error: 'Email required.' }, { status: 400 });
+
+    const limited = await rateLimitedResponse('auth_resend_verification', request, 10, 60);
+    if (limited) return limited;
 
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });

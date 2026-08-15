@@ -23,6 +23,8 @@ import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { maskEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -250,7 +252,8 @@ async function lockOneEntry(opts: {
         emailSent = true;
         await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
       } else {
-        console.error('[confirm-setup] entry email failed', email, emailResult);
+        // Never log the customer email or the full send result verbatim.
+        console.error('[confirm-setup] entry email failed', maskEmail(email), (emailResult as any)?.error || 'send failed');
       }
       } else {
         emailSent = true;
@@ -270,11 +273,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'System offline.' }, { status: 500 });
     }
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const sessionId = String(body?.sessionId || '');
     if (!sessionId) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('checkout_confirm_setup', request, 20, 60);
+    if (limited) return limited;
 
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
@@ -502,7 +513,7 @@ export async function POST(request: Request) {
       clearPromo: !!result.appliedPromo,
     });
   } catch (err: any) {
-    console.error('confirm-setup', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('confirm-setup', err?.message || err);
+    return NextResponse.json({ error: 'Could not confirm your entry. Please try again.' }, { status: 500 });
   }
 }

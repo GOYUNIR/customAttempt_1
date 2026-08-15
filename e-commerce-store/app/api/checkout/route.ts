@@ -3,6 +3,8 @@ import { createRedisClient, createStripeClient, loadProducts, getLiveProductStat
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -40,18 +42,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const { productId, size, email, address, promoCode, ref } = body;
     const requestedMode = String(body?.mode || '').toLowerCase();
 
     if (!productId || !size || !email || !address) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
     }
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
+    }
 
     const addrError = validateShippingAddress(String(address || ''));
     if (addrError) {
       return NextResponse.json({ error: addrError }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('checkout', request, 20, 60);
+    if (limited) return limited;
 
     const allProducts = await loadProducts(redis);
     const product = allProducts[productId];
@@ -318,6 +331,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[checkout] failed', err?.message || err);
+    return NextResponse.json({ error: 'Checkout could not be started. Please try again.' }, { status: 500 });
   }
 }

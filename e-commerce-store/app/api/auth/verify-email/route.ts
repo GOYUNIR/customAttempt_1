@@ -4,6 +4,8 @@ import { randomBytes } from 'crypto';
 import { consumeCustomerVerifyCode } from '@/lib/customer-verify';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +17,9 @@ const WELCOME_DISCOUNT_PERCENT = 10;
 
 function generateWelcomeCode(email: string) {
   const seed = email.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'MBR';
-  return `WELCOME-${seed}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+  // crypto.randomBytes — the promo suffix must be unguessable (never Math.random).
+  const suffix = randomBytes(3).toString('hex').toUpperCase().slice(0, 5);
+  return `WELCOME-${seed}-${suffix}`;
 }
 
 function createSessionCookie(response: NextResponse, token: string) {
@@ -34,9 +38,12 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const email = String(body?.email || '').trim().toLowerCase();
     const code = String(body?.code || '').trim();
-    if (!email || !/^\d{6}$/.test(code)) {
+    if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
       return NextResponse.json({ error: 'Enter the 6-digit code from your email.' }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('auth_verify_email', request, 10, 60);
+    if (limited) return limited;
 
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });

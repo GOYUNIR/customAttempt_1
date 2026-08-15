@@ -25,6 +25,7 @@ import {
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,13 +104,13 @@ async function resolvePromo(
     const maxPer = typeof promo.maxUsesPerEmail === 'number' ? promo.maxUsesPerEmail : 1;
     const self = promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email;
     if (self) {
-      console.warn('[webhook] self-promo blocked', promoCode, email);
+      console.warn('[webhook] self-promo blocked', promoCode, maskEmail(email));
       return { appliedPromo: undefined, discountPercent: 0 };
     }
     if (maxPer > 0) {
       const used = await redis.sismember(promoUsedKey(promoCode), email);
       if (used === 1) {
-        console.warn('[webhook] promo already used by email', promoCode, email);
+        console.warn('[webhook] promo already used by email', promoCode, maskEmail(email));
         return { appliedPromo: undefined, discountPercent: 0 };
       }
     }
@@ -134,17 +135,34 @@ export async function POST(request: Request) {
 
   const sig = request.headers.get('stripe-signature');
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  // Unverified parsing is ONLY allowed in local development with an explicit
+  // opt-in flag — never in production, and never just because a header is
+  // missing. Forging a checkout.session.completed event must be impossible.
+  const allowUnverified = process.env.NODE_ENV !== 'production' && process.env.DEV_WEBHOOK_BYPASS === '1';
   let event: any;
 
   try {
     const rawBody = await request.text();
+    // Stripe webhook payloads are a few KB; anything larger is not a Stripe
+    // event. Guard before any parse so a giant body can't pin CPU/memory.
+    if (rawBody.length > 1_000_000) {
+      return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
+    }
     if (secret && sig) {
       event = stripe.webhooks.constructEvent(rawBody, sig, secret);
-    } else {
+    } else if (allowUnverified) {
       event = JSON.parse(rawBody);
+    } else {
+      return NextResponse.json(
+        { error: 'Webhook signature verification required' },
+        { status: 400 },
+      );
     }
   } catch (err: any) {
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    // Never echo the underlying error to the caller — log it server-side only
+    // (signature errors can leak payload details / internals).
+    console.error('[webhook] event verification failed', err?.message || err);
+    return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
   }
 
   if (event.type === 'checkout.session.completed') {
@@ -161,13 +179,21 @@ export async function POST(request: Request) {
       const email = String(meta.email || session.customer_email || '')
         .trim()
         .toLowerCase();
-      const variant = String(meta.variant || '').trim();
-      const size = String(meta.size || 'Standard').trim();
-      const shippingAddress = String(meta.address || '').trim();
+      const variant = clampLength(meta.variant, 200).trim();
+      const size = clampLength(meta.size || 'Standard', 50).trim();
+      const shippingAddress = clampLength(meta.address, 500).trim();
       const customerId = typeof session.customer === 'string' ? session.customer : '';
-      const rawPromo = String(meta.promoCode || meta.ref || '');
+      const rawPromo = String(meta.promoCode || meta.ref || '').slice(0, 40);
       const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
       const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+
+      // Defense-in-depth: never let a malformed session payload write junk into
+      // the pools/ledger, even though signature verification is now mandatory.
+      if (!isValidEmail(email) || !variant || !size) {
+        console.warn('[webhook] setup session rejected: invalid email/variant/size', maskEmail(email));
+        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+        return NextResponse.json({ received: true, skipped: 'invalid_payload' });
+      }
 
       if (email && variant) {
         let paymentMethodId = '';
@@ -329,19 +355,28 @@ export async function POST(request: Request) {
     if (session.mode === 'payment' && session.status === 'complete') {
       const meta = session.metadata || {};
       const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
-      const productId = String(meta.productId || '').trim();
-      const variant = String(meta.variant || '').trim();
-      const size = String(meta.size || 'Standard').trim();
-      const shippingAddress = String(meta.address || '').trim();
-      const checkoutType = String(meta.checkoutType || 'single');
-      const appliedPromo = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
+      const productId = clampLength(meta.productId, 200).trim();
+      const variant = clampLength(meta.variant, 200).trim();
+      const size = clampLength(meta.size || 'Standard', 50).trim();
+      const shippingAddress = clampLength(meta.address, 500).trim();
+      const checkoutType = String(meta.checkoutType || 'single').slice(0, 20);
+      const appliedPromo = String(meta.promoCode || meta.ref || '').trim().toUpperCase().slice(0, 40);
       const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+
+      // Same defense-in-depth as the setup path: junk payloads never reach the
+      // ledger/inventory accounting.
+      if (!isValidEmail(email)) {
+        console.warn('[webhook] payment session rejected: invalid email', maskEmail(email));
+        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+        return NextResponse.json({ received: true, skipped: 'invalid_payload' });
+      }
 
       const allProducts = await loadProducts(redis);
       if (checkoutType === 'cart') {
         let cartItems: any[] = [];
         try {
-          cartItems = JSON.parse(String(meta.cartItems || '[]'));
+          const rawCart = String(meta.cartItems || '[]');
+          if (rawCart.length <= 50_000) cartItems = JSON.parse(rawCart);
         } catch {}
         for (const item of cartItems) {
           const thisProduct = allProducts[String(item.productId || '')] as any;

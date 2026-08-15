@@ -114,6 +114,7 @@ export async function POST(request: Request) {
     } catch {}
     return NextResponse.json({ success: true, message: 'Shipping address updated.' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[account/update-address] failed', err?.message || err);
+    return NextResponse.json({ error: 'Could not update the address. Please try again.' }, { status: 500 });
   }
 }

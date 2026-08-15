@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY, ANALYTICS_ONLINE_KEY } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { isRateLimited } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,13 @@ async function sumAllSubs(redis: any): Promise<number> {
 
 export async function GET(request: Request) {
   try {
+    // Heartbeats fire on page load + periodically; a very generous per-IP cap
+    // stops a script from inflating the online-visitor / social-proof tallies
+    // without ever tripping a normal multi-tab visitor.
+    if (await isRateLimited('heartbeat', request, 120, 60)) {
+      return NextResponse.json({ socialProofDisplay: 0 });
+    }
+
     const redis = createRedisClient();
     const url = new URL(request.url);
     const visitorId = String(url.searchParams.get('visitorId') || '').slice(0, 64);
@@ -47,6 +55,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ socialProofDisplay });
   } catch (err: any) {
-    return NextResponse.json({ socialProofDisplay: 0, error: err.message }, { status: 500 });
+    console.error('[heartbeat] failed', err?.message || err);
+    return NextResponse.json({ socialProofDisplay: 0 });
   }
 }

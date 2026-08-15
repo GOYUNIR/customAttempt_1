@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY, USERS_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
+import { randomBytes } from 'crypto';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +28,9 @@ export async function POST(request: Request) {
     if (!sessionUser) {
       return NextResponse.json({ error: 'Login required.' }, { status: 401 });
     }
+
+    const limited = await rateLimitedResponse('redeem_points', request, 10, 60);
+    if (limited) return limited;
 
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
@@ -82,7 +87,8 @@ export async function POST(request: Request) {
     // otherwise it stays reserved to the redeemer.
     const giftingEnabled = rewardsConfig.giftingEnabled !== false;
     const seed = sessionUser.email.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || 'MBR';
-    const code = `REWARD-${seed}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    // crypto.randomBytes — the credit suffix must be unguessable (never Math.random).
+    const code = `REWARD-${seed}-${randomBytes(3).toString('hex').toUpperCase().slice(0, 5)}`;
     const promo = {
       code,
       promoterName: 'Points Redemption',

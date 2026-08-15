@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
+import { isValidEmail, isValidPassword } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 function hashPassword(password: string, salt: string): string {
   return scryptSync(password, salt, 64).toString('hex');
@@ -16,7 +18,12 @@ function hashPassword(password: string, salt: string): string {
  * This stops automated bots from farming welcome rewards with fake inboxes.
  */
 export async function POST(request: Request) {
-  const body = await request.json();
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
   const { email, password, emailOptIn, termsAgreed } = body;
   if (!email || !password) {
     return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
@@ -24,6 +31,16 @@ export async function POST(request: Request) {
   if (termsAgreed !== true) {
     return NextResponse.json({ error: 'You must agree to the Terms of Service and Privacy Policy to create an account.' }, { status: 400 });
   }
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
+  }
+  if (!isValidPassword(password)) {
+    return NextResponse.json({ error: 'Password must be between 6 and 128 characters.' }, { status: 400 });
+  }
+
+  const limited = await rateLimitedResponse('auth_signup', request, 10, 60);
+  if (limited) return limited;
+
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 

@@ -67,7 +67,8 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err?.message || 'Draw trigger failed' }, { status: 500 });
+    console.error('[auto-draw] trigger failed', err?.message || err);
+    return NextResponse.json({ success: false, error: 'Draw trigger failed' }, { status: 500 });
   }
 }
 
@@ -85,6 +86,9 @@ export async function GET(request: Request) {
     onlyProductName: url.searchParams.get('productName') || undefined,
     onlySlug: url.searchParams.get('slug') || undefined,
     dryRun: url.searchParams.get('dryRun') === '1',
-  }).catch((err: any) => ({ success: false, error: err?.message || 'Draw trigger failed' }));
+  }).catch((err: any) => {
+    console.error('[auto-draw] trigger failed', err?.message || err);
+    return { success: false, error: 'Draw trigger failed' };
+  });
   return NextResponse.json(result);
 }

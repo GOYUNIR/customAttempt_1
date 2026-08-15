@@ -7,6 +7,21 @@ const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
 const ADMIN_PASSWORD = getAdminPassword();
 
 /**
+ * Constant-time string comparison that works in the proxy (Edge) runtime where
+ * Node's crypto.timingSafeEqual is unavailable. Length is compared first (the
+ * same information timingSafeEqual leaks), then every byte is XORed together so
+ * a timing attacker can never learn the password one character at a time.
+ */
+function timingSafeStringEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
  * These endpoints ARE the two-step verification flow, so they are reachable
  * with Basic Auth alone. Every OTHER /api/admin request additionally requires
  * a valid device cookie (issued by verify-confirm after an emailed code).
@@ -31,7 +46,7 @@ function verifyBasicAuth(authorization: string | null) {
   if (colon < 0) return false;
   const user = decoded.slice(0, colon);
   const pass = decoded.slice(colon + 1);
-  return user === ADMIN_USER && pass === ADMIN_PASSWORD;
+  return timingSafeStringEq(user, ADMIN_USER) && timingSafeStringEq(pass, ADMIN_PASSWORD);
 }
 
 export async function proxy(request: NextRequest) {

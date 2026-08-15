@@ -120,7 +120,13 @@ export default function HomePage() {
       .catch(() => setAuthUser(null));
 
     const visitorId = typeof window !== 'undefined'
-      ? (window.localStorage.getItem('goyunir-visitor-id') || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
+      ? (window.localStorage.getItem('goyunir-visitor-id') || (() => {
+          // crypto.getRandomValues — never Math.random for an identifier that is
+          // echoed into the analytics online-tally (prevents spoofing visitors).
+          const bytes = new Uint8Array(8);
+          window.crypto.getRandomValues(bytes);
+          return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        })())
       : '';
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('goyunir-visitor-id', visitorId);

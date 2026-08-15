@@ -2,14 +2,18 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, verifyAdminPassword, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
+import { randomBytes } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
 const ALLOWED = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'];
 
 function generatePromoCode(prefix: string) {
-  const root = (prefix || 'GOY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'GOY';
-  return `${root}-${Math.random().toString(36).slice(2, 7).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  // Neutral default prefix — never a template brand (customer-visible codes).
+  const root = (prefix || 'DROP').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'DROP';
+  const a = randomBytes(4).toString('hex').toUpperCase().slice(0, 5);
+  const b = randomBytes(3).toString('hex').toUpperCase().slice(0, 3);
+  return `${root}-${a}-${b}`;
 }
 
 /** Human-friendly status line for the customer email. */

@@ -15,6 +15,8 @@ import {
 import { buildOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isValidEmail } from '@/lib/validation';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -74,7 +76,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
 
-    const body = await request.json();
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
     const email = String(body?.email || '').trim().toLowerCase();
     const address = String(body?.address || '').trim();
     const promoCode = String(body?.promoCode || body?.ref || '').trim().toUpperCase();
@@ -83,11 +90,20 @@ export async function POST(request: Request) {
     if (!email || !address || cart.length === 0) {
       return NextResponse.json({ error: 'Missing checkout details.' }, { status: 400 });
     }
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
+    }
+    if (cart.length > 50) {
+      return NextResponse.json({ error: 'Too many items in the cart.' }, { status: 400 });
+    }
 
     const addrError = validateShippingAddress(address);
     if (addrError) {
       return NextResponse.json({ error: addrError }, { status: 400 });
     }
+
+    const limited = await rateLimitedResponse('checkout_cart', request, 20, 60);
+    if (limited) return limited;
 
     // Resolve the deployment origin for Stripe success/cancel URLs. In a Next.js
     // route handler `origin` is NOT a global (that's browser-only), so derive it
@@ -381,6 +397,7 @@ export async function POST(request: Request) {
       fcfsCount: fcfsLines.length,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[checkout/cart] failed', err?.message || err);
+    return NextResponse.json({ error: 'Checkout could not be started. Please try again.' }, { status: 500 });
   }
 }

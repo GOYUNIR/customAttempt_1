@@ -131,6 +131,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ ok: true, sentEarly, sentPre, config });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[cron/recovery] failed', err?.message || err);
+    return NextResponse.json({ error: 'Recovery run failed' }, { status: 500 });
   }
 }
