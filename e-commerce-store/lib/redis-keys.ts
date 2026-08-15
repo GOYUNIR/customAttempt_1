@@ -57,15 +57,14 @@ export const PRODUCTS_KEY = 'store:products';
 export const STORE_CONFIG_KEY = 'store:config';
 /** Hash of customer accounts; field = user id. */
 export const USERS_KEY = 'store:users';
-/** String — the signed-in user's saved cart (JSON array), keyed by user id.
+/** Hash of signed-in user carts; field = user id, value = JSON array.
  *  Anonymous carts live only in the browser (localStorage); the moment a
  *  customer signs in, SiteChrome merges the local bag with this record and
  *  every subsequent change is persisted here (debounced client-side), so the
- *  same account sees the same bag on any device. Deletable — it is a cache of
- *  the browser cart, never a source of truth. */
-export function userCartKey(userId: string): string {
-  return `store:cart:${String(userId || '').slice(0, 128)}`;
-}
+ *  same account sees the same bag on any device. ONE hash (not one key per
+ *  user) keeps the Redis browser tidy no matter how many customers sign up.
+ *  Deletable — it is a cache of the browser cart, never a source of truth. */
+export const STORED_CARTS_KEY = 'store:carts';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Permanent ledger (append-only entry/charge history)
@@ -132,9 +131,12 @@ export function cardBlockKey(variant: string, size: string): string {
 export const PROCESSED_SESSIONS_KEY = 'entries:processed';
 /** Set of `<variant>:<size>:<email>` rows that already got a confirmation email. */
 export const ENTRY_EMAIL_SENT_KEY = 'entries:email_sent';
-/** Timestamp of the last auto-draw per pool (draw-scheduler dedupe). */
-export function lastAutoDrawKey(variant: string, size: string): string {
-  return `entries:last_auto:${variant}:${size}`;
+/** Hash — last auto-draw timestamp per pool (field = `variant:size`). The
+ *  draw-scheduler dedupe lives in ONE hash so every product/size never spawns
+ *  its own top-level key. */
+export const LAST_AUTO_DRAW_HASH_KEY = 'entries:last_auto';
+export function lastAutoDrawField(variant: string, size: string): string {
+  return `${variant}:${size}`;
 }
 
 /** String — JSON summary of the most recent draw run. */
@@ -155,15 +157,14 @@ export const RECOVERY_CONFIG_KEY = 'ops:recovery_config';
 /** Hash — recovery-email dedupe (field = `email|variant|size|kind`). */
 export const RECOVERY_SENT_KEY = 'ops:recovery_sent';
 
-// Live-apply overrides managed from /admin (no redeploy needed).
-/** String — global drop-schedule override. */
-export const SCHEDULE_OVERRIDE_KEY = 'ops:override:schedule';
-/** String — global social-proof override. */
-export const SOCIAL_PROOF_OVERRIDE_KEY = 'ops:override:social_proof';
-/** Prefix — per-product pricing/schedule overrides (`ops:override:product:<id>`). */
-export const PRODUCT_OVERRIDE_PREFIX = 'ops:override:product:';
-export function productOverrideKey(productId: string): string {
-  return `${PRODUCT_OVERRIDE_PREFIX}${productId}`;
+// Live-apply overrides managed from /admin (no redeploy needed). ALL overrides
+// live in ONE hash `ops:overrides` (fields: `schedule`, `social_proof`,
+// `product:<id>`) so the ops namespace never grows a key per product.
+export const OVERRIDES_KEY = 'ops:overrides';
+export const OVERRIDE_SCHEDULE_FIELD = 'schedule';
+export const OVERRIDE_SOCIAL_PROOF_FIELD = 'social_proof';
+export function productOverrideField(productId: string): string {
+  return `product:${String(productId || '')}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -205,14 +206,6 @@ export function adminVerifyKey(email: string): string {
  * the Redis data browser tidy — expired tokens are lazy-deleted the next time
  * they're checked, and revoking a device is a one-field HDEL. */
 export const ADMIN_DEVICES_KEY = 'admin:devices';
-/** String w/ TTL — wrong-code counter for brute-force lockout (`admin:verify_attempts:<email>`). */
-export function adminVerifyAttemptsKey(email: string): string {
-  return `admin:verify_attempts:${email}`;
-}
-/** String w/ TTL — resend throttle counter (`admin:send_attempts:<email>`). */
-export function adminSendAttemptsKey(email: string): string {
-  return `admin:send_attempts:${email}`;
-}
 /** Name of the httpOnly admin 2FA device cookie set after a successful code. */
 export const ADMIN_DEVICE_COOKIE = 'goyunir_admin_device';
 
@@ -224,12 +217,13 @@ export const ADMIN_DEVICE_COOKIE = 'goyunir_admin_device';
 export const ANALYTICS_ONLINE_KEY = 'analytics:online';
 /** String — social-proof boost counter (real + auto-increment). */
 export const SOCIAL_PROOF_BOOST_KEY = 'analytics:social_boost';
-/** String — timestamp of the last auto-increment tick. */
-export const TICKS_LAST_KEY = 'analytics:ticks:last';
-/** String — number of auto-increment ticks today. */
-export const TICKS_TODAY_KEY = 'analytics:ticks:today';
-/** String — YYYY-MM-DD stamp that resets the daily tick counter. */
-export const TICKS_DAY_STAMP_KEY = 'analytics:ticks:day';
+/** Hash of the social-proof auto-tick counters — ONE key for the whole ticker
+ *  (fields: `last` = last tick timestamp, `today` = ticks today, `day` =
+ *  YYYY-MM-DD stamp that resets the daily counter). */
+export const ANALYTICS_TICKS_KEY = 'analytics:ticks';
+export const TICKS_LAST_FIELD = 'last';
+export const TICKS_TODAY_FIELD = 'today';
+export const TICKS_DAY_FIELD = 'day';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Customer records

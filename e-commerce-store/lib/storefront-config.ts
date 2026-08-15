@@ -112,6 +112,13 @@ export interface StorefrontConfig {
     /** Secondary/muted text color rendered on card/info-box backgrounds. */
     cardTextMuted: string;
     checkoutCtaButton: string;
+    /** Top-bar (header) background — optional. Empty = derive from cardBackground
+     *  at the chrome transparency (the classic look). Set from /admin → Settings
+     *  → Theme Colors so the top bar can be branded independently of the cards. */
+    headerBackground?: string;
+    /** Top-bar text/icon color — optional. Empty = auto pick a readable color
+     *  from the header background. */
+    headerText?: string;
     /** CSS font stack applied to the storefront body (set by design presets). */
     fontFamily?: string;
     /** Border radius in px — 0 = square, ~10 = small rounded, 999 = fully rounded. */
@@ -196,6 +203,10 @@ const defaultThemeColors = {
   cardTextMain: '#1d1d1f',
   cardTextMuted: '#52525a',
   checkoutCtaButton: '#0071e3',
+  // Top bar colors: empty = auto (derived from cardBackground + chrome
+  // transparency, readable text picked automatically).
+  headerBackground: '',
+  headerText: '',
   fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
   borderRadius: 24,
   // Transparency (0-100, editable from /admin → Settings → Theme Colors):
@@ -279,11 +290,11 @@ const defaultFooter = {
 // Every value here is editable live from /admin → Settings → Orb Glow.
 const defaultOrbs: OrbsConfig = {
   enabled: true,
-  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-  fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-  fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+  fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+  fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -454,10 +465,15 @@ export type GlassSurfaceOptions = {
 /**
  * Apple Liquid Glass — the FULL chrome material in one style object. Use on
  * the header, cart drawer, modals and toasts so every glass surface shares
- * the same recipe: a chrome-tinted translucent background, a specular top
- * sheen (the "glass catches light" gradient), a hairline border, an inner rim
- * highlight and a soft outer float. Blur / saturation / brightness come from
- * the admin backdropBlur slider via `glassBackdrop()`.
+ * the same recipe.
+ *
+ * IMPORTANT DESIGN DECISION: the material is FLAT by default. There is no
+ * painted specular sheen — the surface is a plain translucent color, and the
+ * frosted-glass `backdrop-filter` is the only "glass" that shows, and it only
+ * shows when real content scrolls beneath. This is deliberate: a painted
+ * white sheen gradient on top of a dark header looks like a smudge when there
+ * is nothing behind it. A flat translucent surface with a hairline border and
+ * a barely-there top light reads as clean glass in every state.
  *
  * Returns a plain style record (no React dependency) so both server and
  * client components can spread it: `style={{ ...glassSurfaceStyle(theme) }}`.
@@ -468,11 +484,13 @@ export function glassSurfaceStyle(themeColors?: Record<string, any> | null, opts
   const chromeAlpha = Number.isFinite(chrome) ? Math.max(30, Math.min(100, chrome)) : 62;
   const base = String(themeColors?.primaryBackground || '#f2f2f7');
   const bg = opts.bg || (chromeAlpha >= 100 ? base : `color-mix(in srgb, ${base} ${chromeAlpha}%, transparent)`);
-  // Specular top sheen: bright and crisp on light glass, softer on dark panels.
+  // Barely-there top light: a hairline "glass catches light" highlight, NOT a
+  // band. Flat on light glass (white-on-white is invisible), a subtle rim on
+  // dark panels so the drawer still reads as a material edge.
   const sheen = opts.dark
-    ? 'linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.07) 24%, rgba(255,255,255,0) 48%)'
-    : 'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 26%, rgba(255,255,255,0) 54%)';
-  const borderColor = opts.dark ? 'rgba(255,255,255,0.16)' : String(themeColors?.cardBorder || 'rgba(0,0,0,0.08)');
+    ? 'linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.02) 22%, rgba(255,255,255,0) 44%)'
+    : 'linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.012) 22%, rgba(255,255,255,0) 44%)';
+  const borderColor = opts.dark ? 'rgba(255,255,255,0.16)' : String(themeColors?.cardBorder || 'rgba(0,0,0,0.10)');
   const outer = opts.shadow ?? (opts.dark ? '0 10px 40px rgba(0,0,0,0.35)' : '0 8px 32px rgba(0,0,0,0.10)');
   return {
     background: bg,
@@ -480,7 +498,7 @@ export function glassSurfaceStyle(themeColors?: Record<string, any> | null, opts
     WebkitBackdropFilter: blur,
     backdropFilter: blur,
     border: `1px solid ${borderColor}`,
-    boxShadow: `inset 0 1px 0 ${opts.dark ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.5)'}, inset 0 -1px 0 rgba(255,255,255,0.05), ${outer}`,
+    boxShadow: `inset 0 1px 0 ${opts.dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.10)'}, inset 0 -1px 0 rgba(255,255,255,0.05), ${outer}`,
   };
 }
 

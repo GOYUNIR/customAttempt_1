@@ -35,7 +35,8 @@ import {
   getProductOverride,
   intentPoolKey,
   LAST_DRAW_KEY,
-  lastAutoDrawKey,
+  LAST_AUTO_DRAW_HASH_KEY,
+  lastAutoDrawField,
   loadProducts,
   POOL_KEY_PREFIX,
   POOL_STATS_KEY,
@@ -156,7 +157,7 @@ async function shouldRunPoolDraw(opts: {
   };
   const timezone = String(effectiveSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
   const endMs = toMs(opts.product?.releaseEndsAt, timezone);
-  const lastAuto = Number((await opts.redis.get(lastAutoDrawKey(opts.product.name, opts.size))) || 0);
+  const lastAuto = Number((await opts.redis.hget(LAST_AUTO_DRAW_HASH_KEY, lastAutoDrawField(opts.product.name, opts.size))) || 0);
 
   if (endMs !== null) {
     // The product's own countdown end is the current cycle boundary.
@@ -287,7 +288,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       // tight loop. A just-drawn pool (within the cooldown) is skipped unless
       // the caller explicitly forced the draw (cron/admin).
       if (options.force !== true && options.ignoreCooldown !== true) {
-        const lastAuto = Number((await redis.get(lastAutoDrawKey(productName, productSize))) || 0);
+        const lastAuto = Number((await redis.hget(LAST_AUTO_DRAW_HASH_KEY, lastAutoDrawField(productName, productSize))) || 0);
         if (lastAuto > 0 && now - lastAuto < CLIENT_RE_RUN_COOLDOWN_MS) continue;
       }
 
@@ -546,7 +547,9 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
           [poolStatField('int', productName, productSize)]: '0',
         });
 
-        await redis.set(lastAutoDrawKey(productName, productSize), String(Date.now()));
+        await redis.hset(LAST_AUTO_DRAW_HASH_KEY, {
+          [lastAutoDrawField(productName, productSize)]: String(Date.now()),
+        });
 
         // ── Recurring-raffle roll-forward (deferred) ─────────────────────────
         // If inventory remains (and the product is not archived), the product's

@@ -8,7 +8,8 @@ import {
   safeParseRedisItem,
   STORE_CONFIG_KEY,
   PRODUCTS_KEY,
-  SCHEDULE_OVERRIDE_KEY,
+  OVERRIDES_KEY,
+  OVERRIDE_SCHEDULE_FIELD,
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
@@ -96,7 +97,7 @@ async function buildCatalogPayload() {
     // Global drop-schedule override merged over the static config — used to
     // compute `nextReleaseEndsAt` exactly like /api/store so the catalog tile
     // timers agree with the product page and the draw engine.
-    const scheduleOverride = safeParseRedisItem<any>(redis ? await redis.get(SCHEDULE_OVERRIDE_KEY) : null) || {};
+    const scheduleOverride = safeParseRedisItem<any>(redis ? await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD) : null) || {};
     const globalSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(storeConfig?.dropSchedule || {}), ...scheduleOverride };
 
     const allProducts: any[] = [];

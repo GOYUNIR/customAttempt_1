@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY } from '@/lib/server-config';
+import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -212,6 +212,85 @@ export async function POST(request: Request) {
             migrated.push(`${key} → ${ADMIN_DEVICES_KEY}#${token.slice(0, 8)}…`);
           } catch {
             skipped.push(`${key} (could not fold into ${ADMIN_DEVICES_KEY})`);
+          }
+        }
+      }
+    } catch {}
+
+    // ── 4) FOLD v2 string keys into single hashes (KEY NEATNESS) ───────────
+    // These namespaces used to grow ONE top-level key per thing (per product,
+    // per size, per user, per ticker). They are now FIELDS of a single hash, so
+    // the Redis browser stays tidy no matter how big the store gets. Existing
+    // installs are folded losslessly here; a fresh install simply has nothing
+    // to fold. Safe to re-run — the source keys are deleted after folding.
+    const foldStringIntoHash = async (sourceKey: string, targetHash: string, field: string, list: string[]) => {
+      try {
+        const exists = await redis.exists(sourceKey);
+        if (!exists) return;
+        const value = await redis.get(sourceKey);
+        if (value != null) {
+          await redis.hset(targetHash, { [field]: value });
+          list.push(`${sourceKey} → ${targetHash}#${field}`);
+        }
+        await redis.del(sourceKey);
+      } catch {
+        /* non-fatal */
+      }
+    };
+
+    // analytics:ticks:last / :today / :day → analytics:ticks#last|today|day
+    await foldStringIntoHash('analytics:ticks:last', ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, migrated);
+    await foldStringIntoHash('analytics:ticks:today', ANALYTICS_TICKS_KEY, TICKS_TODAY_FIELD, migrated);
+    await foldStringIntoHash('analytics:ticks:day', ANALYTICS_TICKS_KEY, TICKS_DAY_FIELD, migrated);
+
+    // ops:override:schedule / :social_proof → ops:overrides#schedule|social_proof
+    await foldStringIntoHash('ops:override:schedule', OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, migrated);
+    await foldStringIntoHash('ops:override:social_proof', OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD, migrated);
+
+    // ops:override:product:<id> → ops:overrides#product:<id>
+    try {
+      const productOverrideKeys = (await redis.keys('ops:override:product:*')) as string[] | null;
+      if (Array.isArray(productOverrideKeys)) {
+        for (const key of productOverrideKeys) {
+          const productId = key.slice('ops:override:product:'.length);
+          await foldStringIntoHash(key, OVERRIDES_KEY, `product:${productId}`, migrated);
+        }
+      }
+    } catch {}
+
+    // store:cart:<userId> → store:carts#<userId>
+    try {
+      const cartKeys = (await redis.keys('store:cart:*')) as string[] | null;
+      if (Array.isArray(cartKeys)) {
+        for (const key of cartKeys) {
+          const userId = key.slice('store:cart:'.length);
+          await foldStringIntoHash(key, STORED_CARTS_KEY, userId, migrated);
+        }
+      }
+    } catch {}
+
+    // entries:last_auto:<variant>:<size> → entries:last_auto#<variant>:<size>
+    try {
+      const lastAutoKeys = (await redis.keys('entries:last_auto:*')) as string[] | null;
+      if (Array.isArray(lastAutoKeys)) {
+        for (const key of lastAutoKeys) {
+          const field = key.slice('entries:last_auto:'.length);
+          await foldStringIntoHash(key, LAST_AUTO_DRAW_HASH_KEY, field, migrated);
+        }
+      }
+    } catch {}
+
+    // admin:verify_attempts:* / admin:send_attempts:* — transient rate-limit
+    // counters that now live INSIDE the single `admin:verify:<email>` payload.
+    // Safe to delete: they only throttle, and the challenge key carries the
+    // same information going forward.
+    try {
+      for (const prefix of ['admin:verify_attempts:', 'admin:send_attempts:']) {
+        const counters = (await redis.keys(`${prefix}*`)) as string[] | null;
+        if (Array.isArray(counters)) {
+          for (const key of counters) {
+            await redis.del(key);
+            removed.push(`${key} (folded into admin:verify:<email> payload)`);
           }
         }
       }

@@ -146,6 +146,23 @@ const FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'Monospace — terminal / technical', value: "'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace" },
 ];
 
+/** Friendly labels for the theme color inputs (Settings → Theme Colors) so the
+ *  admin UI reads like Apple settings instead of raw camelCase key names. */
+const THEME_COLOR_LABELS: Record<string, string> = {
+  primaryBackground: 'Page background',
+  cardBackground: 'Card surface',
+  cardBorder: 'Card hairline border',
+  accentPurple: 'Accent (violet)',
+  accentBlue: 'Accent (blue / links)',
+  textMain: 'Page text',
+  textMuted: 'Page muted text',
+  cardTextMain: 'Text on cards',
+  cardTextMuted: 'Muted text on cards',
+  checkoutCtaButton: 'Checkout button',
+  headerBackground: 'Top bar background',
+  headerText: 'Top bar text / icons',
+};
+
 const buttonPrimary: React.CSSProperties = {
   padding: '10px 16px',
   borderRadius: 10,
@@ -204,11 +221,11 @@ const UNCONFIGURED_PRICE_SENTINEL = 9999999;
 // the storefront defaults so a fresh portal has sane values before any save.
 const DEFAULT_ORBS: any = {
   enabled: true,
-  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-  fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-  fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+  fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+  fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -1813,17 +1830,17 @@ export default function AdminPortal() {
   // Streamer mode forces every sensitive display off regardless of reveal state.
   const sensitiveVisible = !streamerMode && revealAddresses;
 
-  const tabs: { id: Tab; label: string; badge?: number }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'drops', label: 'Drops' },
-    { id: 'ledger', label: 'Ledger' },
-    { id: 'products', label: 'Products', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
-    { id: 'users', label: 'Users', badge: users.length || undefined },
-    { id: 'promotions', label: 'Promotions' },
-    { id: 'growth', label: 'Growth' },
-    { id: 'system', label: 'System' },
-    { id: 'settings', label: 'Settings' },
-    { id: 'setup', label: 'SetUp' },
+  const tabs: { id: Tab; label: string; group: string; badge?: number }[] = [
+    { id: 'overview', label: 'Overview', group: 'Store' },
+    { id: 'drops', label: 'Drops', group: 'Store' },
+    { id: 'products', label: 'Products', group: 'Store', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
+    { id: 'ledger', label: 'Ledger', group: 'Store' },
+    { id: 'users', label: 'Users', group: 'Customers', badge: users.length || undefined },
+    { id: 'promotions', label: 'Promotions', group: 'Customers' },
+    { id: 'growth', label: 'Growth', group: 'Customers' },
+    { id: 'settings', label: 'Settings', group: 'Configuration' },
+    { id: 'system', label: 'System', group: 'Configuration' },
+    { id: 'setup', label: 'SetUp', group: 'Configuration' },
   ];
 
   // ============================================================
@@ -1956,33 +1973,47 @@ export default function AdminPortal() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-          {tabs.map((t) => (
-            <button key={t.id}
-              onClick={() => {
-                setTab(t.id);
-                if (t.id === 'growth') { fetchPromos(); fetchAudit(); fetchAlerts(); }
-                if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
-                if (t.id === 'drops') fetchConfig();
-                if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
-                if (t.id === 'settings') fetchSettings();
-                if (t.id === 'setup') fetchEnvStatus();
-                if (t.id === 'products') fetchProducts();
-                if (t.id === 'users') fetchUsers();
-              }}
-              style={{
-                padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
-                background: tab === t.id ? '#fff' : 'transparent', color: tab === t.id ? '#000' : '#aaa',
-                fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-              {t.label}
-              {t.badge ? (
-                <span style={{ background: tab === t.id ? '#000' : '#edb210', color: tab === t.id ? '#fff' : '#000', fontSize: 9, padding: '1px 5px', borderRadius: 8, fontWeight: 700 }}>
-                  {t.badge}
-                </span>
-              ) : null}
-            </button>
-          ))}
+        {/* Apple-style grouped tab bar: Store / Customers / Configuration */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+          {['Store', 'Customers', 'Configuration'].map((groupName) => {
+            const groupTabs = tabs.filter((t) => t.group === groupName);
+            if (groupTabs.length === 0) return null;
+            return (
+              <div key={groupName}>
+                <div style={{ fontSize: 9, letterSpacing: '2px', textTransform: 'uppercase', color: '#6b6b74', margin: '2px 4px 4px', fontWeight: 700 }}>{groupName}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {groupTabs.map((t) => (
+                    <button key={t.id}
+                      onClick={() => {
+                        setTab(t.id);
+                        if (t.id === 'growth') { fetchPromos(); fetchAudit(); fetchAlerts(); }
+                        if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
+                        if (t.id === 'drops') fetchConfig();
+                        if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
+                        if (t.id === 'settings') fetchSettings();
+                        if (t.id === 'setup') fetchEnvStatus();
+                        if (t.id === 'products') fetchProducts();
+                        if (t.id === 'users') fetchUsers();
+                      }}
+                      style={{
+                        padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
+                        background: tab === t.id ? '#fff' : 'transparent', color: tab === t.id ? '#000' : '#aaa',
+                        fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                        transition: 'background 140ms ease, color 140ms ease, border-color 140ms ease',
+                      }}
+                    >
+                      {t.label}
+                      {t.badge ? (
+                        <span style={{ background: tab === t.id ? '#000' : '#edb210', color: tab === t.id ? '#fff' : '#000', fontSize: 9, padding: '1px 5px', borderRadius: 8, fontWeight: 700 }}>
+                          {t.badge}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* ============ OVERVIEW (unchanged) ============ */}
@@ -3328,10 +3359,10 @@ export default function AdminPortal() {
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(themeSettings)
-                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency' && key !== 'radiusStyle' && key !== 'cardShadow' && key !== 'backdropBlur' && key !== 'contentSpacing')
+                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency' && key !== 'radiusStyle' && key !== 'cardShadow' && key !== 'backdropBlur' && key !== 'contentSpacing' && key !== 'headerBackground' && key !== 'headerText')
                   .map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    {THEME_COLOR_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="color" 
                       value={toHexColor(value)} 
@@ -3339,6 +3370,51 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                   </label>
                 ))}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 8px' }}>
+                <h4 style={{ fontSize: 11, color: '#aaa', margin: 0, textTransform: 'uppercase' }}>Top bar</h4>
+                <span style={{ fontSize: 10, color: '#888' }}>Give the top bar its own colors. Empty = auto-match the card surface.</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  {THEME_COLOR_LABELS.headerBackground}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="color"
+                      value={toHexColor(themeSettings.headerBackground || themeSettings.cardBackground)}
+                      onChange={(e) => setThemeSettings({ ...themeSettings, headerBackground: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', flex: 1, marginTop: 4, padding: 4, height: 40 }} />
+                    <button
+                      type="button"
+                      onClick={() => setThemeSettings({ ...themeSettings, headerBackground: '' })}
+                      style={{ ...buttonGhost, marginTop: 4, whiteSpace: 'nowrap' }}
+                      title="Reset to auto (match card surface)"
+                    >
+                      Auto
+                    </button>
+                  </div>
+                  <span style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 2 }}>{themeSettings.headerBackground ? 'Custom top-bar color' : 'Auto — matches card surface'}</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  {THEME_COLOR_LABELS.headerText}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="color"
+                      value={toHexColor(themeSettings.headerText || (themeSettings.headerBackground || themeSettings.cardBackground))}
+                      onChange={(e) => setThemeSettings({ ...themeSettings, headerText: e.target.value })}
+                      style={{ ...inputStyle, display: 'block', flex: 1, marginTop: 4, padding: 4, height: 40 }} />
+                    <button
+                      type="button"
+                      onClick={() => setThemeSettings({ ...themeSettings, headerText: '' })}
+                      style={{ ...buttonGhost, marginTop: 4, whiteSpace: 'nowrap' }}
+                      title="Reset to auto (readable text picked from the background)"
+                    >
+                      Auto
+                    </button>
+                  </div>
+                  <span style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 2 }}>{themeSettings.headerText ? 'Custom text color' : 'Auto — readable on the top bar'}</span>
+                </label>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -3739,6 +3815,9 @@ export default function AdminPortal() {
                     <option value="cart">Cart</option>
                     <option value="bag">Bag</option>
                   </select>
+                  <span style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 2 }}>
+                    Changes the icon AND every word site-wide (top bar, drawer, product page, empty states).
+                  </span>
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Logo Upload or URL

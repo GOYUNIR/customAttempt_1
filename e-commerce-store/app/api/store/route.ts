@@ -7,8 +7,9 @@ import {
   loadStoreConfigCached,
   safeParseRedisItem,
   PRODUCTS_KEY,
-  SCHEDULE_OVERRIDE_KEY,
-  SOCIAL_PROOF_OVERRIDE_KEY,
+  OVERRIDES_KEY,
+  OVERRIDE_SCHEDULE_FIELD,
+  OVERRIDE_SOCIAL_PROOF_FIELD,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs } from '@/lib/storefront-config';
@@ -264,7 +265,7 @@ async function buildStorePayload(requestedSlug: string) {
   // over the seeded store config + static code default. Priority is override >
   // store config > static, so the storefront's next-raffle anchor agrees with
   // the draw engine.
-  const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
+  const scheduleRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD);
   const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
   const globalSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
@@ -292,7 +293,7 @@ async function buildStorePayload(requestedSlug: string) {
     ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
     : null;
 
-  const socialRaw = await redis.get(SOCIAL_PROOF_OVERRIDE_KEY);
+  const socialRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD);
   const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
   return {

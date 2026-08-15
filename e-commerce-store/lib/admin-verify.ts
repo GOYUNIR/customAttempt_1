@@ -18,8 +18,6 @@ import { randomBytes, createHash } from 'crypto';
 import {
   ADMIN_DEVICES_KEY,
   adminVerifyKey,
-  adminVerifyAttemptsKey,
-  adminSendAttemptsKey,
 } from '@/lib/redis-keys';
 import { safeParseRedisItem } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
@@ -30,6 +28,37 @@ const ATTEMPT_WINDOW_SECONDS = 15 * 60; // 15 minute lockout window
 const RESEND_THROTTLE_SECONDS = 60;
 const DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days ("remember device")
 const SESSION_DEVICE_TTL_SECONDS = 24 * 60 * 60; // 1 day ("this browser only")
+
+// The whole 2FA challenge for one email lives in a SINGLE TTL key
+// (`admin:verify:<email>`), whose payload carries the code hash, the resend
+// throttle stamp, the wrong-attempt counter and the lockout deadline. No
+// separate `admin:verify_attempts:*` / `admin:send_attempts:*` keys — the
+// Redis browser stays tidy no matter how often the operator signs in.
+type AdminChallenge = {
+  codeHash: string;
+  createdAt: number;
+  lastSentAt: number;
+  attempts: number;
+  lockoutUntil: number;
+};
+
+async function readChallenge(redis: any, email: string): Promise<AdminChallenge | null> {
+  const raw = await redis.get(adminVerifyKey(email)).catch(() => null);
+  if (!raw) return null;
+  // Upstash auto-deserializes JSON stored via setex — handle both forms.
+  const parsed = safeParseRedisItem<Partial<AdminChallenge>>(raw) || {};
+  return {
+    codeHash: String(parsed.codeHash || ''),
+    createdAt: Number(parsed.createdAt) || 0,
+    lastSentAt: Number(parsed.lastSentAt) || 0,
+    attempts: Number(parsed.attempts) || 0,
+    lockoutUntil: Number(parsed.lockoutUntil) || 0,
+  };
+}
+
+async function writeChallenge(redis: any, email: string, challenge: AdminChallenge) {
+  await redis.setex(adminVerifyKey(email), CODE_TTL_SECONDS, JSON.stringify(challenge));
+}
 
 export function generateAdminCode(): string {
   // 6 digits, zero-padded so "042913" style codes are valid too.
@@ -57,24 +86,35 @@ function verifyCodeHash(hashed: string, code: string): boolean {
 export async function issueAdminCode(
   redis: any,
   email: string,
-): Promise<{ ok: boolean; devCode?: string; error?: string; throttled?: boolean }> {
+): Promise<{ ok: boolean; devCode?: string; error?: string; throttled?: boolean; locked?: boolean }> {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return { ok: false, error: 'Email required.' };
 
+  const existing = await readChallenge(redis, normalized);
+  const now = Date.now();
+
+  // Active lockout: refuse to mint a fresh code until the window passes.
+  if (existing && existing.lockoutUntil > now) {
+    const remaining = Math.max(1, Math.ceil((existing.lockoutUntil - now) / 1000));
+    return { ok: false, locked: true, error: `Too many failed attempts. Try again in ${Math.ceil(remaining / 60)} minute(s).` };
+  }
+
   // Resend throttle.
-  const sendKey = adminSendAttemptsKey(normalized);
-  const lastSend = await redis.get(sendKey).catch(() => null);
-  if (lastSend && Date.now() - Number(lastSend) < RESEND_THROTTLE_SECONDS * 1000) {
-    const remaining = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(lastSend)) / 1000));
+  if (existing && existing.lastSentAt && now - existing.lastSentAt < RESEND_THROTTLE_SECONDS * 1000) {
+    const remaining = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (now - existing.lastSentAt) / 1000));
     return { ok: false, throttled: true, error: `Please wait ${remaining}s before requesting another code.` };
   }
 
   const code = generateAdminCode();
-  await redis.setex(adminVerifyKey(normalized), CODE_TTL_SECONDS, JSON.stringify({
+  // Preserve the wrong-attempt count across refreshes so banking 4 wrong tries
+  // on one code still counts toward the lockout on the next code.
+  await writeChallenge(redis, normalized, {
     codeHash: hashCode(code),
-    createdAt: Date.now(),
-  }));
-  await redis.setex(sendKey, RESEND_THROTTLE_SECONDS, String(Date.now()));
+    createdAt: now,
+    lastSentAt: now,
+    attempts: existing ? existing.attempts : 0,
+    lockoutUntil: 0,
+  });
 
   const res = await sendAdminVerificationEmail({ to: normalized, code });
   if (res && res.ok === false && !('skipped' in res && res.skipped === true)) {
@@ -104,25 +144,21 @@ export async function consumeAdminCode(
   code: string,
 ): Promise<{ ok: boolean; error?: string; locked?: boolean }> {
   const normalized = String(email || '').trim().toLowerCase();
-  const attemptsKey = adminVerifyAttemptsKey(normalized);
-  const attempts = Number(await redis.get(attemptsKey).catch(() => 0)) || 0;
-  if (attempts >= MAX_ATTEMPTS) {
+  const existing = await readChallenge(redis, normalized);
+  if (!existing) {
+    return { ok: false, error: 'No active code. Request a new one.' };
+  }
+  if (existing.lockoutUntil > Date.now()) {
     return { ok: false, locked: true, error: 'Too many failed attempts. Try again in 15 minutes.' };
   }
 
-  const raw = await redis.get(adminVerifyKey(normalized)).catch(() => null);
-  if (!raw) {
-    return { ok: false, error: 'No active code. Request a new one.' };
-  }
-  // The Upstash client auto-deserializes JSON stored via setex, so `raw` is
-  // often ALREADY an object. JSON.parse(String(raw)) would then throw on
-  // "[object Object]" and every code would be rejected as "Incorrect code" —
-  // use the shared safeParseRedisItem helper (handles both string and object).
-  const payload = safeParseRedisItem<{ codeHash?: string }>(raw) || {};
-
-  if (!verifyCodeHash(payload.codeHash || '', String(code || '').trim())) {
-    const next = attempts + 1;
-    await redis.setex(attemptsKey, ATTEMPT_WINDOW_SECONDS, String(next));
+  if (!verifyCodeHash(existing.codeHash, String(code || '').trim())) {
+    const next = existing.attempts + 1;
+    await writeChallenge(redis, normalized, {
+      ...existing,
+      attempts: next,
+      lockoutUntil: next >= MAX_ATTEMPTS ? Date.now() + ATTEMPT_WINDOW_SECONDS * 1000 : existing.lockoutUntil,
+    });
     return {
       ok: false,
       error:
@@ -133,7 +169,6 @@ export async function consumeAdminCode(
   }
 
   await redis.del(adminVerifyKey(normalized));
-  await redis.del(attemptsKey);
   return { ok: true };
 }
 

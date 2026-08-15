@@ -18,9 +18,10 @@ import {
   intentPoolKey,
   POOL_KEY_PREFIX,
   INTENT_KEY_PREFIX,
-  SCHEDULE_OVERRIDE_KEY,
-  SOCIAL_PROOF_OVERRIDE_KEY,
-  productOverrideKey,
+  OVERRIDES_KEY,
+  OVERRIDE_SCHEDULE_FIELD,
+  OVERRIDE_SOCIAL_PROOF_FIELD,
+  productOverrideField,
   PROMO_CODES_KEY,
 } from '@/lib/redis-keys';
 
@@ -733,20 +734,23 @@ export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
 // ============================================================
 // LIVE CONFIG OVERRIDES — lets /admin change schedule, social
 // proof, and pricing without a redeploy. Key names live in
-// lib/redis-keys.ts under the `ops:override:` namespace.
+// lib/redis-keys.ts under the `ops:overrides` hash.
 // ============================================================
+// Live-apply overrides — all stored as FIELDS of the single `ops:overrides`
+// hash (see lib/redis-keys.ts). Reading via HGET / writing via HSET keeps the
+// ops namespace to ONE key no matter how many products have overrides.
 export async function getGlobalScheduleOverride(redis: Redis): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.get(SCHEDULE_OVERRIDE_KEY));
+  return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD));
 }
 export async function saveGlobalScheduleOverride(redis: Redis, value: Record<string, any>) {
-  await redis.set(SCHEDULE_OVERRIDE_KEY, JSON.stringify(value));
+  await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SCHEDULE_FIELD]: JSON.stringify(value) });
 }
 
 export async function getSocialProofOverride(redis: Redis): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.get(SOCIAL_PROOF_OVERRIDE_KEY));
+  return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD));
 }
 export async function saveSocialProofOverride(redis: Redis, value: Record<string, any>) {
-  await redis.set(SOCIAL_PROOF_OVERRIDE_KEY, JSON.stringify(value));
+  await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SOCIAL_PROOF_FIELD]: JSON.stringify(value) });
 }
 
 export interface ProductOverride {
@@ -755,16 +759,26 @@ export interface ProductOverride {
   price100ml?: number;
 }
 export async function getProductOverride(redis: Redis, productId: string): Promise<ProductOverride | null> {
-  return safeParseRedisItem<ProductOverride>(await redis.get(productOverrideKey(productId)));
+  return safeParseRedisItem<ProductOverride>(await redis.hget(OVERRIDES_KEY, productOverrideField(productId)));
 }
 export async function saveProductOverride(redis: Redis, productId: string, value: ProductOverride) {
-  await redis.set(productOverrideKey(productId), JSON.stringify(value));
+  await redis.hset(OVERRIDES_KEY, { [productOverrideField(productId)]: JSON.stringify(value) });
 }
 export async function getAllProductOverrides(redis: Redis, productIds: string[]): Promise<Record<string, ProductOverride>> {
   const out: Record<string, ProductOverride> = {};
-  for (const id of productIds) {
-    const o = await getProductOverride(redis, id);
-    if (o) out[id] = o;
+  if (!redis || !Array.isArray(productIds) || productIds.length === 0) return out;
+  try {
+    const all = await redis.hgetall(OVERRIDES_KEY);
+    if (!all || typeof all !== 'object') return out;
+    for (const [field, raw] of Object.entries(all)) {
+      if (!field.startsWith('product:')) continue;
+      const productId = field.slice('product:'.length);
+      if (!productIds.includes(productId)) continue;
+      const parsed = safeParseRedisItem<ProductOverride>(raw);
+      if (parsed) out[productId] = parsed;
+    }
+  } catch {
+    /* missing redis — no overrides */
   }
   return out;
 }

@@ -72,20 +72,29 @@ Redis data browser stays filterable and organised at any scale:
 
 | Namespace | Contents | Keys |
 | --- | --- | --- |
-| `store:` | Canonical, admin-edited data (the ONLY data a buyer configures) | `store:products` (hash), `store:config` (string), `store:users` (hash), `store:cart:<userId>` (string — signed-in cart mirror) |
+| `store:` | Canonical, admin-edited data (the ONLY data a buyer configures) | `store:products` (hash), `store:config` (string), `store:users` (hash), `store:carts` (hash — signed-in cart mirror, field = user id) |
 | `archive:` | Permanent entry/charge history (append-only) | `archive:ledger` (list) |
 | `promo:` | Promo code records + operational state | `promo:codes` (hash), `promo:used:<code>` (set), `promo:pending:<code>:<email>` (ttl string), `promo:credit:<orderRef>` (string) |
-| `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (sets), `entries:last_auto:<variant>:<size>` (string) |
+| `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (sets), `entries:last_auto` (hash, field = `variant:size`) |
 | `draws:` | Draw summaries + history | `draws:last` (string), `draws:history` (list) |
-| `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:override:schedule` / `ops:override:social_proof` / `ops:override:product:<id>` (strings) |
+| `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:overrides` (hash — fields `schedule`, `social_proof`, `product:<id>`) |
 | `auth:` | Auth tokens + verification challenges | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string), `auth:verify:<email>` (ttl string) |
-| `admin:` | Admin-only data + two-step verification state | `admin:audit_log` (list), `admin:verify:<email>` (ttl string), `admin:devices` (hash of verified device tokens — one key, not one per browser), `admin:verify_attempts:<email>` / `admin:send_attempts:<email>` (ttl strings) |
-| `analytics:` | Social-proof counters + online visitors | `analytics:online` (zset), `analytics:social_boost`, `analytics:ticks:last` / `ticks:today` / `ticks:day` (strings) |
+| `admin:` | Admin-only data + two-step verification state | `admin:audit_log` (list), `admin:verify:<email>` (ttl string — payload also carries attempts + resend throttle + lockout), `admin:devices` (hash of verified device tokens — one key, not one per browser) |
+| `analytics:` | Social-proof counters + online visitors | `analytics:online` (zset), `analytics:social_boost`, `analytics:ticks` (hash — fields `last` / `today` / `day`) |
 | `customer:` | Customer-submitted data | `customer:waitlist` (hash), `customer:addresses` (hash) |
 | `cache:` | Ephemeral caches (safe to delete anytime) | `cache:stripe_portal_config` (string), `cache:rate:auto_draw:<ip>` (ttl string) |
 
 Highlights of what changed in the tidy schema (and why it matters at scale):
 
+- **ONE hash per high-churn namespace — the Redis browser never grows a key
+  per product/per user/per size.** Per-user carts live in `store:carts` (field
+  = user id), auto-draw timestamps in `entries:last_auto` (field =
+  `variant:size`), admin overrides in `ops:overrides` (fields `schedule`,
+  `social_proof`, `product:<id>`), the social-proof ticker in `analytics:ticks`
+  (fields `last`/`today`/`day`), and the admin 2FA counters live INSIDE the
+  `admin:verify:<email>` payload (no more `admin:verify_attempts:*` /
+  `admin:send_attempts:*`). The key space stays at a FIXED, small size no
+  matter how many customers sign up or products are added.
 - **Pools** live under `entries:pool:` / `entries:intent:` / `entries:waitlist:`
   (was `drop_pool:` / `intent_pool:` / `waitlist:`), fraud blocks under
   `entries:block:email:` / `entries:block:card:` (was `drop_fraud_block:*:emails|cards`).
@@ -95,7 +104,6 @@ Highlights of what changed in the tidy schema (and why it matters at scale):
 - **Live states / catalog archive** moved under `ops:` (`ops:live_state`,
   `ops:catalog_archive`); promos consolidated under `promo:` (`promo:codes`,
   `promo:used:`, `promo:pending:`, `promo:credit:`).
-- **Overrides** (admin live-apply) moved under `ops:override:*`.
 - **Analytics/social-proof counters** moved under `analytics:*`.
 
 **Live states** are seeded lazily by `getLiveProductState()`, eagerly by
@@ -105,8 +113,13 @@ The storefront falls back to `totalInventory` when a live state is missing.
 **Migrating older data**: `/admin → Developer → Tidy Redis Schema` losslessly
 renames any legacy-prefix keys (drop_pool:*, intent_pool:*, session:*, live_state,
 stats:*, config:promos, …) to the tidy schema via RENAMENX (atomic, TTL-preserving,
-never overwrites). It is safe to re-run. The admin **Site Self-Test** includes a
-"Redis schema tidy" check that flags any legacy prefixes that are still present.
+never overwrites), then FOLDS the v2 high-churn string keys into their single
+hashes (`ops:override:*` → `ops:overrides`, `store:cart:*` → `store:carts`,
+`entries:last_auto:*` → `entries:last_auto`, `analytics:ticks:*` →
+`analytics:ticks`, `admin:verify_attempts:*`/`admin:send_attempts:*` → the
+`admin:verify:<email>` payload). It is safe to re-run. The admin **Site
+Self-Test** includes a "Redis schema tidy" check that flags any legacy prefixes
+that are still present.
 
 **Legacy keys that no longer exist** (removed via `/admin → Developer → Tidy
 Redis Schema`): `store:active_products`, `store:archived_products`,
@@ -303,7 +316,7 @@ input like `123 realstreet` can never be saved.
   inventory remaining (and the product is not archived), the engine computes the
   next scheduled draw moment (`getNextRecurringAnchorMs` in
   `lib/storefront-config.ts`, merging static config → `store:config.dropSchedule`
-  → `ops:override:schedule` → per-product `customDropSchedule`) and PERSISTS it as
+  → `ops:overrides#schedule` → per-product `customDropSchedule`) and PERSISTS it as
   the product's new `releaseEndsAt` (naive store-time wall clock via
   `formatStoreWallClock` in `lib/drop-timestamps.ts`). The storefront then shows a
   countdown to the NEW timer instead of "Raffle closed"/"Until sold out". Both
@@ -322,7 +335,8 @@ input like `123 realstreet` can never be saved.
   Drop path (unchanged). The product page splits the countdown into a DISPLAY
   anchor (the effective `nextReleaseEndsAt`) and a TRIGGER anchor (the raw cycle
   end) so a recurring raffle shows its new timer while still nudging the draw.
-- **Anti-double-draw:** the runner checks `entries:last_auto:<product>:<size>`
+- **Anti-double-draw:** the runner checks the `entries:last_auto` hash (field =
+  `product:size`)
   and skips a pool drawn within the last 90s unless the caller forced it (cron).
   `dryRun=1` simulates the draw without charging/archiving (used by the admin
   self-test and support).
@@ -447,6 +461,17 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — Final polish for production sale: flat Liquid Glass + top-bar color settings + desktop-swipe fix + cart/bag icon sync + Redis hash consolidation + admin reorganization + richer demo seeds:**
+  - **🎨 Top bar has its OWN color settings now.** New `themeColors.headerBackground` / `headerText` tokens (Settings → Theme Colors → **Top bar**). Empty = auto (headerBackground matches the card surface, headerText is auto-picked readable). Every one of the 11 presets carries header colors; the admin UI has friendly labels + Auto-reset buttons for every theme color input.
+  - **🪟 Liquid Glass is FLAT — no more ugly gradient.** The painted specular sheen on the header/drawer/toasts made a dark top bar wear a bright white band even when nothing was behind it. `glassSurfaceStyle` + the `.liquid-glass` utility + the banner/toast gradients now use a hairline top light only; the frosted backdrop-filter is the sole "glass" and only shows when real content scrolls underneath. White AND black chrome both look clean now.
+  - **🖱 Desktop image-swipe "stuck" bug fixed** (`components/Storefront.tsx`): the gallery used per-element pointerup, so releasing the mouse button off-element (fast drag off the photo, release outside the window, lost capture) left the photo dragged and the cursor "trying to scroll". The drag is now a ref-based state machine with WINDOW-level pointerup/pointercancel/blur listeners, explicit `releasePointerCapture`, right-click ignored, and an unmount cleanup.
+  - **🛍 Cart/Bag icon + wording now consistent EVERYWHERE.** The admin "Top-right action label" (Cart vs Bag) switches the header ICON (cart vs bag SVG) AND every word: header tooltip, drawer title + empty state, product-page "Add to {bag|cart}" button + toast messages. Added a hint in the admin so buyers know it's site-wide.
+  - **✨ Orbs more tasteful + GONE from the cart.** Default orb opacities lowered across every config path (primary 16→12, secondary 26→15, tertiary 12→8, fourth 10→8, fifth 8→6) and the entire cart-drawer orb layer + animation was removed (drawer is now clean dark glass). The stale `topBar` orb entry was purged from the store config defaults.
+  - **🗄 Redis is NEAT — the key space no longer grows per user / per product / per size.** Consolidated the high-churn namespaces into single hashes: `store:carts` (field = user id), `entries:last_auto` (field = `variant:size`), `ops:overrides` (fields `schedule`, `social_proof`, `product:<id>`), `analytics:ticks` (fields `last`/`today`/`day`), and the admin 2FA counters now live INSIDE the `admin:verify:<email>` payload (no `admin:verify_attempts:*` / `admin:send_attempts:*`). A store with thousands of customers keeps the same fixed set of keys. **Tidy Redis Schema** gained a v2 folding step (lossless, safe to re-run) and the **Site Self-Test** flags any leftover `ops:override:*` / `store:cart:*` / `entries:last_auto:*` / `analytics:ticks:*` / `admin:verify_attempts:*` / `admin:send_attempts:*` keys.
+  - **🖥 Admin portal reorganized Apple-style.** The tab bar is now grouped into **Store** (Overview, Drops, Products, Ledger) / **Customers** (Users, Promotions, Growth) / **Configuration** (Settings, System, SetUp) with small uppercase group labels and pill transitions. Theme-color inputs use friendly names ("Page background", "Text on cards", …) instead of raw camelCase, and the new Top bar section has Auto buttons.
+  - **🖼 Richer seeded demos.** Every seeded product now ships a 3-photo gallery (brand-neutral gradients generated with sharp at `/images/*/1-3.jpeg`) so the swipe/arrows demo works out of the box; the catalog preview gained a Solar Drift upcoming entry + Atlas Bloom archive. The 14 seed products keep their full "Why this drop matters" explainers.
+  - Docs: AGENTS.md namespace map + changelog + README updated in the same change set. Verified: `tsc --noEmit` clean, `eslint` clean (0/0), `npm test` 26/26, and `npm run build` compiles every route + middleware.
 
 - **2026-08-15 — Text-contrast pass (all presets) + new default hero copy + console-noise fixes (cart/sync 401, rgba color inputs, image 404s) + share-card revision bump + home-page label finalization:**
   - **🔤 “MOST OF THE PRESETS NEED MORE CONTRAST IN TEXT” — fixed across ALL 11 presets** (`lib/theme-presets.ts`): muted text is now dark enough on light themes / bright enough on dark themes to be comfortably readable, and hairlines are stronger. Examples: Apple/Minimal `textMuted`/`cardTextMuted` `#52525a → #3f3f46` (≈9:1 on white), Luxury `#4b5563 → #3c4450` (page) + `#b9c0ca → #ccd4de` (dark card), Golden Noir `#a79e8b → #cfc6b3` + `#d0c7b5 → #e5decc`, Cyber Neon `#93a3bc → #b1bfd6` + `#bdcbe0 → #cfdbec`, Warm Paper `#5f564a → #473f31`, Hype `#9CA3AF → #b8bec9`, Deep Navy / Editorial / Wellness / Monochrome all brightened/darkened the same way. `cardBorder` alpha raised to `0.18` (light) / `0.20` (dark) so card edges read. The same improved defaults were applied to `goyunir.config.ts`, `lib/store-config.ts`, `lib/storefront-config.ts`, `app/api/store/config/route.ts` and the seed route's `DEFAULT_CONFIG`.

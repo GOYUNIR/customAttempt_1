@@ -389,51 +389,97 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // Swipe / drag navigation for the product gallery. Vertical drags still scroll
   // the page (touchAction 'pan-y'); horizontal drags switch photos with a live
   // drag preview and a spring-back when the gesture isn't far enough.
+  //
+  // ROBUSTNESS: the drag is tracked with a ref-based state machine + WINDOW-level
+  // pointerup/pointercancel listeners. The old per-element handlers could get
+  // "stuck" on desktop: if the mouse button was released anywhere other than
+  // directly over the gallery (fast drag off the element, released outside the
+  // browser, a lost pointer capture), the pointerup never fired and the photo
+  // stayed dragged while the cursor kept trying to scroll. Window listeners end
+  // the drag no matter where the pointer is released, and the pointer capture is
+  // explicitly released so the browser can never keep hijacking the pointer.
   const [dragOffset, setDragOffset] = useState(0);
   const [galleryDragging, setGalleryDragging] = useState(false);
-  const dragStartX = useRef(0);
-  const dragStartY = useRef(0);
-  const dragActiveRef = useRef(false);
+  const dragStateRef = useRef<{ startX: number; startY: number; active: boolean; pointerId: number; touch: boolean }>({ startX: 0, startY: 0, active: false, pointerId: -1, touch: false });
+  const lastDragDxRef = useRef(0);
+  const endDragRef = useRef<((() => void) & { cleanup?: () => void }) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (endDragRef.current && endDragRef.current.cleanup) endDragRef.current.cleanup();
+    };
+  }, []);
 
   const onGalleryPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (imgCount <= 1) return;
-    dragStartX.current = e.clientX;
-    dragStartY.current = e.clientY;
-    dragActiveRef.current = false;
-    setGalleryDragging(false);
+    // Ignore secondary mouse buttons (right-click) — never start a drag on those.
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    dragStateRef.current = { startX: e.clientX, startY: e.clientY, active: false, pointerId: e.pointerId, touch: e.pointerType === 'touch' };
     setGalleryPaused(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture can throw if the pointer is already gone — the window listeners below still end the drag */ }
+    const endDrag = () => {
+      const s = dragStateRef.current;
+      const finalDx = lastDragDxRef.current;
+      if (s.active && Math.abs(finalDx) > 52) {
+        if (finalDx < 0) setSelectedImageIndex((prev) => (prev + 1) % imgCount);
+        else setSelectedImageIndex((prev) => (prev - 1 + imgCount) % imgCount);
+      }
+      dragStateRef.current = { startX: 0, startY: 0, active: false, pointerId: -1, touch: false };
+      lastDragDxRef.current = 0;
+      setGalleryDragging(false);
+      setDragOffset(0);
+      // Mouse users resume autoplay via onMouseLeave (hover pauses); touch swipes
+      // release the pause here so the carousel keeps cycling.
+      if (s.touch) setGalleryPaused(false);
+    };
+    const handleWindowUp = () => {
+      endDragRef.current?.cleanup?.();
+      // Release the capture so the browser pointer is never left trapped.
+      try {
+        const el = document.getElementById('goyunir-gallery-surface');
+        if (el && dragStateRef.current.pointerId >= 0) el.releasePointerCapture(dragStateRef.current.pointerId);
+      } catch { /* already released */ }
+      endDrag();
+    };
+    const handleBlur = () => {
+      endDragRef.current?.cleanup?.();
+      endDrag();
+    };
+    endDrag.cleanup = () => {
+      window.removeEventListener('pointerup', handleWindowUp);
+      window.removeEventListener('pointercancel', handleWindowUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+    window.addEventListener('pointerup', handleWindowUp);
+    window.addEventListener('pointercancel', handleWindowUp);
+    window.addEventListener('blur', handleBlur);
+    endDragRef.current = endDrag;
   };
 
   const onGalleryPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (imgCount <= 1) return;
-    const dx = e.clientX - dragStartX.current;
-    const dy = e.clientY - dragStartY.current;
-    if (!dragActiveRef.current) {
+    if (dragStateRef.current.pointerId !== e.pointerId) return;
+    const dx = e.clientX - dragStateRef.current.startX;
+    const dy = e.clientY - dragStateRef.current.startY;
+    if (!dragStateRef.current.active) {
       // Only claim the gesture once it's clearly horizontal (not a page scroll).
       if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        dragActiveRef.current = true;
+        dragStateRef.current.active = true;
         setGalleryDragging(true);
       } else {
         return;
       }
     }
+    lastDragDxRef.current = dx;
     setDragOffset(dx);
   };
 
   const onGalleryPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
     if (imgCount <= 1) return;
-    const dx = e.clientX - dragStartX.current;
-    if (dragActiveRef.current && Math.abs(dx) > 52) {
-      if (dx < 0) setSelectedImageIndex((prev) => (prev + 1) % imgCount);
-      else setSelectedImageIndex((prev) => (prev - 1 + imgCount) % imgCount);
-    }
-    dragActiveRef.current = false;
-    setGalleryDragging(false);
-    setDragOffset(0);
-    // Mouse users resume autoplay via onMouseLeave (hover pauses); touch swipes
-    // release the pause here so the carousel keeps cycling.
-    if (e.pointerType === 'touch') setGalleryPaused(false);
+    if (dragStateRef.current.pointerId !== e.pointerId) return;
+    lastDragDxRef.current = e.clientX - dragStateRef.current.startX;
+    endDragRef.current?.cleanup?.();
+    endDragRef.current?.();
   };
 
   const prevImage = () => {
@@ -1054,8 +1100,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
         <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 16) }}>
           <div
+            id="goyunir-gallery-surface"
             onMouseEnter={() => setGalleryPaused(true)}
-            onMouseLeave={() => { if (!dragActiveRef.current) setGalleryPaused(false); }}
+            onMouseLeave={() => { if (!dragStateRef.current.active) setGalleryPaused(false); }}
             onPointerDown={onGalleryPointerDown}
             onPointerMove={onGalleryPointerMove}
             onPointerUp={onGalleryPointerEnd}

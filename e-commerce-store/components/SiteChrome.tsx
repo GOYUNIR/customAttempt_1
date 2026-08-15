@@ -36,13 +36,14 @@ const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 // Orb system defaults — overridden at runtime by /admin → Settings → Orb Glow
 // (served through `/api/store` → config.orbs). Motion uses a spring-damper so
 // the orbs feel heavy and keep momentum instead of snapping to the cursor.
+// Opacities are intentionally LOW: the glow is an ambient wash, not a blob.
 const DEFAULT_ORBS: any = {
   enabled: true,
-  primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-  secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-  tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-  fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-  fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+  primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+  secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+  tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+  fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+  fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -79,16 +80,6 @@ const ORB_LAYERS = [
   { xAmp: 24, yAmp: -18, xOff: 18, yOff: 62, k: 0.0029, friction: 0.956, impulse: 0.85 },
   { xAmp: -18, yAmp: 22, xOff: -32, yOff: 76, k: 0.0034, friction: 0.954, impulse: 0.75 },
   { xAmp: 16, yAmp: -30, xOff: 82, yOff: 18, k: 0.0046, friction: 0.968, impulse: 1.5 },
-] as const;
-
-/** Drawer-orbs drift on the same layer states, scaled way down so the compact
- *  glows sway gently inside the drawer instead of zipping around. */
-const DRAWER_ORB_OFFSETS = [
-  { ax: 20, ay: 18, bx: -10, by: -9 },
-  { ax: -14, ay: 12, bx: 7, by: -6 },
-  { ax: 12, ay: -10, bx: -6, by: 5 },
-  { ax: -9, ay: -11, bx: 4, by: 6 },
-  { ax: 8, ay: 9, bx: -4, by: -5 },
 ] as const;
 
 /** Fresh physics state for every orb layer (x, y, vx, vy). */
@@ -164,11 +155,10 @@ function chromeBackground(color: string, alphaPct: number, fallback: string, min
 /**
  * Radial-gradient paint for a glow orb at the given opacity.
  *
- * `soft` (used by the cart drawer) tapers the glow far more aggressively
- * (transparent by 58% of the radius instead of 72%) so a compact orb reads as
- * a gentle, seamless wash of light — never a visible disc with a hard edge.
- * An explicit opacity of 0 always returns "transparent" so a disabled glow can
- * never render.
+ * `soft` tapers the glow far more aggressively (transparent by 58% of the
+ * radius instead of 72%) so a compact orb reads as a gentle, seamless wash of
+ * light — never a visible disc with a hard edge. An explicit opacity of 0
+ * always returns "transparent" so a disabled glow can never render.
  */
 function orbGradient(color: string, opacity: number, fallback: string, soft = false) {
   const hex = normalizeHex(color, fallback);
@@ -178,33 +168,6 @@ function orbGradient(color: string, opacity: number, fallback: string, soft = fa
     return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 30%, ${hex}${alphaHex(pct * 0.16)} 46%, transparent 60%)`;
   }
   return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 34%, ${hex}${alphaHex(pct * 0.14)} 54%, transparent 72%)`;
-}
-
-/**
- * Resolve an orb's configured opacity for the cart-drawer glow. Respects an
- * explicit 0 (no glow) and never boosts the value. The drawer used to hardcode
- * +6/+10/+12 opacity boosts on 84-86% drawer-sized orb divs with negative
- * offsets — the result was huge clipped colour blobs with hard edges where the
- * drawer's `overflow: hidden` boundary cut through the still-strong part of the
- * gradients. The drawer now uses the exact admin-configured opacities.
- */
-function orbGlowOpacity(value: unknown, fallback: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.min(100, n));
-}
-
-/**
- * Drawer-specific orb opacity. The cart drawer surface is a dark panel, so the
- * admin orb opacity that reads on the storefront is faint inside the drawer.
- * Scale it up (capped) so the glow has a similar presence — but an EXPLICIT 0
- * stays 0 (a disabled orb must never render), and the floor is much lower than
- * the old +18 so a low admin opacity stays subtle instead of forced-visible.
- */
-function drawerOrbOpacity(value: unknown, fallback: number): number {
-  const base = orbGlowOpacity(value, fallback);
-  if (base <= 0) return 0;
-  return Math.min(52, Math.max(10, Math.round(base * 1.9 + 8)));
 }
 
 function readCart(): CartItem[] {
@@ -313,15 +276,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const orbTertiaryRef = useRef<HTMLDivElement | null>(null);
   const orbFourthRef = useRef<HTMLDivElement | null>(null);
   const orbFifthRef = useRef<HTMLDivElement | null>(null);
-  // Cart-drawer orbs: the drawer paints above the page-level orb layer, so it
-  // carries its own glow layer. These refs let the SAME rAF loop that drives
-  // the page orbs drift the drawer orbs too (they would otherwise be frozen
-  // static blobs while the page orbs keep gliding).
-  const drawerOrbPrimaryRef = useRef<HTMLDivElement | null>(null);
-  const drawerOrbSecondaryRef = useRef<HTMLDivElement | null>(null);
-  const drawerOrbTertiaryRef = useRef<HTMLDivElement | null>(null);
-  const drawerOrbFourthRef = useRef<HTMLDivElement | null>(null);
-  const drawerOrbFifthRef = useRef<HTMLDivElement | null>(null);
   // Tracks whether a finger is actively on the screen. While touching, scroll
   // motion is paused so the orbs keep following the finger instead of being
   // yanked around by the page scroll on mobile.
@@ -460,25 +414,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       apply(tertiary, ORB_LAYERS[2], states[2] || { x: 0.5, y: 0.35 });
       apply(fourth, ORB_LAYERS[3], states[3] || { x: 0.5, y: 0.35 });
       apply(fifth, ORB_LAYERS[4], states[4] || { x: 0.5, y: 0.35 });
-      // Cart-drawer orbs drift on the same layer states so the ambient glow
-      // keeps moving while the drawer is open. The amplitudes are tiny and
-      // centered so the glows can never leave the drawer bounds (no clipping).
-      const dEls = [
-        drawerOrbPrimaryRef.current,
-        drawerOrbSecondaryRef.current,
-        drawerOrbTertiaryRef.current,
-        drawerOrbFourthRef.current,
-        drawerOrbFifthRef.current,
-      ];
-      for (let i = 0; i < dEls.length; i += 1) {
-        const el = dEls[i];
-        if (!el) continue;
-        const state = states[i] || { x: 0.5, y: 0.35 };
-        const off = DRAWER_ORB_OFFSETS[i];
-        const x = clamp(state.x, -0.2, 1.2);
-        const y = clamp(state.y, -0.12, 1.12);
-        el.style.transform = `translate3d(${(off.ax + x * off.bx) * intensity}px, ${(off.ay + y * off.by) * intensity}px, 0)`;
-      }
     };
 
     let rafId = 0;
@@ -891,13 +826,17 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // /api/store → config → themeColors). Keeps drawer/card text editable.
   const liveTheme = { ...GOYUNIR_STORE_SUITE.themeColors, ...(theme || {}) } as Record<string, any>;
   const chromeAlpha = clamp(Number(liveTheme.chromeTransparency ?? 94), 0, 100);
-  const headerBg = chromeBackground(liveTheme.cardBackground, chromeAlpha, 'rgba(8,8,10,0.94)');
+  // Top bar gets its OWN color settings (admin → Settings → Theme Colors →
+  // "Top bar"). When headerBackground is empty it falls back to the card
+  // surface (the classic look); headerText empty = auto-picked from the bg.
+  const headerBase = String(liveTheme.headerBackground || liveTheme.cardBackground || '#ffffff').trim();
+  const headerBg = chromeBackground(headerBase, chromeAlpha, 'rgba(8,8,10,0.94)');
   const drawerBg = chromeBackground(liveTheme.cardBackground, Math.max(chromeAlpha, 92), '#0b0b0f', 92);
   const drawerText = liveTheme.cardTextMain || '#ffffff';
   const drawerTextMuted = liveTheme.cardTextMuted || '#a1a1aa';
   // Readable foreground for the top bar: hardcoded white text is invisible on
   // light presets (e.g. white header), so derive it from the header background.
-  const headerText = readableTextOn(liveTheme.cardBackground);
+  const headerText = String(liveTheme.headerText || readableTextOn(headerBase) || '#f5f5f7');
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
@@ -952,7 +891,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         )}
       </div>
       {bannerMessage && (
-        <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 42%)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 40px rgba(0,0,0,0.35)' }}>
+        <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 40%)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 12px 40px rgba(0,0,0,0.35)' }}>
           {bannerMessage}{promoCode ? ` · ${promoCode}` : ''}
         </div>
       )}
@@ -961,7 +900,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           <div
             onClick={() => setNotice(null)}
             role="alert"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 999, background: 'rgba(10,10,12,0.96)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 40%)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.45)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.45)' : notice.type === 'loading' ? 'rgba(125,211,252,0.45)' : 'rgba(255,255,255,0.18)'}`, fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 16px 40px rgba(0,0,0,0.5)', cursor: 'pointer' }}>
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 999, background: 'rgba(10,10,12,0.96)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 40%)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.45)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.45)' : notice.type === 'loading' ? 'rgba(125,211,252,0.45)' : 'rgba(255,255,255,0.18)'}`, fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 16px 40px rgba(0,0,0,0.5)', cursor: 'pointer' }}>
             <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
               {notice.type === 'loading' ? (
                 <>
@@ -1077,7 +1016,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             title={actionTitle}
             style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: headerText === '#0a0a0c' ? '1px solid rgba(10,10,12,0.18)' : '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : headerText, cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
           >
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M3 4h2l2.4 9.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L17 7H7" /></svg>
+            {headerActionMode === 'bag' ? (
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8h12l1 12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1L6 8Z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M3 4h2l2.4 9.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L17 7H7" /></svg>
+            )}
             {cart.length > 0 ? <span style={{ position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, padding: '0 4px', fontSize: 10, borderRadius: 999, background: '#7dd3fc', color: '#07121f', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{cart.length}</span> : null}
           </button>
         </div>
@@ -1128,32 +1071,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, ...glassSurfaceStyle(theme, { bg: drawerBg, dark: true, shadow: cardShadowStyle(theme, 24) }), borderLeft: '1px solid rgba(255,255,255,0.16)' }}>
-            {/* Orb glows inside the cart drawer — mirrors the storefront glow so
-                the ambient orbs stay visible while the drawer is open (the drawer
-                paints above the page-level orb layer). Every orb uses the SOFT
-                gradient (fully transparent by 60% of its radius) at a compact
-                size so it reads as a gentle wash of light — never a disc with a
-                hard edge. An orb with admin opacity 0 renders nothing. The same
-                rAF loop that animates the page orbs sways them (small, centered
-                amplitudes so they can never clip at the drawer edge). */}
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.05), transparent 26%)' }} />
-              {orbsEnabled && primaryOrb.enabled !== false && (
-                <div ref={drawerOrbPrimaryRef} style={{ position: 'absolute', top: '5%', right: '4%', width: '34%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(primaryOrb.color, drawerOrbOpacity(primaryOrb.opacity, 16), '#3b82f6', true) }} />
-              )}
-              {orbsEnabled && secondaryOrb.enabled !== false && (
-                <div ref={drawerOrbSecondaryRef} style={{ position: 'absolute', left: '3%', bottom: '6%', width: '30%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(secondaryOrb.color, drawerOrbOpacity(secondaryOrb.opacity, 26), '#a855f7', true) }} />
-              )}
-              {orbsEnabled && tertiaryOrb.enabled !== false && (
-                <div ref={drawerOrbTertiaryRef} style={{ position: 'absolute', right: '8%', bottom: '14%', width: '22%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(tertiaryOrb.color, drawerOrbOpacity(tertiaryOrb.opacity, 12), '#ffd79b', true) }} />
-              )}
-              {orbsEnabled && fourthOrb.enabled !== false && (
-                <div ref={drawerOrbFourthRef} style={{ position: 'absolute', top: '12%', left: '2%', width: '20%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fourthOrb.color, drawerOrbOpacity(fourthOrb.opacity, 10), '#7dd3fc', true) }} />
-              )}
-              {orbsEnabled && fifthOrb.enabled !== false && (
-                <div ref={drawerOrbFifthRef} style={{ position: 'absolute', right: '6%', bottom: '8%', width: '16%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fifthOrb.color, drawerOrbOpacity(fifthOrb.opacity, 8), '#f472b6', true) }} />
-              )}
-            </div>
             <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>

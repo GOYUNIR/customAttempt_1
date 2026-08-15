@@ -42,6 +42,10 @@ export interface StoreConfig {
     /** Secondary/muted text color rendered on card/info-box backgrounds. */
     cardTextMuted: string;
     checkoutCtaButton: string;
+    /** Top-bar background — empty = derived from cardBackground + chrome transparency. */
+    headerBackground?: string;
+    /** Top-bar text/icon color — empty = auto-picked from the header background. */
+    headerText?: string;
     fontFamily?: string;
     borderRadius?: number;
     /** Header/footer/cart-drawer opacity (0-100) — set from /admin → Settings. */
@@ -141,6 +145,9 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     cardTextMain: '#1d1d1f',
     cardTextMuted: '#52525a',
     checkoutCtaButton: '#0071e3',
+    // Top bar colors — empty = auto (derived from cardBackground + chrome alpha).
+    headerBackground: '',
+    headerText: '',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 24,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
@@ -220,11 +227,11 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   },
   orbs: {
     enabled: true,
-    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-    fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-    fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+    fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+    fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
     motion: {
       idleEnabled: true,
       pointerEnabled: true,

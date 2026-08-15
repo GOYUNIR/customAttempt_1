@@ -12,6 +12,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     cardTextMain: '#1d1d1f',
     cardTextMuted: '#52525a',
     checkoutCtaButton: '#0071e3',
+    // Top bar colors — empty = auto (derived from cardBackground + chrome alpha).
+    headerBackground: '',
+    headerText: '',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 22,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
@@ -106,6 +109,14 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         image: '/images/cargo/1.jpeg',
         description: 'Utility-inspired cargo pants in raw, undyed cotton canvas. Still in development, no firm date yet.',
       },
+      {
+        name: 'Solar Drift — Upcoming FCFS',
+        status: 'Upcoming',
+        eta: 'Soon',
+        image: '/images/baseItem1/2.jpeg',
+        description: 'Direct-purchase drop entering the queue — a bright, immediate FCFS release.',
+        slug: 'solar-drift-upcoming-fcfs',
+      },
     ],
     archiveScents: [
       {
@@ -114,19 +125,27 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         image: '/images/crimson-static/1.jpeg',
         description: 'A discontinued profile built around raw saffron and dark cassis.',
       },
+      {
+        name: 'Atlas Bloom — Archive',
+        status: 'Archived',
+        image: '/images/baseItem2/1.jpeg',
+        description: 'Completed direct drop preserved in the archive lane.',
+        slug: 'atlas-bloom-archive',
+      },
     ],
   },
 
   // Glow orb system (editable live from /admin → Settings → Orb Glow).
-  // Background glow orbs behind the storefront content. The old top-bar orb
-  // has been removed in favor of more (smaller, subtler) background orbs.
+  // Background glow orbs behind the storefront content. Opacities stay LOW on
+  // purpose — the glow is an ambient wash, not a blob. The top-bar orb and the
+  // cart-drawer orbs were removed (see the changelog).
   orbs: {
     enabled: true,
-    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-    fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-    fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+    fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+    fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
     motion: {
       idleEnabled: true,
       pointerEnabled: true,
@@ -156,7 +175,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       notes: [
         { label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' },
       ],
-      images: ['/images/elysian-white/1.jpeg'],
+      images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
       maxRaffleAllocationLimit: 120,
       totalInventory: 120,
       winnerTiers: [3, 2, 2],
@@ -178,7 +197,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       notes: [
         { label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' },
       ],
-      images: ['/images/obsidian-void/1.jpeg'],
+      images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
       maxRaffleAllocationLimit: 90,
       totalInventory: 90,
       winnerTiers: [2, 2, 1],
@@ -201,7 +220,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       notes: [
         { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },
       ],
-      images: ['/images/baseItem1/1.jpeg'],
+      images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
       maxRaffleAllocationLimit: 0,
       totalInventory: 160,
       winnerTiers: [0],

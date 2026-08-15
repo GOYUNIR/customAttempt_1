@@ -41,6 +41,10 @@ export type ThemePreset = {
     /** Secondary/muted text color rendered on card/info-box backgrounds. */
     cardTextMuted: string;
     checkoutCtaButton: string;
+    /** Top bar background — empty = auto (derived from cardBackground + chrome). */
+    headerBackground: string;
+    /** Top bar text — empty = auto (readable color picked from the header bg). */
+    headerText: string;
     /** CSS font stack applied to the storefront body. */
     fontFamily: string;
     /** Border radius in px — 0 = square, ~10 = small rounded, 999 = fully rounded. */
@@ -89,6 +93,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#1d1d1f',
       cardTextMuted: '#3f3f46',
       checkoutCtaButton: '#0071e3',
+      headerBackground: '#ffffff',
+      headerText: '',
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 26,
       chromeTransparency: 56,
@@ -127,6 +133,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#1d1d1f',
       cardTextMuted: '#3f3f46',
       checkoutCtaButton: '#0071e3',
+      headerBackground: '#ffffff',
+      headerText: '',
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 24,
       chromeTransparency: 62,
@@ -164,6 +172,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#F7F7F7',
       cardTextMuted: '#ccd4de',
       checkoutCtaButton: '#111111',
+      headerBackground: '#111111',
+      headerText: '',
       fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif",
       borderRadius: 18,
       chromeTransparency: 66,
@@ -201,6 +211,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#FFFFFF',
       cardTextMuted: '#dcdce6',
       checkoutCtaButton: '#FF3E3E',
+      headerBackground: '#161618',
+      headerText: '',
       fontFamily: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 20,
       chromeTransparency: 62,
@@ -238,6 +250,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#F5F2EC',
       cardTextMuted: '#e9f2e5',
       checkoutCtaButton: '#2C3E2B',
+      headerBackground: '#2C3E2B',
+      headerText: '',
       fontFamily: "'Nunito', 'Poppins', 'Segoe UI', sans-serif",
       borderRadius: 24,
       chromeTransparency: 62,
@@ -275,6 +289,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#F7F2E9',
       cardTextMuted: '#e1d9c6',
       checkoutCtaButton: '#B01E23',
+      headerBackground: '#17150F',
+      headerText: '',
       fontFamily: "'Playfair Display', 'Iowan Old Style', Georgia, 'Times New Roman', serif",
       borderRadius: 18,
       chromeTransparency: 68,
@@ -312,6 +328,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#FAFAFA',
       cardTextMuted: '#dadce4',
       checkoutCtaButton: '#0A0A0A',
+      headerBackground: '#111111',
+      headerText: '',
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 22,
       chromeTransparency: 60,
@@ -349,6 +367,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#F5F1E6',
       cardTextMuted: '#d8e1ec',
       checkoutCtaButton: '#C9A227',
+      headerBackground: '#111D2E',
+      headerText: '',
       fontFamily: "'IBM Plex Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
       borderRadius: 20,
       chromeTransparency: 64,
@@ -386,6 +406,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#F7F2E9',
       cardTextMuted: '#e5decc',
       checkoutCtaButton: '#D4AF37',
+      headerBackground: '#121212',
+      headerText: '',
       fontFamily: "'Cormorant Garamond', 'Playfair Display', Georgia, serif",
       borderRadius: 20,
       chromeTransparency: 64,
@@ -423,6 +445,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#f0f9ff',
       cardTextMuted: '#cfdbec',
       checkoutCtaButton: '#22d3ee',
+      headerBackground: '#0b0f1a',
+      headerText: '',
       fontFamily: "'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif",
       borderRadius: 22,
       chromeTransparency: 60,
@@ -460,6 +484,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       cardTextMain: '#241C14',
       cardTextMuted: '#473f31',
       checkoutCtaButton: '#C05B3C',
+      headerBackground: '#FFFFFF',
+      headerText: '',
       fontFamily: "'Sora', 'Inter', 'Segoe UI', Arial, sans-serif",
       borderRadius: 24,
       chromeTransparency: 60,

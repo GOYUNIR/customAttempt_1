@@ -24,7 +24,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Conversion is deferred — customers commit first and pay later, so instant revenue is lower than a direct FCFS drop.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Manufactured scarcity, email capture, and careful winner selection on a marquee product.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 120, totalInventory: 120, winnerTiers: [3, 2, 2], releaseEndsAt: isoIn(2 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -37,7 +37,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Lower instant revenue than FCFS and a higher chance customers feel “waitlisted” if the pool overfills.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'VIP / early-access releases where exclusivity is the whole point.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -50,7 +50,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Can sell through instantly and skips the anticipation of a draw.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Immediate conversion from social clicks, bundles, and upselling a cheap entry into a full purchase.' },
     ],
-    priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'], createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -63,7 +63,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Less selective than a draw, and lower-priced SKUs can cannibalize the hero size if priced too close.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Polished launches where the goal is speed and order value, not manufactured scarcity.' },
     ],
-    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -76,7 +76,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Not monetizable until the go-live moment, so it depends on the countdown converting.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Teaser launches, influencer announcements, and anything that benefits from a fixed opening time.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -89,7 +89,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Inventory can disappear very quickly once open, which is the intended tension for FCFS.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Time-boxed launches where precision timing is the hook.' },
     ],
-    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -102,7 +102,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Deliberately low conversion capacity, so it will never generate large revenue numbers.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Statement pieces and collector drops where scarcity IS the product.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -115,7 +115,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Intentionally not the primary conversion surface anymore — it tells the story rather than closing the sale.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'A living archive that makes “everything sells out” look like the norm.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 118, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 118, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -128,7 +128,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Meant for trust, not instant sales — don’t expect new orders from it.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Proving a track record before the next launch opens.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -141,7 +141,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Invisible until activated, so it contributes nothing to traffic or revenue while drafted.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Pre-launch staging, client review, and seasonal planning.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -154,7 +154,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Splits attention across two live offers, which can dilute focus on the hero.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Companion pieces, regional variants, or a second tier running beside the flagship.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -167,7 +167,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Less selective than a prestige draw and can feel like a commodity if over-stocked.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Cart stress testing, bundles, and higher-volume direct SKUs.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 152, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 152, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
     maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -180,7 +180,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Takes a slot on the active list without generating new orders.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Keeping a catalog looking successful between drops.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 88, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 88, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -193,7 +193,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'More moving parts than a simple drop — needs clean product config to avoid confusion.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Bundles, memberships, and any drop where the goal is maximizing order value.' },
     ],
-    priceCategories: [{ size: 'Discovery Kit', price: 42, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 168, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Grand Size', price: 240, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg'],
+    priceCategories: [{ size: 'Discovery Kit', price: 42, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 168, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Grand Size', price: 240, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 4, maxPerCart: 4, maxRaffleAllocationLimit: 0, totalInventory: 220, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 30, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 2000, deliveryIncentiveMinOrderSubtotalCents: 12000, deliveryIncentiveExpiresDays: 45, deliveryIncentiveCodePrefix: 'GILDE', deliveryIncentiveTriggerSizes: ['Discovery Kit'], deliveryIncentiveEligibleProductSlugs: ['gilded-hour-member-bundle'], deliveryIncentiveEligibleSizes: ['Full Bottle', 'Grand Size'], createdAt: NOW, updatedAt: NOW,
   },
 ];
@@ -210,6 +210,9 @@ const DEFAULT_CONFIG = {
     cardTextMain: '#1d1d1f',
     cardTextMuted: '#52525a',
     checkoutCtaButton: '#0071e3',
+    // Top bar colors — empty = auto (derived from cardBackground + chrome alpha).
+    headerBackground: '',
+    headerText: '',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 24,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
@@ -335,11 +338,11 @@ const DEFAULT_CONFIG = {
   },
   orbs: {
     enabled: true,
-    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
-    fourth: { enabled: true, color: '#7dd3fc', opacity: 10, size: 36 },
-    fifth: { enabled: true, color: '#f472b6', opacity: 8, size: 24 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+    fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+    fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
     motion: {
       idleEnabled: true,
       pointerEnabled: true,

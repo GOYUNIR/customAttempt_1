@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride , getAdminPassword, TICKS_LAST_KEY, TICKS_TODAY_KEY, TICKS_DAY_STAMP_KEY} from '@/lib/server-config';
+import { createRedisClient, SOCIAL_PROOF_BOOST_KEY, getSocialProofOverride, getAdminPassword, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -33,19 +33,28 @@ export async function GET(request: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const dayStamp = await redis.get(TICKS_DAY_STAMP_KEY);
+  // The ticker state lives in ONE hash (`analytics:ticks`) so the analytics
+  // namespace stays tidy — day stamp, today counter and last-tick timestamp
+  // are just three fields of the same key.
+  const [dayStamp, todayRaw, lastRaw] = await Promise.all([
+    redis.hget(ANALYTICS_TICKS_KEY, TICKS_DAY_FIELD).catch(() => null),
+    redis.hget(ANALYTICS_TICKS_KEY, TICKS_TODAY_FIELD).catch(() => null),
+    redis.hget(ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD).catch(() => null),
+  ]);
   if (dayStamp !== today) {
-    await redis.set(TICKS_DAY_STAMP_KEY, today);
-    await redis.set(TICKS_TODAY_KEY, '0');
+    await redis.hset(ANALYTICS_TICKS_KEY, {
+      [TICKS_DAY_FIELD]: today,
+      [TICKS_TODAY_FIELD]: '0',
+    });
   }
 
-  const ticksToday = Number((await redis.get(TICKS_TODAY_KEY)) ?? 0);
+  const ticksToday = Number(todayRaw ?? 0);
   if (ticksToday >= (cfg.autoIncrementMaxPerDay ?? 4)) {
     return NextResponse.json({ skipped: true, reason: 'daily cap reached', ticksToday });
   }
 
   const now = Date.now();
-  const last = Number((await redis.get(TICKS_LAST_KEY)) ?? 0);
+  const last = Number(lastRaw ?? 0);
   const minGapMs = (cfg.autoIncrementMinHourGap ?? 3) * 60 * 60 * 1000;
   const maxGapMs = Math.max(minGapMs, (cfg.autoIncrementMaxHourGap ?? 8) * 60 * 60 * 1000);
   if (last && now - last < minGapMs) {
@@ -63,8 +72,10 @@ export async function GET(request: Request) {
 
   const amount = (cfg.autoIncrementAmount ?? 1) * (1 + Math.floor(Math.random() * 3));
   const boost = await redis.incrby(SOCIAL_PROOF_BOOST_KEY, amount);
-  await redis.set(TICKS_LAST_KEY, String(now));
-  await redis.incr(TICKS_TODAY_KEY);
+  await redis.hset(ANALYTICS_TICKS_KEY, {
+    [TICKS_LAST_FIELD]: String(now),
+  });
+  await redis.hincrby(ANALYTICS_TICKS_KEY, TICKS_TODAY_FIELD, 1);
 
   return NextResponse.json({ ok: true, boost, amount, ticksToday: ticksToday + 1 });
 }

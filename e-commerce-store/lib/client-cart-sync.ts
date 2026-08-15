@@ -6,8 +6,8 @@
  * The anonymous cart lives in localStorage (`goyunir-cart`). When a customer
  * signs in, this module:
  *
- *   1. fetches the account's saved cart (`store:cart:<userId>` via
- *      `/api/cart/sync`),
+ *   1. fetches the account's saved cart (`store:carts` hash, field = user id,
+ *      via `/api/cart/sync`),
  *   2. merges it with the current local bag (server first, local overrides the
  *      same product+size lines so freshly-added items keep the newest price),
  *   3. writes the merged bag back to localStorage (firing `goyunir-cart-updated`

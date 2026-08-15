@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, SCHEDULE_OVERRIDE_KEY, SOCIAL_PROOF_OVERRIDE_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { mergeOrbsConfig } from '@/lib/storefront-config';
 
@@ -38,6 +38,9 @@ const DEFAULT_CONFIG = {
     cardTextMain: '#1d1d1f',
     cardTextMuted: '#52525a',
     checkoutCtaButton: '#0071e3',
+    // Top bar colors — empty = auto (derived from cardBackground + chrome alpha).
+    headerBackground: '',
+    headerText: '',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 24,
     radiusStyle: 'squircle',
@@ -111,10 +114,11 @@ const DEFAULT_CONFIG = {
   },
   orbs: {
     enabled: true,
-    topBar: { enabled: true, color: '#7dd3fc', opacity: 34, size: 210 },
-    primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
-    secondary: { enabled: true, color: '#a855f7', opacity: 26, size: 44 },
-    tertiary: { enabled: true, color: '#ffd79b', opacity: 12, size: 28 },
+    primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
+    secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
+    tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
+    fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
+    fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
     motion: {
       idleEnabled: true,
       pointerEnabled: true,
@@ -206,11 +210,11 @@ export async function GET(request: NextRequest) {
       : null;
 
     // Get global schedule override
-    const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
+    const scheduleRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD);
     const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
 
     // Get social proof override
-    const socialRaw = await redis.get(SOCIAL_PROOF_OVERRIDE_KEY);
+    const socialRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD);
     const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 
     return NextResponse.json({

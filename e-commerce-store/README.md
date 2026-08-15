@@ -149,7 +149,7 @@ Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
   "You're already entered" message.
 - Checkout from the bag clears the bag once all raffle entries are secured.
 - **The bag follows the account.** Signed-in customers get their cart saved to
-  Redis (`store:cart:<userId>` via `/api/cart/sync`) on every change, and it is
+  Redis (`store:carts` — a single hash keyed by user id — via `/api/cart/sync`) on every change, and it is
   merged into the browser bag on login — so the same account sees the same bag
   on any device. Anonymous visitors keep the localStorage bag as before.
 

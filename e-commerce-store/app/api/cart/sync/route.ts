@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
-import { userCartKey } from '@/lib/redis-keys';
+import { STORED_CARTS_KEY } from '@/lib/redis-keys';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic';
  * Signed-in cart persistence.
  *
  * The browser cart lives in localStorage (`goyunir-cart`). When a customer is
- * signed in, SiteChrome also mirrors it here under `store:cart:<userId>` so the
+ * signed in, SiteChrome also mirrors it here under `store:carts` (hash, field =
+ * user id) so the
  * same account sees the same bag on every device/browser. The client merges
  * server + local on login (once per page session) and then persists every
  * change through POST /api/cart/sync (debounced client-side).
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
     if (!user?.userId) return NextResponse.json({ items: [] });
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ items: [] });
-    const raw = await redis.get(userCartKey(user.userId));
+    const raw = await redis.hget(STORED_CARTS_KEY, user.userId);
     const parsed = safeParseRedisItem<any>(raw);
     return NextResponse.json({ items: sanitizeItems(parsed) });
   } catch {
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     const items = sanitizeItems(body?.items);
     const redis = createRedisClient();
     if (redis) {
-      await redis.set(userCartKey(user.userId), JSON.stringify(items));
+      await redis.hset(STORED_CARTS_KEY, { [user.userId]: JSON.stringify(items) });
     }
     return NextResponse.json({ saved: true, count: items.length });
   } catch {

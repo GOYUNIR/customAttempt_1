@@ -403,6 +403,18 @@ export async function GET(request: Request) {
         'reset:',
         'draw:last_auto:',
         'waitlist:',
+        // v2 consolidation leftovers — these namespaces are now FIELDS of a
+        // single hash (ops:overrides / store:carts / entries:last_auto /
+        // analytics:ticks / admin:verify:<email>); any top-level key with these
+        // prefixes is stale and should be folded by Tidy Redis Schema.
+        'ops:override:',
+        'store:cart:',
+        'entries:last_auto:',
+        'analytics:ticks:last',
+        'analytics:ticks:today',
+        'analytics:ticks:day',
+        'admin:verify_attempts:',
+        'admin:send_attempts:',
       ];
       const foundLegacy: string[] = [];
       for (const prefix of legacyPrefixes) {
