@@ -288,23 +288,50 @@ input like `123 realstreet` can never be saved.
   fire for admin-created products), decides per-pool due-ness from the product's
   own timings, and charges winners with the same logic the old cron used.
 - **Due-ness rules** (`shouldRunPoolDraw`): force → draw; product `isArchived` →
-  final draw; product `releaseEndsAt` passed → draw (the "timer hit zero" case);
-  otherwise fall back to the global drop-schedule cadence. Upcoming products whose
-  `goLiveAt` passed are auto-activated (the Redis record is flipped to live) so
-  the raffle timer starts counting to `releaseEndsAt`.
+  final draw. A product with an explicit `releaseEndsAt` uses that as its CYCLE
+  boundary — the pool is NEVER drawn before the countdown ends (a cron run or
+  unrelated ping must not charge winners early), then draws once the timer hits
+  zero. Recurring raffles (a schedule can produce a next draw: hourly/daily/
+  weekly/biweekly/monthly/yearly) draw now and the runner ROLLS the product's
+  `releaseEndsAt` forward to the next scheduled moment; one-shot drops (fixed
+  date passed, no next anchor) draw at most once after the cycle ends. Products
+  with NO explicit `releaseEndsAt` fall back to the global cadence
+  (`shouldRunDraw`). Upcoming products whose `goLiveAt` passed are auto-activated
+  (the Redis record is flipped to live) so the raffle timer starts counting to
+  `releaseEndsAt`.
+- **Recurring raffles / the "new raffle" timer.** When a draw completes with
+  inventory remaining (and the product is not archived), the engine computes the
+  next scheduled draw moment (`getNextRecurringAnchorMs` in
+  `lib/storefront-config.ts`, merging static config → `store:config.dropSchedule`
+  → `ops:override:schedule` → per-product `customDropSchedule`) and PERSISTS it as
+  the product's new `releaseEndsAt` (naive store-time wall clock via
+  `formatStoreWallClock` in `lib/drop-timestamps.ts`). The storefront then shows a
+  countdown to the NEW timer instead of "Raffle closed"/"Until sold out". Both
+  `/api/store` and `/api/catalog/status` also compute a read-time
+  `nextReleaseEndsAt` field per product so the UI shows the new timer even before
+  the engine's roll-forward is observed. Unselected entries carry over into the
+  next raffle round. The per-product cadence is configured from `/admin → Products
+  → Edit → Raffle schedule (recurring)`; the global cadence lives in `/admin →
+  Draws → Automation` (mode: fixed/hourly/daily/weekly/biweekly/monthly/yearly).
 - **Triggers:** (1) the client countdown pings `/api/checkout/auto-draw`
   (`lib/client-auto-draw.ts` → `notifyDropDue()`) from the product page, catalog
   and home page the second a countdown hits zero — a drop happens immediately with
   NO cron; (2) the Vercel cron (`vercel.json`: `*/5 * * * *` →
   `/api/checkout/cron-draw`, auth via `x-vercel-cron` / `Authorization: Bearer
   $CRON_SECRET`) is the server-side safety net; (3) the admin → Draws → Trigger
-  Drop path (unchanged).
+  Drop path (unchanged). The product page splits the countdown into a DISPLAY
+  anchor (the effective `nextReleaseEndsAt`) and a TRIGGER anchor (the raw cycle
+  end) so a recurring raffle shows its new timer while still nudging the draw.
 - **Anti-double-draw:** the runner checks `entries:last_auto:<product>:<size>`
   and skips a pool drawn within the last 90s unless the caller forced it (cron).
   `dryRun=1` simulates the draw without charging/archiving (used by the admin
   self-test and support).
 - **Admin-created product lifecycle** is now persisted: go-live flips are written
-  to `store:products`, and sold-out pools are archived to `ops:catalog_archive`.
+  to `store:products`, sold-out pools are archived to `ops:catalog_archive`, and
+  recurring-raffle roll-forwards write the new `releaseEndsAt` back to
+  `store:products`. Winner counts come from the product's per-size
+  `priceCategories[].winnerTiers` CSV (admin "Winners / draw", e.g. `3,2,2` →
+  3 winners on draw 1), falling back to `winnerTiers`, then the live state.
 
 ### Promo codes
 
@@ -420,6 +447,16 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — DROP-ON-TIMER-ZERO fixed for real (recurring raffles + the new timer) + per-product raffle schedule settings:**
+  - **💥 The drop now ACTUALLY fires on timer-zero and then starts a NEW raffle.** Verified end-to-end against live Redis: a product whose `releaseEndsAt` passed drew its pool, and because inventory remained the engine rolled the product's `releaseEndsAt` FORWARD to the next scheduled draw moment (today 21:00 store time for the seeded daily schedule). The pool is not due again until that new timer hits zero — the storefront shows the NEW countdown instead of "Raffle closed"/"Until sold out".
+  - **The engine never drew before the timer ended — now fixed.** `shouldRunPoolDraw` treated a product with a future `releaseEndsAt` as due whenever `lastAuto` was 0 (the cadence fallback fired even though the product's own countdown hadn't ended), so a cron run could have charged winners EARLY. It now treats the product's `releaseEndsAt` as its CYCLE boundary: never due before it, due once it passes, and after the draw it rolls the boundary forward (recurring) or marks the pool done (one-shot).
+  - **Recurring-raffle roll-forward** (`lib/auto-draw.ts`): after a draw with inventory remaining, the engine computes the next scheduled draw moment (`getNextRecurringAnchorMs`) and persists it as the product's new `releaseEndsAt` (store-time wall clock via new `formatStoreWallClock` in `lib/drop-timestamps.ts`). Per-product `customDropSchedule` overrides the global cadence; the global cadence now merges static config → `store:config.dropSchedule` → `ops:override:schedule` so the engine agrees with the storefront's config (drawHour 21 vs the old static drawHour 0 mismatch is gone).
+  - **`nextReleaseEndsAt` on the storefront payloads.** `/api/store` and `/api/catalog/status` compute a read-time `nextReleaseEndsAt` per product (`resolveNextRaffleAnchorMs` in `lib/storefront-config.ts`), so the product page, home cards and catalog tiles show the new timer immediately — even before the engine's roll-forward is observed. The product page splits the countdown into a DISPLAY anchor (new timer) and a TRIGGER anchor (raw cycle end) so the draw still fires on load for an ended-but-un-drawn pool.
+  - **Home page "Until sold out" is gone** for recurring raffles — `formatCountdown` and the countdown clock now use the effective anchor (`nextReleaseEndsAt || releaseEndsAt`).
+  - **Winner counts honor the product's tiers.** The auto-draw now charges `priceCategories[].winnerTiers` (admin "Winners / draw", e.g. `3,2,2` → 3 winners on draw 1) instead of the seeded live state's stale `winnersPerDraw: 1`. The seed route now seeds live states with the first-tier count too.
+  - **Admin → Products → Edit → "Raffle schedule (recurring)"** — a per-product toggle + cadence selector (hourly/daily/weekly/biweekly/monthly/yearly), timezone, and the mode-specific draw time/day fields, persisted as `customDropSchedule` by `/api/admin/products`. The global cadence selector already lives in `/admin → Draws → Automation`.
+  - Docs: AGENTS.md updated (auto-draw section + this changelog). No new Redis keys. Verified: `tsc --noEmit` clean, full `eslint` clean (0/0), `npm test` 25/25 pass, `npm run build` compiles every route + middleware, and the live-draw dry-run + real roll-forward were tested against the live store.
 
 - **2026-08-15 — Apple Liquid Glass design system + ALL presets rebuilt on Apple design language + new "Apple" preset + snappier-perf pass + production finalization:**
   - **🍎 New flagship `Apple` preset** (`lib/theme-presets.ts`, `id: 'apple'`) — the full iOS 26 Liquid Glass look: `#f2f2f7` system background, SF Pro stack, squircle radius 26, heavy `blur(36px) saturate(196%) brightness(110%)` chrome, 96% card translucency, soft layered shadows, spacious rhythm, and iOS-vibrant glow orbs (blue/purple/pink/cyan/orange). It is the FIRST card in `/admin → Settings → Design Presets`.

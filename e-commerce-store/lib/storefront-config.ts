@@ -1,4 +1,5 @@
 import { DEFAULT_LEGAL, type StoreLegalConfig } from '@/lib/legal-config';
+import { dropTimestampToMs } from './drop-timestamps';
 
 export interface StorefrontNote {
   label: string;
@@ -707,12 +708,12 @@ export function scheduledDateToTimestamp(isoWallClock: string, timezone: string)
   return zonedTimeToTimestamp({ timezone, ...parsed });
 }
 
-export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): number {
+export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig, afterMs: number = Date.now()): number {
   if (schedule.mode === 'fixed') {
     return scheduledDateToTimestamp(schedule.targetEndDateTime, schedule.timezone);
   }
 
-  const now = new Date();
+  const now = new Date(afterMs);
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: schedule.timezone,
     hourCycle: 'h23',
@@ -840,4 +841,49 @@ export function getNextDrawTimestampForSchedule(schedule: DropScheduleConfig): n
 
 export function getNextDrawTimestamp(config: StorefrontConfig): number {
   return getNextDrawTimestampForSchedule(config.dropSchedule);
+}
+
+/**
+ * Next recurring draw moment for a schedule, STRICTLY after `afterMs`.
+ *
+ * Unlike `getNextDrawTimestampForSchedule` (which is used for countdown
+ * fallbacks and may legitimately return a past `fixed` target), this helper
+ * drives the RAFFLE CYCLE: it returns `null` when the schedule cannot produce
+ * a future draw (a one-shot `fixed` date that has already passed), which tells
+ * the caller the product should NOT start a new raffle round.
+ */
+export function getNextRecurringAnchorMs(schedule: DropScheduleConfig, afterMs: number): number | null {
+  if (schedule.mode === 'fixed') {
+    const target = scheduledDateToTimestamp(schedule.targetEndDateTime, schedule.timezone);
+    return target > afterMs ? target : null;
+  }
+  const next = getNextDrawTimestampForSchedule(schedule, afterMs);
+  return Number.isFinite(next) && next > afterMs ? next : null;
+}
+
+/**
+ * The countdown anchor the storefront should show for a product RIGHT NOW.
+ *
+ * - While the product's own `releaseEndsAt` is still in the future, that IS
+ *   the anchor (the current raffle round is counting down to it).
+ * - Once it has passed and the product still has inventory (and is not
+ *   archived), the product is a RECURRING raffle: the anchor becomes the next
+ *   scheduled draw time (per the effective schedule — global + per-product
+ *   overrides), so the UI shows the NEW timer instead of freezing on
+ *   "Raffle closed" / "Until sold out".
+ * - Sold-out/archived products and one-shot drops whose date passed return
+ *   `null` (no future raffle).
+ */
+export function resolveNextRaffleAnchorMs(
+  product: any,
+  schedule: DropScheduleConfig,
+  now: number = Date.now(),
+): number | null {
+  const explicitMs = product?.releaseEndsAt
+    ? dropTimestampToMs(product.releaseEndsAt, schedule.timezone)
+    : null;
+  if (explicitMs !== null && explicitMs > now) return explicitMs;
+  if (product?.soldOut === true || product?.isArchived === true) return null;
+  const base = explicitMs !== null && explicitMs > 0 ? explicitMs : now;
+  return getNextRecurringAnchorMs(schedule, base);
 }

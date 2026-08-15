@@ -379,7 +379,14 @@ export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liv
       : [{ size: 'Standard' }];
     for (const cat of categories) {
       try {
-        await getLiveProductState(redis, product, String(cat.size || 'Standard'));
+        // Seed the live state with the product's first-tier winner count (e.g.
+        // winnerTiers [3,2,2] → 3 winners on draw 1). Passing it here means the
+        // admin's Trigger Drop and the auto-draw engine agree with the product's
+        // advertised tiers instead of a default of 1.
+        const firstTier = Array.isArray(product.winnerTiers) && product.winnerTiers.length > 0
+          ? Math.max(1, Number(product.winnerTiers[0]) || 1)
+          : 1;
+        await getLiveProductState(redis, product, String(cat.size || 'Standard'), firstTier);
         liveSeeded++;
       } catch (err: any) {
         console.warn(`[seed] Could not seed live state for ${product.name} (${cat.size}):`, err);

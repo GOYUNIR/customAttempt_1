@@ -130,3 +130,35 @@ export function dropTimestampToMsOrNaN(value: unknown, storeTimezone?: string): 
   const ms = dropTimestampToMs(value, storeTimezone);
   return ms === null ? NaN : ms;
 }
+
+/**
+ * Render an absolute epoch-ms timestamp as a NAIVE wall-clock string
+ * (`YYYY-MM-DDTHH:mm:ss`) in the given store timezone. This is the inverse of
+ * `dropTimestampToMs`: it is used to PERSIST a countdown anchor — e.g. after a
+ * draw, a recurring raffle product's `releaseEndsAt` is rolled forward to its
+ * next scheduled draw time — in exactly the same format the admin
+ * `datetime-local` inputs produce, so every consumer (browser countdown, draw
+ * engine, admin edit form) keeps interpreting it identically.
+ */
+export function formatStoreWallClock(ms: number, timezone?: string): string {
+  if (!Number.isFinite(ms)) return '';
+  const tz = String(timezone || 'UTC');
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = dtf.formatToParts(new Date(ms));
+    const map: Record<string, string> = {};
+    parts.forEach((p) => { if (p.type !== 'literal') map[p.type] = p.value; });
+    return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}:${map.second}`;
+  } catch {
+    // Unknown timezone → render the UTC wall-clock (dropTimestampToMs would
+    // also fall back to UTC for the same string, so round-tripping is stable).
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  }
+}

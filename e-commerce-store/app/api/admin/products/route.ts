@@ -248,6 +248,11 @@ export async function POST(request: Request) {
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
     goLiveAt: has('goLiveAt') ? String(body.goLiveAt || '') : (existing?.goLiveAt || ''),
     releaseEndsAt: has('releaseEndsAt') ? String(body.releaseEndsAt || '') : (existing?.releaseEndsAt || ''),
+    customDropSchedule: has('customDropSchedule')
+      ? (body.customDropSchedule && typeof body.customDropSchedule === 'object' && Object.keys(body.customDropSchedule).length > 0
+          ? body.customDropSchedule
+          : (existing?.customDropSchedule || null))
+      : (existing?.customDropSchedule || null),
     soldOutBehavior: has('soldOutBehavior') ? String(body.soldOutBehavior || '') : (existing?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: has('soldOutArchiveDelayHours') ? Math.max(0, numberOr(body.soldOutArchiveDelayHours, existing?.soldOutArchiveDelayHours || 0)) : Math.max(0, Number(existing?.soldOutArchiveDelayHours || 0)),
     soldOutAt: has('soldOutAt') ? String(body.soldOutAt || '') : (existing?.soldOutAt || ''),

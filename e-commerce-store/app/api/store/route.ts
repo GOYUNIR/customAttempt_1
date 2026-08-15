@@ -11,8 +11,8 @@ import {
   SOCIAL_PROOF_OVERRIDE_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
-import { dropTimestampToMs } from '@/lib/drop-timestamps';
+import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs } from '@/lib/storefront-config';
+import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,16 @@ type PublicStoreProduct = {
   soldOut?: boolean;
   goLiveAt?: string;
   releaseEndsAt?: string;
+  /** Per-product recurring raffle cadence (admin → Product → Raffle schedule). */
+  customDropSchedule?: Record<string, any>;
+  /**
+   * Effective countdown end the storefront should display. Equals
+   * `releaseEndsAt` while the current raffle round is still counting down, and
+   * rolls forward to the NEXT scheduled draw moment once a recurring raffle's
+   * timer has passed but inventory remains — so the UI shows the new timer
+   * instead of "Until sold out". Empty for sold-out / one-shot-ended products.
+   */
+  nextReleaseEndsAt?: string;
   soldOutBehavior?: string;
   soldOutArchiveDelayHours?: number;
   soldOutAt?: string;
@@ -96,6 +106,9 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     soldOut: false,
     goLiveAt: String(raw?.goLiveAt || ''),
     releaseEndsAt: String(raw?.releaseEndsAt || ''),
+    customDropSchedule: raw?.customDropSchedule && typeof raw.customDropSchedule === 'object'
+      ? raw.customDropSchedule
+      : undefined,
     soldOutBehavior: String(raw?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: Math.max(0, Number(raw?.soldOutArchiveDelayHours || 0)),
     soldOutAt: String(raw?.soldOutAt || ''),
@@ -145,6 +158,7 @@ function applyLifecycle(
   products: PublicStoreProduct[],
   liveStates: Awaited<ReturnType<typeof listLiveStates>>,
   timezone?: string,
+  globalSchedule?: Record<string, any>,
 ) {
   const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
   const now = Date.now();
@@ -175,7 +189,7 @@ function applyLifecycle(
       soldOutAtMs !== null &&
       now >= soldOutAtMs + Math.max(0, Number(item.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000;
 
-    return {
+    const lifecycleProduct = {
       ...item,
       inventoryRemaining,
       totalInventory,
@@ -184,6 +198,26 @@ function applyLifecycle(
       isArchived: shouldArchiveFromSoldOut || shouldArchiveAfterDelay ? true : item.isArchived,
       isActive: shouldGoLive ? true : item.isActive,
     };
+
+    // Effective countdown anchor: the product's own releaseEndsAt while it is
+    // still in the future; otherwise (inventory remains + recurring schedule)
+    // the NEXT scheduled draw moment — the "new raffle" timer the storefront
+    // should show instead of "Until sold out". Sold-out / one-shot-ended
+    // products keep the (past) raw value so the UI can label them closed.
+    let nextReleaseEndsAt = String(item.releaseEndsAt || '');
+    try {
+      const effectiveSchedule = {
+        ...GOYUNIR_STORE_SUITE.dropSchedule,
+        ...(globalSchedule || {}),
+        ...((item as any).customDropSchedule || {}),
+      };
+      const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct as any, effectiveSchedule as any, now);
+      if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, timezone);
+    } catch {
+      /* a schedule glitch must never break the store payload */
+    }
+
+    return { ...lifecycleProduct, nextReleaseEndsAt };
   });
 }
 
@@ -226,6 +260,18 @@ async function buildStorePayload(requestedSlug: string) {
   const config = mergePublicConfig(await loadStoreConfigCached(redis));
   const liveStates = await listLiveStates(redis);
 
+  // Global drop-schedule override (admin → Automation → Save Schedule) merged
+  // over the seeded store config + static code default. Priority is override >
+  // store config > static, so the storefront's next-raffle anchor agrees with
+  // the draw engine.
+  const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
+  const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
+  const globalSchedule = {
+    ...GOYUNIR_STORE_SUITE.dropSchedule,
+    ...(config?.dropSchedule || {}),
+    ...scheduleOverride,
+  };
+
   let allProducts: PublicStoreProduct[] = [];
   const allRaw = await redis.hgetall(PRODUCTS_KEY);
   if (allRaw) {
@@ -237,7 +283,7 @@ async function buildStorePayload(requestedSlug: string) {
 
   allProducts = sortProducts(allProducts);
   const storeTimezone = String(config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
-  const lifecycleProducts = applyLifecycle(allProducts, liveStates, storeTimezone);
+  const lifecycleProducts = applyLifecycle(allProducts, liveStates, storeTimezone, globalSchedule);
   const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
   const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
   const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
@@ -246,8 +292,6 @@ async function buildStorePayload(requestedSlug: string) {
     ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
     : null;
 
-  const scheduleRaw = await redis.get(SCHEDULE_OVERRIDE_KEY);
-  const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
   const socialRaw = await redis.get(SOCIAL_PROOF_OVERRIDE_KEY);
   const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dropTimestampToMs, dropTimestampToMsOrNaN } from '../lib/drop-timestamps.ts';
+import { dropTimestampToMs, dropTimestampToMsOrNaN, formatStoreWallClock } from '../lib/drop-timestamps.ts';
 
 test('naive wall-clock strings are interpreted in the store timezone (not the viewer zone)', () => {
   // 2026-08-15T06:16 in America/Los_Angeles == 13:16 UTC (PDT, UTC-7).
@@ -37,4 +37,20 @@ test('client and server agree on the same naive string (the draw-engine fix)', (
   // A UTC-configured consumer calling with the store timezone gets the same.
   const clientParse = dropTimestampToMs(naive, 'America/Los_Angeles');
   assert.equal(serverParse, clientParse);
+});
+
+test('formatStoreWallClock round-trips through dropTimestampToMs (the roll-forward fix)', () => {
+  // The draw engine persists the NEXT scheduled draw moment as a naive
+  // store-time wall-clock string; parsing it back must yield the same instant.
+  const ms = dropTimestampToMs('2026-08-15T21:00:00', 'America/Los_Angeles')!;
+  const formatted = formatStoreWallClock(ms, 'America/Los_Angeles');
+  assert.equal(formatted, '2026-08-15T21:00:00');
+  const reparsed = dropTimestampToMs(formatted, 'America/Los_Angeles');
+  assert.equal(reparsed, ms);
+});
+
+test('formatStoreWallClock renders the store-time wall clock (not UTC)', () => {
+  // 2026-08-15T21:00 PDT == 2026-08-16T04:00Z — must render 21:00, not 04:00.
+  const ms = Date.parse('2026-08-16T04:00:00Z');
+  assert.equal(formatStoreWallClock(ms, 'America/Los_Angeles'), '2026-08-15T21:00:00');
 });

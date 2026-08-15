@@ -8,9 +8,11 @@ import {
   safeParseRedisItem,
   STORE_CONFIG_KEY,
   PRODUCTS_KEY,
+  SCHEDULE_OVERRIDE_KEY,
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
-import { dropTimestampToMs } from '@/lib/drop-timestamps';
+import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
+import { resolveNextRaffleAnchorMs } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -91,6 +93,11 @@ async function buildCatalogPayload() {
       : ['upcoming', 'archive', 'live'];
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
+    // Global drop-schedule override merged over the static config — used to
+    // compute `nextReleaseEndsAt` exactly like /api/store so the catalog tile
+    // timers agree with the product page and the draw engine.
+    const scheduleOverride = safeParseRedisItem<any>(redis ? await redis.get(SCHEDULE_OVERRIDE_KEY) : null) || {};
+    const globalSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(storeConfig?.dropSchedule || {}), ...scheduleOverride };
 
     const allProducts: any[] = [];
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
@@ -135,7 +142,8 @@ async function buildCatalogPayload() {
         product.soldOutBehavior === 'archive_after_delay' &&
         soldOutAtMs !== null &&
         now >= soldOutAtMs + Math.max(0, Number(product.soldOutArchiveDelayHours || 0)) * 60 * 60 * 1000;
-      return {
+
+      const lifecycleProduct = {
         ...product,
         inventoryRemaining,
         totalInventory,
@@ -144,6 +152,18 @@ async function buildCatalogPayload() {
         isArchived: shouldArchiveFromSoldOut || shouldArchiveAfterDelay ? true : product.isArchived,
         isActive: shouldGoLive ? true : product.isActive,
       };
+
+      // Effective countdown anchor — the next scheduled draw for recurring
+      // raffles whose timer ended with inventory remaining (the "new raffle"
+      // timer the tiles should show instead of "Until sold out").
+      let nextReleaseEndsAt = String(product.releaseEndsAt || '');
+      try {
+        const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
+        const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct, effectiveSchedule as any, now);
+        if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, storeTimezone);
+      } catch {}
+
+      return { ...lifecycleProduct, nextReleaseEndsAt };
     });
 
     // Lookup by slug OR name so static `catalogPreview` entries can inherit the
@@ -185,6 +205,7 @@ async function buildCatalogPayload() {
         isRaffle: normalizeMode(p) === 'RAFFLE',
         goLiveAt: p.goLiveAt || '',
         releaseEndsAt: p.releaseEndsAt || '',
+        nextReleaseEndsAt: p.nextReleaseEndsAt || p.releaseEndsAt || '',
       }));
 
     // Never list a product in BOTH live drops and upcoming. Products that

@@ -372,6 +372,7 @@ export default function AdminPortal() {
     isUpcoming: false,
     goLiveAt: '',
     releaseEndsAt: '',
+    customDropSchedule: null,
     soldOutBehavior: 'stay_visible',
     soldOutArchiveDelayHours: 24,
     deliveryIncentiveEnabled: false,
@@ -718,6 +719,7 @@ export default function AdminPortal() {
       isUpcoming: false,
       goLiveAt: '',
       releaseEndsAt: '',
+      customDropSchedule: null,
       soldOutBehavior: 'stay_visible',
       soldOutArchiveDelayHours: 24,
       deliveryIncentiveEnabled: false,
@@ -749,6 +751,9 @@ export default function AdminPortal() {
       : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }];
     setProductForm({
       ...product,
+      customDropSchedule: product.customDropSchedule && typeof product.customDropSchedule === 'object' && Object.keys(product.customDropSchedule).length > 0
+        ? product.customDropSchedule
+        : null,
       priceCategories: categories,
       notes: product.notes || [],
       images: product.images || [],
@@ -2466,7 +2471,89 @@ export default function AdminPortal() {
                     <input type="number" min={0} value={productForm.soldOutArchiveDelayHours ?? 24} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutArchiveDelayHours: Number(e.target.value) }))} style={inputStyle} />
                   </div>
                 </div>
-                
+
+                {/* Per-product raffle schedule: lets a raffle REPEAT on a cadence
+                    (hourly/daily/weekly/biweekly/monthly/yearly) while inventory
+                    remains. When enabled, the product's countdown rolls forward
+                    to the next scheduled draw after each drop — the "new raffle"
+                    timer. Leave disabled to inherit the global schedule. */}
+                <div style={{ gridColumn: '1 / -1', marginTop: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                  <h5 style={{ fontSize: 11, color: '#aaa', margin: '0 0 6px' }}>Raffle schedule (recurring)</h5>
+                  <p style={{ fontSize: 10, color: '#666', margin: '0 0 8px', lineHeight: 1.5 }}>
+                    When the countdown ends and inventory remains, a NEW raffle starts on this cadence and the storefront shows the new timer. Off = inherit the global schedule from <strong>Draws → Automation</strong> (or the drop is one-shot if no recurring schedule exists).
+                  </p>
+                  <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!productForm.customDropSchedule}
+                      onChange={(e) => setProductForm((p: any) => ({
+                        ...p,
+                        customDropSchedule: e.target.checked
+                          ? {
+                              mode: 'daily',
+                              timezone: scheduleForm.timezone || 'America/Los_Angeles',
+                              targetEndDateTime: scheduleForm.targetEndDateTime || '',
+                              drawDayOfWeek: 6,
+                              drawDayOfMonth: 1,
+                              drawHour: 21,
+                              drawMinute: 0,
+                              drawSecond: 0,
+                            }
+                          : null,
+                      }))}
+                    />
+                    <span>Repeat this raffle on a schedule while inventory remains</span>
+                  </label>
+                  {productForm.customDropSchedule && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                      <label style={{ fontSize: 11 }}>Cadence
+                        <select
+                          value={productForm.customDropSchedule.mode || 'daily'}
+                          onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), mode: e.target.value } }))}
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                        >
+                          <option value="hourly">Hourly</option>
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="biweekly">Biweekly</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="yearly">Yearly</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 11 }}>Timezone
+                        <input value={productForm.customDropSchedule.timezone || 'America/Los_Angeles'} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), timezone: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                      </label>
+                      {productForm.customDropSchedule.mode === 'hourly' && (
+                        <label style={{ fontSize: 11 }}>Minute (0-59)
+                          <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {productForm.customDropSchedule.mode === 'weekly' && (
+                        <label style={{ fontSize: 11 }}>Day of week (0=Sun..6=Sat)
+                          <input type="number" min={0} max={6} value={productForm.customDropSchedule.drawDayOfWeek ?? 6} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfWeek: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {productForm.customDropSchedule.mode === 'monthly' && (
+                        <label style={{ fontSize: 11 }}>Day of month (1-31)
+                          <input type="number" min={1} max={31} value={productForm.customDropSchedule.drawDayOfMonth ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfMonth: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {(productForm.customDropSchedule.mode === 'daily' || productForm.customDropSchedule.mode === 'weekly' || productForm.customDropSchedule.mode === 'monthly') && (
+                        <>
+                          <label style={{ fontSize: 11 }}>Hour (0-23)
+                            <input type="number" min={0} max={23} value={productForm.customDropSchedule.drawHour ?? 21} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawHour: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                          </label>
+                          <label style={{ fontSize: 11 }}>Minute (0-59)
+                            <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                          </label>
+                        </>
+                      )}
+                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.5 }}>
+                        First draw happens at the countdown end above; every later draw happens on this cadence while allocation remains. Unselected entries carry over into the next raffle.
+                      </p>
+                    </div>
+                  )}
+                </div>
                 <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />

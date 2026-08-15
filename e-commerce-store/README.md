@@ -125,7 +125,14 @@ Everything happens in `/admin`:
    90s cooldown make a stampede of pings harmless.
 4. Non-winners and unfinished checkouts are never deleted — everything is
    logged in the searchable ledger in `/admin`.
-5. After a draw, the pool resets so customers can enter the next cycle.
+5. **If inventory remains, the raffle can repeat on a schedule.** The draw
+   engine rolls the product's countdown forward to the next scheduled draw
+   moment (hourly/daily/weekly/biweekly/monthly/yearly — per-product under
+   `/admin → Products → Edit → Raffle schedule (recurring)`, or the global
+   cadence in `/admin → Draws → Automation`), the storefront shows the NEW
+   timer (never a stale "Until sold out"), and unselected entries carry over
+   into the next round. One-shot drops (a fixed date with no next occurrence)
+   draw once and are done.
 
 > Set `CRON_SECRET` in Vercel so the scheduled safety-net cron
 > (`/api/checkout/cron-draw`) is authorized. The client-side countdown trigger

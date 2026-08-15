@@ -57,10 +57,13 @@ export default function HomePage() {
   const SECTION_CV = { contentVisibility: 'auto', containIntrinsicSize: 'auto 320px' } as any;
 
   // Only tick the clock while at least one release shows a live countdown —
-  // otherwise the whole page re-renders every second for nothing.
+  // otherwise the whole page re-renders every second for nothing. Uses the
+  // effective anchor (nextReleaseEndsAt for recurring raffles) so a mid-cycle
+  // product showing the NEW timer keeps ticking.
   const needsCountdown = activeProducts.some((product: any) => {
-    const releaseEndsAt = product.releaseEndsAt ? dropTimestampToMsOrNaN(product.releaseEndsAt, storeTimezone) : NaN;
-    return Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick;
+    const anchor = String(product.nextReleaseEndsAt || product.releaseEndsAt || '');
+    const anchorMs = anchor ? dropTimestampToMsOrNaN(anchor, storeTimezone) : NaN;
+    return Number.isFinite(anchorMs) && anchorMs > nowTick;
   });
 
   useEffect(() => {
@@ -144,10 +147,14 @@ export default function HomePage() {
 
   const formatCountdown = (product: any) => {
     if (product.isArchived) return 'Archived release';
-    const releaseEndsAt = product.releaseEndsAt ? dropTimestampToMsOrNaN(product.releaseEndsAt, storeTimezone) : NaN;
     if (product.soldOut) return 'Sold out';
-    if (Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick) {
-      const diff = Math.max(0, releaseEndsAt - nowTick);
+    // Effective anchor: for a recurring raffle whose previous timer ended with
+    // inventory remaining, `/api/store` provides `nextReleaseEndsAt` (the next
+    // scheduled draw) — show THAT timer instead of "Until sold out".
+    const anchorRaw = String(product.nextReleaseEndsAt || product.releaseEndsAt || '');
+    const anchorMs = anchorRaw ? dropTimestampToMsOrNaN(anchorRaw, storeTimezone) : NaN;
+    if (Number.isFinite(anchorMs) && anchorMs > nowTick) {
+      const diff = Math.max(0, anchorMs - nowTick);
       const total = Math.floor(diff / 1000);
       const days = Math.floor(total / 86400);
       const hours = Math.floor((total % 86400) / 3600);

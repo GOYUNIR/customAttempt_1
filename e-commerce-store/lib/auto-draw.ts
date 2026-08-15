@@ -46,6 +46,7 @@ import {
   safeParseRedisItem,
   saveLiveState,
   sizeFromPoolKey,
+  STORE_CONFIG_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
@@ -53,12 +54,13 @@ import {
   getWinnerCount,
   isConfiguredPrice,
   shouldRunDraw,
+  getNextRecurringAnchorMs,
 } from '@/lib/storefront-config';
 import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
-import { dropTimestampToMs } from '@/lib/drop-timestamps';
+import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 
 export { productNameFromPoolKey };
 
@@ -123,8 +125,18 @@ const toMs = (value: unknown, timezone?: string): number | null =>
  * Decide whether a pool is due for a draw right now.
  * - force → yes
  * - product archived → yes (final allocation of any stragglers)
- * - product `releaseEndsAt` passed → yes (the timer hit zero)
- * - otherwise fall back to the global drop-schedule cadence
+ * - product has an explicit `releaseEndsAt` → that is the CYCLE boundary. The
+ *   pool is NEVER drawn before the countdown finishes (a cron run or an
+ *   unrelated client ping must not charge winners early). Once the cycle has
+ *   ended:
+ *     - one-shot drops (no next scheduled anchor) draw at most once — a pool
+ *       that has already been drawn after the cycle ended stays done;
+ *     - recurring raffles draw now (the runner rolls `releaseEndsAt` forward
+ *       after the draw, so the next countdown becomes due at the next anchor),
+ *       and if the pool has somehow rolled PAST the next anchor without a draw
+ *       (e.g. a failed roll-forward) it is due immediately to catch up.
+ * - no explicit `releaseEndsAt` → fall back to the global schedule cadence
+ *   (interval since the last auto-draw).
  */
 async function shouldRunPoolDraw(opts: {
   redis: any;
@@ -132,18 +144,34 @@ async function shouldRunPoolDraw(opts: {
   size: string;
   now: number;
   force: boolean;
+  globalSchedule?: Record<string, any> | null;
 }): Promise<boolean> {
   if (opts.force) return true;
   if (opts.product?.isArchived === true) return true;
 
-  const scheduleOverride = await getGlobalScheduleOverride(opts.redis);
-  const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(scheduleOverride || {}) };
+  const effectiveSchedule = {
+    ...GOYUNIR_STORE_SUITE.dropSchedule,
+    ...(opts.globalSchedule || {}),
+    ...(opts.product?.customDropSchedule || {}),
+  };
   const timezone = String(effectiveSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
-
   const endMs = toMs(opts.product?.releaseEndsAt, timezone);
-  if (endMs !== null && opts.now >= endMs) return true;
-
   const lastAuto = Number((await opts.redis.get(lastAutoDrawKey(opts.product.name, opts.size))) || 0);
+
+  if (endMs !== null) {
+    // The product's own countdown end is the current cycle boundary.
+    if (opts.now < endMs) return false;
+    const nextAnchor = getNextRecurringAnchorMs(effectiveSchedule as any, endMs);
+    if (nextAnchor === null) {
+      // One-shot: draw at most once after the cycle ended (lastAuto >= endMs
+      // means this pool was already drawn for this cycle).
+      return lastAuto < endMs;
+    }
+    if (opts.now >= nextAnchor) return true; // rolled past the next boundary → catch up
+    return lastAuto < endMs;                 // this cycle ended but hasn't been drawn yet
+  }
+
+  // No explicit countdown end → the global cadence defines the cycle.
   return shouldRunDraw(effectiveSchedule, lastAuto, opts.now);
 }
 
@@ -180,9 +208,20 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   // countdown just ended would stay `isUpcoming` because the filter branch
   // skipped the flip. The flip is idempotent (isUpcoming: false), so concurrent
   // triggers are harmless.
+  // Effective global schedule (code default → seeded store config → admin
+  // live-apply override) + the store timezone. The per-product
+  // `customDropSchedule` is merged per-pool in the due-check and roll-forward
+  // below. All three sources matter: the seed writes `store:config.dropSchedule`,
+  // the admin "Save Schedule" writes the override, and the static config is the
+  // code-level fallback — priority is override > store config > static.
   const scheduleOverrideForTz = await getGlobalScheduleOverride(redis).catch(() => null);
-  const effectiveScheduleForTz = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(scheduleOverrideForTz || {}) };
-  const storeTimezone = String(effectiveScheduleForTz?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+  const storeConfigForSchedule = safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY).catch(() => null)) || {};
+  const globalSchedule = {
+    ...GOYUNIR_STORE_SUITE.dropSchedule,
+    ...(storeConfigForSchedule?.dropSchedule || {}),
+    ...(scheduleOverrideForTz || {}),
+  };
+  const storeTimezone = String(globalSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
   {
     for (const product of Object.values(products) as any[]) {
       if (!product || product.isUpcoming !== true) continue;
@@ -225,6 +264,11 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   const processedWinners: AutoDrawWinner[] = [];
   const drewPools: string[] = [];
   let grandRevenueChargesCount = 0;
+  // Products whose countdown should roll forward after ALL their pools have
+  // been evaluated this run (a multi-size product's pools share the same
+  // releaseEndsAt — advancing it mid-loop would wrongly mark later size pools
+  // "not due" in the same run).
+  const productsToAdvance = new Map<string, any>();
 
   for (const poolKey of allPoolKeys) {
     try {
@@ -236,7 +280,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       const listLength = await redis.llen(poolKey);
       if (listLength === 0) continue;
 
-      const due = await shouldRunPoolDraw({ redis, product, size: productSize, now, force: options.force === true });
+      const due = await shouldRunPoolDraw({ redis, product, size: productSize, now, force: options.force === true, globalSchedule });
       if (!due) continue;
 
       // Client "timer hit zero" pings should never re-draw the same pool in a
@@ -269,9 +313,26 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       }
 
       const rawWinners = live.winnersPerDraw ?? winnersPerDraw;
-      const winnersThisDraw = Array.isArray(rawWinners)
-        ? Math.max(1, Number(rawWinners[Math.min(live.drawsCompleted || 0, rawWinners.length - 1)]) || 1)
-        : Math.max(1, Number(rawWinners) || 1);
+      // Winner count for THIS draw. The per-size "Winners / draw" tiers on the
+      // product's price categories are the source of truth (admin CSV, e.g.
+      // 3,2,2 → 3 winners on draw 1, 2 on draw 2, 2 on draw 3); fall back to the
+      // legacy `winnerTiers` array, then the live-state value, then the global
+      // schedule fallback. This makes seeded products with `winnerTiers: [3,2,2]`
+      // actually charge 3 winners on the first draw (their seeded live state
+      // used to carry a wrong `winnersPerDraw: 1`).
+      let winnersThisDraw = 1;
+      const rawTierValue = priceCat?.winnerTiers ?? product.winnerTiers;
+      if (typeof rawTierValue === 'string') {
+        const tiers = rawTierValue.split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
+        if (tiers.length > 0) winnersThisDraw = Math.max(1, Number(tiers[Math.min(live.drawsCompleted || 0, tiers.length - 1)]) || 1);
+      } else if (Array.isArray(rawTierValue)) {
+        const tiers = rawTierValue.map(Number).filter((n) => Number.isFinite(n) && n > 0);
+        if (tiers.length > 0) winnersThisDraw = Math.max(1, Number(tiers[Math.min(live.drawsCompleted || 0, tiers.length - 1)]) || 1);
+      } else if (Array.isArray(rawWinners)) {
+        winnersThisDraw = Math.max(1, Number(rawWinners[Math.min(live.drawsCompleted || 0, rawWinners.length - 1)]) || 1);
+      } else {
+        winnersThisDraw = Math.max(1, Number(rawWinners) || 1);
+      }
       const inventoryLimit = Math.min(winnersThisDraw, live.inventoryRemaining);
       let successfulPoolCaptures = 0;
       const remainingEntries: string[] = [];
@@ -487,6 +548,19 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
 
         await redis.set(lastAutoDrawKey(productName, productSize), String(Date.now()));
 
+        // ── Recurring-raffle roll-forward (deferred) ─────────────────────────
+        // If inventory remains (and the product is not archived), the product's
+        // countdown rolls forward to its NEXT scheduled draw moment AFTER all of
+        // its pools have been evaluated (see productsToAdvance below). The
+        // storefront then shows a NEW countdown to that moment instead of
+        // freezing on "Raffle closed"/"Until sold out", and the pool becomes due
+        // again exactly when that timer hits zero. One-shot drops (no future
+        // anchor) keep the past releaseEndsAt and are marked done by the
+        // `lastAuto` guard in shouldRunPoolDraw.
+        if (live.inventoryRemaining > 0 && !product.isArchived) {
+          productsToAdvance.set(String(product.id), product);
+        }
+
         if (live.inventoryRemaining <= 0) {
           await archiveProductToCatalog(redis, {
             productId: product.id,
@@ -502,6 +576,31 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       }
     } catch {
       // A single broken pool must never abort the whole run.
+    }
+  }
+
+  // ── Deferred recurring-raffle roll-forward ────────────────────────────────
+  // Persist each drawn product's new releaseEndsAt (the next scheduled draw
+  // moment) now that every pool has been evaluated. A failed roll-forward must
+  // never fail the run itself.
+  if (!dryRun && productsToAdvance.size > 0) {
+    for (const [, product] of productsToAdvance) {
+      try {
+        const productSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
+        const productTz = String(productSchedule?.timezone || storeTimezone || 'America/Los_Angeles');
+        const currentEndMs = toMs(product.releaseEndsAt, productTz);
+        const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? currentEndMs : now;
+        const nextAnchorMs = getNextRecurringAnchorMs(productSchedule as any, baseForAdvance);
+        if (nextAnchorMs !== null) {
+          const nextRelease = formatStoreWallClock(nextAnchorMs, productTz);
+          if (nextRelease && nextRelease !== product.releaseEndsAt) {
+            product.releaseEndsAt = nextRelease;
+            await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+          }
+        }
+      } catch {
+        /* non-fatal */
+      }
     }
   }
 

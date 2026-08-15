@@ -174,6 +174,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [cart, setCart] = useState<any[]>([]);
   const [showCart, setShowCart] = useState(false);
   const [raffleEndsAt, setRaffleEndsAt] = useState<number | null>(null);
+  // Raw cycle-end anchor used ONLY to trigger the draw (may be in the past on
+  // load — e.g. a recurring raffle mid-cycle whose timer already ended — which
+  // nudges the server to draw right away). The DISPLAY anchor (`raffleEndsAt`)
+  // can be the next cycle's timer while this is past.
+  const [raffleDueAt, setRaffleDueAt] = useState<number | null>(null);
   const [countdownLabel, setCountdownLabel] = useState('');
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [promoCode, setPromoCode] = useState('');
@@ -257,13 +262,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         setProduct(data.product);
         if (data.product.isArchived) {
           setRaffleEndsAt(null);
+          setRaffleDueAt(null);
         } else {
           const releaseEndsAt = data.product.releaseEndsAt;
+          const nextReleaseEndsAt = data.product.nextReleaseEndsAt || '';
           // Drop times are naive wall-clock strings set in the STORE's
           // timezone. Parse them as such so the countdown means the same
           // instant to every browser (and to the server's draw engine).
           const storeTz = String(data?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
           const releaseMs = releaseEndsAt ? dropTimestampToMsOrNaN(releaseEndsAt, storeTz) : NaN;
+          const nextReleaseMs = nextReleaseEndsAt ? dropTimestampToMsOrNaN(nextReleaseEndsAt, storeTz) : NaN;
           // A live (non-upcoming) drop counts down to its own releaseEndsAt —
           // even when that moment has already passed, because the countdown
           // effect below pings the draw engine the instant it renders. We
@@ -271,20 +279,35 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           // that produced a week-long bogus countdown ("Raffle ends in 6d…")
           // while the pool sat due and un-drawn. If no release end exists at
           // all, fall back to the configured drop-schedule anchor.
+          //
+          // The /api/store lifecycle now ALSO returns `nextReleaseEndsAt`: the
+          // next scheduled draw moment for a RECURRING raffle whose previous
+          // timer ended with inventory remaining. When present, that is the
+          // DISPLAY anchor (the "new raffle" timer) while the raw
+          // releaseEndsAt stays the TRIGGER anchor so the draw still fires.
           let drawAnchor: string | undefined;
+          let dueAnchor: string | undefined;
           if (data.product.isUpcoming) {
             drawAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
+            dueAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
+          } else if (nextReleaseEndsAt && Number.isFinite(nextReleaseMs)) {
+            drawAnchor = nextReleaseEndsAt;
+            dueAnchor = releaseEndsAt || nextReleaseEndsAt;
           } else if (releaseEndsAt && Number.isFinite(releaseMs)) {
-            drawAnchor = data.product.releaseEndsAt;
+            drawAnchor = releaseEndsAt;
+            dueAnchor = releaseEndsAt;
           } else {
             drawAnchor =
               data?.config?.dropSchedule?.targetEndDateTime ||
               data?.config?.dropSchedule?.countdownEndsAt ||
               data.product.releaseEndsAt ||
               undefined;
+            dueAnchor = drawAnchor;
           }
           const anchorMs = drawAnchor ? dropTimestampToMsOrNaN(drawAnchor, storeTz) : NaN;
+          const dueMs = dueAnchor ? dropTimestampToMsOrNaN(dueAnchor, storeTz) : NaN;
           setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
+          setRaffleDueAt(Number.isFinite(dueMs) && dueMs > 0 ? dueMs : null);
         }
         const cats = data.product.priceCategories || [];
         if (cats.length > 0) setSelectedSize(cats[0].size);
@@ -733,36 +756,46 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   useEffect(() => {
-    if (!raffleEndsAt) {
+    if (!raffleEndsAt && !raffleDueAt) {
       setCountdownLabel('');
       return;
     }
     let notified = false;
     let refreshTimer: number | null = null;
     const update = () => {
-      const diff = raffleEndsAt - Date.now();
-      if (diff <= 0) {
-        setCountdownLabel('Raffle closed');
-        // The timer hit zero — tell the server to run the draw RIGHT NOW. The
-        // server is idempotent (due-check + 90s per-pool cooldown), so this
-        // fire-and-forget ping can never double-charge even if several tabs /
-        // visitors hit zero at the same second. `notifyDropDue` retries on
-        // failure, so a flaky connection can't silently miss the drop.
-        if (!notified) {
-          notified = true;
-          notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
-          // Re-anchor after the draw trigger: an "opens in" countdown (upcoming
-          // product) that just hit zero means the drop OPENED — re-fetch so the
-          // timer flips to counting down to releaseEndsAt. A LIVE product whose
-          // releaseEndsAt just passed (or was already passed on load) gets the
-          // same re-fetch so the page reflects the draw result instead of
-          // freezing on "Raffle closed" while the server works.
-          if (product?.slug) {
-            refreshTimer = window.setTimeout(() => {
-              fetchProduct(String(product.slug), true).catch(() => {});
-            }, 1500);
-          }
+      const now = Date.now();
+      // TRIGGER: when the RAW cycle end has passed (timer hit zero — possibly
+      // before this page even loaded), tell the server to run the draw RIGHT
+      // NOW. The server is idempotent (due-check + 90s per-pool cooldown), so
+      // this fire-and-forget ping can never double-charge even if several
+      // tabs / visitors hit zero at the same second. `notifyDropDue` retries
+      // on failure, so a flaky connection can't silently miss the drop.
+      if (raffleDueAt !== null && raffleDueAt <= now && !notified) {
+        notified = true;
+        notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
+        // Re-anchor after the draw trigger: an "opens in" countdown (upcoming
+        // product) that just hit zero means the drop OPENED — re-fetch so the
+        // timer flips to counting down to releaseEndsAt. A LIVE product whose
+        // releaseEndsAt just passed (or was already passed on load) gets the
+        // same re-fetch so the page reflects the draw result (and any new
+        // recurring-raffle timer) instead of freezing on "Raffle closed"
+        // while the server works.
+        if (product?.slug) {
+          refreshTimer = window.setTimeout(() => {
+            fetchProduct(String(product.slug), true).catch(() => {});
+          }, 1500);
         }
+      }
+
+      if (!raffleEndsAt) {
+        setCountdownLabel('');
+        return;
+      }
+      const diff = raffleEndsAt - now;
+      if (diff <= 0) {
+        // Display anchor in the past (one-shot drop done, or the next cycle's
+        // timer just ended — the re-fetch above will swap in the newest one).
+        setCountdownLabel('Raffle closed');
         return;
       }
       const total = Math.floor(diff / 1000);
@@ -779,7 +812,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       window.clearInterval(timer);
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
-  }, [raffleEndsAt, product, fetchProduct]);
+  }, [raffleEndsAt, raffleDueAt, product, fetchProduct]);
 
   const handleRaffleSubmit = async () => {
     if (!email || !selectedSize) {
