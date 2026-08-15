@@ -307,46 +307,67 @@ input like `123 realstreet` can never be saved.
   static `goyunir.config.ts` catalog, which is why drops used to silently never
   fire for admin-created products), decides per-pool due-ness from the product's
   own timings, and charges winners with the same logic the old cron used.
-- **Due-ness rules** (`shouldRunPoolDraw`): force → draw; product `isArchived` →
+- **Due-ness rules** (`evaluatePoolDue`): force → draw; product `isArchived` →
   final draw. A product with an explicit `releaseEndsAt` uses that as its CYCLE
   boundary — the pool is NEVER drawn before the countdown ends (a cron run or
   unrelated ping must not charge winners early), then draws once the timer hits
-  zero. Recurring raffles (a schedule can produce a next draw: hourly/daily/
-  weekly/biweekly/monthly/yearly) draw now and the runner ROLLS the product's
-  `releaseEndsAt` forward to the next scheduled moment; one-shot drops (fixed
-  date passed, no next anchor) draw at most once after the cycle ends. Products
-  with NO explicit `releaseEndsAt` fall back to the global cadence
-  (`shouldRunDraw`). Upcoming products whose `goLiveAt` passed are auto-activated
-  (the Redis record is flipped to live) so the raffle timer starts counting to
-  `releaseEndsAt`.
+  zero. Recurring raffles (a schedule can produce a next draw:
+  hourly/daily/weekly/biweekly/monthly/yearly/**custom (every N hours)**) draw
+  now and the runner ROLLS the product's `releaseEndsAt` forward to the next
+  scheduled moment; one-shot drops (fixed date passed, no next anchor) draw at
+  most once after the cycle ends. Products with NO explicit `releaseEndsAt` fall
+  back to the global cadence (`shouldRunDraw`). Upcoming products whose
+  `goLiveAt` passed are auto-activated (the Redis record is flipped to live) so
+  the raffle timer starts counting to `releaseEndsAt`.
+- **⚡ Cycle-aware draws — a new entrant can NEVER be charged early (the big
+  one).** Entries carry `registeredAt`; the persisted `releaseEndsAt` is the
+  cycle boundary. When a cycle ends the engine draws ONLY the entries that were
+  registered BEFORE that boundary (`splitEntriesByCycleEnd` in
+  `lib/drop-timestamps.ts`). Entries made AFTER the boundary (the storefront
+  already shows the NEXT round's "new countdown") are carried over untouched —
+  so "I entered after the countdown restarted" can never be charged before the
+  timer they saw hits zero. If a stale recurring cycle ends with NO eligible
+  entries (e.g. the pool was empty at the boundary, or every entry is from the
+  next round), the engine rolls `releaseEndsAt` forward to the next anchor
+  WITHOUT drawing. This also fixes the "empty pool at cycle end" case, where the
+  product's persisted timer used to stay stale forever and the first entrant got
+  instantly drawn.
 - **Recurring raffles / the "new raffle" timer.** When a draw completes with
   inventory remaining (and the product is not archived), the engine computes the
   next scheduled draw moment (`getNextRecurringAnchorMs` in
   `lib/storefront-config.ts`, merging static config → `store:config.dropSchedule`
   → `ops:overrides#schedule` → per-product `customDropSchedule`) and PERSISTS it as
   the product's new `releaseEndsAt` (naive store-time wall clock via
-  `formatStoreWallClock` in `lib/drop-timestamps.ts`). The storefront then shows a
-  countdown to the NEW timer instead of "Raffle closed"/"Until sold out". Both
+  `formatStoreWallClock` in `lib/drop-timestamps.ts`). The roll-forward advances
+  from the LATER of (cycle end, now) so the new timer is always in the future
+  (no chasing missed anchors one-by-one). The storefront then shows a countdown
+  to the NEW timer instead of "Raffle closed"/"Until sold out". Both
   `/api/store` and `/api/catalog/status` also compute a read-time
   `nextReleaseEndsAt` field per product so the UI shows the new timer even before
   the engine's roll-forward is observed. Unselected entries carry over into the
   next raffle round. The per-product cadence is configured from `/admin → Products
   → Edit → Raffle schedule (recurring)`; the global cadence lives in `/admin →
-  Draws → Automation` (mode: fixed/hourly/daily/weekly/biweekly/monthly/yearly).
+  Draws → Automation` (mode: fixed/hourly/daily/weekly/biweekly/monthly/yearly/
+  custom-with-hours).
 - **Triggers:** (1) the client countdown pings `/api/checkout/auto-draw`
   (`lib/client-auto-draw.ts` → `notifyDropDue()`) from the product page, catalog
   and home page the second a countdown hits zero — a drop happens immediately with
-  NO cron; (2) the Vercel cron (`vercel.json`: `*/5 * * * *` →
-  `/api/checkout/cron-draw`, auth via `x-vercel-cron` / `Authorization: Bearer
-  $CRON_SECRET`) is the server-side safety net; (3) the admin → Draws → Trigger
-  Drop path (unchanged). The product page splits the countdown into a DISPLAY
-  anchor (the effective `nextReleaseEndsAt`) and a TRIGGER anchor (the raw cycle
-  end) so a recurring raffle shows its new timer while still nudging the draw.
+  NO cron; (2) the Vercel cron (`vercel.json`: `0 0 * * *` → once daily, the
+  Hobby-plan ceiling — `/api/checkout/cron-draw`, auth via `x-vercel-cron` /
+  `Authorization: Bearer $CRON_SECRET`) is the server-side safety net; (3) the
+  admin → Draws → Trigger Drop path (unchanged). The product page splits the
+  countdown into a DISPLAY anchor (the effective `nextReleaseEndsAt`) and a
+  TRIGGER anchor (the raw cycle end) so a recurring raffle shows its new timer
+  while still nudging the draw. Because the client trigger fires on EVERY page
+  load for an ended-but-un-drawn pool, a drop that happened while nobody watched
+  settles the moment the first visitor opens any page.
 - **Anti-double-draw:** the runner checks the `entries:last_auto` hash (field =
   `product:size`)
   and skips a pool drawn within the last 90s unless the caller forced it (cron).
   `dryRun=1` simulates the draw without charging/archiving (used by the admin
-  self-test and support).
+  self-test and support). The PUBLIC `/api/checkout/auto-draw` is rate-limited
+  per IP (see `cache:rate:auto_draw:<ip>` in `lib/redis-keys.ts`); all other
+  public write endpoints use the shared `lib/rate-limit.ts`.
 - **Admin-created product lifecycle** is now persisted: go-live flips are written
   to `store:products`, sold-out pools are archived to `ops:catalog_archive`, and
   recurring-raffle roll-forwards write the new `releaseEndsAt` back to
@@ -468,6 +489,14 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — CRITICAL: "I entered after the countdown restarted and got charged early" is fixed forever + custom per-raffle intervals (lead engine work):**
+  - **💥 Cycle-aware draws.** The draw engine (`lib/auto-draw.ts` → `evaluatePoolDue`) now treats the persisted `releaseEndsAt` as the cycle boundary and draws ONLY entries whose `registeredAt` is before it (`splitEntriesByCycleEnd` in `lib/drop-timestamps.ts`). Root cause of the bug: when a cycle ended with an empty pool (or a missed draw), the product's persisted `releaseEndsAt` stayed in the PAST while the storefront showed a read-time "new countdown" — the next trigger drew EVERYTHING in the pool, including a customer who had just entered for the NEW round, and charged them. Now: post-cycle entrants are carried over untouched (they can never be charged before the timer they saw hits zero), and a stale recurring cycle with no eligible entries simply rolls `releaseEndsAt` forward WITHOUT drawing. This also fixes the "empty pool at cycle end → first entrant instantly charged" case. New `entries:pool` writes already carry `registeredAt`; legacy entries without one stay eligible so they're never stranded.
+  - **⏱ Custom per-raffle interval: "each raffle per hour/day/week/month/X hours" per ITEM.** New `custom` schedule mode on the global cadence AND per-product: `customIntervalHours` (1–720). Wired through `DropScheduleConfig` (both type unions + defaults in `lib/storefront-config.ts`, `lib/store-config.ts`, `goyunir.config.ts`, seed + `/api/store/config`), `getDrawIntervalMs`, `getNextDrawTimestampForSchedule` (rolling fixed-interval anchors that always land in the future), `evaluatePoolDue`, and the admin schedule forms (global Draws→Automation + per-product Raffle schedule).
+  - **🧭 Roll-forward always lands in the future.** The deferred roll-forward advances from `max(cycleEnd, now)` so a run that catches a stale cycle late skips past any intermediate missed anchors instead of chasing them one per run.
+  - **Tests:** `tests/auto-draw-cycle.test.ts` (6 cases) proves the splitter protects post-cycle entrants and never strands legacy entries. `npm test` 32/32, `npm run typecheck` clean, `npm run lint` 0/0, `npm run build` compiles every route + middleware.
+  - Docs: this changelog entry + the Auto-draw section above updated. No Redis keys were added (existing `entries:pool:*` entries already carry `registeredAt`).
+
 
 - **2026-08-15 — Orb glow premium pass + preset identity sweep + global polish (orb-presets-globals):**
   - **✨ Glow orbs read as light, not blobs.** `orbGradient()` in `components/SiteChrome.tsx` now uses a smooth multi-stop eased falloff (gaussian-like) that is FULLY transparent by ~62% of the radius (58% for the cart-drawer orbs) instead of the old 72%/60% hard-ish taper — so every orb reads as a seamless ambient wash. Overlapping orbs now ADD their light via `mix-blend-mode: screen` on dark themes (light themes keep plain compositing) — the high-end glow harmony where intersections brighten instead of one disc covering another. Explicit opacity 0 still renders nothing.

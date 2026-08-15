@@ -115,24 +115,31 @@ Everything happens in `/admin`:
 3. **When a product's countdown hits zero, the drop fires automatically** — the
    storefront pings `/api/checkout/auto-draw` the instant the timer ends (and
    re-pings with backoff if the network blips, so a flaky connection can't
-   silently miss the drop), and a Vercel cron (`vercel.json`, every 5 minutes)
-   is the server-side safety net. Drop times are stored as **store-timezone
-   wall-clock strings** (`store:config.dropSchedule.timezone`) and parsed
-   consistently by the browser countdown AND the server engine
-   (`lib/drop-timestamps.ts`), so a release whose end has already passed fires
-   the draw immediately when anyone loads the product/home/catalog page. The
-   draw engine reads each product from Redis (never the static config), so
-   admin-created products draw too. Winners are picked randomly up to the
-   configured winner tiers / inventory and their saved cards are charged. The
-   public trigger endpoint is rate-limited per IP, and the engine's due-check +
-   90s cooldown make a stampede of pings harmless.
-4. Non-winners and unfinished checkouts are never deleted — everything is
-   logged in the searchable ledger in `/admin`.
+   silently miss the drop), and a Vercel cron (`vercel.json`, once daily — the
+   Hobby-plan ceiling) is the final server-side safety net. Drop times are
+   stored as **store-timezone wall-clock strings**
+   (`store:config.dropSchedule.timezone`) and parsed consistently by the browser
+   countdown AND the server engine (`lib/drop-timestamps.ts`), so a release
+   whose end has already passed fires the draw immediately when anyone loads the
+   product/home/catalog page. The draw engine reads each product from Redis
+   (never the static config), so admin-created products draw too. Winners are
+   picked randomly up to the configured winner tiers / inventory and their saved
+   cards are charged. The public trigger endpoint is rate-limited per IP, and
+   the engine's due-check + 90s cooldown make a stampede of pings harmless.
+4. **A draw is cycle-aware — nobody is ever charged before the timer they saw
+   hits zero.** Every entry records `registeredAt`; when a countdown ends the
+   engine draws ONLY the entries made before that instant. If you enter a
+   raffle *after* the countdown restarted (the "new raffle" timer), your entry
+   is carried into the next round untouched. A stale cycle that ended with no
+   eligible entries is rolled forward to the next draw moment without charging
+   anyone. Non-winners and unfinished checkouts are never deleted — everything
+   is logged in the searchable ledger in `/admin`.
 5. **If inventory remains, the raffle can repeat on a schedule.** The draw
    engine rolls the product's countdown forward to the next scheduled draw
-   moment (hourly/daily/weekly/biweekly/monthly/yearly — per-product under
+   moment — **hourly, daily, weekly, biweekly, monthly, yearly, or a custom
+   "every N hours" interval** (per-product under
    `/admin → Products → Edit → Raffle schedule (recurring)`, or the global
-   cadence in `/admin → Draws → Automation`), the storefront shows the NEW
+   cadence in `/admin → Draws → Automation`) — the storefront shows the NEW
    timer (never a stale "Until sold out"), and unselected entries carry over
    into the next round. One-shot drops (a fixed date with no next occurrence)
    draw once and are done.
