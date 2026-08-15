@@ -24,6 +24,11 @@ without touching a single file.
    click **Seed Defaults** (or build your catalog by hand with **Add Product**).
 4. Your store is live.
 
+> **Repo layout:** the entire application lives in the `e-commerce-store/`
+> subdirectory of this repo (it is fully self-contained — its own `package.json`,
+> lockfile, `vercel.json` and `.gitignore`). When deploying this repository,
+> set Vercel's **Root Directory** to `e-commerce-store`.
+
 ### Required environment variables
 
 | Variable | Purpose |

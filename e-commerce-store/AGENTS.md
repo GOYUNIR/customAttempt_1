@@ -362,6 +362,24 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — Finalization pass (repo hygiene + full verification):**
+  - **Removed every tracked debug/scratch artifact** that had been committed
+    during development: the `.admin-*` Playwright repro scripts, `.mapbox-*`
+    analysis/repro scripts + logs, `.inspect-config.cjs`, `*.log` / `*.pid`
+    files, and `files_list.txt`. These never belong in the shipped template.
+  - **`e-commerce-store/.gitignore` hardened** — patterns for `.admin-*`,
+    `.inspect-*`, `.mapbox-*`, `*.pid`, and `files_list.txt` were added so
+    scratch artifacts can never be re-committed.
+  - **Stale git-repo-root leftovers removed**: an old `node_modules` remnant,
+    `package-lock.json`, and `vercel.json` that sat at the repo root
+    (`customAttempt_1/`, outside this subdirectory) were untracked and
+    deleted. The project is fully self-contained under `e-commerce-store/`;
+    the root `.gitignore` is now committed. When deploying this repo to
+    Vercel, point **Root Directory** at `e-commerce-store`.
+  - **Full verification green on the cleaned tree**: `npm run lint` (0 errors,
+    0 warnings), `npm run typecheck`, `npm test` (7/7), and `npm run build`
+    (every route + the proxy middleware compile) all pass.
+
 - **2026-08-14 — Storefront UX + settings pass (sticky save bar, editable home copy, swipeable gallery, cart orbs):**
   - **Admin sticky "Save All Settings" bar now sticks BELOW the fixed top bar** (`app/admin/page.tsx`): the sticky offset was `top: 12`, so as you scrolled the long settings form the bar slid under the 84px fixed storefront header. It now uses `top: 92` (matching the content padding) so it floats just under the top bar and stays fully visible.
   - **Home-page "Priority drops" subtitle default is now "Explore our creations"** (was "Curated by our team — refreshed as releases move") and BOTH the section title and subtitle are editable from `/admin → Settings → Storefront copy` via the new `settings.copy.priorityDropsTitle` / `priorityDropsSubtitle` keys (empty = built-in default).

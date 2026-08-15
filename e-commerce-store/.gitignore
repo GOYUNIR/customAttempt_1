@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# debug / scratch artifacts (never commit)
+.admin-*
+.inspect-*
+.mapbox-*
+files_list.txt
+*.pid
