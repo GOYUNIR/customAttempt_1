@@ -39,6 +39,38 @@ textarea {
   font: inherit;
 }
 
+/*
+ * ── Universal tap feedback ─────────────────────────────────────────────
+ * Every button visibly depresses the instant it is pressed — even before any
+ * JS or network work starts. On slow connections this is what tells the
+ * customer "the tap registered" instead of feeling like nothing happened.
+ * touch-action: manipulation also removes the ~350ms mobile double-tap-zoom
+ * delay so taps feel instant. Buttons that are disabled (busy) deliberately
+ * do NOT press, which is its own clear "working…" signal.
+ */
+button,
+[role='button'] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(127, 127, 160, 0.18);
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+button:not(:disabled):active,
+[role='button']:not([aria-disabled='true']):active {
+  transform: scale(0.965);
+  opacity: 0.88;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 /* ── Minimal loading / gallery animation helpers ───────────────────────────── */
 @keyframes goyunirSpin {
   from { transform: rotate(0deg); }

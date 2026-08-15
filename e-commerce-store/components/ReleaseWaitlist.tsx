@@ -3,6 +3,26 @@
 import { useState } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
+/** Small inline spinner shown while the subscribe request is in flight. */
+function ButtonSpinner({ light = true }: { light?: boolean }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 999,
+          border: `2px solid ${light ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.25)'}`,
+          borderTopColor: light ? '#ffffff' : '#111111',
+          animation: 'goyunirSpin 0.7s linear infinite',
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+    </span>
+  );
+}
+
 export default function ReleaseWaitlist({
   source,
   headline,
@@ -79,9 +99,9 @@ export default function ReleaseWaitlist({
         <button
           onClick={subscribe}
           disabled={submitting}
-          style={{ padding: '13px 18px', borderRadius: 999, border: 'none', background: c.checkoutCtaButton || '#f3f4f6', color: isLight ? '#ffffff' : '#09090b', fontWeight: 700, fontSize: 13, cursor: submitting ? 'not-allowed' : 'pointer' }}
+          style={{ padding: '13px 18px', borderRadius: 999, border: 'none', background: c.checkoutCtaButton || '#f3f4f6', color: isLight ? '#ffffff' : '#09090b', fontWeight: 700, fontSize: 13, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1 }}
         >
-          {submitting ? 'Saving…' : 'Be first to know'}
+          {submitting ? (<><ButtonSpinner light={isLight} /> Saving…</>) : 'Be first to know'}
         </button>
       </div>
       <div style={{ fontSize: 11, color: status.includes('valid') || status.includes('Unable') ? '#fca5a5' : '#9ae6b4', marginTop: 10, minHeight: 16 }}>

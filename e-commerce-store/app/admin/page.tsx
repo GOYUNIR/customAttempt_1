@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -3504,16 +3505,7 @@ export default function AdminPortal() {
                 ))}
               </div>
 
-              <div style={{ border: `1px solid ${themeSettings.cardBorder || '#27272a'}`, borderRadius: 14, padding: 14, marginBottom: 10, background: brandingSettings.shareImageUrl ? `linear-gradient(180deg, rgba(0,0,0,0.58), rgba(0,0,0,0.64)), url(${brandingSettings.shareImageUrl}) center/cover, ${brandingSettings.shareBackground || '#050505'}` : (brandingSettings.shareBackground || '#050505'), color: brandingSettings.shareText || '#ffffff' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-                  {brandingSettings.logoUrl ? <img src={brandingSettings.logoUrl} alt="Brand preview" style={{ width: 40, height: 40, borderRadius: 10, objectFit: 'cover' }} /> : <div style={{ width: 40, height: 40, borderRadius: 10, background: brandingSettings.shareAccent || '#3b82f6' }} />}
-                  <div>
-                    <div style={{ fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', color: brandingSettings.shareAccent || '#3b82f6' }}>{brandingSettings.brandName || brandingSettings.shareTitle || 'Your Brand'}</div>
-                    <div style={{ fontSize: 16, fontWeight: 700 }}>{brandingSettings.shareTitle}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'rgba(255,255,255,0.82)' }}>{brandingSettings.shareDescription}</div>
-              </div>
+              <LinkPreviewGallery branding={brandingSettings} themeColors={themeSettings} />
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 4px', textTransform: 'uppercase' }}>Orb Glow</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>

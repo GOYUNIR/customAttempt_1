@@ -85,6 +85,15 @@ async function buildCatalogPayload() {
     }
 
     const now = Date.now();
+    // Same checkout-mode normalization as /api/store so the catalog and the
+    // product page always agree on Raffle vs FCFS.
+    const normalizeMode = (p: any): 'RAFFLE' | 'FCFS' => {
+      const mode = String(p?.checkoutMode || '').toUpperCase();
+      if (mode === 'FCFS') return 'FCFS';
+      if (mode === 'RAFFLE') return 'RAFFLE';
+      if (p?.isRaffle === false || String(p?.productType || '').toLowerCase() === 'fcfs') return 'FCFS';
+      return 'RAFFLE';
+    };
     const sortedProducts = sortProducts(allProducts).map((product) => {
       const inventory = findLiveInventoryForProduct(liveStatesByProduct, product, liveStates);
       const inventoryRemaining = inventory
@@ -131,6 +140,8 @@ async function buildCatalogPayload() {
         image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
         soldOut: p.soldOut === true,
         inventoryRemaining: p.inventoryRemaining,
+        checkoutMode: normalizeMode(p),
+        isRaffle: normalizeMode(p) === 'RAFFLE',
       }));
 
     // Never list a product in BOTH live drops and upcoming. Products that
@@ -148,11 +159,21 @@ async function buildCatalogPayload() {
         image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
         description: p.desc || '',
         slug: p.slug,
+        checkoutMode: normalizeMode(p),
+        isRaffle: normalizeMode(p) === 'RAFFLE',
       }));
+
+    // Never list a product that is (or just became) archived in "Upcoming".
+    const archivedProductSlugs = new Set(
+      sortedProducts
+        .filter((p) => p.isArchived || archivedProductIds.includes(p.id))
+        .map((p) => String(p.slug || p.name || '').toLowerCase()),
+    );
 
     const upcomingDrops = sortProducts(
       [...upcomingFromProducts, ...configuredUpcoming]
         .filter((item: any) => !activeSlugs.has(String(item.slug || item.name || '').toLowerCase()))
+        .filter((item: any) => !archivedProductSlugs.has(String(item.slug || item.name || '').toLowerCase()))
         .filter(
           (item: any, index: number, all: any[]) =>
             all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index,
@@ -170,6 +191,8 @@ async function buildCatalogPayload() {
         slug: p.slug,
         productId: p.id,
         soldOut: p.soldOut === true,
+        checkoutMode: normalizeMode(p),
+        isRaffle: normalizeMode(p) === 'RAFFLE',
       }));
 
     const archiveScents = sortProducts(

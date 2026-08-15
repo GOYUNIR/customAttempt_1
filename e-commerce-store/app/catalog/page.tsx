@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
@@ -32,6 +33,8 @@ interface ActiveDrop {
   desc: string;
   slug?: string;
   soldOut?: boolean;
+  checkoutMode?: string;
+  isRaffle?: boolean;
 }
 
 export default function CatalogPage() {
@@ -52,6 +55,12 @@ export default function CatalogPage() {
   // Live /api/store product payload (lifecycle-enriched) so upcoming/archive
   // cards can show real entry state, drop type, and sold-out dates.
   const [liveProducts, setLiveProducts] = useState<any[]>([]);
+  const router = useRouter();
+  // Navigation feedback: the catalog stays mounted while Next fetches the
+  // product page's RSC payload, so on a slow connection a tile tap could
+  // otherwise look unhandled. This overlay announces the tap instantly.
+  const [navigating, setNavigating] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState('');
 
   // Only tick the clock while any tile shows a live countdown (a future
   // goLive/available date) — avoids re-rendering the whole catalog every second.
@@ -83,26 +92,35 @@ export default function CatalogPage() {
     return `${days}d ${hours}h ${minutes}m ${seconds}s`;
   };
 
+  const loadCatalog = useCallback(async () => {
+    setIsLoading(true);
+    setStatusError('');
+    try {
+      // Route through fetchStoreJson: dedupes with the rest of the site and
+      // retries timeouts once, so a flaky connection still renders the
+      // catalog instead of an empty page.
+      const data = await fetchStoreJson('/api/catalog/status');
+      if (Array.isArray(data.activeDrops)) {
+        setActiveDrops(data.activeDrops);
+      }
+      if (Array.isArray(data.upcomingDrops)) {
+        setUpcomingDrops(data.upcomingDrops);
+      }
+      if (Array.isArray(data.archiveScents)) {
+        setArchiveScents(data.archiveScents);
+      }
+    } catch {
+      setActiveDrops([]);
+      setUpcomingDrops([]);
+      setArchiveScents([]);
+      setStatusError('Could not load the catalog — check your connection and tap retry.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    fetch('/api/catalog/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data.activeDrops)) {
-          setActiveDrops(data.activeDrops);
-        }
-        if (Array.isArray(data.upcomingDrops)) {
-          setUpcomingDrops(data.upcomingDrops);
-        }
-        if (Array.isArray(data.archiveScents)) {
-          setArchiveScents(data.archiveScents);
-        }
-      })
-      .catch(() => {
-        setActiveDrops([]);
-        setUpcomingDrops([]);
-        setArchiveScents([]);
-      })
-      .finally(() => setIsLoading(false));
+    loadCatalog();
     // Pull the live theme (deduped/cached by client-store-cache) so preset
     // background/text colors apply to this statically-built page shell.
     fetchStoreJson('/api/store').then((data) => {
@@ -113,7 +131,7 @@ export default function CatalogPage() {
         setLiveProducts(data.allProducts);
       }
     }).catch(() => {});
-  }, []);
+  }, [loadCatalog]);
 
   const handleTileClick = (item: CatalogItem) => {
     let slug = item.slug;
@@ -124,11 +142,22 @@ export default function CatalogPage() {
       slug = match?.slug;
     }
     if (slug) {
-      window.location.assign(`/${slug}`);
+      // Client-side nav keeps the page responsive; the "Opening…" overlay
+      // tells the user the tap registered while the product page loads.
+      setNavigating(item.name);
+      router.push(`/${slug}`);
       return;
     }
     setSelectedItem(item);
   };
+
+  // Safety net: if a navigation is interrupted (offline, slow), clear the
+  // overlay after a few seconds so the catalog never stays dimmed.
+  useEffect(() => {
+    if (!navigating) return;
+    const timer = window.setTimeout(() => setNavigating(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [navigating]);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredActiveDrops = activeDrops.filter((drop) => {
@@ -136,7 +165,33 @@ export default function CatalogPage() {
     const haystack = `${drop.name} ${drop.tagline} ${drop.desc}`.toLowerCase();
     return haystack.includes(normalizedQuery);
   });
-  const filteredUpcomingDrops = upcomingDrops.filter((item) => {
+
+  // ── Catalog consistency ────────────────────────────────────────────────────
+  // The status endpoint (15s TTL) and the store endpoint (10s TTL) can briefly
+  // disagree about a product's lifecycle (e.g. goLiveAt just passed). Reconcile
+  // client-side so a product NEVER shows in both "Currently Available" and
+  // "Upcoming Releases", and an item that went live (or was archived) is never
+  // still advertised as upcoming. Products derived from the live payload always
+  // win — the same classification the home page and product page use.
+  const liveBySlug = new Map(
+    (liveProducts || []).map((p: any) => [String(p.slug || '').toLowerCase(), p]),
+  );
+  const allActiveSlugs = new Set(activeDrops.map((d) => String(d.slug || '').toLowerCase()));
+
+  const consistentUpcoming = upcomingDrops.filter((item) => {
+    const key = String(item.slug || '').toLowerCase();
+    const live = key ? liveBySlug.get(key) : null;
+    if (live) {
+      const isLiveNow = live.isActive === true && live.isUpcoming !== true && live.isArchived !== true;
+      const isArchived = live.isArchived === true;
+      if (isLiveNow || isArchived) return false;
+    }
+    // Belt and braces: never list an item that the same payload already shows
+    // as a live drop.
+    return !allActiveSlugs.has(key);
+  });
+
+  const filteredUpcomingDrops = consistentUpcoming.filter((item) => {
     if (!normalizedQuery) return true;
     const haystack = `${item.name} ${item.description || ''} ${item.status} ${item.eta || ''}`.toLowerCase();
     return haystack.includes(normalizedQuery);
@@ -249,10 +304,10 @@ export default function CatalogPage() {
                 {archiveBadge.text}
               </div>
             )}
-            {section === 'archive' && (isRaffle || checkoutMode === 'FCFS' || soldOutDate) && (
+            {(section === 'upcoming' || section === 'archive') && (isRaffle || checkoutMode === 'FCFS' || (section === 'archive' && soldOutDate)) && (
               <div style={{ marginTop: 6, fontSize: 9, color: configPalette.textMuted || '#a1a1aa', letterSpacing: '0.5px' }}>
                 {(isRaffle || checkoutMode === 'FCFS') && (isRaffle ? 'Raffle' : 'FCFS')}
-                {soldOutDate && ((isRaffle || checkoutMode === 'FCFS') ? ` · ${soldOutDate}` : soldOutDate)}
+                {section === 'archive' && soldOutDate && ((isRaffle || checkoutMode === 'FCFS') ? ` · ${soldOutDate}` : soldOutDate)}
               </div>
             )}
           </div>
@@ -314,13 +369,69 @@ export default function CatalogPage() {
           ) : null}
         </motion.div>
 
+        {statusError && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.08)', fontSize: 12, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+            <span>{statusError}</span>
+            <button onClick={loadCatalog} style={{ border: 'none', background: 'rgba(248,113,113,0.18)', color: '#fecaca', borderRadius: 999, padding: '6px 12px', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>Retry</button>
+          </div>
+        )}
+
+        {isLoading && filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '40px 0', color: '#777' }}>
+            <div style={{ width: 30, height: 30, borderRadius: 999, background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 55%, transparent 72%)', animation: 'goyunirSpin 1.1s linear infinite, goyunirPulse 1.6s ease-in-out infinite' }} />
+            <div style={{ fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase' }}>Loading the catalog</div>
+          </div>
+        )}
+
+        {filteredActiveDrops.length > 0 && (
+          <>
+            <h2
+              style={{
+                fontSize: '13px',
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                color: configPalette.textMain,
+                margin: '0 0 12px 0',
+              }}
+            >
+              Currently Available
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredActiveDrops.map((drop) => (
+                <Link
+                  key={drop.id}
+                  href={drop.slug ? `/${drop.slug}` : '/'}
+                  prefetch={false}
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div
+                    style={{
+                      background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
+                      border: `1px solid ${configPalette.cardBorder}`,
+                      borderRadius: '14px',
+                      padding: '14px 16px',
+                    }}
+                  >
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
+                    <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
+                    <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
+                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
+                      {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
+
         <h2
           style={{
             fontSize: '13px',
             textTransform: 'uppercase',
             letterSpacing: '1px',
             color: configPalette.accentBlue,
-            margin: '0 0 12px 0',
+            margin: '32px 0 12px 0',
           }}
         >
           Upcoming Releases
@@ -340,51 +451,7 @@ export default function CatalogPage() {
         </h2>
         {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
 
-        {filteredActiveDrops.length > 0 && (
-          <>
-            <h2
-              style={{
-                fontSize: '13px',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                color: configPalette.textMain,
-                margin: '32px 0 8px 0',
-              }}
-            >
-              Currently Available
-            </h2>
-            <p style={{ fontSize: '12px', color: configPalette.textMuted, margin: '0 0 12px 0', lineHeight: 1.6 }}>
-              Live releases are open for entry right now — open while allocation remains.
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredActiveDrops.map((drop) => (
-                <Link
-                  key={drop.id}
-                  href={drop.slug ? `/${drop.slug}` : '/'}
-                  style={{ textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div
-                    style={{
-                      background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
-                      border: `1px solid ${configPalette.cardBorder}`,
-                      borderRadius: '14px',
-                      padding: '14px 16px',
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
-                    <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
-                    <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : 'Limited handmade supply. Open while allocation remains.'}</div>
-                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
-                      {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </>
-        )}
-
-        {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && (
+        {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && !statusError && (
           <div style={{ marginTop: 24 }}>
             <ReleaseWaitlist
               source="catalog"
@@ -466,6 +533,13 @@ export default function CatalogPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {navigating && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.72)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: '#fff' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 999, background: 'radial-gradient(circle, #3b82f6 0%, #a855f7 55%, transparent 72%)', animation: 'goyunirSpin 1.1s linear infinite, goyunirPulse 1.6s ease-in-out infinite' }} />
+          <div style={{ fontSize: 12, letterSpacing: '2px', textTransform: 'uppercase' }}>Opening {navigating}…</div>
+        </div>
+      )}
     </main>
   );
 }

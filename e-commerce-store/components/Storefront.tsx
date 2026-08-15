@@ -7,6 +7,7 @@ import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
+import { fetchStoreJson } from '@/lib/client-store-cache';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -25,6 +26,31 @@ function addressValidationError(address: string): string | null {
 function getProductPriceCategory(product: any, size: string) {
   const cats = product.priceCategories || [];
   return cats.find((c: any) => c.size === size) || null;
+}
+
+/**
+ * Small inline spinner used inside buttons while an async action is running.
+ * Because every tap now also gets the global press-down animation, a button
+ * that is mid-request shows BOTH the pressed (disabled) state AND this
+ * spinner + label — there is never a moment where a tap looks unhandled.
+ */
+function ButtonSpinner({ light = true }: { light?: boolean }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 999,
+          border: `2px solid ${light ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.25)'}`,
+          borderTopColor: light ? '#ffffff' : '#111111',
+          animation: 'goyunirSpin 0.7s linear infinite',
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+    </span>
+  );
 }
 
 function getFallbackImage(product: any) {
@@ -136,6 +162,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // "Add to bag" runs a server duplicate-entry lookup that can take a moment
+  // on a slow connection — this makes the button show a spinner while it runs
+  // instead of looking like the tap did nothing.
+  const [cartBusy, setCartBusy] = useState(false);
+  // Promo validation is an async network call too; same treatment.
+  const [promoBusy, setPromoBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [cart, setCart] = useState<any[]>([]);
   const [showCart, setShowCart] = useState(false);
@@ -214,8 +246,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const fetchProduct = useCallback(async (slug: string) => {
     try {
-      const res = await fetch(`/api/store?slug=${slug}`);
-      const data = await res.json();
+      // Route through fetchStoreJson: dedupes with the rest of the site,
+      // serves a stale payload instantly on repeat visits, and retries
+      // timeouts once — so a slow connection shows the product fast.
+      const data = await fetchStoreJson<any>(`/api/store?slug=${slug}`);
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
@@ -261,8 +295,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const fetchAllProducts = useCallback(async () => {
     try {
-      const res = await fetch('/api/store');
-      const data = await res.json();
+      const data = await fetchStoreJson<any>('/api/store');
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
@@ -456,9 +489,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
     // Prune cart lines that no longer exist (products/sizes gone after a
     // wipe/rebuild or archive). Runs against the live /api/store snapshot.
-    fetch('/api/store')
-      .then((res) => res.json())
-      .then((data) => {
+    fetchStoreJson('/api/store')
+      .then((data: any) => {
         const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
         const pruned = pruneStaleCart(stored, products);
         if (pruned.length !== stored.length) {
@@ -630,61 +662,68 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       }
     }
 
-    // Never stack a second raffle entry for a variant+size the email already
-    // holds an active entry for. Fail-open: if the lookup errors or the
-    // customer isn't signed in (401), we still allow the add so checkout is
-    // never blocked — the server re-checks duplicates at payment time too.
-    const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (isRaffleEntry && normalizedEmail) {
-      try {
-        const res = await fetch('/api/account/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: normalizedEmail }),
-        });
-        const data = await res.json();
-        const entries = Array.isArray(data?.entries) ? data.entries : [];
-        const terminalStates = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER', 'CANCELLED_BY_ADMIN'];
-        const alreadyEntered = entries.some(
-          (entry: any) =>
-            (String(entry.variant || '').toLowerCase() === String(product.name || '').toLowerCase() ||
-              String(entry.variant || '').toLowerCase() === String(product.id || '').toLowerCase()) &&
-            String(entry.size || '') === String(selectedSize || '') &&
-            (!entry.status || String(entry.status).toUpperCase() === 'ENTERED' || !terminalStates.includes(String(entry.status).toUpperCase())),
-        );
-        if (alreadyEntered) {
-          markEnteredLedger(String(product.id || ''), String(selectedSize || ''));
-          const msg = `You're already entered for ${product.name} (${selectedSize}). Check your entry in Manage My Entry.`;
-          setMessage(msg);
-          notify({ type: 'info', message: msg });
-          return;
+    // The server duplicate lookup below is a network call — show a busy state
+    // so the tap never looks ignored on a slow connection.
+    setCartBusy(true);
+    try {
+      // Never stack a second raffle entry for a variant+size the email already
+      // holds an active entry for. Fail-open: if the lookup errors or the
+      // customer isn't signed in (401), we still allow the add so checkout is
+      // never blocked — the server re-checks duplicates at payment time too.
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      if (isRaffleEntry && normalizedEmail) {
+        try {
+          const res = await fetch('/api/account/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: normalizedEmail }),
+          });
+          const data = await res.json();
+          const entries = Array.isArray(data?.entries) ? data.entries : [];
+          const terminalStates = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CANCELLED_BY_USER', 'CANCELLED_BY_ADMIN'];
+          const alreadyEntered = entries.some(
+            (entry: any) =>
+              (String(entry.variant || '').toLowerCase() === String(product.name || '').toLowerCase() ||
+                String(entry.variant || '').toLowerCase() === String(product.id || '').toLowerCase()) &&
+              String(entry.size || '') === String(selectedSize || '') &&
+              (!entry.status || String(entry.status).toUpperCase() === 'ENTERED' || !terminalStates.includes(String(entry.status).toUpperCase())),
+          );
+          if (alreadyEntered) {
+            markEnteredLedger(String(product.id || ''), String(selectedSize || ''));
+            const msg = `You're already entered for ${product.name} (${selectedSize}). Check your entry in Manage My Entry.`;
+            setMessage(msg);
+            notify({ type: 'info', message: msg });
+            return;
+          }
+        } catch {
+          // Fail-open: lookup failures must never block adding to the cart.
         }
-      } catch {
-        // Fail-open: lookup failures must never block adding to the cart.
       }
-    }
 
-    const item = {
-      productId: product.id,
-      name: product.name,
-      size: selectedSize,
-      price: cat.price,
-      checkoutMode: checkoutMode,
-      productType: isRaffleEntry ? 'raffle' : 'fcfs',
-    };
-    const maxPerCart = Math.max(1, Number(product.maxPerCart || product.maxPerEmail || 1));
-    const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
-    if (inCartCount >= maxPerCart) {
-      setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
-      notify({ type: 'alert', message: `Limit reached for ${product.name}.` });
-      return;
+      const item = {
+        productId: product.id,
+        name: product.name,
+        size: selectedSize,
+        price: cat.price,
+        checkoutMode: checkoutMode,
+        productType: isRaffleEntry ? 'raffle' : 'fcfs',
+      };
+      const maxPerCart = Math.max(1, Number(product.maxPerCart || product.maxPerEmail || 1));
+      const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
+      if (inCartCount >= maxPerCart) {
+        setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
+        notify({ type: 'alert', message: `Limit reached for ${product.name}.` });
+        return;
+      }
+      const next = [...cart, item];
+      setCart(next);
+      writeStoredCart(next);
+      setMessage(isRaffleEntry ? `Prepared ${product.name} (${selectedSize}) for entry.` : `Added ${product.name} (${selectedSize}) to your ${actionLabel}.`);
+      notify({ type: 'success', message: isRaffleEntry ? `${product.name} is ready to secure.` : `${product.name} added to your ${actionLabel}.` });
+      setShowCart(true);
+    } finally {
+      setCartBusy(false);
     }
-    const next = [...cart, item];
-    setCart(next);
-    writeStoredCart(next);
-    setMessage(isRaffleEntry ? `Prepared ${product.name} (${selectedSize}) for entry.` : `Added ${product.name} (${selectedSize}) to your ${actionLabel}.`);
-    notify({ type: 'success', message: isRaffleEntry ? `${product.name} is ready to secure.` : `${product.name} added to your ${actionLabel}.` });
-    setShowCart(true);
   };
 
   useEffect(() => {
@@ -873,6 +912,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       notify({ type: 'alert', message: 'Enter a promo code first.' });
       return;
     }
+    setPromoBusy(true);
     notify({ id: 'promo-apply', type: 'loading', message: 'Checking promo...', persist: true });
     try {
       const res = await fetch(`/api/promo/validate?code=${encodeURIComponent(code)}&email=${encodeURIComponent(email || '')}&productId=${encodeURIComponent(product?.id || '')}&size=${encodeURIComponent(selectedSize || '')}&orderSubtotal=${encodeURIComponent(String(price || 0))}`);
@@ -892,6 +932,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setPromoValid(false);
       setPromoMsg('Could not validate promo right now.');
       notify({ id: 'promo-apply', type: 'error', message: 'Could not validate promo right now.' });
+    } finally {
+      setPromoBusy(false);
     }
   };
 
@@ -1080,7 +1122,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             {showPromoField ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
-                <button onClick={applyPromo} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, color: configPalette.cardTextMain, fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+                <button onClick={applyPromo} disabled={promoBusy} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, color: configPalette.cardTextMain, fontWeight: 700, cursor: promoBusy ? 'not-allowed' : 'pointer', opacity: promoBusy ? 0.6 : 1 }}>{promoBusy ? 'Checking…' : 'Apply'}</button>
                 <button onClick={() => setShowPromoField(false)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
               </div>
             ) : promoCode ? (
@@ -1113,23 +1155,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
-              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation')}
+              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation')}
               </button>
             )}
             {canCheckoutDirect && (
               <>
-                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                  {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : `Secure piece · $${price.toFixed(2)}`}
+                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+                  {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : `Secure piece · $${price.toFixed(2)}`}
                 </button>
                 {showWaitlistOption && (
-                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.cardBackground, color: configPalette.cardTextMain, border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                    {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Reserve for next opening' : 'Reserve for launch'}
+                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.cardBackground, color: configPalette.cardTextMain, border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+                    {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : product.isArchived ? 'Reserve for next opening' : 'Reserve for launch'}
                   </button>
                 )}
               </>
             )}
-            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>Add to {actionLabel}</button>}
+            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled || cartBusy} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled || cartBusy ? 'not-allowed' : 'pointer', opacity: checkoutDisabled || cartBusy ? 0.6 : 1 }}>{cartBusy ? (<><ButtonSpinner light={false} /> Checking…</>) : `Add to ${actionLabel}`}</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}

@@ -15,6 +15,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > anyway — a slightly verbose AGENTS.md is always better than a misleading one.
 > When you finish a task, append your work to the **Change Log** at the bottom.
 
+> **⚠️ MANDATORY COMMIT WORKFLOW — DO THIS AT THE END OF EVERY TASK**
+> When you complete ANY change (fix, feature, docs, config), you MUST commit
+> and push the work before you call the task done. Always run exactly:
+>
+> ```
+> git add .
+> git commit -m 'whats new'
+> git push origin main
+> ```
+>
+> Use `'whats new'` as the commit message verbatim (it's the house convention;
+> it keeps the template repo's history short and predictable). Before
+> committing, verify the build/checks pass (`npm run lint`, `npm run typecheck`,
+> `npm test`, and `npm run build` when a build is feasible). If the commit or
+> push fails for a real reason (auth, upstream divergence), say so in your final
+> summary and leave the working tree in a committed state if possible. Never
+> end a task with uncommitted work in the tree.
+
 ## Project Overview
 
 This is a **drop-allocation / raffle storefront** built on Next.js 16 (App
@@ -126,7 +144,12 @@ Never rebuild them.
   `/api/store` (10s), `/api/catalog/status` (15s), `/api/config/public` (30s),
   heartbeat social-proof tally (15s), `loadStoreConfigCached` (30s).
 - `lib/client-store-cache.ts` — client-side `fetchStoreJson(url)` dedupes
-  in-flight requests and reuses results for 10s.
+  in-flight requests, reuses fresh results for 10s, and is hardened for slow
+  connections: stale-while-revalidate (the last good payload is served
+  instantly for up to 5 min while a background refresh repairs it), a 10s
+  abort timeout per network attempt, and a single retry with backoff on flaky
+  connections. If a retried fetch still fails and a stale payload exists, the
+  stale payload is served instead of an error.
 - `app/layout.tsx` uses `export const dynamic = 'force-dynamic'` so the live
   `/admin` theme is baked into server HTML every request (no FOUC). It also
   renders a `<script type="application/json">` theme blob
@@ -300,7 +323,7 @@ input like `123 realstreet` can never be saved.
   fallback. `getBrandName()` / `getSupportEmail()` / `neutralBrandName()` /
   `fallbackSiteUrl()` are the other brand-safe helpers — **use them instead of
   reading `process.env.*` directly** in customer-facing code. In request-scoped
-  metadata (`app/layout.tsx` `generateMetadata`, `app/opengraph-image.tsx`) the
+  metadata (`app/layout.tsx` `generateMetadata`, `app/og/route.ts`) the
   site URL also falls back to the CURRENT REQUEST's host via `lib/request-url.ts`
   (`getRequestSiteUrl()`), so link previews never resolve against a stock
   `https://example.com` placeholder when env vars and the admin Share URL are
@@ -365,6 +388,83 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — Tap feedback, slow-connection hardening + catalog consistency**
+  (final "make it feel fast" pass):
+  - **Universal tap feedback** (`app/globals.css`): every `button`/`[role=button]`
+    now visibly depresses the instant it is pressed (`:active` scale + fade,
+    120ms) and buttons use `touch-action: manipulation` (kills the ~350ms mobile
+    double-tap-zoom delay). A tap is now ALWAYS visibly answered, even before any
+    JS/network work starts; disabled (busy) buttons deliberately don't press,
+    which is itself a clear "working…" signal.
+  - **Every async button now shows a busy state.** `components/Storefront.tsx`:
+    "Add to bag" (its server duplicate lookup previously ran with ZERO visual
+    feedback — the exact "looks like nothing was pressed" bug), promo "Apply"
+    (new `promoBusy`), and the Raffle/Direct/Waitlist submit buttons all show an
+    inline spinner + dimmed/disabled state while in flight. The cart drawer
+    checkout (`components/SiteChrome.tsx`) and the release-waitlist subscribe
+    button (`components/ReleaseWaitlist.tsx`) got the same spinner treatment.
+  - **Slow-connection hardening** (`lib/client-store-cache.ts`): `fetchStoreJson`
+    now does stale-while-revalidate (serves the last good payload instantly for
+    up to 5 min while a background refresh repairs it), aborts each network
+    attempt after 10s, and retries once with a 700ms backoff — a flaky/congested
+    connection shows content instead of blank sections or endless spinners. The
+    catalog page now routes its `/api/catalog/status` fetch through this cache,
+    keeps the last product visible during re-fetch, and shows an inline "Loading
+    the catalog" spinner plus a Retry banner on failure instead of silently
+    rendering empty sections.
+  - **Catalog navigation feedback** (`app/catalog/page.tsx`): catalog tiles now
+    use `router.push` (client-side nav) with a full-screen "Opening {name}…"
+    overlay instead of `window.location.assign` (which was a full page reload —
+    on a slow connection it looked like the tap did nothing).
+  - **Catalog consistency** (upcoming vs live vs archived): `/api/catalog/status`
+    now emits `checkoutMode`/`isRaffle` on every active/upcoming/archive row
+    (same normalization as `/api/store`) and drops configured-upcoming entries
+    that point at a product that is now live OR archived. The catalog page
+    reconciles the status payload (15s TTL) against the live store payload (10s
+    TTL) client-side so a product can NEVER appear in both "Currently
+    Available" and "Upcoming Releases", and an item that went live (goLiveAt
+    passed) is never still advertised as upcoming. Raffle/FCFS tags now show
+    consistently on live, upcoming and archive cards. The catalog sections were
+    reordered to match the page's own copy ("live now, what is next, and what
+    already moved") and the rest of the site: **Currently Available → Upcoming
+    Releases → Past Archives** (live drops were previously buried at the bottom
+    below archives).
+  - Docs: AGENTS.md updated (mandatory commit-workflow rule added, caching
+    section + this changelog entry). No Redis keys were added or changed.
+
+- **2026-08-14 — Link preview / share card reworked + exact as-shared admin preview:**
+  - **Share card moved to a Route Handler at `/og`** (`app/og/route.ts`) and the
+    `app/opengraph-image.tsx` file convention was REMOVED. Why: Next's file
+    convention emits a content-hash `?v=…` og:image URL that NEVER changes when
+    the buyer edits Branding → Share, so WhatsApp/iMessage/Discord (which cache
+    previews aggressively by URL) showed a STALE card forever. `generateMetadata`
+    (`app/layout.tsx`) now points `og:image` / `twitter:image` at
+    `/og?v=<revisionHash(branding+theme)>` — the URL changes on every save, so
+    crawlers are forced to re-fetch. Metadata also emits `og:image:type` and
+    `twitter:image:alt/width/height`.
+  - **The card can NEVER 500 again.** `lib/brand-image.ts` gained
+    `fetchImageAsDataUrl()` / `resolveBrandImageForSatori()`: remote/relative
+    logo + share images are fetched by US with a 4s timeout, content-type + 1MB
+    size guard, cached 60s, and converted to data: URLs — because satori fetches
+    `<img>` sources itself and throws (500) on a slow/down/hotlink-protected URL.
+    Colors are sanitized via the new `lib/share-card-config.ts` helpers
+    (`safeCssColor`, `hexToRgba`, `cardBackgroundStyle`, `cardSiteUrlDisplay`,
+    `revisionHash`, …) so free-text admin values can never inject broken CSS.
+    Both `/og` and `/icon` wrap the render in try/catch with a minimal branded
+    fallback card/icon. Route Handlers are `route.js|ts` only (no `.tsx`), so
+    `/og` builds the element with `React.createElement`.
+  - **Exact as-shared admin preview** (`/admin → Settings → Branding & Share`):
+    the old tiny fake card is replaced by `components/LinkPreviewGallery.tsx`,
+    which renders the REAL card live from the CURRENT (unsaved) form state via
+    the shared `components/ShareCard.tsx` (used by both `/og` and the preview so
+    they can't drift), plus pixel-faithful messenger mockups for WhatsApp,
+    iMessage, Discord, X/Twitter and Facebook, the copyable share link, the
+    actual generated `/og` PNG (refreshes after Save), and a caching
+    troubleshooting note.
+  - Docs: this changelog entry; no Redis keys were added or changed. The old
+    `app/opengraph-image.tsx` file no longer exists — the card now lives at `/og`.
+
+- **2026-08-14 — OG share card fixed for real + social-proof contrast fix:**
 - **2026-08-14 — OG share card fixed for real + social-proof contrast fix:**
   - **The share-link card was still broken because the OG image route CRASHED.**
     Root cause: `app/opengraph-image.tsx` fed the admin Branding → Logo URL and
@@ -401,7 +501,7 @@ is the backing endpoint.
   - **Link previews no longer resolve to the stock `https://example.com`
     placeholder** when the buyer hasn't set `NEXT_PUBLIC_URL` /
     `NEXT_PUBLIC_SITE_URL` / `SITE_URL` or the admin Branding → Share URL.
-    `generateMetadata` (`app/layout.tsx`) and the OG card (`app/opengraph-image.tsx`)
+    `generateMetadata` (`app/layout.tsx`) and the OG card (`app/og/route.ts`)
     now fall back to the CURRENT REQUEST's host via the new server-only
     `lib/request-url.ts` → `getRequestSiteUrl()` (env URL → request host →
     admin Share URL → neutral placeholder). `metadataBase`, `og:url`, canonical
@@ -586,7 +686,7 @@ is the backing endpoint.
     the verbose "✓ Address autofill is on — pick a suggestion and the full
     address…" banner is now a tiny dot + label like the "Encrypted payment
     setup" indicator, placed above it.
-  - **Share/OG card follows design presets** (`app/opengraph-image.tsx`,
+  - **Share/OG card follows design presets** (`app/og/route.ts`,
     `app/layout.tsx`, admin `applyThemePreset`): preset apply now also sets the
     share-background/accent/text colors, the OG generator falls back to the live
     theme colors, and `generateMetadata` emits an absolute OG image URL (env URL

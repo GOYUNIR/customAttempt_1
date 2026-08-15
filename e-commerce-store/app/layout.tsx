@@ -7,6 +7,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { getSiteUrl, neutralBrandName } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
+import { revisionHash } from '@/lib/share-card-config';
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
@@ -57,7 +58,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const adminShareUrl = String(branding.shareUrl || '').trim().replace(/\/+$/, '');
   const base = envSiteUrl || requestSiteUrl || adminShareUrl || 'https://example.com';
   const canonicalUrl = adminShareUrl && /^https?:\/\//i.test(adminShareUrl) ? adminShareUrl : base;
-  const ogImageUrl = `${base.replace(/\/+$/, '')}/opengraph-image`;
+  // The share card is served by the /og route handler. The `?v=` cache-buster
+  // is derived from the CURRENT branding/theme, so when the buyer edits
+  // Branding → Share the og:image URL CHANGES — forcing WhatsApp/iMessage/
+  // Discord (which cache previews by URL for days) to re-fetch the fresh card
+  // instead of forever showing a stale one.
+  const ogImageUrl = `${base.replace(/\/+$/, '')}/og?v=${revisionHash({ branding, themeColors: config.themeColors || {} })}`;
 
   return {
     metadataBase: new URL(base),
@@ -80,14 +86,14 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: brandName,
       // Absolute URL — messengers (WhatsApp / iMessage / Discord / Slack) fetch
       // the image from the rendered card, so a relative path never works for them.
-      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName }],
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName, type: 'image/png' }],
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
       title: brandName,
       description: shareDescription,
-      images: [ogImageUrl],
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName }],
     },
   };
 }

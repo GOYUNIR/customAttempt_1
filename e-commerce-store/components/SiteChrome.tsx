@@ -53,6 +53,29 @@ const DEFAULT_ORBS: any = {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+/**
+ * Small inline spinner for buttons mid-request (paired with the global
+ * press-down animation so a tap is NEVER visually unanswered).
+ */
+function ButtonSpinner({ light = true }: { light?: boolean }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 999,
+          border: `2px solid ${light ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.25)'}`,
+          borderTopColor: light ? '#ffffff' : '#111111',
+          animation: 'goyunirSpin 0.7s linear infinite',
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+    </span>
+  );
+}
+
 /** Convert 0-100 opacity into a 2-digit hex alpha suffix for hex colors. */
 function alphaHex(pct: number) {
   const v = Math.round(clamp(pct, 0, 100) * 255 / 100);
@@ -1085,8 +1108,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 </form>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: liveTheme.textMain || '#f3f4f6', color: liveTheme.primaryBackground || '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems ? 'not-allowed' : 'pointer' }}>
-                  {checkoutBusy ? 'Starting…' : checkoutLabel}
+                <button onClick={checkoutCart} disabled={checkoutBusy || !hasItems} style={{ flex: 1, textAlign: 'center', padding: '12px 14px', borderRadius: 999, background: liveTheme.textMain || '#f3f4f6', color: liveTheme.primaryBackground || '#09090b', border: 'none', textDecoration: 'none', fontWeight: 700, fontSize: 13, cursor: checkoutBusy || !hasItems ? 'not-allowed' : 'pointer', opacity: checkoutBusy || !hasItems ? 0.6 : 1 }}>
+                  {checkoutBusy ? (<><ButtonSpinner light={false} /> Starting…</>) : checkoutLabel}
                 </button>
                 <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: drawerTextMuted, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
               </div>
