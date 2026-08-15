@@ -195,6 +195,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [configPalette, setConfigPalette] = useState<any>(
     liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
   );
+  // Storefront copy overrides — admin → Settings → Storefront copy. A non-empty
+  // value overrides the built-in labels (entry CTA etc.).
+  const [copySettings, setCopySettings] = useState<Record<string, any>>(liveCtx?.copy || {});
   const uiRadius = (fallback: number) => {
     const r = Number(configPalette.borderRadius);
     return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
@@ -220,6 +223,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
+      if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
       if (data.product) {
         setProduct(data.product);
         if (data.product.isArchived) {
@@ -266,6 +270,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       const data = await res.json();
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
+      if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
@@ -323,6 +328,65 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }, galleryIntervalMs);
     return () => window.clearInterval(timer);
   }, [autoPlayOn, galleryPaused, galleryIntervalMs, imgCount]);
+
+  // Swipe / drag navigation for the product gallery. Vertical drags still scroll
+  // the page (touchAction 'pan-y'); horizontal drags switch photos with a live
+  // drag preview and a spring-back when the gesture isn't far enough.
+  const [dragOffset, setDragOffset] = useState(0);
+  const [galleryDragging, setGalleryDragging] = useState(false);
+  const dragStartX = useRef(0);
+  const dragStartY = useRef(0);
+  const dragActiveRef = useRef(false);
+
+  const onGalleryPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (imgCount <= 1) return;
+    dragStartX.current = e.clientX;
+    dragStartY.current = e.clientY;
+    dragActiveRef.current = false;
+    setGalleryDragging(false);
+    setGalleryPaused(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onGalleryPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (imgCount <= 1) return;
+    const dx = e.clientX - dragStartX.current;
+    const dy = e.clientY - dragStartY.current;
+    if (!dragActiveRef.current) {
+      // Only claim the gesture once it's clearly horizontal (not a page scroll).
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        dragActiveRef.current = true;
+        setGalleryDragging(true);
+      } else {
+        return;
+      }
+    }
+    setDragOffset(dx);
+  };
+
+  const onGalleryPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (imgCount <= 1) return;
+    const dx = e.clientX - dragStartX.current;
+    if (dragActiveRef.current && Math.abs(dx) > 52) {
+      if (dx < 0) setSelectedImageIndex((prev) => (prev + 1) % imgCount);
+      else setSelectedImageIndex((prev) => (prev - 1 + imgCount) % imgCount);
+    }
+    dragActiveRef.current = false;
+    setGalleryDragging(false);
+    setDragOffset(0);
+    // Mouse users resume autoplay via onMouseLeave (hover pauses); touch swipes
+    // release the pause here so the carousel keeps cycling.
+    if (e.pointerType === 'touch') setGalleryPaused(false);
+  };
+
+  const prevImage = () => {
+    setGalleryPaused(true);
+    setSelectedImageIndex((prev) => (prev - 1 + imgCount) % imgCount);
+  };
+  const nextImage = () => {
+    setGalleryPaused(true);
+    setSelectedImageIndex((prev) => (prev + 1) % imgCount);
+  };
 
   // Always-current cart mirror so helper functions can safely prune items from
   // any closure (e.g. the setup-success effect) without stale state. Declared
@@ -890,29 +954,62 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
           <div
             onMouseEnter={() => setGalleryPaused(true)}
-            onMouseLeave={() => setGalleryPaused(false)}
-            style={{ height: 280, position: 'relative', overflow: 'hidden', cursor: galleryImages.length > 1 ? 'pointer' : 'default' }}
+            onMouseLeave={() => { if (!dragActiveRef.current) setGalleryPaused(false); }}
+            onPointerDown={onGalleryPointerDown}
+            onPointerMove={onGalleryPointerMove}
+            onPointerUp={onGalleryPointerEnd}
+            onPointerCancel={onGalleryPointerEnd}
+            style={{ height: 280, position: 'relative', overflow: 'hidden', cursor: galleryImages.length > 1 ? (galleryDragging ? 'grabbing' : 'grab') : 'default', touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
           >
             <div
               style={{
                 position: 'absolute',
-                inset: -16,
-                background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover`,
-                animation: zoomOn ? `goyunirKenburns ${zoomSeconds}s ease-in-out infinite alternate` : 'none',
-                willChange: 'transform',
+                inset: 0,
+                transform: galleryDragging && dragOffset ? `translateX(${dragOffset}px)` : 'none',
+                transition: galleryDragging ? 'none' : 'transform 260ms cubic-bezier(.22,1,.36,1)',
               }}
-            />
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: -16,
+                  background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover`,
+                  animation: zoomOn ? `goyunirKenburns ${zoomSeconds}s ease-in-out infinite alternate` : 'none',
+                  willChange: 'transform',
+                }}
+              />
+            </div>
+            {galleryImages.length > 1 && (
+              <>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); prevImage(); }}
+                  aria-label="Previous photo"
+                  style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
+                >&#8249;</button>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); nextImage(); }}
+                  aria-label="Next photo"
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
+                >&#8250;</button>
+              </>
+            )}
             {galleryImages.length > 1 && autoPlayOn && (
               <div style={{ position: 'absolute', left: 12, bottom: 12, display: 'flex', gap: 5, alignItems: 'center' }}>
                 {galleryImages.map((_img: string, index: number) => (
                   <button
                     key={`dot-${index}`}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(index); }}
                     aria-label={`View photo ${index + 1}`}
                     style={{ width: 7, height: 7, borderRadius: 999, border: 'none', padding: 0, cursor: 'pointer', background: index === selectedImageIndex ? '#ffffff' : 'rgba(255,255,255,0.4)' }}
                   />
                 ))}
               </div>
+            )}
+            {galleryImages.length > 1 && !autoPlayOn && (
+              <div style={{ position: 'absolute', left: 12, bottom: 12, fontSize: 9, letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', background: 'rgba(0,0,0,0.35)', padding: '4px 8px', borderRadius: 999 }}>Swipe</div>
             )}
           </div>
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1022,7 +1119,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
               <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: checkoutDisabled ? 0.55 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Re-enter for future return' : 'Enter allocation'}
+                {soldOut ? 'Sold out' : isSubmitting ? 'Processing...' : product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation')}
               </button>
             )}
             {canCheckoutDirect && (

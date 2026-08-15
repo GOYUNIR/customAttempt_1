@@ -451,6 +451,8 @@ export default function AdminPortal() {
     cartTitle: '',
     footerTagline: '',
     supportEmail: '',
+    priorityDropsTitle: '',
+    priorityDropsSubtitle: '',
   });
   // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
   // so buyers never need code changes to update policies, company name, or the
@@ -1666,7 +1668,6 @@ export default function AdminPortal() {
     // sendAdminVerifyCode is stable per-mount (it only touches setters), so
     // keying on the gate state alone is intentional — re-running exactly when
     // the gate opens/closes is the desired behaviour.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminVerified]);
 
   // CSV export uses fetch (not a plain <a>) so the admin password never travels
@@ -3087,8 +3088,10 @@ export default function AdminPortal() {
               </p>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
 
-              {/* Sticky top save button — stays visible while scrolling the long settings form. */}
-              <div style={{ position: 'sticky', top: 12, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 12, background: 'rgba(10,10,12,0.94)', border: '1px solid #2a2a2e', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
+              {/* Sticky top save button — stays visible while scrolling the long settings form.
+                  top: 92 keeps it BELOW the fixed storefront header (84px) instead of sliding
+                  underneath it while you scroll. */}
+              <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 12, background: 'rgba(10,10,12,0.94)', border: '1px solid #2a2a2e', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
                 <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading}>
                   {settingsLoading ? 'Saving…' : 'Save All Settings'}
                 </button>
@@ -3319,12 +3322,14 @@ export default function AdminPortal() {
                   </p>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                     {([
-                      ['heroTitle', 'Hero title'],
-                      ['heroSubtitle', 'Hero subtitle'],
-                      ['entryCta', '"Enter now" button label'],
+                      ['heroTitle', 'Hero title (overrides the Hero Content headline)'],
+                      ['heroSubtitle', 'Hero subtitle (overrides the Hero Content body)'],
+                      ['entryCta', '"Enter allocation" button label'],
                       ['cartTitle', 'Cart drawer title ("Review items")'],
                       ['footerTagline', 'Footer tagline'],
-                      ['supportEmail', 'Support email'],
+                      ['supportEmail', 'Support email (footer link)'],
+                      ['priorityDropsTitle', 'Home "Priority drops" section title'],
+                      ['priorityDropsSubtitle', 'Home drops subtitle (default "Explore our creations")'],
                     ] as [string, string][]).map(([key, label]) => (
                       <label key={key} style={{ fontSize: 11 }}>
                         {label}

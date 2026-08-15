@@ -19,7 +19,7 @@ import { neutralBrandName } from '@/lib/env';
  */
 function glowSurface(bg: string, alpha: number | string, fallback: string): string {
   const raw = Number(alpha);
-  const effective = Number.isFinite(raw) && raw >= 95 ? 93 : raw;
+  const effective = Number.isFinite(raw) && raw >= 95 ? 86 : raw;
   return surfaceBackground(bg, effective, fallback);
 }
 
@@ -39,6 +39,10 @@ export default function HomePage() {
   );
   // Hero copy is fully editable from /admin → Settings → Hero Content.
   const [heroContent, setHeroContent] = useState<any>(liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
+  // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
+  // A non-empty value overrides the built-in default below (hero title/subtitle and
+  // the "Priority drops" section header/subtitle).
+  const [copyOverrides, setCopyOverrides] = useState<Record<string, any>>(liveCtx?.copy || {});
 
   const brandName = String(branding?.brandName || branding?.shareTitle || neutralBrandName());
 
@@ -64,6 +68,7 @@ export default function HomePage() {
         if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
         if (data?.config?.branding) setBranding(data.config.branding);
         if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
+        if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
@@ -128,15 +133,23 @@ export default function HomePage() {
     return 'Until sold out';
   };
 
+  // Admin-editable storefront copy (settings.copy). Non-empty overrides win,
+  // otherwise the built-in defaults are used. The priority-drops subtitle now
+  // defaults to "Explore our creations" instead of the old "Curated by our team".
+  const priorityDropsTitle = String(copyOverrides.priorityDropsTitle || 'Priority drops');
+  const priorityDropsSubtitle = String(copyOverrides.priorityDropsSubtitle || 'Explore our creations');
+  const heroTitle = String(copyOverrides.heroTitle || heroContent.headline || 'Luxury releases with private-club energy, built for decisive collectors.');
+  const heroSubtitle = String(copyOverrides.heroSubtitle || heroContent.body || 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.');
+
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: glowSurface(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))'), boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'HIGH-CADENCE RELEASES'}</div>
-          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroContent.headline || 'Luxury releases with private-club energy, built for decisive collectors.'}</h1>
+          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroTitle}</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
-            {heroContent.body || 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.'}
+            {heroSubtitle}
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {primaryProduct?.slug ? (
@@ -163,8 +176,8 @@ export default function HomePage() {
         {activeProducts.length > 0 && (
           <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Priority drops</div>
-              <div style={{ fontSize: 11, color: configPalette.textMuted }}>Curated by our team — refreshed as releases move</div>
+              <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{priorityDropsTitle}</div>
+              <div style={{ fontSize: 11, color: configPalette.textMuted }}>{priorityDropsSubtitle}</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeProducts.map((product: any, index: number) => (

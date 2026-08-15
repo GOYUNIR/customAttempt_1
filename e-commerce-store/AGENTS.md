@@ -362,6 +362,15 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — Storefront UX + settings pass (sticky save bar, editable home copy, swipeable gallery, cart orbs):**
+  - **Admin sticky "Save All Settings" bar now sticks BELOW the fixed top bar** (`app/admin/page.tsx`): the sticky offset was `top: 12`, so as you scrolled the long settings form the bar slid under the 84px fixed storefront header. It now uses `top: 92` (matching the content padding) so it floats just under the top bar and stays fully visible.
+  - **Home-page "Priority drops" subtitle default is now "Explore our creations"** (was "Curated by our team — refreshed as releases move") and BOTH the section title and subtitle are editable from `/admin → Settings → Storefront copy` via the new `settings.copy.priorityDropsTitle` / `priorityDropsSubtitle` keys (empty = built-in default).
+  - **Storefront copy overrides are now actually wired up.** The `settings.copy` block (saved by /admin → Settings → Storefront copy) was persisted but never read by the storefront. It now overrides (non-empty wins): home hero headline/subtitle (`heroTitle`/`heroSubtitle`), the product-page entry CTA (`entryCta`), the cart drawer title (`cartTitle`), the footer tagline (`footerTagline`), and the footer support email link (`supportEmail`, falling back to the Footer tab value). Reads flow through `useLiveTheme()` (server-baked, no flash) and are refreshed from `/api/store → config.copy`.
+  - **Product images are swipable** (`components/Storefront.tsx`): the gallery accepts pointer-drag swipes (touch + mouse) with a live drag preview, spring-back when the gesture is too short, and a photo flip past a 52px horizontal threshold. Vertical drags still scroll the page (`touch-action: pan-y`). Added desktop chevron arrows and a subtle "Swipe" pill (shown when auto-advance is off). Autoplay pauses during a drag and only resumes on touch release (mouse uses hover-pause).
+  - **Orbs are more visible on the home page** (`app/page.tsx`): the home-page surface helper caps fully-opaque surfaces at 86% opacity (was 93%) so the glow bleeds through the hero + product cards more noticeably, matching the catalog/product pages.
+  - **Orbs now glow inside the cart drawer** (`components/SiteChrome.tsx`): the drawer paints above the page-level orb layer, so it previously hid them entirely. The drawer now carries its own subtle orb glow layer (primary/secondary/tertiary orb colors at slightly boosted opacity) behind the content.
+  - Docs: this changelog entry; no new Redis keys were added (copy fields live under the existing `settings.copy` / `store:config.copy` block).
+
 - **2026-08-14 — Admin device tokens + 2FA gate UX (hash cleanup, no-flash gate, auto-send):**
   - **`admin:device:<token>` folder spam is gone.** Verified admin devices now live in a
     SINGLE Redis hash `admin:devices` (field = token, value = JSON with an explicit

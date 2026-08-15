@@ -177,6 +177,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // served through /api/store → config.brandFooterData. The footer NEVER
   // hardcodes social URLs or a brand name.
   const [footerSettings, setFooterSettings] = useState<Record<string, string> | null>(liveCtx?.footer || null);
+  // Storefront copy overrides — admin → Settings → Storefront copy. A non-empty
+  // value overrides the built-in labels (cart title, footer tagline/support email).
+  const [copySettings, setCopySettings] = useState<Record<string, any>>(liveCtx?.copy || {});
   const [promoCode, setPromoCode] = useState('');
   const [bannerMessage, setBannerMessage] = useState('');
   const [encryptionHealthy, setEncryptionHealthy] = useState(true);
@@ -499,6 +502,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         setBranding(data?.config?.branding || null);
         setOrbs(data?.config?.orbs || null);
         if (data?.config?.brandFooterData) setFooterSettings(data.config.brandFooterData);
+        if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
         // Prune cart lines whose product/size no longer exists on the backend
         // (wipe/rebuild or archive) so the bag never shows ghost items.
         const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
@@ -918,7 +922,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             {(() => {
               const ig = String(footerSettings?.instagramLink || '').trim();
               const tt = String(footerSettings?.tiktokLink || '').trim();
-              const mail = String(footerSettings?.supportEmail || '').trim();
+              const mail = String(copySettings.supportEmail || footerSettings?.supportEmail || '').trim();
               const linkStyle = { color: liveTheme.textMuted || '#71717a', textDecoration: 'none' } as const;
               return (
                 <>
@@ -929,6 +933,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
               );
             })()}
           </div>
+          {String(copySettings.footerTagline || '').trim() ? (
+            <div style={{ fontSize: 11, lineHeight: 1.6, color: liveTheme.textMuted || '#71717a', maxWidth: 420, margin: '0 auto' }}>{String(copySettings.footerTagline).trim()}</div>
+          ) : null}
           <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
             © {new Date().getFullYear()} {String(footerSettings?.corporateEntityCopyright || branding?.brandName || branding?.shareTitle || 'ALL RIGHTS RESERVED.')}
           </div>
@@ -937,11 +944,26 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText }}>
+            {/* Orb glows inside the cart drawer — mirrors the storefront glow so
+                the animated background orbs stay visible while the drawer is open
+                (the drawer paints above the page-level orb layer). */}
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+              {orbsEnabled && primaryOrb.enabled !== false && (
+                <div style={{ position: 'absolute', right: '-16%', top: '-10%', width: '86%', height: '86%', borderRadius: '999px', background: orbGradient(primaryOrb.color, Math.min(100, (Number(primaryOrb.opacity) || 16) + 12), '#3b82f6') }} />
+              )}
+              {orbsEnabled && secondaryOrb.enabled !== false && (
+                <div style={{ position: 'absolute', left: '-22%', bottom: '-14%', width: '84%', height: '84%', borderRadius: '999px', background: orbGradient(secondaryOrb.color, Math.min(100, (Number(secondaryOrb.opacity) || 26) + 10), '#a855f7') }} />
+              )}
+              {orbsEnabled && tertiaryOrb.enabled !== false && (
+                <div style={{ position: 'absolute', right: '8%', bottom: '18%', width: '48%', height: '48%', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, Math.min(100, (Number(tertiaryOrb.opacity) || 12) + 6), '#ffd79b') }} />
+              )}
+            </div>
+            <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>
                 <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: liveTheme.accentBlue || '#7dd3fc' }}>{actionTitle}</div>
-                <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: drawerText }}>Review items</div>
+                <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: drawerText }}>{String(copySettings.cartTitle || '').trim() || 'Review items'}</div>
               </div>
               <button onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: drawerTextMuted, borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
             </div>
@@ -1057,6 +1079,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 <button onClick={() => { setCart([]); writeCart([]); }} style={{ padding: '12px 14px', borderRadius: 999, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: drawerTextMuted, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Clear</button>
               </div>
               {cartMsg && <div style={{ marginTop: 8, color: '#fca5a5', fontSize: 12 }}>{cartMsg}</div>}
+            </div>
             </div>
           </div>
         </div>

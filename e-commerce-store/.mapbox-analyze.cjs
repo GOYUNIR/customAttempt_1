@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const fs = require('fs');
 const s = fs.readFileSync('.mapbox-web.js', 'utf8');
 
