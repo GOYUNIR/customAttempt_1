@@ -199,7 +199,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const r = Number(configPalette.borderRadius);
     return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
   };
-  const actionMode = typeof window !== 'undefined' ? (window.localStorage.getItem('goyunir-header-action-mode') === 'bag' ? 'bag' : 'cart') : 'cart';
+  // Header action label ("Bag" vs "Cart"). The admin value is mirrored into
+  // localStorage by SiteChrome; reading it here during RENDER caused a React
+  // hydration mismatch (#418 — SSR says "cart", client says "bag") whenever the
+  // saved value was "bag". Read it in an effect instead so both server and
+  // client render "cart", then converge after mount.
+  const [actionMode, setActionMode] = useState<'cart' | 'bag'>('cart');
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem('goyunir-header-action-mode') === 'bag') setActionMode('bag');
+    } catch {
+      /* ignore storage errors */
+    }
+  }, []);
   const actionLabel = actionMode === 'bag' ? 'bag' : 'cart';
 
   const fetchProduct = useCallback(async (slug: string) => {

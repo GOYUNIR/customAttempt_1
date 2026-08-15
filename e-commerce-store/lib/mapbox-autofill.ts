@@ -141,6 +141,23 @@ let suggestCount = 0;
 let resolvedTokenPrefix = '';
 let tokenRejected = false;
 
+// The full resolved Mapbox token (kept so the street-suggestion fallback can
+// issue its OWN retrieve request when the SDK short-circuits — see
+// retrieveAndFillStreetSuggestion).
+let resolvedMapboxToken = '';
+// Latest suggestions received from the SDK's `suggest` event. The SDK fires
+// `retrieve` for non-street suggestions, but for `accuracy: "street"`
+// suggestions it ONLY fills the street line (no retrieve, no event) — we need
+// the suggestion's `action.id` to retrieve the full address ourselves.
+let latestSuggestions: Array<Record<string, any>> = [];
+let streetFillDetectorInstalled = false;
+// Address inputs currently under full-address defence (composed value + window
+// expiry). Kept in a module map (NOT only dataset attributes) so the
+// capture-phase guard can still rewrite the full address even if another
+// handler clears the dataset attribute — which used to let the SDK's
+// street-only form-fill permanently clobber a verified full address.
+const activeFullFills = new Map<HTMLInputElement, { composed: string; until: number }>();
+
 /** One-time latch so the noisy "Attach verified" info line only logs once per
  * page-load instead of on every attach re-verify (SiteChrome + Storefront both
  * poll, which previously logged it repeatedly in the console). */
@@ -538,18 +555,122 @@ function installFullFillGuard(): void {
     (e) => {
       const target = e.target as HTMLInputElement | null;
       if (!target || !target.dataset) return;
-      const composed = target.dataset.mapboxFullFill;
-      const until = Number(target.dataset.mapboxFullFillUntil || 0);
-      if (!composed || !until || Date.now() > until) return;
+      // A REAL user keystroke (`isTrusted === true`) deliberately overrides any
+      // active full-address defence — never fight the customer.
+      if (e.isTrusted === true) {
+        activeFullFills.delete(target);
+        return;
+      }
+      const guard = activeFullFills.get(target);
+      if (!guard || Date.now() > guard.until) return;
       const current = String(target.value || '').trim();
       // Only override when the current value is SHORTER than the full address
       // (i.e. the SDK truncated it). A longer manual edit is left alone.
-      if (current !== composed && current.length < composed.length) {
-        writeReactInputValue(target, composed);
+      if (current !== guard.composed && current.length < guard.composed.length) {
+        writeReactInputValue(target, guard.composed);
       }
     },
     true,
   );
+}
+
+/**
+ * Detect the SDK's street-only instant fill for `accuracy: "street"`
+ * suggestions and upgrade it to the FULL address.
+ *
+ * Mapbox search-js treats a street-level suggestion specially: it fills the
+ * form with the suggestion's OWN street components (`jn` in the bundle —
+ * `address_line1 + " "`, no city/state/zip) and NEVER calls the retrieve API,
+ * so no `retrieve` event is fired and our `handleRetrieve` never runs. The
+ * customer is left staring at "1600 Pennsylvania Ave NW " with the box still
+ * short of a shippable address. We capture the suggestions from the `suggest`
+ * event, detect the SDK's street-only fill, and issue the retrieve request
+ * OURSELVES to compose the full address.
+ */
+function installStreetFillDetector(): void {
+  if (streetFillDetectorInstalled || typeof document === 'undefined') return;
+  streetFillDetectorInstalled = true;
+  document.addEventListener(
+    'input',
+    (e) => {
+      const target = e.target as HTMLInputElement | null;
+      if (!target || !target.dataset) return;
+      // Only programmatic fills (the SDK's `fe` dispatches untrusted events).
+      // A real keystroke is typing, not a suggestion pick.
+      if (e.isTrusted === true) return;
+      if (activeFullFills.has(target)) return; // retrieve path already defended
+      const current = String(target.value || '').trim();
+      // The SDK's street-only fill writes just the street line(s) — typically
+      // a single line with NO comma (city/state/zip/country come only from a
+      // full retrieve). If a comma is already present the box has a complete
+      // address and there is nothing to upgrade.
+      if (!current || current.includes(',')) return;
+      const suggestion = matchStreetSuggestion(current);
+      if (!suggestion || !suggestion.action?.id) return;
+      retrieveAndFillStreetSuggestion(target, suggestion);
+    },
+    true,
+  );
+}
+
+/**
+ * Find the street-accuracy suggestion whose street line matches the SDK fill.
+ * Prefers an exact street-line match; falls back to a prefix match so a
+ * slightly normalized value still resolves.
+ */
+function matchStreetSuggestion(streetOnly: string): Record<string, any> | null {
+  const norm = streetOnly.toLowerCase().replace(/\s+$/g, '');
+  if (!latestSuggestions.length || !norm) return null;
+  let fallback: Record<string, any> | null = null;
+  for (const s of latestSuggestions) {
+    if (!s || typeof s !== 'object') continue;
+    const street = String(s.address_line1 || s.feature_name || s.name || '')
+      .toLowerCase()
+      .trim();
+    if (!street) continue;
+    if (norm === street) {
+      if (s.accuracy === 'street') return s;
+      if (!fallback) fallback = s;
+    } else if (!fallback && (norm.startsWith(street) || street.startsWith(norm))) {
+      fallback = s;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Retrieve the full feature for a street-accuracy suggestion using the SDK's
+ * public autofill retrieve endpoint, then compose + write the full address.
+ */
+async function retrieveAndFillStreetSuggestion(
+  input: HTMLInputElement,
+  suggestion: Record<string, any>,
+): Promise<void> {
+  const id = suggestion.action?.id;
+  const token = resolvedMapboxToken;
+  if (!id || !token || typeof fetch !== 'function') return;
+  try {
+    const session =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const url =
+      `https://api.mapbox.com/autofill/v1/retrieve/${encodeURIComponent(id)}` +
+      `?access_token=${encodeURIComponent(token)}&session_token=${encodeURIComponent(session)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const props = data?.features?.[0]?.properties;
+    if (!props || typeof props !== 'object') return;
+    const composed = composeFullAddress(props);
+    if (!composed) return;
+    // Write immediately (the SDK already filled street-only) and keep defending
+    // for the window in case anything else truncates it.
+    writeReactInputValue(input, composed);
+    defendFullAddress(input, composed);
+  } catch {
+    /* network blip — the SDK's street-only fill stays; the customer can retype */
+  }
 }
 
 function handleRetrieve(event: any): void {
@@ -578,23 +699,29 @@ function handleRetrieve(event: any): void {
     event?.detail?.properties;
   const composed = composeFullAddress(props);
   if (!composed || !input) return;
+  defendFullAddress(input, composed);
+}
 
-  // Mark this input so the capture-phase guard (and any retry that re-resolves
-  // the element after a React re-render) keeps defending the full address for
-  // a short window. The dataset survives in-place React updates.
+/**
+ * Register a full-address defence for an input and keep re-asserting it over
+ * the whole window. The SDK's own street-only form-fill runs AFTER the
+ * retrieve event (and after the street-suggestion instant fill), so a single
+ * write — even a successful one — is never enough: the box would get
+ * truncated back to the street line and React state with it. Each write goes
+ * through `writeReactInputValue` so React state stays in sync (without that,
+ * the next React re-render resets the box and the address disappears).
+ */
+function defendFullAddress(input: HTMLInputElement, composed: string): void {
   installFullFillGuard();
   const fillUntil = Date.now() + FULL_FILL_WINDOW_MS;
+  activeFullFills.set(input, { composed, until: fillUntil });
   input.setAttribute('data-mapbox-full-fill', composed);
   input.setAttribute('data-mapbox-full-fill-until', String(fillUntil));
 
-  // Apply the full address over a guarded schedule. The SDK's own form-fill can
-  // land at any moment (and, worse, re-truncate the box back to street-only on
-  // slow devices), so we keep re-writing our longer complete value until the
-  // SDK is done. Each write goes through writeReactInputValue so React state is
-  // updated too — without that, the next React re-render resets the box and the
-  // address the customer just picked silently disappears.
   let attempts = 0;
-  const RETRY_SCHEDULE_MS = [0, 40, 120, 260, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400, 6600];
+  // Dense at the start (the SDK's fill lands within a few ticks), then spread
+  // across the whole window to catch slow async fills / re-renders.
+  const RETRY_SCHEDULE_MS = [0, 30, 80, 160, 300, 500, 800, 1200, 1700, 2300, 3000, 3800, 4700, 5700, 6800, 7900];
   const writeFull = () => {
     attempts += 1;
     // Re-resolve the element each attempt: React can replace the DOM node on a
@@ -624,11 +751,14 @@ function handleRetrieve(event: any): void {
       el.setAttribute('data-mapbox-verified', 'true');
       el.setAttribute('data-mapbox-verified-value', composed);
       if (el.form) el.form.setAttribute('data-mapbox-verified', 'true');
-      return;
     }
-    if (attempts < RETRY_SCHEDULE_MS.length) {
-      const delay = RETRY_SCHEDULE_MS[attempts] ?? 6600;
+    if (attempts < RETRY_SCHEDULE_MS.length && Date.now() < fillUntil) {
+      const remaining = Math.max(0, fillUntil - Date.now());
+      const delay = Math.min(RETRY_SCHEDULE_MS[attempts] ?? 1000, remaining);
       window.setTimeout(writeFull, delay);
+    } else if (Date.now() >= fillUntil) {
+      // Defence window over — stop holding a reference to the input.
+      activeFullFills.delete(el);
     }
   };
   writeFull();
@@ -640,8 +770,14 @@ function watchManualEdits(): void {
     (e) => {
       const target = e.target as HTMLInputElement | null;
       if (!target || !target.dataset) return;
+      // Only a REAL user keystroke (`isTrusted === true`) counts as a manual
+      // edit. The SDK's programmatic form-fill dispatches untrusted input
+      // events — clearing the defence on those is exactly how the SDK used to
+      // permanently clobber a verified full address back to street-only.
+      if (e.isTrusted !== true) return;
       // A deliberate manual edit ends both the verified state and the
       // full-address defence window (so the guard never fights the customer).
+      activeFullFills.delete(target);
       if (target.dataset.mapboxFullFill) {
         target.dataset.mapboxFullFill = '';
         target.dataset.mapboxFullFillUntil = '';
@@ -892,6 +1028,7 @@ export async function ensureMapboxAutofill(): Promise<void> {
   }
 
   resolvedTokenPrefix = token.length > 7 ? `${token.slice(0, 7)}…` : '(token too short?)';
+  resolvedMapboxToken = token;
 
   setStatus({ status: 'loading', token: true });
   await loadMapboxSdk();
@@ -922,8 +1059,14 @@ export async function ensureMapboxAutofill(): Promise<void> {
     collection = mapbox.autofill({ accessToken: token, browserAutofillEnabled: true });
     if (collection && typeof collection.addEventListener === 'function') {
       collection.addEventListener('retrieve', handleRetrieve);
-      collection.addEventListener('suggest', () => {
+      collection.addEventListener('suggest', (event: any) => {
         suggestCount += 1;
+        // Capture the raw suggestions so the street-accuracy fallback can
+        // retrieve the full address itself (the SDK skips retrieve for them).
+        const detail = event && event.detail;
+        if (detail && Array.isArray(detail.suggestions)) {
+          latestSuggestions = detail.suggestions;
+        }
         refreshActiveStatus();
       });
       collection.addEventListener('suggesterror', (event: any) => {
@@ -948,6 +1091,7 @@ export async function ensureMapboxAutofill(): Promise<void> {
       });
     }
     watchManualEdits();
+    installStreetFillDetector();
     // Force an explicit scan+attach ONLY if the constructor didn't already
     // attach (e.g. the eligible inputs mounted after the SDK finished loading).
     // update() is idempotent but re-creating wrappers duplicates the SDK's
