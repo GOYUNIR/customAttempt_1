@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { resolveBrandImageSource } from '@/lib/brand-image';
 
 export const size = { width: 32, height: 32 };
 export const contentType = 'image/png';
@@ -8,7 +9,10 @@ export default async function Icon() {
   const redis = createRedisClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
-  const logoUrl = String(branding.logoUrl || '').trim();
+  // ImageResponse requires ABSOLUTE image URLs — a broken logo placeholder in
+  // admin would otherwise 500 the favicon route. resolveBrandImageSource()
+  // drops invalid values so the icon falls back to the brand letter.
+  const logoUrl = await resolveBrandImageSource(branding.logoUrl);
   const brandName = String(branding.brandName || branding.shareTitle || 'Store');
   const background = String(branding.iconBackground || branding.shareBackground || '#0B0B0F');
   const textColor = String(branding.iconText || branding.shareText || '#D4AF37');

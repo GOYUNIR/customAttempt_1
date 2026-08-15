@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { getSiteUrl } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
+import { resolveBrandImageSource } from '@/lib/brand-image';
 
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -11,12 +12,17 @@ export default async function OpenGraphImage() {
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const themeColors = config.themeColors || {};
-  const logoUrl = String(branding.logoUrl || '').trim();
+  // ImageResponse requires ABSOLUTE image URLs. Admin logo/share-image fields
+  // are free text, so a broken placeholder would crash the whole card with
+  // "Image source must be an absolute URL". resolveBrandImageSource() keeps
+  // valid http(s)/data: URLs, resolves root-relative paths against the real
+  // site URL, and drops anything invalid (card falls back to text-only).
+  const logoUrl = await resolveBrandImageSource(branding.logoUrl);
   const brandName = String(branding.brandName || branding.shareTitle || 'Store');
   const title = String(branding.shareTitle || brandName);
   const description = String(branding.shareDescription || 'Private releases, handled cleanly.');
   const tagline = String(branding.shareTagline || '');
-  const shareImageUrl = String(branding.shareImageUrl || '').trim();
+  const shareImageUrl = await resolveBrandImageSource(branding.shareImageUrl);
   // Share colors fall back to the live /admin → Settings theme so applying a
   // Design Preset updates the link-preview card too (explicit branding.share*
   // values always win).

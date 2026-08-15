@@ -365,6 +365,38 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — OG share card fixed for real + social-proof contrast fix:**
+  - **The share-link card was still broken because the OG image route CRASHED.**
+    Root cause: `app/opengraph-image.tsx` fed the admin Branding → Logo URL and
+    Share image values straight into `next/og`'s `ImageResponse`, which only
+    accepts ABSOLUTE image sources. A leftover/free-text value in those admin
+    fields (e.g. `"a image url"`) threw
+    `Error: Image source must be an absolute URL` while the response was being
+    piped — `/opengraph-image` returned 500 and the connection dropped, so
+    WhatsApp/iMessage/Discord never got a card. Fixed with a new server-only
+    helper **`lib/brand-image.ts` → `resolveBrandImageSource()`**: keeps valid
+    `http(s)://` and `data:image/…` URLs, resolves root-relative paths
+    (`/images/…`, `/uploads/…`) against the real site URL (env → request host),
+    and drops anything invalid so the card/favicon ALWAYS renders (text-only
+    fallback). Wired into both `app/opengraph-image.tsx` and `app/icon.tsx`.
+    Verified live: `/opengraph-image` went from 500 → 200 (84KB PNG) with the
+    exact same broken Redis config.
+  - **Social-proof surfaces on the home page are readable again**
+    (`app/page.tsx`): the "Total raffle entries" box and the "Social proof"
+    sold-out release cards used hardcoded `rgba(255,255,255,0.02)` /
+    `rgba(255,255,255,0.04)` white-tint backgrounds, which are nearly
+    invisible ("totally clear") — especially on light themes — while their text
+    uses light `cardTextMain`/`cardTextMuted`. Both now use the same
+    `surfaceBackground(cardBackground, surfaceTransparency, …)` helper as every
+    other card on the page, so they get the (dark, in every preset) card
+    surface and readable text.
+  - Note for template buyers: the admin `store:config` branding still holds the
+    placeholder values you typed while testing (`logoUrl: "a image url"`,
+    `shareDescription: "a description"`, brand "GOYUNIR"). The card no longer
+    crashes on them, but re-save real values in `/admin → Settings → Branding &
+    Share` (clear the Logo URL field or paste a real URL) to brand the card.
+  - Docs: AGENTS.md change log updated; no Redis keys were added or changed.
+
 - **2026-08-14 — Share-link fix (request-host URLs) + address UX copy cleanup:**
   - **Link previews no longer resolve to the stock `https://example.com`
     placeholder** when the buyer hasn't set `NEXT_PUBLIC_URL` /
