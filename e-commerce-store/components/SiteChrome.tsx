@@ -106,6 +106,20 @@ function orbGradient(color: string, opacity: number, fallback: string, edgeRatio
   return `radial-gradient(circle, ${hex}${alphaHex(opacity)} 0%, ${hex}${alphaHex(opacity * edgeRatio)} 42%, transparent 72%)`;
 }
 
+/**
+ * Resolve an orb's configured opacity for the cart-drawer glow. Respects an
+ * explicit 0 (no glow) and never boosts the value. The drawer used to hardcode
+ * +6/+10/+12 opacity boosts on 84-86% drawer-sized orb divs with negative
+ * offsets — the result was huge clipped colour blobs with hard edges where the
+ * drawer's `overflow: hidden` boundary cut through the still-strong part of the
+ * gradients. The drawer now uses the exact admin-configured opacities.
+ */
+function orbGlowOpacity(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(100, n));
+}
+
 function readCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -833,7 +847,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${headerText === '#0a0a0c' ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            Catalog
+            MORE
           </Link>
         </div>
 
@@ -950,13 +964,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 (the drawer paints above the page-level orb layer). */}
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
               {orbsEnabled && primaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', right: '-16%', top: '-10%', width: '86%', height: '86%', borderRadius: '999px', background: orbGradient(primaryOrb.color, Math.min(100, (Number(primaryOrb.opacity) || 16) + 12), '#3b82f6') }} />
+                <div style={{ position: 'absolute', top: '6%', right: '4%', width: '56%', height: '56%', borderRadius: '999px', background: orbGradient(primaryOrb.color, orbGlowOpacity(primaryOrb.opacity, 16), '#3b82f6') }} />
               )}
               {orbsEnabled && secondaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', left: '-22%', bottom: '-14%', width: '84%', height: '84%', borderRadius: '999px', background: orbGradient(secondaryOrb.color, Math.min(100, (Number(secondaryOrb.opacity) || 26) + 10), '#a855f7') }} />
+                <div style={{ position: 'absolute', left: '4%', bottom: '6%', width: '54%', height: '54%', borderRadius: '999px', background: orbGradient(secondaryOrb.color, orbGlowOpacity(secondaryOrb.opacity, 26), '#a855f7') }} />
               )}
               {orbsEnabled && tertiaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', right: '8%', bottom: '18%', width: '48%', height: '48%', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, Math.min(100, (Number(tertiaryOrb.opacity) || 12) + 6), '#ffd79b') }} />
+                <div style={{ position: 'absolute', right: '14%', bottom: '26%', width: '34%', height: '34%', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, orbGlowOpacity(tertiaryOrb.opacity, 12), '#ffd79b') }} />
               )}
             </div>
             <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>

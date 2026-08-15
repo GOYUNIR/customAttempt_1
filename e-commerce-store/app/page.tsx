@@ -10,18 +10,14 @@ import { surfaceBackground } from '@/lib/storefront-config';
 import { neutralBrandName } from '@/lib/env';
 
 /**
- * Home-page surface helper. Keeps the admin surfaceTransparency setting, but
- * when it's set to fully opaque (>= 95) we let a little of the background orb
- * glow bleed through the hero and product cards. The catalog and product pages
- * already expose the orbs through their tile gaps; without this the home page
- * (large, full-width surfaces) hides them entirely. Readability is untouched —
- * the bleed is at most ~7%.
+ * Home-page surfaces use the SAME surfaceBackground() helper as the catalog and
+ * product pages. The background orbs live on the fixed zIndex-0 layer, which
+ * paints above plain flow content — so as long as the sections here never
+ * create their own stacking contexts, the glow shows over them exactly like it
+ * does on every other page. The keyframes below end at `transform: none` and
+ * every entrance uses `backwards` fill so a lingering transform (which would
+ * trap the orbs behind the section surfaces) is impossible.
  */
-function glowSurface(bg: string, alpha: number | string, fallback: string): string {
-  const raw = Number(alpha);
-  const effective = Number.isFinite(raw) && raw >= 95 ? 86 : raw;
-  return surfaceBackground(bg, effective, fallback);
-}
 
 export default function HomePage() {
   const liveCtx = useLiveTheme();
@@ -143,9 +139,9 @@ export default function HomePage() {
 
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
-      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: translateY(0); } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
+      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: glowSurface(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))'), boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 28, padding: '22px 18px', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))'), boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'HIGH-CADENCE RELEASES'}</div>
           <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroTitle}</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
@@ -174,7 +170,7 @@ export default function HomePage() {
         </section>
 
         {activeProducts.length > 0 && (
-          <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) both' }}>
+          <section id="goyunir-priority-drops" style={{ animation: 'goyunirFadeUp 760ms cubic-bezier(.22,1,.36,1) backwards' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{priorityDropsTitle}</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>{priorityDropsSubtitle}</div>
@@ -182,7 +178,7 @@ export default function HomePage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeProducts.map((product: any, index: number) => (
                 <Link key={product.id} href={`/${product.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{ borderRadius: 22, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: glowSurface(configPalette.cardBackground, configPalette.surfaceTransparency, product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217'), boxShadow: '0 16px 48px rgba(0,0,0,0.22)', transform: `translateY(${index === 0 ? 0 : 2}px)`, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) both' }}>
+                  <div style={{ borderRadius: 22, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217'), boxShadow: '0 16px 48px rgba(0,0,0,0.22)', marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
                     <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -219,7 +215,7 @@ export default function HomePage() {
         )}
 
         {soldOutProducts.length > 0 && (
-          <section style={{ animation: 'goyunirFadeUp 780ms cubic-bezier(.22,1,.36,1) both' }}>
+          <section style={{ animation: 'goyunirFadeUp 780ms cubic-bezier(.22,1,.36,1) backwards' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Social proof</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>Sold out releases keep the story alive</div>
@@ -240,7 +236,7 @@ export default function HomePage() {
           </section>
         )}
 
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: glowSurface(configPalette.cardBackground, configPalette.surfaceTransparency, '#0e0e10'), color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) both' }}>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: 24, padding: '16px 15px', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#0e0e10'), color: configPalette.cardTextMain, animation: 'goyunirFadeUp 800ms cubic-bezier(.22,1,.36,1) backwards' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>

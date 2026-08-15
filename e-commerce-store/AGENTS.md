@@ -362,6 +362,30 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-14 — Orb visibility fixes (home page + cart drawer) + mobile header nav:**
+  - **Home-page orbs now glow exactly like the catalog/product pages** (`app/page.tsx`).
+    Root cause: every home section animated with `goyunirFadeUp … both`, and the
+    keyframes ended at `transform: translateY(0)`. With `fill-mode: both` that
+    non-`none` transform stays applied forever, so every hero/card section remained
+    a stacking context painted ABOVE the fixed `zIndex: 0` background-orb layer —
+    the orbs were literally rendered behind the section surfaces. Fixes: the
+    `goyunirFadeUp` keyframes now end at `transform: none`, all home sections use
+    `backwards` fill, and the product-card stagger inline transform
+    (`translateY(0/2px)`, itself a stacking context) was replaced with a `marginTop`
+    offset. Home surfaces now use the plain `surfaceBackground()` helper like every
+    other page (the old `glowSurface` 86% cap is gone).
+  - **Cart-drawer orbs fixed** (`components/SiteChrome.tsx`): the drawer glow divs
+    were 84–86% of the drawer with hardcoded +6/+10/+12 opacity boosts and negative
+    offsets (`right: '-16%'` etc.). The gradients don't fade to transparent until
+    72% of radius, so the drawer's `overflow: hidden` boundary sliced through the
+    still-strong part of the gradients — giant clipped colour blobs with hard edges
+    ("glitched broken"). They are now compact edge glows fully inside the drawer (no
+    clipping), and opacity comes from the configured orb values via the new
+    `orbGlowOpacity()` helper (explicit `0` = no glow, no boosts).
+  - **Mobile header nav** (`components/SiteChrome.tsx`): the `CATALOG` button label
+    is now `MORE` (magnifier icon kept) so the fixed header fits narrow screens.
+  - Docs: this changelog entry; no Redis keys were added or changed.
+
 - **2026-08-14 — Finalization pass (repo hygiene + full verification):**
   - **Removed every tracked debug/scratch artifact** that had been committed
     during development: the `.admin-*` Playwright repro scripts, `.mapbox-*`
