@@ -7,6 +7,7 @@ import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import { toHexColor } from '@/lib/share-card-config';
+import { getNextDrawTimestampForSchedule } from '@/lib/storefront-config';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -39,7 +40,10 @@ function typeLabel(type: string | undefined) {
   return map[type || ''] || type || 'Unknown';
 }
 
-/** Mask an email for streamer mode: first char + domain hint, never the full inbox. */
+/** Mask an email for streamer mode: keep the first 2 chars of the local part
+ *  plus the full domain so the value still LOOKS real on stream — e.g.
+ *  `jane.doe@gmail.com` → `ja•••@gmail.com`. Deterministic (same input always
+ *  produces the same output) so SSR and client render can never disagree. */
 function maskEmail(email: string | undefined | null): string {
   const value = String(email || '').trim();
   if (!value) return '';
@@ -47,9 +51,161 @@ function maskEmail(email: string | undefined | null): string {
   if (at <= 0) return '••••';
   const local = value.slice(0, at);
   const domain = value.slice(at + 1);
-  const localHead = local.slice(0, Math.min(1, local.length));
+  const localHead = local.slice(0, Math.min(2, local.length));
   return `${localHead}•••@${domain}`;
 }
+
+/** Mask a shipping address: keep the street number + first letter of every
+ *  word, replace the middle — realistic-looking but safe to share on a
+ *  livestream. `1234 Rosewood Ave, Los Angeles, CA 90210` →
+ *  `1234 R•••d Ave, L•• Angeles, CA 902••`. */
+function maskAddress(address: string | undefined | null): string {
+  const value = String(address || '').trim();
+  if (!value) return '';
+  const maskSegment = (segment: string): string => {
+    const s = String(segment || '').trim();
+    if (!s) return s;
+    // ZIP/postal codes: keep the first 3 digits only.
+    if (/^\d+$/.test(s)) {
+      return s.length <= 3 ? s : `${s.slice(0, 3)}••`;
+    }
+    const words = s.split(/\s+/);
+    return words
+      .map((word) => {
+        if (word.length <= 3) return word;
+        // "1234" street number stays intact; words keep first + last letter.
+        if (/^\d+$/.test(word)) return word;
+        return `${word.slice(0, 1)}${'•'.repeat(Math.min(3, Math.max(2, word.length - 2)))}${word.slice(-1)}`;
+      })
+      .join(' ');
+  };
+  return value
+    .split(',')
+    .map((part) => maskSegment(part))
+    .join(', ');
+}
+
+/** Mask a card number: keep the first 4 and last 4 digits, bullets in the
+ *  middle — `4242 4242 4242 4242` → `4242 •••• •••• 4242`. */
+function maskCard(value: string | undefined | null): string {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length < 8) return String(value || '') || '';
+  const head = digits.slice(0, 4);
+  const tail = digits.slice(-4);
+  const middleLen = Math.max(2, digits.length - 8);
+  const groups = Math.max(2, Math.ceil(middleLen / 4));
+  return `${head} ${Array(groups).fill('••••').join(' ')} ${tail}`;
+}
+
+/** One helper for every PII field rendered in the portal. Streamer mode routes
+ *  every customer value through here so masking can never be forgotten. */
+function pii(value: string | undefined | null, kind: 'email' | 'address' | 'card', streamer: boolean): string {
+  if (!streamer) return String(value || '');
+  if (kind === 'email') return maskEmail(value);
+  if (kind === 'address') return maskAddress(value);
+  return maskCard(value);
+}
+
+/** Pick readable text (black/white) on top of an arbitrary CSS color — used by
+ *  the live previews so a dark or light CTA button always shows legible text. */
+function readableOn(bg: string | undefined | null): string {
+  const hex = toHexColor(bg || '#ffffff').replace('#', '');
+  if (hex.length < 6) return '#ffffff';
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum > 150 ? '#0b0b0d' : '#ffffff';
+}
+
+/** Section wrapper used across the admin — consistent card header + helper
+ *  copy so every group (product form, settings) reads like a clean settings
+ *  page instead of a wall of inputs. */
+function SectionCard({ title, description, children, action }: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div style={{ background: '#0d0d11', border: '1px solid #232329', borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: description || action ? 8 : 0 }}>
+        <h5 style={{ fontSize: 11, color: '#e4e4e7', margin: 0, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+          {title}
+        </h5>
+        {action}
+      </div>
+      {description && <p style={{ fontSize: 10, color: '#8b8b94', margin: '0 0 10px', lineHeight: 1.5 }}>{description}</p>}
+      {children}
+    </div>
+  );
+}
+
+/** Consistent empty-state block used across tabs. */
+function EmptyState({ icon, title, hint, children }: {
+  icon?: string;
+  title: string;
+  hint?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ textAlign: 'center', padding: '28px 16px', color: '#6b6b74', border: '1px dashed #2e2e35', borderRadius: 14, background: 'rgba(255,255,255,0.015)' }}>
+      {icon && <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>}
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#a1a1aa' }}>{title}</div>
+      {hint && <div style={{ fontSize: 11, color: '#6b6b74', marginTop: 4, lineHeight: 1.5 }}>{hint}</div>}
+      {children && <div style={{ marginTop: 12 }}>{children}</div>}
+    </div>
+  );
+}
+
+/** Small status pill used for state chips (Active / Hidden / Archived…). */
+function Pill({ children, color = '#a1a1aa', background = 'rgba(161,161,170,0.12)', style }: {
+  children: React.ReactNode;
+  color?: string;
+  background?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999, color, background, whiteSpace: 'nowrap', marginLeft: 4, ...style }}>
+      {children}
+    </span>
+  );
+}
+
+/** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
+ *  settings page navigable without hunting through the whole form. */
+const SETTINGS_SECTIONS: [string, string][] = [
+  ['settings-presets', 'Design'],
+  ['settings-theme', 'Theme'],
+  ['settings-hero', 'Hero'],
+  ['settings-behavior', 'Behavior'],
+  ['settings-form', 'Form'],
+  ['settings-footer', 'Footer'],
+  ['settings-copy', 'Copy'],
+  ['settings-catalog', 'Catalog'],
+  ['settings-legal', 'Legal'],
+  ['settings-branding', 'Branding'],
+  ['settings-orbs', 'Orbs'],
+  ['settings-rewards', 'Rewards'],
+  ['settings-gallery', 'Gallery'],
+];
+
+/** Friendly labels for the registration-form + footer copy keys so no
+ *  camelCase ever leaks into the admin UI (Settings → Registration Form / Footer). */
+const COPY_FIELD_LABELS: Record<string, string> = {
+  title: 'Form title',
+  subtitle: 'Form subtitle',
+  buttonLabel: 'Submit button label',
+  emailPlaceholder: 'Email field placeholder',
+  addressPlaceholder: 'Address field placeholder',
+  cardPlaceholder: 'Card field placeholder',
+  finePrint: 'Fine print',
+  instagramLink: 'Instagram URL',
+  tiktokLink: 'TikTok URL',
+  supportEmail: 'Support email (footer link)',
+  shippingReturnPolicyText: 'Shipping & returns line',
+  corporateEntityCopyright: 'Copyright line',
+};
 
 /** Colored badge for the audit log actor (admin=blue, user=green, system=grey). */
 function auditActorStyle(actor?: string): React.CSSProperties {
@@ -290,6 +446,78 @@ async function compressImageFile(file: File, maxSize = 1440, quality = 0.82): Pr
   }
 }
 
+// Module-level defaults for the settings forms. These are the "clean" values a
+// freshly-fetched server payload starts from — fetchSettings() merges the Redis
+// store:config over them deterministically, then snapshots the result so the
+// admin can see when their edits diverge (the Discard-changes button).
+const DEFAULT_BRANDING_SETTINGS = {
+  logoUrl: '',
+  logoWidth: 28,
+  logoHeight: 28,
+  logoTransparent: false,
+  brandName: '',
+  brandFontFamily: '',
+  brandFontSize: 14,
+  headerMode: 'both',
+  headerActionMode: 'cart',
+  shareImageUrl: '',
+  shareTitle: '',
+  shareDescription: '',
+  shareTagline: '',
+  shareUrl: '',
+  shareBackground: '#0B0B0F',
+  shareAccent: '#D4AF37',
+  shareText: '#F5F2E9',
+  iconBackground: '#0B0B0F',
+  iconText: '#D4AF37',
+};
+
+const DEFAULT_REWARDS_SETTINGS = {
+  pointsPerDollar: 100,
+  minRedeemPoints: 100,
+  maxRedeemPoints: 0,
+  purchasePointsPerDollar: 10,
+  giftingEnabled: true,
+  giftDiscountPercent: 10,
+  // Custom caption shown in the account "Redeem points" box. Leave empty to
+  // use the built-in dynamic message (gifting + percentage aware).
+  redemptionInfoMessage: '',
+};
+
+const DEFAULT_GALLERY_SETTINGS = {
+  autoPlay: true,
+  intervalSeconds: 4,
+  zoom: true,
+  zoomDurationSeconds: 14,
+};
+
+const DEFAULT_COPY_SETTINGS = {
+  heroTitle: '',
+  heroSubtitle: '',
+  entryCta: '',
+  cartTitle: '',
+  footerTagline: '',
+  supportEmail: '',
+  priorityDropsTitle: '',
+  priorityDropsSubtitle: '',
+};
+
+const DEFAULT_LEGAL_SETTINGS = {
+  companyName: '',
+  supportEmail: '',
+  terms: '',
+  privacy: '',
+  shipping: '',
+};
+
+const DEFAULT_CATALOG_SETTINGS = {
+  sectionOrder: ['upcoming', 'archive', 'live'],
+};
+
+const DEFAULT_BEHAVIOR_SETTINGS = {
+  scrollToTopOnLoad: true,
+};
+
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
   const [drawsSub, setDrawsSub] = useState<'run' | 'automation'>('run');
@@ -301,12 +529,52 @@ export default function AdminPortal() {
   const [revealAddresses, setRevealAddresses] = useState(false);
   const [revealBusy, setRevealBusy] = useState(false);
   // STREAMER MODE: default ON. Masks all customer PII (addresses, emails, card
-  // numbers) and disables the password field so the portal is safe to share on
-  // a livestream (draw reveal, winner announcements). Operators toggle it off
-  // when they need to act on data — everything destructive still needs the
-  // admin password typed AFTER streamer mode is off.
+  // numbers) and locks the password field so the portal is safe to share on a
+  // livestream (draw reveal, winner announcements). The initial value is ALWAYS
+  // true (deterministic — SSR and the first client render agree, so there can
+  // never be a hydration mismatch); a session preference is restored from
+  // sessionStorage AFTER hydration so a streamer who turned it off doesn't get
+  // re-masked on every reload within the same tab.
   const [streamerMode, setStreamerMode] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Settings dirty-tracking. fetchSettings() stores the merged server payload
+  // as a JSON snapshot; `settingsDirty` compares the live form state against it
+  // so the "Discard changes" button only appears when there really are unsaved
+  // edits. Product-form dirty-tracking uses a snapshot (state, not a ref — refs
+  // must never be read during render) taken when the editor opens.
+  const [settingsSnapshot, setSettingsSnapshot] = useState<string | null>(null);
+  const [productFormSnapshot, setProductFormSnapshot] = useState('');
+
+  // Restore + persist the streamer-mode preference for this tab (session-only).
+  useEffect(() => {
+    let stored: string | null = null;
+    try { stored = window.sessionStorage.getItem('goyunir-admin-streamer-mode'); } catch { /* noop */ }
+    if (stored === 'off') setStreamerMode(false);
+    const onStorage = () => {
+      try { setStreamerMode(window.sessionStorage.getItem('goyunir-admin-streamer-mode') !== 'off'); } catch { /* noop */ }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+  useEffect(() => {
+    try { window.sessionStorage.setItem('goyunir-admin-streamer-mode', streamerMode ? 'on' : 'off'); } catch { /* noop */ }
+  }, [streamerMode]);
+
+  // Guard for every write/destructive action: while Streamer Mode is ON the
+  // password must not be visible or typed on stream, so nothing can be
+  // persisted. Turning it OFF (then typing the password) unlocks everything.
+  const requireUnlocked = (): boolean => {
+    if (streamerMode) {
+      showToast('Turn Streamer Mode OFF first — the admin password must not appear on stream');
+      return false;
+    }
+    if (!password) {
+      showToast('Enter the admin password first');
+      return false;
+    }
+    return true;
+  };
 
   // TWO-STEP ADMIN VERIFICATION: after HTTP Basic Auth, the operator must also
   // confirm a one-time code emailed to ADMIN_VERIFY_EMAIL before the portal
@@ -435,72 +703,24 @@ export default function AdminPortal() {
   const [heroSettings, setHeroSettings] = useState(GOYUNIR_STORE_SUITE.heroContent);
   const [formSettings, setFormSettings] = useState(GOYUNIR_STORE_SUITE.raffleRegistrationForm);
   const [footerSettings, setFooterSettings] = useState(GOYUNIR_STORE_SUITE.brandFooterData);
-  const [brandingSettings, setBrandingSettings] = useState({
-    logoUrl: '',
-    logoWidth: 28,
-    logoHeight: 28,
-    logoTransparent: false,
-    brandName: '',
-    brandFontFamily: '',
-    brandFontSize: 14,
-    headerMode: 'both',
-    headerActionMode: 'cart',
-    shareImageUrl: '',
-    shareTitle: '',
-    shareDescription: '',
-    shareTagline: '',
-    shareUrl: '',
-    shareBackground: '#0B0B0F',
-    shareAccent: '#D4AF37',
-    shareText: '#F5F2E9',
-    iconBackground: '#0B0B0F',
-    iconText: '#D4AF37',
-  });
+  const [brandingSettings, setBrandingSettings] = useState(DEFAULT_BRANDING_SETTINGS);
   // Rewards & points configuration (points earned per $1, redemption rate).
-  const [rewardsSettings, setRewardsSettings] = useState({
-    pointsPerDollar: 100,
-    minRedeemPoints: 100,
-    maxRedeemPoints: 0,
-    purchasePointsPerDollar: 10,
-    giftingEnabled: true,
-    giftDiscountPercent: 10,
-    // Custom caption shown in the account "Redeem points" box. Leave empty to
-    // use the built-in dynamic message (gifting + percentage aware).
-    redemptionInfoMessage: '',
-  });
+  const [rewardsSettings, setRewardsSettings] = useState(DEFAULT_REWARDS_SETTINGS);
   // Product gallery behaviour (auto-advance + slow zoom).
-  const [gallerySettings, setGallerySettings] = useState({
-    autoPlay: true,
-    intervalSeconds: 4,
-    zoom: true,
-    zoomDurationSeconds: 14,
-  });
+  const [gallerySettings, setGallerySettings] = useState(DEFAULT_GALLERY_SETTINGS);
   // Storefront copy overrides — saved under settings.copy. Storefront
   // components keep their built-in defaults until a string here is non-empty.
-  const [copySettings, setCopySettings] = useState({
-    heroTitle: '',
-    heroSubtitle: '',
-    entryCta: '',
-    cartTitle: '',
-    footerTagline: '',
-    supportEmail: '',
-    priorityDropsTitle: '',
-    priorityDropsSubtitle: '',
-  });
+  const [copySettings, setCopySettings] = useState(DEFAULT_COPY_SETTINGS);
   // Catalog presentation — section order on /catalog. Default: live at the
   // BOTTOM (upcoming → archives → currently available). Stored under
   // store:config.catalog.sectionOrder.
   const [catalogSettings, setCatalogSettings] = useState<{
     sectionOrder: string[];
-  }>({
-    sectionOrder: ['upcoming', 'archive', 'live'],
-  });
+  }>(DEFAULT_CATALOG_SETTINGS);
   // Site behaviour (admin → Settings → Behavior). Whether the storefront forces
   // the page to start at the TOP on load (default ON) instead of letting the
   // browser restore the previous scroll position. Stored under store:config.behavior.
-  const [behaviorSettings, setBehaviorSettings] = useState<{ scrollToTopOnLoad: boolean }>({
-    scrollToTopOnLoad: true,
-  });
+  const [behaviorSettings, setBehaviorSettings] = useState<{ scrollToTopOnLoad: boolean }>(DEFAULT_BEHAVIOR_SETTINGS);
   // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
   // so buyers never need code changes to update policies, company name, or the
   // support address. Stored under store:config.legal.
@@ -510,13 +730,7 @@ export default function AdminPortal() {
     terms: string;
     privacy: string;
     shipping: string;
-  }>({
-    companyName: '',
-    supportEmail: '',
-    terms: '',
-    privacy: '',
-    shipping: '',
-  });
+  }>(DEFAULT_LEGAL_SETTINGS);
   const [legalOpen, setLegalOpen] = useState(false);
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
@@ -662,21 +876,39 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/settings');
       const data = await res.json();
       if (data.settings) {
-        if (data.settings.themeColors) setThemeSettings({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.settings.themeColors });
-        if (data.settings.heroContent) setHeroSettings({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.settings.heroContent });
-        if (data.settings.raffleRegistrationForm) setFormSettings(data.settings.raffleRegistrationForm);
-        if (data.settings.brandFooterData) setFooterSettings(data.settings.brandFooterData);
-        if (data.settings.branding) setBrandingSettings((prev) => ({ ...prev, ...data.settings.branding }));
-        if (data.settings.rewards) setRewardsSettings((prev) => ({ ...prev, ...data.settings.rewards }));
-        if (data.settings.gallery) setGallerySettings((prev) => ({ ...prev, ...data.settings.gallery }));
-        if (data.settings.copy) setCopySettings((prev) => ({ ...prev, ...data.settings.copy }));
-        if (data.settings.legal) setLegalSettings((prev) => ({ ...prev, ...data.settings.legal }));
-        if (data.settings.catalog && Array.isArray(data.settings.catalog.sectionOrder)) {
-          setCatalogSettings({ sectionOrder: data.settings.catalog.sectionOrder });
-        }
-        if (data.settings.behavior) setBehaviorSettings((prev) => ({ ...prev, ...data.settings.behavior }));
-        if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
-        if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
+        const s = data.settings;
+        // Merge the server payload over the module defaults DETERMINISTICALLY
+        // (never over the live form state) so the snapshot below is a clean
+        // "what's saved" baseline that dirty-tracking can compare against.
+        const next = {
+          theme: { ...GOYUNIR_STORE_SUITE.themeColors, ...(s.themeColors || {}) },
+          hero: { ...GOYUNIR_STORE_SUITE.heroContent, ...(s.heroContent || {}) },
+          form: s.raffleRegistrationForm || GOYUNIR_STORE_SUITE.raffleRegistrationForm,
+          footer: s.brandFooterData || GOYUNIR_STORE_SUITE.brandFooterData,
+          branding: { ...DEFAULT_BRANDING_SETTINGS, ...(s.branding || {}) },
+          rewards: { ...DEFAULT_REWARDS_SETTINGS, ...(s.rewards || {}) },
+          gallery: { ...DEFAULT_GALLERY_SETTINGS, ...(s.gallery || {}) },
+          copy: { ...DEFAULT_COPY_SETTINGS, ...(s.copy || {}) },
+          legal: { ...DEFAULT_LEGAL_SETTINGS, ...(s.legal || {}) },
+          catalog: { sectionOrder: Array.isArray(s.catalog?.sectionOrder) ? s.catalog.sectionOrder : DEFAULT_CATALOG_SETTINGS.sectionOrder },
+          behavior: { ...DEFAULT_BEHAVIOR_SETTINGS, ...(s.behavior || {}) },
+          orbs: mergeOrbSettings(DEFAULT_ORBS, s.orbs || {}),
+        };
+        setThemeSettings(next.theme);
+        setHeroSettings(next.hero);
+        setFormSettings(next.form);
+        setFooterSettings(next.footer);
+        setBrandingSettings(next.branding);
+        setRewardsSettings(next.rewards);
+        setGallerySettings(next.gallery);
+        setCopySettings(next.copy);
+        setLegalSettings(next.legal);
+        setCatalogSettings(next.catalog);
+        setBehaviorSettings(next.behavior);
+        setOrbSettings(next.orbs);
+        if (s.productNotes) setProductNotes(s.productNotes);
+        // Baseline for the "Discard changes" button — everything saved as-is.
+        setSettingsSnapshot(JSON.stringify(next));
       }
       setSettingsMsg('');
     } catch (err: any) {
@@ -733,12 +965,14 @@ export default function AdminPortal() {
   // ============================================================
 
   const resetProductForm = () => {
-    setProductForm({
+    const fresh = {
       name: '', slug: '', prefix: '', tagline: '', desc: '',
       checkoutMode: 'RAFFLE',
       productType: 'raffle',
       maxPerEmail: 1,
       maxPerCart: 1,
+      totalInventory: 0,
+      maxRaffleAllocationLimit: 0,
       isActive: false, // default hidden
       isArchived: false,
       isUpcoming: false,
@@ -761,7 +995,9 @@ export default function AdminPortal() {
       priceCategories: [
         { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
       ]
-    });
+    };
+    setProductForm(fresh);
+    setProductFormSnapshot(JSON.stringify(fresh));
     setEditingProduct(null);
     setEditingNoteIdx(null);
     setNoteForm({ label: '', name: '', text: '' });
@@ -774,7 +1010,7 @@ export default function AdminPortal() {
     const categories = product.priceCategories && Array.isArray(product.priceCategories)
       ? product.priceCategories
       : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }];
-    setProductForm({
+    const form = {
       ...product,
       customDropSchedule: product.customDropSchedule && typeof product.customDropSchedule === 'object' && Object.keys(product.customDropSchedule).length > 0
         ? product.customDropSchedule
@@ -787,10 +1023,14 @@ export default function AdminPortal() {
       productType: product.productType || (product.isRaffle === false ? 'fcfs' : 'raffle'),
       maxPerEmail: Number(product.maxPerEmail || 1),
       maxPerCart: Number(product.maxPerCart || product.maxPerEmail || 1),
+      totalInventory: Number(product.totalInventory || 0),
+      maxRaffleAllocationLimit: Number(product.maxRaffleAllocationLimit || 0),
       sortOrder: product.sortOrder || 0,
       // Ensure default hidden if new
       isActive: product.isActive !== undefined ? product.isActive : false,
-    });
+    };
+    setProductForm(form);
+    setProductFormSnapshot(JSON.stringify(form));
     setShowProductForm(true);
   };
 
@@ -822,8 +1062,8 @@ export default function AdminPortal() {
 
   // ===== Handle image file uploads =====
   const handleImageFiles = async (files: FileList) => {
-    if (!password) {
-      setProductMsg('❌ Enter admin password first.');
+    if (!requireUnlocked()) {
+      setProductMsg(streamerMode ? '❌ Turn Streamer Mode OFF first to upload images.' : '❌ Enter admin password first.');
       return;
     }
     if (!editingProduct) {
@@ -865,7 +1105,7 @@ export default function AdminPortal() {
 
   // ===== Save product (UPDATED to send priceCategories) =====
   const saveProduct = async () => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
 
     // ── Mistake-proof validation (friendly inline messages, never a bare alert) ──
     const name = String(productForm.name || '').trim();
@@ -954,7 +1194,7 @@ export default function AdminPortal() {
 
   // ===== Delete, archive, active toggles (unchanged logic, but now archiving/upcoming does NOT hide) =====
   const deleteProduct = async (id: string) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
     setProductActionLoading(true);
     try {
@@ -978,7 +1218,7 @@ export default function AdminPortal() {
 
   // Archive/Unarchive: now they do NOT affect isActive – they just move the product to the archive list while remaining visible.
   const toggleArchive = async (id: string, currentArchived: boolean) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     const action = currentArchived ? 'unarchive' : 'archive';
     setProductActionLoading(true);
     try {
@@ -1000,7 +1240,7 @@ export default function AdminPortal() {
 
   // Toggle active: simply toggles visibility without affecting archive/upcoming status
   const toggleActive = async (id: string, currentActive: boolean) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -1020,7 +1260,7 @@ export default function AdminPortal() {
 
   // Upcoming toggle: does not hide, just marks/unmarks as upcoming
   const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     const action = currentUpcoming ? 'removeFromUpcoming' : 'addToUpcoming';
     setProductActionLoading(true);
     try {
@@ -1040,7 +1280,7 @@ export default function AdminPortal() {
   };
 
   const reorderProducts = async (productId: string, newOrder: number) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -1100,7 +1340,7 @@ export default function AdminPortal() {
   };
 
   const seedDefaultProducts = async () => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
     setProductActionLoading(true);
     try {
@@ -1123,7 +1363,7 @@ export default function AdminPortal() {
   // USER FUNCTIONS (unchanged)
   // ============================================================
   const saveUser = async () => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     if (!userForm.email) { showToast('Email is required'); return; }
     setProductActionLoading(true);
     try {
@@ -1164,7 +1404,7 @@ export default function AdminPortal() {
   };
 
   const deleteUser = async (id: string) => {
-    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!requireUnlocked()) return;
     if (!confirm('Delete this user?')) return;
     try {
       const res = await adminFetch('/api/admin/users', {
@@ -1185,7 +1425,7 @@ export default function AdminPortal() {
   // CATALOG FUNCTIONS (unchanged)
   // ============================================================
   const saveCatalogSettings = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     setCatalogLoading(true);
     try {
       const res = await adminFetch('/api/admin/catalog-settings', {
@@ -1214,7 +1454,7 @@ export default function AdminPortal() {
   // PROMO FUNCTIONS (unchanged)
   // ============================================================
   const savePromo = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     const customerDiscount = Number(promoForm.customerDiscountPercent);
     const promoterPayout = Number(promoForm.promoterPayoutPercent);
     const maxUses = Number(promoForm.maxUsesPerEmail);
@@ -1269,7 +1509,7 @@ export default function AdminPortal() {
   };
 
   const deletePromo = async (code: string) => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     if (!confirm(`Delete promo code ${code}?`)) return;
     await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
     await fetchPromos();
@@ -1279,7 +1519,7 @@ export default function AdminPortal() {
   // OTHER FUNCTIONS (unchanged)
   // ============================================================
   const saveSchedule = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'schedule', value: scheduleForm }),
@@ -1288,7 +1528,7 @@ export default function AdminPortal() {
   };
 
   const saveSocial = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
@@ -1328,7 +1568,7 @@ export default function AdminPortal() {
   };
 
   const triggerDrop = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     if (!confirm('This will run the draw and charge selected winners\' saved cards. Continue?')) return;
     setIsRunning(true);
     setResultMessage('Running…');
@@ -1350,10 +1590,10 @@ export default function AdminPortal() {
           ds.executionTime ? `Time: ${ds.executionTime}` : '',
           revenue > 0 ? `Revenue: $${revenue.toFixed(2)}` : '',
           ...charged.slice(0, 8).map((w: any) =>
-            `${streamerMode ? maskEmail(w.email) : w.email} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
+            `${pii(w.email, 'email', streamerMode)} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
           ),
           ...winners.filter((w: any) => w.status && w.status !== 'SUCCESS_CHARGED' && w.status !== 'charged').slice(0, 5).map((w: any) =>
-            `${streamerMode ? maskEmail(w.email) : w.email}: ${w.status}`
+            `${pii(w.email, 'email', streamerMode)}: ${w.status}`
           ),
         ].filter(Boolean);
         setResultMessage(lines.join('\n'));
@@ -1369,7 +1609,7 @@ export default function AdminPortal() {
   };
 
   const updateAddress = async (entry: any, newAddress: string) => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     setShipMsg('Updating address…');
     try {
       const res = await adminFetch('/api/admin/update-address', {
@@ -1398,7 +1638,7 @@ export default function AdminPortal() {
   // /api/admin/update-shipping route persists it on the ledger entry AND emails
   // the customer (and issues any configured post-delivery credit on DELIVERED).
   const updateShipping = async (entry: any) => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     setShipMsg('Updating shipping…');
     try {
       const res = await adminFetch('/api/admin/update-shipping', {
@@ -1429,7 +1669,7 @@ export default function AdminPortal() {
   };
 
   const saveRecovery = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     try {
       const res = await adminFetch('/api/admin/recovery-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...recovery }) });
       const data = await res.json();
@@ -1440,8 +1680,8 @@ export default function AdminPortal() {
   };
 
   const cancelOrder = async (entry: any) => {
-    if (!password) return showToast('Enter the admin password first');
-    const reason = prompt(`Cancel ${entry.email}'s entry for ${entry.variant} (${entry.size})? Optional reason:`);
+    if (!requireUnlocked()) return;
+    const reason = prompt(`Cancel ${pii(entry.email, 'email', streamerMode)}'s entry for ${entry.variant} (${entry.size})? Optional reason:`);
     if (reason === null) return;
     try {
       const res = await adminFetch('/api/admin/cancel-entry', {
@@ -1456,7 +1696,7 @@ export default function AdminPortal() {
   };
 
   const organizeRedis = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     setOrganizeMsg('Migrating legacy keys and tidying the Redis schema...');
     try {
       const res = await adminFetch('/api/admin/organize-redis', {
@@ -1486,7 +1726,7 @@ export default function AdminPortal() {
       showToast('Turn Streamer Mode OFF before wiping — the password must not be visible on stream');
       return;
     }
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     if (wipeConfirm.trim().toUpperCase() !== 'WIPE') {
       showToast('Type WIPE in the confirmation box to erase Redis');
       return;
@@ -1564,6 +1804,21 @@ export default function AdminPortal() {
       if (res.ok) {
         setSettingsMsg('Settings saved successfully!');
         showToast('UPDATED · Settings');
+        // The saved state is now the baseline — the Discard button disappears.
+        setSettingsSnapshot(JSON.stringify({
+          theme: themeSettings,
+          hero: heroSettings,
+          form: formSettings,
+          footer: footerSettings,
+          branding: brandingSettings,
+          rewards: rewardsSettings,
+          gallery: gallerySettings,
+          copy: copySettings,
+          legal: legalSettings,
+          catalog: catalogSettings,
+          behavior: behaviorSettings,
+          orbs: orbSettings,
+        }));
       } else setSettingsMsg(data.error || 'Failed to save settings.');
     } catch (err: any) {
       setSettingsMsg('Connection failed: ' + err.message);
@@ -1596,7 +1851,7 @@ export default function AdminPortal() {
   };
 
   const notifyReleaseList = async () => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     if (!selectedAlertProductId) return showToast('Choose a product first');
     setAlertsMsg('Sending release emails…');
     try {
@@ -1617,7 +1872,7 @@ export default function AdminPortal() {
   };
 
   const removeAlertSubscriber = async (email: string) => {
-    if (!password) return showToast('Enter the admin password first');
+    if (!requireUnlocked()) return;
     try {
       const res = await adminFetch('/api/admin/alerts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1838,6 +2093,41 @@ export default function AdminPortal() {
   // Streamer mode forces every sensitive display off regardless of reveal state.
   const sensitiveVisible = !streamerMode && revealAddresses;
 
+  // True when any settings form differs from the last fetched/saved baseline.
+  // Drives the "Discard changes" button in the sticky save bar.
+  const settingsDirty = (() => {
+    if (!settingsSnapshot) return false;
+    const current = JSON.stringify({
+      theme: themeSettings,
+      hero: heroSettings,
+      form: formSettings,
+      footer: footerSettings,
+      branding: brandingSettings,
+      rewards: rewardsSettings,
+      gallery: gallerySettings,
+      copy: copySettings,
+      legal: legalSettings,
+      catalog: catalogSettings,
+      behavior: behaviorSettings,
+      orbs: orbSettings,
+    });
+    return current !== settingsSnapshot;
+  })();
+
+  // Product-editor dirty state: compares the live form against the snapshot
+  // taken when the editor opened (editProduct / resetProductForm + Add).
+  const productFormDirty = productFormSnapshot !== ''
+    && JSON.stringify(productForm) !== productFormSnapshot;
+
+  // Revert every settings form back to the last SAVED state by re-fetching
+  // from Redis (fetchSettings sets both the form states and the baseline).
+  const discardSettings = async () => {
+    if (!settingsDirty) return;
+    if (!confirm('Discard all unsaved changes? This reverts every settings tab to the last saved state.')) return;
+    await fetchSettings();
+    showToast('DISCARDED · Reverted to last saved settings');
+  };
+
   const tabs: { id: Tab; label: string; group: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview', group: 'Store' },
     { id: 'drops', label: 'Drops', group: 'Store' },
@@ -1951,33 +2241,73 @@ export default function AdminPortal() {
           </div>
         </div>
 
-        <div style={{ ...cardStyle, marginBottom: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          {streamerMode && (
-            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, padding: '6px 10px', borderRadius: 999, background: 'rgba(237,178,16,0.14)', color: '#edb210', border: '1px solid rgba(237,178,16,0.4)' }}>
-              🎥 STREAMER MODE — customer data hidden
-            </span>
-          )}
-          <input
-            type={streamerMode ? 'text' : 'password'}
-            value={streamerMode ? (password ? '••••••••' : '') : password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={streamerMode ? 'Password hidden while streaming' : 'Admin password'}
-            disabled={streamerMode}
-            style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px', opacity: streamerMode ? 0.45 : 1 }} />
-          <button onClick={() => { setRevealAddresses(false); if (streamerMode) { setPassword(''); } setStreamerMode(!streamerMode); }}
-            style={{ ...buttonGhost, padding: '10px 14px', background: streamerMode ? 'rgba(237,178,16,0.14)' : 'transparent', color: streamerMode ? '#edb210' : '#ccc' }}>
-            {streamerMode ? '🎥 Streamer mode: ON' : '🎥 Streamer mode: OFF'}
-          </button>
-          {streamerMode && (
-            <span style={{ width: '100%', fontSize: 10, color: '#888', lineHeight: 1.4 }}>
-              The password field is disabled and shows a fixed mask — nobody can read the real length while you stream. Type your password after switching Streamer Mode OFF.
-            </span>
-          )}
-          {!streamerMode && (
-            <button onClick={toggleReveal} disabled={revealBusy}
-              style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
-              {revealAddresses ? 'Hide addresses' : 'Reveal addresses'}
+        <div style={{ ...cardStyle, marginBottom: 14, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Streamer Mode — polished shield toggle. Defaults ON; masks every
+              customer email/address/card and locks the password so the portal
+              is safe to share on a livestream. */}
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: streamerMode ? 'rgba(237,178,16,0.10)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${streamerMode ? 'rgba(237,178,16,0.45)' : '#27272a'}`,
+              borderRadius: 999, padding: '4px 6px 4px 12px', flexShrink: 0,
+            }}
+            title={streamerMode
+              ? 'Streamer Mode is ON — customer emails, addresses and card numbers are masked and the admin password is locked. Safe to share your screen on a livestream. Click the switch to work with real data.'
+              : 'Streamer Mode is OFF — real customer data is visible. Click the switch to mask everything again before you share your screen.'}
+          >
+            <span style={{ fontSize: 14, lineHeight: 1 }}>🛡️</span>
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: streamerMode ? '#edb210' : '#d4d4d8', letterSpacing: '0.4px', whiteSpace: 'nowrap' }}>
+                {streamerMode ? 'STREAMER MODE ON' : 'STREAMER MODE OFF'}
+              </span>
+              <span style={{ fontSize: 9, color: '#8b8b94', whiteSpace: 'nowrap' }}>
+                {streamerMode ? 'Customer data masked' : 'Real data visible'}
+              </span>
+            </div>
+            <button
+              onClick={() => { setRevealAddresses(false); if (streamerMode) setPassword(''); setStreamerMode((v) => !v); }}
+              aria-pressed={streamerMode}
+              aria-label="Toggle Streamer Mode"
+              title={streamerMode ? 'Turn Streamer Mode OFF to unlock the admin password and see real customer data' : 'Turn Streamer Mode ON to mask customer data for a livestream'}
+              style={{
+                width: 40, height: 22, borderRadius: 999, border: 'none', position: 'relative', cursor: 'pointer',
+                background: streamerMode ? '#edb210' : '#3f3f46', transition: 'background 150ms ease', flexShrink: 0,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: streamerMode ? 20 : 2, width: 18, height: 18, borderRadius: 999,
+                background: streamerMode ? '#0b0b0d' : '#fff', transition: 'left 150ms ease', boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+              }} />
             </button>
+          </div>
+
+          {streamerMode ? (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9a9aa3',
+              background: 'rgba(255,255,255,0.03)', border: '1px dashed #33333a', borderRadius: 10,
+              padding: '8px 12px', flex: 1, minWidth: 220,
+            }}>
+              🔒 <span>
+                <strong style={{ color: '#d4d4d8' }}>Admin password locked</strong> — while streaming, emails, shipping
+                addresses and card numbers are masked everywhere and nothing can be saved or triggered.
+                Turn Streamer Mode OFF and type the password to work with real data.
+              </span>
+            </span>
+          ) : (
+            <>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Admin password"
+                autoComplete="current-password"
+                style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px' }} />
+              <button onClick={toggleReveal} disabled={revealBusy}
+                style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
+                {revealAddresses ? 'Hide addresses' : 'Reveal addresses'}
+              </button>
+            </>
           )}
         </div>
 
@@ -2050,7 +2380,9 @@ export default function AdminPortal() {
             </div>
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 10px', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active Pools</h2>
-              {pools.length === 0 && <p style={{ color: '#555', fontSize: 12 }}>No pools yet.</p>}
+              {pools.length === 0 && (
+                <EmptyState icon="🗄️" title="No live pools yet" hint="Entry pools appear here as soon as customers start entering a drop. A store with zero traffic legitimately has none." />
+              )}
               {pools.map((p: any, i: number) => (
                 <div key={i} style={{ marginBottom: 10 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
@@ -2095,10 +2427,15 @@ export default function AdminPortal() {
                     ))
                   )}
                 </select>
-                <button onClick={triggerDrop} disabled={isRunning}
-                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: isRunning ? '#333' : '#edb210', color: '#09090b', fontWeight: 700, cursor: isRunning ? 'not-allowed' : 'pointer' }}>
-                  {isRunning ? 'Running…' : 'Authorize & Trigger Draw'}
+                <button onClick={triggerDrop} disabled={isRunning || streamerMode}
+                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: isRunning || streamerMode ? '#333' : '#edb210', color: isRunning || streamerMode ? '#777' : '#09090b', fontWeight: 700, cursor: isRunning || streamerMode ? 'not-allowed' : 'pointer' }}>
+                  {streamerMode ? '🔒 Locked while Streamer Mode is ON' : (isRunning ? 'Running…' : 'Authorize & Trigger Draw')}
                 </button>
+                {streamerMode && (
+                  <p style={{ fontSize: 10, color: '#edb210', margin: '8px 0 0', lineHeight: 1.5 }}>
+                    🔒 Triggering a draw charges winners&apos; saved cards — turn Streamer Mode OFF and enter the admin password first.
+                  </p>
+                )}
                 {password && (
                   <button onClick={downloadWinners}
                     style={{ display: 'inline-block', marginTop: 12, fontSize: 12, color: '#60a5fa', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -2115,7 +2452,7 @@ export default function AdminPortal() {
                     </button>
                   </div>
                   {drawHistory.length === 0 && !drawHistoryLoading && (
-                    <p style={{ color: '#555' }}>No draws have been run yet.</p>
+                    <EmptyState icon="🎲" title="No draws have been run yet" hint="Trigger a draw above, or let the countdown + cron engine do it automatically. History appears here after the first drop." />
                   )}
                   {drawHistoryLoading && <p style={{ color: '#555' }}>Loading history…</p>}
                   <div style={{ maxHeight: 400, overflowY: 'auto' }}>
@@ -2147,7 +2484,7 @@ export default function AdminPortal() {
                               {winners.length === 0 && <div style={{ color: '#555', fontSize: 11 }}>No winners recorded.</div>}
                               {winners.map((w: any, wi: number) => (
                                 <div key={wi} style={{ fontSize: 11, color: '#666', marginTop: 4, paddingLeft: 8, borderLeft: '2px solid #222' }}>
-                                  {streamerMode ? maskEmail(w.email) : w.email} · {w.product || w.variant || ''} {w.size || ''}
+                                  {pii(w.email, 'email', streamerMode)} · {w.product || w.variant || ''} {w.size || ''}
                                   {w.status === 'SUCCESS_CHARGED' || w.status === 'charged' ? (
                                     <span style={{ color: '#34d399' }}> ✓ ${((w.amountCents || 0) / 100).toFixed(2)}</span>
                                   ) : (
@@ -2183,12 +2520,26 @@ export default function AdminPortal() {
                       <option value="biweekly">Biweekly</option>
                       <option value="monthly">Monthly</option>
                       <option value="yearly">Yearly</option>
+                      <option value="custom">Custom interval (hours)</option>
                     </select>
                   </label>
                   <label style={{ fontSize: 11 }}>Timezone
                     <input value={scheduleForm.timezone || ''} onChange={(e) => setScheduleForm((f: any) => ({ ...f, timezone: e.target.value }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
+                  {scheduleForm.mode === 'custom' && (
+                    <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>Every N hours
+                      <input
+                        type="number"
+                        min={1}
+                        max={720}
+                        value={scheduleForm.customIntervalHours ?? 24}
+                        onChange={(e) => setScheduleForm((f: any) => ({ ...f, customIntervalHours: Math.max(1, Math.min(720, Number(e.target.value) || 24)) }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                      />
+                      <span style={{ fontSize: 10, color: '#666' }}>A new global draw becomes due every N hours (e.g. 6 → every 6 hours). Products with their own schedule still follow theirs.</span>
+                    </label>
+                  )}
                   {(scheduleForm.mode === 'fixed' || scheduleForm.mode === 'biweekly' || scheduleForm.mode === 'yearly') && (
                     <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>{scheduleForm.mode === 'fixed' ? 'Fixed date/time (YYYY-MM-DDTHH:MM:SS)' : 'Anchor date/time (YYYY-MM-DDTHH:MM:SS)'}
                       <input value={scheduleForm.targetEndDateTime || ''} onChange={(e) => setScheduleForm((f: any) => ({ ...f, targetEndDateTime: e.target.value }))}
@@ -2231,6 +2582,40 @@ export default function AdminPortal() {
                     </>
                   )}
                 </div>
+
+                {/* Live preview: next global draw computed from the CURRENT form
+                    state (before saving) using the same engine helper the
+                    storefront countdowns use. `lastUpdatedAt` (a state value,
+                    refreshed by the status poll) is the "now" reference so the
+                    past/future badge stays pure during render. */}
+                {(() => {
+                  const mode = scheduleForm?.mode;
+                  if (!mode) return null;
+                  if (mode === 'fixed' && !String(scheduleForm?.targetEndDateTime || '').trim()) return null;
+                  try {
+                    const nextMs = getNextDrawTimestampForSchedule(scheduleForm as any);
+                    if (!Number.isFinite(nextMs)) return null;
+                    const label = new Date(nextMs).toLocaleString(undefined, {
+                      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                    });
+                    const nowMs = lastUpdatedAt ?? null;
+                    const inPast = nowMs != null && nextMs <= nowMs;
+                    return (
+                      <div style={{
+                        marginBottom: 10, padding: '8px 12px', borderRadius: 10, fontSize: 11,
+                        background: inPast ? 'rgba(237,178,16,0.10)' : 'rgba(52,211,153,0.08)',
+                        border: `1px solid ${inPast ? 'rgba(237,178,16,0.4)' : 'rgba(52,211,153,0.3)'}`,
+                        color: inPast ? '#fde68a' : '#a7f3d0',
+                      }}>
+                        <span style={{ fontWeight: 700 }}>{inPast ? '⚠ Next draw is due now' : '🎯 Next draw'}</span>
+                        <span style={{ opacity: 0.85 }}> — {inPast ? 'the pool is due and will draw on the next engine check. Save, then trigger or wait for the countdown.' : `${label} (${scheduleForm.timezone || 'store timezone'})`}</span>
+                      </div>
+                    );
+                  } catch {
+                    return null;
+                  }
+                })()}
+
                 <button onClick={saveSchedule} style={buttonPrimary}>Save Schedule</button>
                 {configMsg && <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10 }}>{configMsg}</p>}
 
@@ -2315,6 +2700,13 @@ export default function AdminPortal() {
             {shipMsg && <p style={{ fontSize: 12, color: '#34d399', marginBottom: 10 }}>{shipMsg}</p>}
             
             <div>
+              {filteredEntries.length === 0 && (
+                <EmptyState
+                  icon="📜"
+                  title="No ledger entries found"
+                  hint={searchTerm ? `Nothing matches “${searchTerm}”. Try a different email, product, or address.` : 'Every entry event (entered, charged, declined, cancelled…) lands here permanently. Entries appear the moment a customer starts one.'}
+                />
+              )}
               {currentEntries.map((e: any, i: number) => {
                 const entryKey = `${e.email}|${e.variant}|${e.size}|${i}`;
                 const isEditingAddress = editingAddressEntry === entryKey;
@@ -2324,7 +2716,7 @@ export default function AdminPortal() {
                 
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
-                    <div style={{ fontWeight: 600 }}>{streamerMode ? maskEmail(e.email) : e.email}</div>
+                    <div style={{ fontWeight: 600 }}>{pii(e.email, 'email', streamerMode)}</div>
                     <div style={{ color: '#666', fontSize: 10 }}>Ref: {orderRef}</div>
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
@@ -2334,8 +2726,8 @@ export default function AdminPortal() {
                       )}
                     </div>
                     <div style={{ color: '#666', marginTop: 4 }}>
-                      📍 {sensitiveVisible ? e.shippingAddress || 'n/a' : '•••• hidden'}
-                      {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 ••{e.cardLast4}</span>}
+                      📍 {sensitiveVisible ? e.shippingAddress || 'n/a' : pii(e.shippingAddress, 'address', streamerMode) || '•••• hidden'}
+                      {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 {streamerMode ? maskCard(`•••• •••• •••• ${e.cardLast4}`) : `••${e.cardLast4}`}</span>}
                       {e.type === 'WINNER_CHARGED' && (
                         <span style={{ marginLeft: 6 }}>
                           · {e.shippingStatus ? e.shippingStatus.replace(/_/g, ' ').toLowerCase() : 'pending fulfillment'}
@@ -2343,7 +2735,7 @@ export default function AdminPortal() {
                         </span>
                       )}
                     </div>
-                    {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
+                    {!streamerMode && (e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {isEditingAddress ? (
                           <>
@@ -2362,7 +2754,7 @@ export default function AdminPortal() {
                         )}
                       </div>
                     )}
-                    {e.type === 'WINNER_CHARGED' && (
+                    {!streamerMode && e.type === 'WINNER_CHARGED' && (
                       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
                         {isEditingShipping ? (
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2423,10 +2815,22 @@ export default function AdminPortal() {
 
             {showProductForm && (
               <div style={{ background: '#09090b', padding: 16, borderRadius: 12, marginBottom: 16 }}>
-                <h4 style={{ margin: '0 0 8px', fontSize: 12, color: '#aaa' }}>
-                  {editingProduct ? 'Edit Product' : 'New Product'}
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                  <h4 style={{ margin: 0, fontSize: 13, color: '#e4e4e7' }}>
+                    {editingProduct ? 'Edit Product' : 'New Product'}
+                    {productFormDirty && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#edb210', marginLeft: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>● Unsaved changes</span>
+                    )}
+                  </h4>
+                  <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>✕ Close</button>
+                </div>
+
+                {/* ============ BASICS ============ */}
+                <SectionCard
+                  title="Basics"
+                  description="What the product is called, its URL, and how it appears on the storefront. Products start hidden — flip “Active (visible)” on when you are ready to publish."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Name *</label>
                     <input
@@ -2466,13 +2870,19 @@ export default function AdminPortal() {
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={{ fontSize: 10, color: '#888' }}>Description</label>
-                    <input type="text" placeholder="Product description" value={productForm.desc} onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))} style={inputStyle} />
+                    <textarea
+                      rows={3}
+                      placeholder="Product description — what makes this drop matter"
+                      value={productForm.desc}
+                      onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))}
+                      style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', resize: 'vertical' }}
+                    />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Checkout Mode</label>
                     <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => ({ ...p, checkoutMode: e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE' }))} style={inputStyle}>
-                      <option value="RAFFLE">RAFFLE</option>
-                      <option value="FCFS">FCFS</option>
+                      <option value="RAFFLE">RAFFLE — draw winners when the countdown ends</option>
+                      <option value="FCFS">FCFS — first come, first served</option>
                     </select>
                     <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
                       Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout.
@@ -2482,180 +2892,34 @@ export default function AdminPortal() {
                     <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
                     <input type="number" placeholder="0" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
                   </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)</label>
-                    <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email</label>
-                    <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Go live at (upcoming auto-activates)</label>
-                    <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at</label>
-                    <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Sold-out behavior</label>
-                    <select value={productForm.soldOutBehavior || 'stay_visible'} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutBehavior: e.target.value }))} style={inputStyle}>
-                      <option value="stay_visible">Stay visible as social proof</option>
-                      <option value="archive_now">Archive immediately</option>
-                      <option value="archive_after_delay">Archive after delay</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Archive delay after sold out (hours)</label>
-                    <input type="number" min={0} value={productForm.soldOutArchiveDelayHours ?? 24} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutArchiveDelayHours: Number(e.target.value) }))} style={inputStyle} />
-                  </div>
-                </div>
-
-                {/* Per-product raffle schedule: lets a raffle REPEAT on a cadence
-                    (hourly/daily/weekly/biweekly/monthly/yearly) while inventory
-                    remains. When enabled, the product's countdown rolls forward
-                    to the next scheduled draw after each drop — the "new raffle"
-                    timer. Leave disabled to inherit the global schedule. */}
-                <div style={{ gridColumn: '1 / -1', marginTop: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                  <h5 style={{ fontSize: 11, color: '#aaa', margin: '0 0 6px' }}>Raffle schedule (recurring)</h5>
-                  <p style={{ fontSize: 10, color: '#666', margin: '0 0 8px', lineHeight: 1.5 }}>
-                    When the countdown ends and inventory remains, a NEW raffle starts on this cadence and the storefront shows the new timer. Off = inherit the global schedule from <strong>Draws → Automation</strong> (or the drop is one-shot if no recurring schedule exists).
-                  </p>
-                  <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!productForm.customDropSchedule}
-                      onChange={(e) => setProductForm((p: any) => ({
-                        ...p,
-                        customDropSchedule: e.target.checked
-                          ? {
-                              mode: 'daily',
-                              timezone: scheduleForm.timezone || 'America/Los_Angeles',
-                              targetEndDateTime: scheduleForm.targetEndDateTime || '',
-                              drawDayOfWeek: 6,
-                              drawDayOfMonth: 1,
-                              drawHour: 21,
-                              drawMinute: 0,
-                              drawSecond: 0,
-                            }
-                          : null,
-                      }))}
-                    />
-                    <span>Repeat this raffle on a schedule while inventory remains</span>
-                  </label>
-                  {productForm.customDropSchedule && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-                      <label style={{ fontSize: 11 }}>Cadence
-                        <select
-                          value={productForm.customDropSchedule.mode || 'daily'}
-                          onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), mode: e.target.value } }))}
-                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                        >
-                          <option value="hourly">Hourly</option>
-                          <option value="daily">Daily</option>
-                          <option value="weekly">Weekly</option>
-                          <option value="biweekly">Biweekly</option>
-                          <option value="monthly">Monthly</option>
-                          <option value="yearly">Yearly</option>
-                        </select>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
+                        <span title="If checked, product is visible on the storefront (if not hidden by other flags).">Active (visible)</span>
                       </label>
-                      <label style={{ fontSize: 11 }}>Timezone
-                        <input value={productForm.customDropSchedule.timezone || 'America/Los_Angeles'} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), timezone: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked, isUpcoming: e.target.checked ? false : p.isUpcoming }))} />
+                        <span title="Moves to archive section – product remains visible.">Archived</span>
                       </label>
-                      {productForm.customDropSchedule.mode === 'hourly' && (
-                        <label style={{ fontSize: 11 }}>Minute (0-59)
-                          <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                        </label>
-                      )}
-                      {productForm.customDropSchedule.mode === 'weekly' && (
-                        <label style={{ fontSize: 11 }}>Day of week (0=Sun..6=Sat)
-                          <input type="number" min={0} max={6} value={productForm.customDropSchedule.drawDayOfWeek ?? 6} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfWeek: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                        </label>
-                      )}
-                      {productForm.customDropSchedule.mode === 'monthly' && (
-                        <label style={{ fontSize: 11 }}>Day of month (1-31)
-                          <input type="number" min={1} max={31} value={productForm.customDropSchedule.drawDayOfMonth ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfMonth: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                        </label>
-                      )}
-                      {(productForm.customDropSchedule.mode === 'daily' || productForm.customDropSchedule.mode === 'weekly' || productForm.customDropSchedule.mode === 'monthly') && (
-                        <>
-                          <label style={{ fontSize: 11 }}>Hour (0-23)
-                            <input type="number" min={0} max={23} value={productForm.customDropSchedule.drawHour ?? 21} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawHour: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                          </label>
-                          <label style={{ fontSize: 11 }}>Minute (0-59)
-                            <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
-                          </label>
-                        </>
-                      )}
-                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.5 }}>
-                        First draw happens at the countdown end above; every later draw happens on this cadence while allocation remains. Unselected entries carry over into the next raffle.
-                      </p>
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked, isArchived: e.target.checked ? false : p.isArchived }))} />
+                        <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
+                      </label>
                     </div>
-                  )}
-                </div>
-                <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
-                    <span title="If checked, product is visible on the storefront (if not hidden by other flags).">Active (visible)</span>
-                  </label>
-                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked, isUpcoming: e.target.checked ? false : p.isUpcoming }))} />
-                    <span title="Moves to archive section – product remains visible.">Archived</span>
-                  </label>
-                  <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked, isArchived: e.target.checked ? false : p.isArchived }))} />
-                    <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
-                  </label>
-                </div>
-
-                <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: '#060606', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.6 }}>
-                  RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Sold-out hold keeps proof of demand visible before archiving.
-                </div>
-
-                <div style={{ marginTop: 12, borderTop: '1px solid #27272a', paddingTop: 12 }}>
-                  <h5 style={{ fontSize: 11, color: '#aaa', margin: '0 0 8px' }}>Post-Delivery Credit</h5>
-                  <p style={{ fontSize: 10, color: '#666', margin: '0 0 8px' }}>
-                    Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum. Generated credits remain usable until they are manually removed.
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} />
-                      <span>Enable delivery credit</span>
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Credit value (cents)
-                      <input type="number" min={0} value={productForm.deliveryIncentiveCreditCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: Number(e.target.value) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
-                      <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
-                      <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Code prefix
-                      <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Trigger on size(s) CSV
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveTriggerSizes) ? productForm.deliveryIncentiveTriggerSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveTriggerSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
+                    <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
+                      RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Archived moves the release to the “Past Archives” section without hiding it.
+                    </div>
                   </div>
-                </div>
-
-                {/* ===== PRICE CATEGORIES (DYNAMIC) ===== */}
-                <div style={{ marginTop: 12, borderTop: '1px solid #27272a', paddingTop: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h5 style={{ fontSize: 11, color: '#aaa', margin: 0 }}>Price Categories (sizes / variants)</h5>
-                    <button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>
                   </div>
-                  <p style={{ fontSize: 10, color: '#666', margin: '4px 0 8px' }}>
-                    Define each size/variant. Price and Stripe ID are required. Winners per draw controls raffle quantity.
-                  </p>
+                </SectionCard>
+
+                {/* ============ PRICING & SIZES ============ */}
+                <SectionCard
+                  title="Pricing & Sizes"
+                  description="Define each size/variant the customer can buy. Price and Stripe ID are required. “Winners / draw” controls how many winners a raffle picks per draw — a CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on."
+                  action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
+                >
                   {productForm.priceCategories.map((cat: any, idx: number) => (
                     <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', background: '#060606', padding: 8, borderRadius: 6 }}>
                       <input
@@ -2692,79 +2956,306 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
                     <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it.</span>
                   </div>
-                </div>
+                </SectionCard>
 
-                {/* ===== NOTES ===== */}
-                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Product Notes (scrollable cards on product page)</h5>
-                <div style={{ marginBottom: 8 }}>
-                  {productForm.notes && productForm.notes.map((note: any, idx: number) => (
-                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#060606', padding: 6, borderRadius: 6 }}>
-                      <span style={{ fontSize: 10, color: '#888', minWidth: 60 }}>{note.label}</span>
-                      <span style={{ fontSize: 11, color: '#ccc', flex: 1 }}>{note.name}</span>
-                      <span style={{ fontSize: 10, color: '#666', flex: 1 }}>{note.text}</span>
-                      <button onClick={() => editNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10 }}>Edit</button>
-                      <button onClick={() => removeNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                {/* ============ INVENTORY & LIMITS ============ */}
+                <SectionCard
+                  title="Inventory & Limits"
+                  description="How many units exist and how many one customer can take. Total inventory drives the “sold out” state — 0 units shows the release as sold out while “stay visible” keeps it on the page as proof of demand."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)</label>
+                      <input type="number" min={0} value={productForm.totalInventory ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: Math.max(0, Number(e.target.value) || 0) }))} style={inputStyle} />
                     </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  <input type="text" placeholder="Label (e.g. TOP PROFILE)" value={noteForm.label} onChange={(e) => setNoteForm((n) => ({ ...n, label: e.target.value }))} style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }} />
-                  <input type="text" placeholder="Name" value={noteForm.name} onChange={(e) => setNoteForm((n) => ({ ...n, name: e.target.value }))} style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }} />
-                  <input type="text" placeholder="Text" value={noteForm.text} onChange={(e) => setNoteForm((n) => ({ ...n, text: e.target.value }))} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
-                  <button onClick={addNote} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>{editingNoteIdx !== null ? 'Update' : 'Add'}</button>
-                  {editingNoteIdx !== null && <button onClick={() => { setEditingNoteIdx(null); setNoteForm({ label: '', name: '', text: '' }); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Cancel</button>}
-                </div>
-
-                {/* ===== IMAGES (FILE UPLOAD + URL) ===== */}
-                <h5 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 4px' }}>Images (360° rotation) – upload files or paste URLs</h5>
-                <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        handleImageFiles(e.target.files);
-                      }
-                    }}
-                    style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Or paste image URL"
-                    value={imageInput}
-                    onChange={(e) => setImageInput(e.target.value)}
-                    style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
-                  />
-                  <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {(productForm.images || []).map((img: string, idx: number) => (
-                    <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
-                      <img src={img} alt={`img-${idx+1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>#{idx+1}</span>
-                      <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)</label>
+                      <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={inputStyle} />
                     </div>
-                  ))}
-                </div>
-                <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                  <span>💡 Uploaded images are stored as data URLs (base64) – for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
-                </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)</label>
+                      <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email</label>
+                      <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
+                    </div>
+                  </div>
+                </SectionCard>
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                {/* ============ DROP SCHEDULE ============ */}
+                <SectionCard
+                  title="Drop Schedule"
+                  description="When the release goes live and when the countdown ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle restarts)."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Go live at (upcoming auto-activates)</label>
+                      <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at</label>
+                      <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
+                    </div>
+                  </div>
+
+                  {/* Per-product raffle schedule: lets a raffle REPEAT on a cadence
+                      (hourly/daily/weekly/biweekly/monthly/yearly/custom) while
+                      inventory remains. When enabled, the product's countdown
+                      rolls forward to the next scheduled draw after each drop —
+                      the "new raffle" timer. Leave disabled to inherit the global
+                      schedule from Draws → Automation. */}
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                    <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!productForm.customDropSchedule}
+                        onChange={(e) => setProductForm((p: any) => ({
+                          ...p,
+                          customDropSchedule: e.target.checked
+                            ? {
+                                mode: 'daily',
+                                timezone: scheduleForm.timezone || 'America/Los_Angeles',
+                                targetEndDateTime: scheduleForm.targetEndDateTime || '',
+                                drawDayOfWeek: 6,
+                                drawDayOfMonth: 1,
+                                drawHour: 21,
+                                drawMinute: 0,
+                                drawSecond: 0,
+                                customIntervalHours: 24,
+                              }
+                            : null,
+                        }))}
+                      />
+                      <span>Repeat this raffle on a schedule while inventory remains</span>
+                    </label>
+                    {productForm.customDropSchedule && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                      <label style={{ fontSize: 11 }}>Cadence
+                        <select
+                          value={productForm.customDropSchedule.mode || 'daily'}
+                          onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), mode: e.target.value } }))}
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                        >
+                          <option value="hourly">Hourly</option>
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="biweekly">Biweekly</option>
+                          <option value="monthly">Monthly</option>
+                          <option value="yearly">Yearly</option>
+                          <option value="custom">Custom interval (hours)</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 11 }}>Timezone
+                        <input value={productForm.customDropSchedule.timezone || 'America/Los_Angeles'} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), timezone: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                      </label>
+                      {productForm.customDropSchedule.mode === 'custom' && (
+                        <label style={{ fontSize: 11, gridColumn: '1 / -1' }}>Every N hours
+                          <input
+                            type="number"
+                            min={1}
+                            max={720}
+                            value={productForm.customDropSchedule.customIntervalHours ?? 24}
+                            onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), customIntervalHours: Math.max(1, Math.min(720, Number(e.target.value) || 24)) } }))}
+                            style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                          />
+                          <span style={{ fontSize: 10, color: '#666' }}>A new raffle round starts every N hours (e.g. 6 → a draw every 6 hours).</span>
+                        </label>
+                      )}
+                      {productForm.customDropSchedule.mode === 'hourly' && (
+                        <label style={{ fontSize: 11 }}>Minute (0-59)
+                          <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {productForm.customDropSchedule.mode === 'weekly' && (
+                        <label style={{ fontSize: 11 }}>Day of week (0=Sun..6=Sat)
+                          <input type="number" min={0} max={6} value={productForm.customDropSchedule.drawDayOfWeek ?? 6} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfWeek: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {productForm.customDropSchedule.mode === 'monthly' && (
+                        <label style={{ fontSize: 11 }}>Day of month (1-31)
+                          <input type="number" min={1} max={31} value={productForm.customDropSchedule.drawDayOfMonth ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawDayOfMonth: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                        </label>
+                      )}
+                      {(productForm.customDropSchedule.mode === 'daily' || productForm.customDropSchedule.mode === 'weekly' || productForm.customDropSchedule.mode === 'monthly') && (
+                        <>
+                          <label style={{ fontSize: 11 }}>Hour (0-23)
+                            <input type="number" min={0} max={23} value={productForm.customDropSchedule.drawHour ?? 21} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawHour: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                          </label>
+                          <label style={{ fontSize: 11 }}>Minute (0-59)
+                            <input type="number" min={0} max={59} value={productForm.customDropSchedule.drawMinute ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, customDropSchedule: { ...(p.customDropSchedule || {}), drawMinute: Number(e.target.value) } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                          </label>
+                        </>
+                      )}
+                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.5 }}>
+                        First draw happens at the countdown end above; every later draw happens on this cadence while allocation remains. Unselected entries carry over into the next raffle.
+                      </p>
+                    </div>
+                  )}
+                </div>
+                </SectionCard>
+
+                {/* ============ SOLD-OUT BEHAVIOR ============ */}
+                <SectionCard
+                  title="Sold-out behavior"
+                  description="What happens to the product page when every unit is allocated. “Stay visible” keeps momentum as social proof; archiving moves the release to Past Archives."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Sold-out behavior</label>
+                      <select value={productForm.soldOutBehavior || 'stay_visible'} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutBehavior: e.target.value }))} style={inputStyle}>
+                        <option value="stay_visible">Stay visible as social proof</option>
+                        <option value="archive_now">Archive immediately</option>
+                        <option value="archive_after_delay">Archive after delay</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Archive delay after sold out (hours)</label>
+                      <input type="number" min={0} value={productForm.soldOutArchiveDelayHours ?? 24} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutArchiveDelayHours: Number(e.target.value) }))} style={inputStyle} />
+                    </div>
+                  </div>
+                </SectionCard>
+                {/* ============ POST-DELIVERY CREDIT ============ */}
+                <SectionCard
+                  title="Post-delivery credit"
+                  description="Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum. Generated credits remain usable until they are manually removed."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} />
+                      <span>Enable delivery credit</span>
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Credit value (cents)
+                      <input type="number" min={0} value={productForm.deliveryIncentiveCreditCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
+                      <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
+                      <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Code prefix
+                      <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Trigger on size(s) CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveTriggerSizes) ? productForm.deliveryIncentiveTriggerSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveTriggerSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV
+                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
+                    </label>
+                  </div>
+                </SectionCard>
+
+                {/* ============ NOTES ============ */}
+                <SectionCard
+                  title="Notes"
+                  description="Scrollable story cards on the product page (“Why this drop matters”, “How it works”, …). Label is the small eyebrow, name the heading, text the body."
+                >
+                  <div style={{ marginBottom: 8 }}>
+                    {productForm.notes && productForm.notes.map((note: any, idx: number) => (
+                      <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#060606', padding: 6, borderRadius: 6 }}>
+                        <span style={{ fontSize: 10, color: '#888', minWidth: 60 }}>{note.label}</span>
+                        <span style={{ fontSize: 11, color: '#ccc', flex: 1 }}>{note.name}</span>
+                        <span style={{ fontSize: 10, color: '#666', flex: 1 }}>{note.text}</span>
+                        <button onClick={() => editNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10 }}>Edit</button>
+                        <button onClick={() => removeNote(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    <input type="text" placeholder="Label (e.g. TOP PROFILE)" value={noteForm.label} onChange={(e) => setNoteForm((n) => ({ ...n, label: e.target.value }))} style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }} />
+                    <input type="text" placeholder="Name" value={noteForm.name} onChange={(e) => setNoteForm((n) => ({ ...n, name: e.target.value }))} style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }} />
+                    <input type="text" placeholder="Text" value={noteForm.text} onChange={(e) => setNoteForm((n) => ({ ...n, text: e.target.value }))} style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }} />
+                    <button onClick={addNote} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 11 }}>{editingNoteIdx !== null ? 'Update' : 'Add'}</button>
+                    {editingNoteIdx !== null && <button onClick={() => { setEditingNoteIdx(null); setNoteForm({ label: '', name: '', text: '' }); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Cancel</button>}
+                  </div>
+                </SectionCard>
+
+                {/* ============ GALLERY & IMAGES ============ */}
+                <SectionCard
+                  title="Gallery & Images"
+                  description="Product photos are swipeable on the product page (360° rotation feel). Upload files or paste image URLs — the first image is the cover."
+                >
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleImageFiles(e.target.files);
+                        }
+                      }}
+                      style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Or paste image URL"
+                      value={imageInput}
+                      onChange={(e) => setImageInput(e.target.value)}
+                      style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
+                    />
+                    <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
+                  </div>
+                  {(!productForm.images || productForm.images.length === 0) && (
+                    <div style={{ fontSize: 10, color: '#666', marginBottom: 8, border: '1px dashed #2e2e35', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      No images yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(productForm.images || []).map((img: string, idx: number) => (
+                      <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
+                        <img src={img} alt={`img-${idx+1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>#{idx+1}</span>
+                        <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+                    <span>💡 Uploaded images are stored as data URLs (base64) – for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
+                  </div>
+                </SectionCard>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button onClick={saveProduct} disabled={productActionLoading} style={buttonPrimary}>
                     {productActionLoading ? 'Saving…' : 'Save Product'}
                   </button>
-                  <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={buttonGhost}>Cancel</button>
+                  <button
+                    onClick={() => {
+                      if (productFormDirty && !confirm('Discard your unsaved changes to this product?')) return;
+                      setShowProductForm(false);
+                      resetProductForm();
+                    }}
+                    style={buttonGhost}
+                  >
+                    Cancel
+                  </button>
+                  <span style={{ fontSize: 10, color: '#666' }}>
+                    {productFormDirty ? '● You have unsaved changes in this product.' : 'No unsaved changes.'}
+                  </span>
                 </div>
               </div>
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {allProducts.length === 0 && !productsLoading && (
-                <div style={{ textAlign: 'center', padding: 30, color: '#555', border: '1px dashed #333', borderRadius: 12 }}>
-                  No products yet. Click &quot;Seed Defaults&quot; to add placeholder products or &quot;Add Product&quot; to create your own.
-                </div>
+                <EmptyState
+                  icon="📦"
+                  title="No products yet"
+                  hint="Click “Seed Defaults” to load the demo catalog, or “Add Product” to build your own release from scratch."
+                >
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button onClick={seedDefaultProducts} disabled={productActionLoading} style={{ ...buttonGhost, border: '1px solid #34d399', color: '#34d399' }}>
+                      {productActionLoading ? 'Loading…' : 'Seed Defaults'}
+                    </button>
+                    <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); }} style={buttonPrimary}>
+                      + Add Product
+                    </button>
+                  </div>
+                </EmptyState>
               )}
               {allProducts.length > 0 && allProducts.map((product) => {
                 const isPublished = product.isActive === true;
@@ -2779,12 +3270,12 @@ export default function AdminPortal() {
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{product.name}</div>
                         <div style={{ fontSize: 10, color: '#666' }}>
                           slug: {product.slug} · images: {product.images?.length || 0}
-                          {isPublished && <span style={{ color: '#d4d4d8', marginLeft: 8 }}>● Published</span>}
-                          {isActive && <span style={{ color: '#34d399', marginLeft: 8 }}>● Active</span>}
-                          {isArchived && <span style={{ color: '#f59e0b', marginLeft: 8 }}>● Archived</span>}
-                          {isUpcoming && <span style={{ color: '#3b82f6', marginLeft: 8 }}>● Upcoming</span>}
-                          {product.soldOutBehavior === 'archive_after_delay' && <span style={{ color: '#d6c29c', marginLeft: 8 }}>● Delayed archive</span>}
-                          {isHidden && <span style={{ color: '#f87171', marginLeft: 8 }}>● Hidden</span>}
+                          {isPublished && <Pill color="#d4d4d8" background="rgba(212,212,216,0.12)">Published</Pill>}
+                          {isActive && <Pill color="#34d399" background="rgba(52,211,153,0.14)">Active</Pill>}
+                          {isArchived && <Pill color="#f59e0b" background="rgba(245,158,11,0.14)">Archived</Pill>}
+                          {isUpcoming && <Pill color="#3b82f6" background="rgba(59,130,246,0.14)">Upcoming</Pill>}
+                          {product.soldOutBehavior === 'archive_after_delay' && <Pill color="#d6c29c" background="rgba(214,194,156,0.14)">Delayed archive</Pill>}
+                          {isHidden && <Pill color="#f87171" background="rgba(248,113,113,0.14)">Hidden</Pill>}
                           <span style={{ color: '#888', marginLeft: 8 }}>Order: {product.sortOrder || 0}</span>
                         </div>
                         {product.priceCategories && (
@@ -2858,21 +3349,26 @@ export default function AdminPortal() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 && !usersLoading && (
-                <div style={{ textAlign: 'center', padding: 30, color: '#555', border: '1px dashed #333', borderRadius: 12 }}>
-                  No users yet. Create your first user account.
-                </div>
+                <EmptyState
+                  icon="👤"
+                  title="No customer accounts yet"
+                  hint="Accounts are created automatically when someone signs up or enters a drop. You can also create one manually below."
+                />
               )}
               {users.map((user) => (
                 <div key={user.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: '1px solid #1c1c1e' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{streamerMode ? maskEmail(user.email) : user.email}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{pii(user.email, 'email', streamerMode)}</div>
                       <div style={{ fontSize: 10, color: '#666' }}>
                         Role: {user.role} · Rewards: {user.rewards || 0}
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button onClick={() => { setEditingUser(user.id); setUserForm({ email: user.email, password: '', role: user.role, rewards: user.rewards || 0 }); setShowUserForm(true); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
+                      <button onClick={() => {
+                        if (streamerMode) { showToast('Turn Streamer Mode OFF to edit user details'); return; }
+                        setEditingUser(user.id); setUserForm({ email: user.email, password: '', role: user.role, rewards: user.rewards || 0 }); setShowUserForm(true);
+                      }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
                       <button onClick={() => deleteUser(user.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                     </div>
                   </div>
@@ -2928,7 +3424,9 @@ export default function AdminPortal() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ fontWeight: 700 }}>{p.code} {!p.active && <span style={{ color: '#f87171' }}>(disabled)</span>}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => setPromoForm({
+                      <button onClick={() => {
+                        if (streamerMode) { showToast('Turn Streamer Mode OFF to edit promo details'); return; }
+                        setPromoForm({
                         code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
                         customerDiscountPercent: String(p.customerDiscountPercent || ''), 
                         promoterPayoutPercent: String(p.promoterPayoutPercent || ''), 
@@ -2937,7 +3435,7 @@ export default function AdminPortal() {
                         startAt: p.startAt || '',
                         endAt: p.endAt || '',
                         maxUsesTotal: String(p.maxUsesTotal || ''),
-                      })} style={buttonGhost}>Edit</button>
+                      });}} style={buttonGhost}>Edit</button>
                       <button onClick={() => deletePromo(p.code)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                     </div>
                   </div>
@@ -3097,7 +3595,7 @@ export default function AdminPortal() {
                 </div>
                 {p.payoutOwedCents > 0 && (
                   <button onClick={async () => {
-                    if (!password) return showToast('Enter the admin password first');
+                    if (!requireUnlocked()) return;
                     await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
                     await fetchPromos();
                   }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
@@ -3129,7 +3627,7 @@ export default function AdminPortal() {
                   <div key={subscriber.email} style={{ background: '#09090b', padding: 12, borderRadius: 10, fontSize: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                       <div>
-                        <div style={{ fontWeight: 700 }}>{streamerMode ? maskEmail(subscriber.email) : subscriber.email}</div>
+                        <div style={{ fontWeight: 700 }}>{pii(subscriber.email, 'email', streamerMode)}</div>
                         <div style={{ color: '#888', fontSize: 10, marginTop: 2 }}>
                           Sources: {(subscriber.sources || []).join(', ') || 'site'} · joined {subscriber.createdAt ? new Date(subscriber.createdAt).toLocaleDateString() : 'n/a'}
                         </div>
@@ -3226,11 +3724,16 @@ export default function AdminPortal() {
                   <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
                   Rebuild with Seed Defaults after wipe
                 </label>
-                <button onClick={runWipe} disabled={wipeBusy}
-                  style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
-                  {wipeBusy ? 'Wiping…' : 'Wipe Redis'}
+                <button onClick={runWipe} disabled={wipeBusy || streamerMode}
+                  style={{ ...buttonPrimary, background: streamerMode ? '#3a3a3f' : '#ef4444', color: streamerMode ? '#777' : '#fff' }}>
+                  {streamerMode ? '🔒 Locked while Streamer Mode is ON' : (wipeBusy ? 'Wiping…' : 'Wipe Redis')}
                 </button>
               </div>
+              {streamerMode && (
+                <p style={{ fontSize: 10, color: '#edb210', marginTop: 8, lineHeight: 1.5 }}>
+                  🔒 Wiping Redis deletes <em>every key</em> — turn Streamer Mode OFF and enter the admin password to unlock this.
+                </p>
+              )}
               {wipeMsg && <p style={{ fontSize: 11, color: wipeMsg.includes('Failed') || wipeMsg.includes('Type') ? '#f87171' : '#34d399', marginTop: 10 }}>{wipeMsg}</p>}
             </div>
           </div>
@@ -3300,8 +3803,21 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-                Edit site appearance and content. Theme colors, card backgrounds/borders, radius, and text colors apply live to product pages and the cart (cached up to ~10s); static pages (home/catalog/legal) are baked at build time, so a redeploy may be needed for those to pick up color changes.
+                Edit site appearance and content. Theme colors, card backgrounds/borders, radius, and text colors apply live to product pages and the cart (cached up to ~10s); static pages (home/catalog/legal) are baked at build time, so a redeploy may be needed for those to pick up color changes. Every section below has a <strong style={{ color: '#ccc' }}>live preview</strong> that updates as you type — nothing is published until you press Save All Settings.
               </p>
+
+              {/* Quick-jump pills so the long settings form is easy to navigate. */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                {SETTINGS_SECTIONS.map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    style={{ ...buttonGhost, padding: '5px 11px', fontSize: 10, borderRadius: 999 }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
 
               {/* Sticky top save button — stays visible while scrolling the long settings form.
@@ -3311,11 +3827,20 @@ export default function AdminPortal() {
                 <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading}>
                   {settingsLoading ? 'Saving…' : 'Save All Settings'}
                 </button>
-                <span style={{ fontSize: 11, color: '#888' }}>Changes below publish to the live store immediately.</span>
+                {settingsDirty && (
+                  <button onClick={discardSettings} style={buttonGhost} title="Revert every settings tab to the last saved state">
+                    Discard changes
+                  </button>
+                )}
+                <span style={{ fontSize: 11, color: '#888' }}>
+                  {settingsDirty
+                    ? <strong style={{ color: '#edb210' }}>● Unsaved changes</strong>
+                    : 'Changes below publish to the live store immediately.'}
+                </span>
                 {settingsMsg && <span style={{ fontSize: 11, fontWeight: 700, color: settingsMsg.includes('Failed') ? '#f87171' : '#34d399' }}>{settingsMsg}</span>}
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Design Presets</h4>
+              <h4 id="settings-presets" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Design Presets</h4>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
                 One-click market skins for client onboarding. Applying a preset fills the theme colors, font, border treatment and glow below — then press <strong style={{ color: '#ccc' }}>Save Settings</strong>.
               </p>
@@ -3364,7 +3889,7 @@ export default function AdminPortal() {
                 })}
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
+              <h4 id="settings-theme" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(themeSettings)
                   .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency' && key !== 'radiusStyle' && key !== 'cardShadow' && key !== 'backdropBlur' && key !== 'contentSpacing' && key !== 'headerBackground' && key !== 'headerText')
@@ -3378,6 +3903,40 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                   </label>
                 ))}
+              </div>
+
+              {/* Live preview: a mini storefront card rendered from the CURRENT
+                  color + radius state — updates the instant any color changes. */}
+              <div style={{
+                margin: '4px 0 14px', padding: 14, borderRadius: 12,
+                background: themeSettings.primaryBackground || '#f2f2f7', border: '1px solid rgba(255,255,255,0.08)',
+              }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: themeSettings.textMuted || '#888', marginBottom: 8 }}>
+                  ● Live preview — how cards look with these colors
+                </div>
+                <div style={{
+                  background: themeSettings.cardBackground || '#ffffff',
+                  border: `1px solid ${themeSettings.cardBorder || 'rgba(0,0,0,0.12)'}`,
+                  borderRadius: Math.max(6, Number(themeSettings.borderRadius) || 18),
+                  padding: 14,
+                  boxShadow: `0 ${Math.round((Number(themeSettings.cardShadow) || 12) / 3)}px ${Math.max(10, (Number(themeSettings.cardShadow) || 12) * 2)}px rgba(0,0,0,0.12)`,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: themeSettings.cardTextMain || '#111' }}>Sample product</div>
+                  <div style={{ fontSize: 10, color: themeSettings.cardTextMuted || '#666', marginTop: 2 }}>Muted supporting text on the card</div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{
+                      background: themeSettings.checkoutCtaButton || '#111',
+                      color: readableOn(themeSettings.checkoutCtaButton),
+                      fontWeight: 700, fontSize: 11, padding: '7px 14px', borderRadius: 999,
+                    }}>
+                      Add to bag
+                    </span>
+                    <span style={{ fontSize: 10, color: themeSettings.accentBlue || '#3b82f6' }}>A link in accent blue</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: themeSettings.textMuted || '#888', marginTop: 8 }}>
+                  Radius {Number(themeSettings.borderRadius) || 18}px · Page {themeSettings.primaryBackground || '#f2f2f7'} · Card {themeSettings.cardBackground || '#ffffff'}
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 8px' }}>
@@ -3567,7 +4126,7 @@ export default function AdminPortal() {
                 </label>
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
+              <h4 id="settings-hero" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
                 The intro section on the home page (the brand / location block). Every line is editable.
               </p>
@@ -3607,7 +4166,35 @@ export default function AdminPortal() {
                 })}
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
+              {/* Live preview: the home hero block rendered from the CURRENT
+                  copy — line breaks (pre-line) included. */}
+              <div style={{ margin: '4px 0 14px', padding: 18, borderRadius: 14, background: '#0d0d11', border: '1px solid #2a2a30' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', marginBottom: 10 }}>
+                  ● Live hero preview
+                </div>
+                <div style={{ fontSize: 10, letterSpacing: 2.5, textTransform: 'uppercase', color: themeSettings.accentBlue || '#60a5fa', fontWeight: 700 }}>
+                  {(heroSettings.eyebrow || 'CALIFORNIA USA').toUpperCase()}
+                </div>
+                <div style={{ fontSize: 19, fontWeight: 700, marginTop: 8, whiteSpace: 'pre-line', color: themeSettings.textMain || '#fff', fontFamily: 'Georgia, Times New Roman, serif', lineHeight: 1.25 }}>
+                  {heroSettings.headline || 'by our hands. to your hands.'}
+                </div>
+                <div style={{ fontSize: 11, color: themeSettings.textMuted || '#aaa', marginTop: 8, whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+                  {heroSettings.body || 'homemade & designed, with real ingredients, with real hands. for real people.'}
+                </div>
+                <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{
+                    background: themeSettings.checkoutCtaButton || '#fff', color: readableOn(themeSettings.checkoutCtaButton),
+                    padding: '9px 18px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+                  }}>
+                    {heroSettings.ctaLabel || 'Browse drops'}
+                  </span>
+                  <span style={{ fontSize: 11, color: themeSettings.textMuted || '#aaa', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+                    {heroSettings.storyHeadline || 'Our Story'}
+                  </span>
+                </div>
+              </div>
+
+              <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
                 How the storefront behaves when a visitor opens or refreshes a page. Changes apply on the next storefront load.
               </p>
@@ -3616,11 +4203,11 @@ export default function AdminPortal() {
                 Start at the top when the page opens
               </label>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
+              <h4 id="settings-form" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(formSettings).map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    {COPY_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="text" 
                       value={value} 
@@ -3630,11 +4217,11 @@ export default function AdminPortal() {
                 ))}
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Footer</h4>
+              <h4 id="settings-footer" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Footer</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(footerSettings).map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    {COPY_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="text" 
                       value={value} 
@@ -3644,7 +4231,7 @@ export default function AdminPortal() {
                 ))}
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+              <h4 id="settings-copy" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
                 <button
                   onClick={() => setCopyOpen((v) => !v)}
                   style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
@@ -3698,7 +4285,7 @@ export default function AdminPortal() {
                 </>
               )}
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+              <h4 id="settings-catalog" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
                 <button
                   onClick={() => setCatalogOpen((v) => !v)}
                   style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
@@ -3750,7 +4337,7 @@ export default function AdminPortal() {
                 </>
               )}
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+              <h4 id="settings-legal" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
                 <button
                   onClick={() => setLegalOpen((v) => !v)}
                   style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
@@ -3801,7 +4388,7 @@ export default function AdminPortal() {
                 </>
               )}
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
+              <h4 id="settings-branding" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Branding & Share</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
                   Brand name (top bar / footer / emails)
@@ -3927,9 +4514,60 @@ export default function AdminPortal() {
                 })}
               </div>
 
+              {/* Live preview: the top bar + footer rendered from the CURRENT
+                  branding/footer state — updates as you type. */}
+              <div style={{ margin: '4px 0 14px', borderRadius: 14, overflow: 'hidden', border: '1px solid #2a2a30' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', padding: '10px 14px 0' }}>
+                  ● Live preview — top bar & footer
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, margin: 10, padding: '10px 14px', borderRadius: 12,
+                  background: themeSettings.headerBackground || themeSettings.cardBackground || '#141417',
+                }}>
+                  {brandingSettings.logoUrl ? (
+                    <img
+                      src={brandingSettings.logoUrl}
+                      alt="logo"
+                      style={{ width: Math.min(48, Math.max(16, Number(brandingSettings.logoWidth) || 28)), height: Math.min(48, Math.max(16, Number(brandingSettings.logoHeight) || 28)), objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 16, color: themeSettings.headerText || themeSettings.cardTextMain || '#fff' }}>◆</span>
+                  )}
+                  {brandingSettings.headerMode !== 'logo' && (
+                    <span style={{
+                      fontSize: Math.min(22, Math.max(10, Number(brandingSettings.brandFontSize) || 14)),
+                      fontFamily: brandingSettings.brandFontFamily || undefined,
+                      fontWeight: 700,
+                      color: themeSettings.headerText || themeSettings.cardTextMain || '#fff',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {brandingSettings.brandName || 'Your Brand'}
+                    </span>
+                  )}
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: themeSettings.headerText || themeSettings.cardTextMuted || '#aaa', whiteSpace: 'nowrap' }}>
+                    {brandingSettings.headerActionMode === 'cart' ? '🛒 Cart' : '🛍️ Bag'}
+                  </span>
+                </div>
+                <div style={{ padding: '0 10px 10px' }}>
+                  <div style={{ padding: '12px 14px', borderRadius: 12, background: '#0b0b0d', fontSize: 10, color: '#8b8b94', textAlign: 'center', lineHeight: 1.6 }}>
+                    {String(footerSettings.shippingReturnPolicyText || 'Shipping & Returns Policy Apply.')}
+                    <div style={{ marginTop: 6, color: '#6b6b74' }}>
+                      {[footerSettings.instagramLink, footerSettings.tiktokLink].filter((url) => String(url || '').trim()).length === 0
+                        ? 'no social links yet'
+                        : ['Instagram', 'TikTok'].filter((_, i) => String([footerSettings.instagramLink, footerSettings.tiktokLink][i] || '').trim()).map((label) => (
+                            <span key={label} style={{ margin: '0 6px' }}>{label}</span>
+                          ))}
+                    </div>
+                    <div style={{ marginTop: 6, color: '#5d5d66' }}>
+                      {String(footerSettings.supportEmail || 'support@example.com')} · © {String(footerSettings.corporateEntityCopyright || 'ALL RIGHTS RESERVED.')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <LinkPreviewGallery branding={brandingSettings} themeColors={themeSettings} />
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 4px', textTransform: 'uppercase' }}>Orb Glow</h4>
+              <h4 id="settings-orbs" style={{ fontSize: 11, color: '#aaa', margin: '16px 0 4px', textTransform: 'uppercase' }}>Orb Glow</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
                 Animated glow orbs behind the storefront and inside the top bar. Saved changes apply on the next storefront load (public config is cached up to ~30s).
               </p>
@@ -4002,7 +4640,7 @@ export default function AdminPortal() {
                 </>
               )}
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Rewards &amp; Points</h4>
+              <h4 id="settings-rewards" style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Rewards &amp; Points</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
                 Customers earn points on every paid purchase and can redeem them for store credit. Welcome bonus and per-user balances stay editable in the Users tab.
               </p>
@@ -4047,7 +4685,7 @@ export default function AdminPortal() {
                 </label>
               </div>
 
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Product Gallery</h4>
+              <h4 id="settings-gallery" style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Product Gallery</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
                 Product photos can auto-advance with a slow cinematic zoom (Ken Burns) — the way big fashion houses present a drop. Changes apply immediately to product pages.
               </p>
@@ -4070,9 +4708,15 @@ export default function AdminPortal() {
                 </label>
               </div>
 
-              <button onClick={saveSettings} style={{ ...buttonPrimary, marginTop: 12 }} disabled={settingsLoading}>
-                {settingsLoading ? 'Saving…' : 'Save All Settings'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button onClick={saveSettings} style={buttonPrimary} disabled={settingsLoading}>
+                  {settingsLoading ? 'Saving…' : 'Save All Settings'}
+                </button>
+                {settingsDirty && (
+                  <button onClick={discardSettings} style={buttonGhost}>Discard changes</button>
+                )}
+                {settingsDirty && <span style={{ fontSize: 10, color: '#edb210', fontWeight: 700 }}>● Unsaved changes</span>}
+              </div>
               {settingsMsg && <p style={{ fontSize: 12, color: settingsMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{settingsMsg}</p>}
             </div>
           </div>
