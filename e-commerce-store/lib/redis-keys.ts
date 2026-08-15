@@ -57,6 +57,15 @@ export const PRODUCTS_KEY = 'store:products';
 export const STORE_CONFIG_KEY = 'store:config';
 /** Hash of customer accounts; field = user id. */
 export const USERS_KEY = 'store:users';
+/** String — the signed-in user's saved cart (JSON array), keyed by user id.
+ *  Anonymous carts live only in the browser (localStorage); the moment a
+ *  customer signs in, SiteChrome merges the local bag with this record and
+ *  every subsequent change is persisted here (debounced client-side), so the
+ *  same account sees the same bag on any device. Deletable — it is a cache of
+ *  the browser cart, never a source of truth. */
+export function userCartKey(userId: string): string {
+  return `store:cart:${String(userId || '').slice(0, 128)}`;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Permanent ledger (append-only entry/charge history)

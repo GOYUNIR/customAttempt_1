@@ -9,6 +9,7 @@ import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, themeRadiusNumber } from '@/lib/storefront-config';
+import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 
 interface CatalogItem {
   name: string;
@@ -36,6 +37,8 @@ interface ActiveDrop {
   soldOut?: boolean;
   checkoutMode?: string;
   isRaffle?: boolean;
+  goLiveAt?: string;
+  releaseEndsAt?: string;
 }
 
 /** Valid /catalog section ids + sanitizer (module-scope so hooks deps stay stable).
@@ -62,7 +65,13 @@ export default function CatalogPage() {
   const [upcomingDrops, setUpcomingDrops] = useState<CatalogItem[]>([]);
   const [archiveScents, setArchiveScents] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [clock, setClock] = useState<number>(0);
+  const [clock, setClock] = useState<number>(() => (typeof window !== 'undefined' ? Date.now() : 0));
+  // Store drop timezone — naive product timestamps are interpreted in this zone
+  // (never the viewer's local zone) so countdowns + draw triggers agree with the
+  // server. Populated from /api/catalog/status; defaults to the static config.
+  const [storeTimezone, setStoreTimezone] = useState<string>(
+    String(liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
+  );
   const [searchQuery, setSearchQuery] = useState('');
   // Live /api/store product payload (lifecycle-enriched) so upcoming/archive
   // cards can show real entry state, drop type, and sold-out dates.
@@ -82,9 +91,9 @@ export default function CatalogPage() {
   // Only tick the clock while any tile shows a live countdown (a future
   // goLive/available date) — avoids re-rendering the whole catalog every second.
   const needsClock = [...activeDrops, ...upcomingDrops, ...archiveScents].some((item) => {
-    const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || '');
+    const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || (item as ActiveDrop).releaseEndsAt || '');
     if (!target) return false;
-    const ms = new Date(target).getTime();
+    const ms = dropTimestampToMsOrNaN(target, storeTimezone);
     return Number.isFinite(ms) && ms > clock;
   });
 
@@ -119,6 +128,7 @@ export default function CatalogPage() {
       if (Array.isArray(data.sectionOrder)) {
         setCatalogOrder(sanitizeSectionOrder(data.sectionOrder));
       }
+      if (data.storeTimezone) setStoreTimezone(String(data.storeTimezone));
     } catch {
       setActiveDrops([]);
       setUpcomingDrops([]);
@@ -134,21 +144,21 @@ export default function CatalogPage() {
     const consider = (item: CatalogItem | ActiveDrop) => {
       const slug = String(item.slug || item.name || '');
       if (dropNotifiedRef.current.has(slug)) return;
-      const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || '');
-      const ms = target ? new Date(target).getTime() : NaN;
+      const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || (item as ActiveDrop).releaseEndsAt || '');
+      const ms = target ? dropTimestampToMsOrNaN(target, storeTimezone) : NaN;
       if (Number.isFinite(ms) && ms <= clock) {
         dropNotifiedRef.current.add(slug);
-        notifyDropDue({ slug });
+        notifyDropDue({ productId: String((item as ActiveDrop).id || ''), productName: String(item.name || ''), slug });
         // Refresh so the item moves sections immediately (e.g. an upcoming
         // product whose go-live passed becomes a live drop on screen).
         loadCatalog();
       }
     };
     [...activeDrops, ...upcomingDrops, ...archiveScents].forEach(consider);
-  }, [clock, activeDrops, upcomingDrops, archiveScents, loadCatalog]);
+  }, [clock, activeDrops, upcomingDrops, archiveScents, loadCatalog, storeTimezone]);
 
   const formatCountdown = (value?: string) => {
-    const target = value ? new Date(value).getTime() : NaN;
+    const target = value ? dropTimestampToMsOrNaN(value, storeTimezone) : NaN;
     if (!Number.isFinite(target)) return null;
     const diff = target - clock;
     if (diff <= 0) return 'Live now';

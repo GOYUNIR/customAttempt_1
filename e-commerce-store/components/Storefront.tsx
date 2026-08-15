@@ -7,6 +7,7 @@ import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground, themeRadius } from '@/lib/storefront-config';
+import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import NotFoundView from '@/components/NotFoundView';
@@ -257,17 +258,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         if (data.product.isArchived) {
           setRaffleEndsAt(null);
         } else {
-          const now = Date.now();
           const releaseEndsAt = data.product.releaseEndsAt;
-          const releaseMs = releaseEndsAt ? new Date(releaseEndsAt).getTime() : NaN;
-          // A live (non-upcoming) drop should count down to its release end
-          // while that's still in the future; if it has already passed, fall
-          // back to the configured drop-schedule anchor so a live allocation
-          // never shows a misleading "closed" countdown.
+          // Drop times are naive wall-clock strings set in the STORE's
+          // timezone. Parse them as such so the countdown means the same
+          // instant to every browser (and to the server's draw engine).
+          const storeTz = String(data?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+          const releaseMs = releaseEndsAt ? dropTimestampToMsOrNaN(releaseEndsAt, storeTz) : NaN;
+          // A live (non-upcoming) drop counts down to its own releaseEndsAt —
+          // even when that moment has already passed, because the countdown
+          // effect below pings the draw engine the instant it renders. We
+          // NEVER re-anchor a passed release to the next GLOBAL drop here:
+          // that produced a week-long bogus countdown ("Raffle ends in 6d…")
+          // while the pool sat due and un-drawn. If no release end exists at
+          // all, fall back to the configured drop-schedule anchor.
           let drawAnchor: string | undefined;
           if (data.product.isUpcoming) {
             drawAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
-          } else if (Number.isFinite(releaseMs) && releaseMs > now) {
+          } else if (releaseEndsAt && Number.isFinite(releaseMs)) {
             drawAnchor = data.product.releaseEndsAt;
           } else {
             drawAnchor =
@@ -276,7 +283,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               data.product.releaseEndsAt ||
               undefined;
           }
-          const anchorMs = drawAnchor ? new Date(drawAnchor).getTime() : NaN;
+          const anchorMs = drawAnchor ? dropTimestampToMsOrNaN(drawAnchor, storeTz) : NaN;
           setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
         }
         const cats = data.product.priceCategories || [];
@@ -744,13 +751,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         if (!notified) {
           notified = true;
           notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
-          // Re-anchor: an "opens in" countdown (upcoming product) that just hit
-          // zero means the drop OPENED — re-fetch so the timer flips to counting
-          // down to releaseEndsAt (or the product resolves as sold-out/archived).
-          if (product?.isUpcoming && product?.slug) {
+          // Re-anchor after the draw trigger: an "opens in" countdown (upcoming
+          // product) that just hit zero means the drop OPENED — re-fetch so the
+          // timer flips to counting down to releaseEndsAt. A LIVE product whose
+          // releaseEndsAt just passed (or was already passed on load) gets the
+          // same re-fetch so the page reflects the draw result instead of
+          // freezing on "Raffle closed" while the server works.
+          if (product?.slug) {
             refreshTimer = window.setTimeout(() => {
               fetchProduct(String(product.slug), true).catch(() => {});
-            }, 1200);
+            }, 1500);
           }
         }
         return;

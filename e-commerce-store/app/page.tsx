@@ -8,6 +8,7 @@ import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
+import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { neutralBrandName } from '@/lib/env';
 
 /**
@@ -25,7 +26,13 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [activeProducts, setActiveProducts] = useState<any[]>([]);
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
-  const [nowTick, setNowTick] = useState<number>(0);
+  const [nowTick, setNowTick] = useState<number>(() => (typeof window !== 'undefined' ? Date.now() : 0));
+  // Store drop timezone — naive product timestamps are interpreted in this zone
+  // (never the viewer's local zone) so countdowns + draw triggers agree with the
+  // server. Updated from /api/store config; defaults to the static config.
+  const [storeTimezone, setStoreTimezone] = useState<string>(
+    String(liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
+  );
   const [authUser, setAuthUser] = useState<any>(null);
   const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
   // Live theme palette. Initialized from the server-baked /admin → Settings
@@ -46,7 +53,7 @@ export default function HomePage() {
   // Only tick the clock while at least one release shows a live countdown —
   // otherwise the whole page re-renders every second for nothing.
   const needsCountdown = activeProducts.some((product: any) => {
-    const releaseEndsAt = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
+    const releaseEndsAt = product.releaseEndsAt ? dropTimestampToMsOrNaN(product.releaseEndsAt, storeTimezone) : NaN;
     return Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick;
   });
 
@@ -59,26 +66,29 @@ export default function HomePage() {
   }, [needsCountdown]);
 
   // When a live product's raffle/entry timer hits zero on the home page, ping
-  // the server to run the drop immediately (idempotent server-side).
+  // the server to run the drop immediately (idempotent server-side). Runs on
+  // mount too: a product whose releaseEndsAt already passed (store timezone)
+  // while the visitor wasn't watching still triggers the draw on load.
   const dropNotifiedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!nowTick) return;
     for (const product of activeProducts) {
       const id = String(product?.id || '');
       if (!id || dropNotifiedRef.current.has(id)) continue;
-      const endMs = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
+      const endMs = product.releaseEndsAt ? dropTimestampToMsOrNaN(product.releaseEndsAt, storeTimezone) : NaN;
       if (Number.isFinite(endMs) && endMs <= nowTick) {
         dropNotifiedRef.current.add(id);
         notifyDropDue({ productId: id, productName: String(product?.name || ''), slug: String(product?.slug || '') });
       }
     }
-  }, [nowTick, activeProducts]);
+  }, [nowTick, activeProducts, storeTimezone]);
 
   useEffect(() => {
     async function checkProducts() {
       try {
         const data = await fetchStoreJson('/api/store');
         if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+        if (data?.config?.dropSchedule?.timezone) setStoreTimezone(String(data.config.dropSchedule.timezone));
         if (data?.config?.branding) setBranding(data.config.branding);
         if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
@@ -128,7 +138,7 @@ export default function HomePage() {
 
   const formatCountdown = (product: any) => {
     if (product.isArchived) return 'Archived release';
-    const releaseEndsAt = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
+    const releaseEndsAt = product.releaseEndsAt ? dropTimestampToMsOrNaN(product.releaseEndsAt, storeTimezone) : NaN;
     if (product.soldOut) return 'Sold out';
     if (Number.isFinite(releaseEndsAt) && releaseEndsAt > nowTick) {
       const diff = Math.max(0, releaseEndsAt - nowTick);
@@ -140,7 +150,7 @@ export default function HomePage() {
       return `${days}d ${hours}h ${minutes}m ${seconds}s left`;
     }
     if (product.goLiveAt) {
-      const goLiveAt = new Date(product.goLiveAt).getTime();
+      const goLiveAt = dropTimestampToMsOrNaN(product.goLiveAt, storeTimezone);
       if (Number.isFinite(goLiveAt) && goLiveAt > nowTick) return 'Opening soon';
     }
     return 'Until sold out';

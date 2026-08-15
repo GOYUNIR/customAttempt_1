@@ -58,6 +58,7 @@ import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
+import { dropTimestampToMs } from '@/lib/drop-timestamps';
 
 export { productNameFromPoolKey };
 
@@ -109,10 +110,14 @@ export interface AutoDrawResult {
   totalRevenueCents: number;
 }
 
-const toMs = (value: unknown): number | null => {
-  const parsed = typeof value === 'string' && value ? new Date(value).getTime() : NaN;
-  return Number.isFinite(parsed) ? parsed : null;
-};
+/**
+ * Parse a product drop timestamp as an absolute epoch-ms value. Naive strings
+ * (`2026-08-15T06:16`) are interpreted in the STORE's timezone (never the
+ * server's UTC), so the draw engine agrees with the browser countdown that
+ * triggered it. Explicitly-zoned strings pass through natively.
+ */
+const toMs = (value: unknown, timezone?: string): number | null =>
+  dropTimestampToMs(value, timezone);
 
 /**
  * Decide whether a pool is due for a draw right now.
@@ -131,11 +136,13 @@ async function shouldRunPoolDraw(opts: {
   if (opts.force) return true;
   if (opts.product?.isArchived === true) return true;
 
-  const endMs = toMs(opts.product?.releaseEndsAt);
-  if (endMs !== null && opts.now >= endMs) return true;
-
   const scheduleOverride = await getGlobalScheduleOverride(opts.redis);
   const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(scheduleOverride || {}) };
+  const timezone = String(effectiveSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+
+  const endMs = toMs(opts.product?.releaseEndsAt, timezone);
+  if (endMs !== null && opts.now >= endMs) return true;
+
   const lastAuto = Number((await opts.redis.get(lastAutoDrawKey(opts.product.name, opts.size))) || 0);
   return shouldRunDraw(effectiveSchedule, lastAuto, opts.now);
 }
@@ -173,13 +180,16 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   // countdown just ended would stay `isUpcoming` because the filter branch
   // skipped the flip. The flip is idempotent (isUpcoming: false), so concurrent
   // triggers are harmless.
+  const scheduleOverrideForTz = await getGlobalScheduleOverride(redis).catch(() => null);
+  const effectiveScheduleForTz = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(scheduleOverrideForTz || {}) };
+  const storeTimezone = String(effectiveScheduleForTz?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
   {
     for (const product of Object.values(products) as any[]) {
       if (!product || product.isUpcoming !== true) continue;
       if (options.onlyProductId && String(product.id) !== String(options.onlyProductId)) continue;
       if (options.onlyProductName && String(product.name || '').toLowerCase() !== String(options.onlyProductName).toLowerCase()) continue;
       if (options.onlySlug && String(product.slug || '').toLowerCase() !== String(options.onlySlug).toLowerCase()) continue;
-      const goMs = toMs(product.goLiveAt);
+      const goMs = toMs(product.goLiveAt, storeTimezone);
       if (goMs !== null && now >= goMs) {
         try {
           await redis.hset(PRODUCTS_KEY, {

@@ -12,6 +12,7 @@ import {
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
+import { dropTimestampToMs } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 
 export const dynamic = 'force-dynamic';
@@ -52,9 +53,9 @@ type PublicStoreProduct = {
   deliveryIncentiveCreditCents?: number;
 };
 
-function toMs(value: unknown) {
-  const parsed = typeof value === 'string' && value ? new Date(value).getTime() : NaN;
-  return Number.isFinite(parsed) ? parsed : null;
+function toMs(value: unknown, timezone?: string): number | null {
+  const parsed = dropTimestampToMs(value, timezone);
+  return parsed === null ? null : parsed;
 }
 
 function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
@@ -143,6 +144,7 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
 function applyLifecycle(
   products: PublicStoreProduct[],
   liveStates: Awaited<ReturnType<typeof listLiveStates>>,
+  timezone?: string,
 ) {
   const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
   const now = Date.now();
@@ -163,8 +165,8 @@ function applyLifecycle(
       totalInventory > 0
         ? inventoryRemaining <= 0
         : item.soldOutBehavior === 'stay_visible';
-    const goLiveAtMs = toMs(item.goLiveAt);
-    const soldOutAtMs = toMs(item.soldOutAt);
+    const goLiveAtMs = toMs(item.goLiveAt, timezone);
+    const soldOutAtMs = toMs(item.soldOutAt, timezone);
     const shouldGoLive = item.isUpcoming && goLiveAtMs !== null && now >= goLiveAtMs;
     const shouldArchiveFromSoldOut = soldOut && item.soldOutBehavior === 'archive_now';
     const shouldArchiveAfterDelay =
@@ -234,7 +236,8 @@ async function buildStorePayload(requestedSlug: string) {
   }
 
   allProducts = sortProducts(allProducts);
-  const lifecycleProducts = applyLifecycle(allProducts, liveStates);
+  const storeTimezone = String(config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+  const lifecycleProducts = applyLifecycle(allProducts, liveStates, storeTimezone);
   const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
   const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
   const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);

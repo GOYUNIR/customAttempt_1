@@ -19,7 +19,7 @@ import { normalizeSiteBase } from '@/lib/url-utils';
  * broken one. This is exactly why "the share card still doesn't work after the
  * last fix" happens: the branding hash never changed, so the URL never changed.
  */
-const CARD_REVISION = 2;
+const CARD_REVISION = 3;
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
@@ -48,6 +48,7 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
     footer: config.brandFooterData || {},
     legal: config.legal || {},
     catalog: config.catalog || {},
+    dropSchedule: config.dropSchedule || {},
   };
   return liveValue;
 }
@@ -104,7 +105,9 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: brandName,
       // Absolute URL — messengers (WhatsApp / iMessage / Discord / Slack) fetch
       // the image from the rendered card, so a relative path never works for them.
-      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName, type: 'image/png' }],
+      // `secure_url` is emitted too because a handful of crawlers (X/Twitter,
+      // LinkedIn) require the https form explicitly.
+      images: [{ url: ogImageUrl, secureUrl: ogImageUrl, width: 1200, height: 630, alt: brandName, type: 'image/png' }],
       type: 'website',
     },
     twitter: {
@@ -112,6 +115,13 @@ export async function generateMetadata(): Promise<Metadata> {
       title: brandName,
       description: shareDescription,
       images: [{ url: ogImageUrl, width: 1200, height: 630, alt: brandName }],
+    },
+    // Some crawlers still look for the classic legacy meta tags; Next only
+    // emits them from `other`. Cheap insurance for WhatsApp/iMessage which
+    // historically prefer og:image with an absolute URL.
+    other: {
+      'og:image:url': ogImageUrl,
+      'og:image:secure_url': ogImageUrl,
     },
   };
 }

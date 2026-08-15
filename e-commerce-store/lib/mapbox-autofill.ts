@@ -158,11 +158,6 @@ let streetFillDetectorInstalled = false;
 // street-only form-fill permanently clobber a verified full address.
 const activeFullFills = new Map<HTMLInputElement, { composed: string; until: number }>();
 
-/** One-time latch so the noisy "Attach verified" info line only logs once per
- * page-load instead of on every attach re-verify (SiteChrome + Storefront both
- * poll, which previously logged it repeatedly in the console). */
-let attachLogFired = false;
-
 /**
  * True once the SDK successfully attached to at least one input this page-load.
  * Once latched, autofill stays "on" for the rest of the session while eligible
@@ -948,12 +943,6 @@ function startAttachLoop(): void {
     if (info.attachedInputs > 0) {
       attachedEver = true;
       stopAttachLoop();
-      if (!attachLogFired) {
-        attachLogFired = true;
-        console.info(
-          `[mapbox-autofill] Attach verified: ${info.attachedInputs} input(s) attached, ${info.listboxes} dropdown(s) rendered. Type in the shipping field to see suggestions.`
-        );
-      }
       refreshActiveStatus();
       return true;
     }
@@ -963,9 +952,6 @@ function startAttachLoop(): void {
       // is expected, not an error: the observer re-attaches if one appears.
       if (attempts >= MAX_ATTEMPTS) {
         stopAttachLoop();
-        console.info(
-          '[mapbox-autofill] No address inputs on this page — autofill will attach automatically if one appears later.'
-        );
       }
       return false;
     }
@@ -1020,10 +1006,6 @@ export async function ensureMapboxAutofill(): Promise<void> {
   const token = resolveMapboxToken();
   if (!token) {
     setStatus({ status: 'no-token', token: false });
-    console.info(
-      '[mapbox-autofill] No Mapbox token configured — address autofill is OFF. ' +
-        'Set NEXT_PUBLIC_MAPBOX_TOKEN (Vercel → Project Settings → Environment Variables) and redeploy.'
-    );
     return;
   }
 
@@ -1110,9 +1092,6 @@ export async function ensureMapboxAutofill(): Promise<void> {
     // startAutofillObserver() provides the same auto-attach behaviour safely.
     startAutofillObserver();
     markActive();
-    console.info(
-      '[mapbox-autofill] SDK loaded (token ' + resolvedTokenPrefix + '). Verifying attach…'
-    );
     startAttachLoop();
     refreshActiveStatus();
   } catch (err) {

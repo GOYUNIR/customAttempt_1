@@ -23,6 +23,8 @@ export interface LiveThemeValue {
   legal?: Record<string, string>;
   /** Catalog presentation settings (section order on /catalog). */
   catalog?: { sectionOrder?: string[] };
+  /** Drop scheduling (timezone + cadence) — used to parse product timestamps. */
+  dropSchedule?: Record<string, any>;
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

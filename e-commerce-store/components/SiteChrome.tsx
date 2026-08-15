@@ -9,6 +9,7 @@ import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
 import { themeRadius } from '@/lib/storefront-config';
+import { scheduleCartPersist, syncCartWithServer } from '@/lib/client-cart-sync';
 
 type CartItem = {
   productId: string;
@@ -376,7 +377,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => {
-    const sync = () => setCart(readCart());
+    // Keep the drawer in sync with localStorage (the source of truth shared
+    // with Storefront), and persist every change to the signed-in user's
+    // account cart (debounced) so the bag follows the account across devices.
+    const sync = () => {
+      setCart(readCart());
+      scheduleCartPersist();
+    };
     sync();
     const draft = readCheckoutDetails();
     if (draft.email) setCheckoutEmail(draft.email);
@@ -751,6 +758,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // Detect the signed-in session so the header can show the green account
   // indicator and the cart drawer can lock the email to the session address.
   // Fails silently — signed-out visitors just see the normal account icon.
+  const cartMergeDoneRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/auth/me')
@@ -760,6 +768,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         if (data?.user?.email) {
           setSignedIn(true);
           setSignedInEmail(String(data.user.email));
+          // Pull the account's saved cart and merge it with this browser's bag
+          // ONCE per page session. A second merge could resurrect items the
+          // user removed on another device (stale local copy wins).
+          if (!cartMergeDoneRef.current) {
+            cartMergeDoneRef.current = true;
+            syncCartWithServer();
+          }
         } else {
           setSignedIn(false);
           setSignedInEmail('');

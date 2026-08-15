@@ -52,7 +52,6 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         u.rewards = Math.max(0, Number(u.rewards || 0)) + pointsEarned;
         await redis.hset(USERS_KEY, { [k]: JSON.stringify(u) });
-        console.log('[webhook] awarded points', email, pointsEarned);
         break;
       }
     }
@@ -309,13 +308,6 @@ export async function POST(request: Request) {
             console.error('[webhook] entry email', e);
           }
 
-          console.log('[webhook] entry locked', {
-            email,
-            variant,
-            size,
-            promoCode: appliedPromo || null,
-            discountPercent: discountPercent || 0,
-          });
         }
         if (blockedByLimit) {
           await archiveEntry(redis, {

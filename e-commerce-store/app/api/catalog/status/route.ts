@@ -10,6 +10,8 @@ import {
   PRODUCTS_KEY,
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { dropTimestampToMs } from '@/lib/drop-timestamps';
+import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,10 +42,19 @@ export async function GET() {
 async function buildCatalogPayload() {
   try {
     const redis = createRedisClient();
-    const toMs = (value: unknown) => {
-      const parsed = typeof value === 'string' && value ? new Date(value).getTime() : NaN;
-      return Number.isFinite(parsed) ? parsed : null;
-    };
+    // Catalog groupings are stored inside store:config.catalogPreview (single
+    // source of truth) — there is no separate `store:catalog_config` key.
+    // Read early: the store timezone below comes from the same config blob.
+    const storeConfig = safeParseRedisItem<any>(redis ? await redis.get(STORE_CONFIG_KEY) : null) || {};
+    // Drop timestamps are naive wall-clock strings set in the STORE's
+    // timezone. Parse them as such so the catalog's go-live logic agrees with
+    // the product page countdown and the server draw engine.
+    const storeTimezone = String(
+      storeConfig?.dropSchedule?.timezone ||
+      GOYUNIR_STORE_SUITE.dropSchedule?.timezone ||
+      'America/Los_Angeles',
+    );
+    const toMs = (value: unknown) => dropTimestampToMs(value, storeTimezone);
     const sortProducts = (items: any[]) =>
       [...items].sort(
         (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
@@ -62,15 +73,13 @@ async function buildCatalogPayload() {
         notesByProductId: {},
         availableFromByProductId: {},
         records: [],
+        storeTimezone,
         fromFallback: true,
       };
     }
 
     const archived = await getCatalogArchiveRecords(redis);
     const archivedProductIds = archived.map((r) => r.productId);
-    // Catalog groupings are stored inside store:config.catalogPreview (single
-    // source of truth) — there is no separate `store:catalog_config` key.
-    const storeConfig = safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
     const catalogPreview = storeConfig.catalogPreview || {};
     const configuredUpcoming = Array.isArray(catalogPreview.upcomingDrops) ? catalogPreview.upcomingDrops : [];
     const configuredArchive = Array.isArray(catalogPreview.archiveScents) ? catalogPreview.archiveScents : [];
@@ -174,6 +183,8 @@ async function buildCatalogPayload() {
         inventoryRemaining: p.inventoryRemaining,
         checkoutMode: normalizeMode(p),
         isRaffle: normalizeMode(p) === 'RAFFLE',
+        goLiveAt: p.goLiveAt || '',
+        releaseEndsAt: p.releaseEndsAt || '',
       }));
 
     // Never list a product in BOTH live drops and upcoming. Products that
@@ -244,6 +255,7 @@ async function buildCatalogPayload() {
       notesByProductId: {},
       availableFromByProductId: {},
       records: archived,
+      storeTimezone,
     };
   } catch (err: any) {
     console.error('[catalog/status] Error:', err);

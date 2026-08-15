@@ -37,11 +37,15 @@ export const contentType = 'image/png';
 const DEFAULT_DESCRIPTION = 'Private releases, handled cleanly.';
 
 export async function GET() {
+  // Brand fallback for the catch-branch below (read best-effort so a broken
+  // renderer still produces a *branded* fallback card, never a generic one).
+  let fallbackBrandName = 'Store';
   try {
     const redis = createRedisClient();
     const config = await loadStoreConfigCached(redis);
     const branding = config.branding || {};
     const themeColors = config.themeColors || {};
+    fallbackBrandName = String(branding.brandName || branding.shareTitle || 'Store');
 
     // Fetch logo + share image as data: URLs so satori can never fail on a
     // slow/broken remote image (invalid values resolve to '' → text-only card).
@@ -111,7 +115,11 @@ export async function GET() {
               fontFamily: 'system-ui, sans-serif',
             },
           },
-          createElement('div', { style: { fontSize: 64, fontWeight: 800, letterSpacing: 6 } }, 'STORE'),
+          createElement(
+            'div',
+            { style: { fontSize: 64, fontWeight: 800, letterSpacing: 6, textTransform: 'uppercase' } },
+            fallbackBrandName.slice(0, 24),
+          ),
         ),
         {
           ...size,
