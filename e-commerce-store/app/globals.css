@@ -17,7 +17,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
@@ -98,9 +98,9 @@ p {
   box-sizing: border-box;
 }
 
-/* Apple-style selection: a soft tint instead of the harsh default blue. */
+/* Apple-style selection: a soft system-blue tint instead of the harsh default. */
 ::selection {
-  background: rgba(90, 200, 250, 0.28);
+  background: rgba(0, 122, 255, 0.2);
   color: inherit;
 }
 
@@ -118,10 +118,17 @@ p {
 }
 *::-webkit-scrollbar-thumb {
   background: rgba(120, 120, 130, 0.4);
+  /* padding-box + transparent border turns the thumb into a slim capsule
+     instead of a square-edged block on light surfaces. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(140, 140, 150, 0.6);
+  background: rgba(140, 140, 150, 0.55);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
 }
 
 button,
@@ -185,7 +192,9 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Apple-style focus ring: a soft outer glow instead of a harsh 2px outline. */
+/* Apple-style focus ring: a soft double halo in system blue instead of a harsh
+   2px outline. The inner ring anchors the focus, the outer one glows — visible
+   on both light and dark surfaces without ever looking like a browser outline. */
 button:focus-visible,
 [role='button']:focus-visible,
 a:focus-visible,
@@ -193,18 +202,23 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(90, 200, 250, 0.35);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.3), 0 0 0 5px rgba(0, 122, 255, 0.16);
 }
 
 input,
 select,
 textarea {
+  caret-color: #0071e3;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 /* Respect customers who disable motion: collapse the press-down bounce and
    spinner pulses so nothing feels aggressive. */
 @media (prefers-reduced-motion: reduce) {
+  html {
+    /* Never smooth-scroll for users who asked for less motion. */
+    scroll-behavior: auto;
+  }
   button:not(:disabled):active,
   [role='button']:not([aria-disabled='true']):active {
     transform: none;

@@ -39,11 +39,14 @@ const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 // Opacities are intentionally LOW: the glow is an ambient wash, not a blob.
 const DEFAULT_ORBS: any = {
   enabled: true,
-  primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
-  secondary: { enabled: true, color: '#a855f7', opacity: 15, size: 44 },
-  tertiary: { enabled: true, color: '#ffd79b', opacity: 8, size: 28 },
-  fourth: { enabled: true, color: '#7dd3fc', opacity: 8, size: 36 },
-  fifth: { enabled: true, color: '#f472b6', opacity: 6, size: 24 },
+  // Apple-aligned ambient palette (matches the Apple preset): system blue,
+  // violet, warm amber, sky, pink. Opacities stay in the 6-14 band — the glow
+  // is an ambient wash, never a blob.
+  primary: { enabled: true, color: '#0071e3', opacity: 12, size: 58 },
+  secondary: { enabled: true, color: '#bf5af2', opacity: 14, size: 44 },
+  tertiary: { enabled: true, color: '#ff9f0a', opacity: 9, size: 28 },
+  fourth: { enabled: true, color: '#64d2ff', opacity: 8, size: 36 },
+  fifth: { enabled: true, color: '#ff375f', opacity: 6, size: 24 },
   motion: {
     idleEnabled: true,
     pointerEnabled: true,
@@ -70,16 +73,18 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
  * `impulse` scales how much pointer VELOCITY is injected into each layer. When
  * the cursor/finger moves fast, the injected momentum carries the orb PAST the
  * stopping point (the overshoot the client asked for), then the spring drags it
- * back and it settles. `xAmp`/`yAmp`/`xOff`/`yOff` are the same transform
- * mapping the old single-state loop used, so the visible composition is
- * unchanged — only the motion character is.
+ * back and it settles. `parallax` adds a subtle scroll-depth offset — the big
+ * ambient layers drift a touch more with the page than the small accents, so
+ * the glow reads as one layered volume. `xAmp`/`yAmp`/`xOff`/`yOff` are the
+ * same transform mapping the old single-state loop used, so the visible
+ * composition is unchanged — only the motion character is.
  */
 const ORB_LAYERS = [
-  { xAmp: 68, yAmp: 72, xOff: -16, yOff: -8, k: 0.0018, friction: 0.942, impulse: 0.4 },
-  { xAmp: -32, yAmp: -26, xOff: 56, yOff: 48, k: 0.0022, friction: 0.948, impulse: 0.55 },
-  { xAmp: 24, yAmp: -18, xOff: 18, yOff: 62, k: 0.0029, friction: 0.956, impulse: 0.85 },
-  { xAmp: -18, yAmp: 22, xOff: -32, yOff: 76, k: 0.0034, friction: 0.954, impulse: 0.75 },
-  { xAmp: 16, yAmp: -30, xOff: 82, yOff: 18, k: 0.0046, friction: 0.968, impulse: 1.5 },
+  { xAmp: 68, yAmp: 72, xOff: -16, yOff: -8, k: 0.0018, friction: 0.942, impulse: 0.45, parallax: 0.03 },
+  { xAmp: -32, yAmp: -26, xOff: 56, yOff: 48, k: 0.0022, friction: 0.948, impulse: 0.6, parallax: 0.042 },
+  { xAmp: 24, yAmp: -18, xOff: 18, yOff: 62, k: 0.0029, friction: 0.95, impulse: 1.05, parallax: 0.024 },
+  { xAmp: -18, yAmp: 22, xOff: -32, yOff: 76, k: 0.0034, friction: 0.946, impulse: 0.95, parallax: 0.018 },
+  { xAmp: 16, yAmp: -30, xOff: 82, yOff: 18, k: 0.0046, friction: 0.958, impulse: 1.8, parallax: 0.012 },
 ] as const;
 
 /** Fresh physics state for every orb layer (x, y, vx, vy). */
@@ -152,22 +157,35 @@ function chromeBackground(color: string, alphaPct: number, fallback: string, min
   return safe >= 100 ? c : `color-mix(in srgb, ${c} ${safe}%, transparent)`;
 }
 
+/** True when a hex color is dark enough that 'screen' blending reads premium. */
+function isDarkColor(color: any): boolean {
+  const hex = normalizeHex(color, '');
+  if (!hex) return false;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  if ([r, g, b].some((v) => Number.isNaN(v))) return false;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.45;
+}
+
 /**
  * Radial-gradient paint for a glow orb at the given opacity.
  *
- * `soft` tapers the glow far more aggressively (transparent by 58% of the
- * radius instead of 72%) so a compact orb reads as a gentle, seamless wash of
- * light — never a visible disc with a hard edge. An explicit opacity of 0
- * always returns "transparent" so a disabled glow can never render.
+ * The falloff is a smooth, eased taper (several stops approximating a gaussian
+ * curve) that is FULLY transparent by ~62% of the radius (`soft` ~58%), so an
+ * orb reads as a seamless wash of ambient light - never a visible disc with a
+ * hard edge. An explicit opacity of 0 always returns "transparent" so a
+ * disabled glow can never render.
  */
 function orbGradient(color: string, opacity: number, fallback: string, soft = false) {
   const hex = normalizeHex(color, fallback);
   const pct = Math.max(0, Number(opacity) || 0);
   if (pct <= 0) return 'transparent';
   if (soft) {
-    return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 30%, ${hex}${alphaHex(pct * 0.16)} 46%, transparent 60%)`;
+    return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.5)} 16%, ${hex}${alphaHex(pct * 0.24)} 30%, ${hex}${alphaHex(pct * 0.1)} 44%, transparent 58%)`;
   }
-  return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 34%, ${hex}${alphaHex(pct * 0.14)} 54%, transparent 72%)`;
+  return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.52)} 14%, ${hex}${alphaHex(pct * 0.28)} 28%, ${hex}${alphaHex(pct * 0.13)} 42%, ${hex}${alphaHex(pct * 0.05)} 52%, transparent 62%)`;
 }
 
 function readCart(): CartItem[] {
@@ -296,6 +314,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // motion is paused so the orbs keep following the finger instead of being
   // yanked around by the page scroll on mobile.
   const touchingRef = useRef(false);
+  // Pointer VELOCITY tracking (smoothed, normalized units/sec). A fast flick
+  // injects a stronger overshoot impulse into the springs so the small orbs
+  // visibly swing PAST the stopping point, then settle back (Apple-style
+  // spring). Decayed every frame so a stopped cursor leaves no drift.
+  const lastPointerXRef = useRef(0.5);
+  const lastPointerYRef = useRef(0.35);
+  const lastPointerAtRef = useRef(0);
+  const pointerVelXRef = useRef(0);
+  const pointerVelYRef = useRef(0);
 
   const showNotice = (next: { id?: string; type: string; message: string; persist?: boolean }) => {
     setNotice({ id: next.id, type: next.type, message: next.message });
@@ -387,13 +414,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       else if (nextScroll < 40) setShowScrollCue(true);
     };
     let lastInteraction = Date.now();
+    // Smoothed pointer velocity in normalized units/second — feeds the spring
+    // overshoot impulse so fast flicks carry real momentum.
+    const trackPointerVelocity = (nx: number, ny: number) => {
+      const nowVel = performance.now();
+      const dtVel = Math.max(8, nowVel - lastPointerAtRef.current || 16);
+      const nvx = (nx - lastPointerXRef.current) / dtVel;
+      const nvy = (ny - lastPointerYRef.current) / dtVel;
+      pointerVelXRef.current = pointerVelXRef.current * 0.65 + nvx * 0.35;
+      pointerVelYRef.current = pointerVelYRef.current * 0.65 + nvy * 0.35;
+      lastPointerAtRef.current = nowVel;
+      lastPointerXRef.current = nx;
+      lastPointerYRef.current = ny;
+    };
     const onPointer = (event: PointerEvent) => {
       const cfg = orbsRef.current;
       if (cfg?.motion?.pointerEnabled === false) return;
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
-      targetXRef.current = clamp(event.clientX / width, 0.04, 0.96);
-      targetYRef.current = clamp(event.clientY / height, 0.06, 0.94);
+      const nx = clamp(event.clientX / width, 0.04, 0.96);
+      const ny = clamp(event.clientY / height, 0.06, 0.94);
+      targetXRef.current = nx;
+      targetYRef.current = ny;
+      trackPointerVelocity(nx, ny);
       lastInteraction = Date.now();
     };
     const onTouchStart = (event: TouchEvent) => {
@@ -404,8 +447,16 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (!touch) return;
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
-      targetXRef.current = clamp(touch.clientX / width, 0.04, 0.96);
-      targetYRef.current = clamp(touch.clientY / height, 0.06, 0.94);
+      const nx = clamp(touch.clientX / width, 0.04, 0.96);
+      const ny = clamp(touch.clientY / height, 0.06, 0.94);
+      targetXRef.current = nx;
+      targetYRef.current = ny;
+      // A fresh touch shouldn't inherit the mouse's leftover velocity.
+      lastPointerXRef.current = nx;
+      lastPointerYRef.current = ny;
+      pointerVelXRef.current = 0;
+      pointerVelYRef.current = 0;
+      lastPointerAtRef.current = performance.now();
       lastInteraction = Date.now();
     };
     const onTouchEnd = () => {
@@ -419,8 +470,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       if (!touch) return;
       const width = window.innerWidth || 1;
       const height = window.innerHeight || 1;
-      targetXRef.current = clamp(touch.clientX / width, 0.04, 0.96);
-      targetYRef.current = clamp(touch.clientY / height, 0.06, 0.94);
+      const nx = clamp(touch.clientX / width, 0.04, 0.96);
+      const ny = clamp(touch.clientY / height, 0.06, 0.94);
+      targetXRef.current = nx;
+      targetYRef.current = ny;
+      trackPointerVelocity(nx, ny);
       lastInteraction = Date.now();
     };
 
@@ -430,6 +484,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     // the compositor thread, so nothing forces a paint per frame. The orbs are
     // pre-blurred radial gradients (no `filter: blur()`), so the glow is
     // painted once and then only composited.
+    // Respect prefers-reduced-motion: slower springs, no overshoot impulse, no
+    // scroll parallax, and the idle write cadence stays at ~7fps permanently.
+    const reducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const applyGlow = (states: { x: number; y: number; vx: number; vy: number }[]) => {
       const cfg = orbsRef.current;
       const motion = cfg?.motion || DEFAULT_ORBS.motion;
@@ -441,11 +498,18 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const fifth = orbFifthRef.current;
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
+      // Subtle scroll parallax: each layer drifts a little more/less with the
+      // page (see ORB_LAYERS.parallax), gated off for reduced-motion users and
+      // when scroll motion is disabled in /admin.
+      const scrollY = window.scrollY || 0;
+      const scrollParallax = reducedMotion || cfg?.motion?.scrollEnabled === false ? 0 : 1;
       const apply = (el: HTMLDivElement | null, def: (typeof ORB_LAYERS)[number], state: { x: number; y: number }) => {
         if (!el) return;
         const x = clamp(state.x, -0.2, 1.2);
         const y = clamp(state.y, -0.12, 1.12);
-        el.style.transform = `translate3d(${((def.xOff + x * def.xAmp * intensity) / 100) * vw}px, ${((def.yOff + y * def.yAmp * intensity) / 100) * vh}px, 0)`;
+        const px = ((def.xOff + x * def.xAmp * intensity) / 100) * vw;
+        const py = ((def.yOff + y * def.yAmp * intensity) / 100) * vh + scrollY * def.parallax * scrollParallax;
+        el.style.transform = `translate3d(${px}px, ${py}px, 0)`;
       };
       apply(primary, ORB_LAYERS[0], states[0] || { x: 0.5, y: 0.35 });
       apply(secondary, ORB_LAYERS[1], states[1] || { x: 0.5, y: 0.35 });
@@ -464,7 +528,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     // and this halves the per-frame compositor work — a meaningful lag fix on
     // seeded stores with product imagery layered over the glow.
     let glowFrameCount = 0;
-    const reducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const animateIdle = () => {
       if (!running) return;
       const cfg = orbsRef.current;
@@ -489,18 +552,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const idleFor = now - lastInteraction;
       const scrollMomentumAge = now - lastScrollAtRef.current;
 
-      // Idle drift: gently wander the raw target, never snapping.
+      // Idle drift: a slow, organic Lissajous wander layered over a gentle
+      // random retarget — smooth and never-repeating, so the glow feels alive
+      // without ever looking algorithmic.
       if (motion.idleEnabled && idleFor > 950) {
         if (now >= nextIdleRetargetAt) {
           idleTargetX = 0.16 + Math.random() * 0.68;
           idleTargetY = 0.12 + Math.random() * 0.7;
-          nextIdleRetargetAt = now + 2200 + Math.random() * 2600;
+          nextIdleRetargetAt = now + 2600 + Math.random() * 2600;
         }
         const t = now / 1000;
-        const microDriftX = Math.sin(t * 0.9) * 0.012 + Math.sin(t * 1.7) * 0.005;
-        const microDriftY = Math.cos(t * 0.85) * 0.011 + Math.cos(t * 1.5) * 0.005;
-        targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.014 + microDriftX, 0.05, 0.95);
-        targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.014 + microDriftY, 0.08, 0.92);
+        const microDriftX = Math.sin(t * 0.62) * 0.014 + Math.sin(t * 1.31 + 1.7) * 0.007 + Math.sin(t * 2.9 + 0.4) * 0.003;
+        const microDriftY = Math.cos(t * 0.57) * 0.013 + Math.cos(t * 1.24 + 2.1) * 0.007 + Math.cos(t * 2.7 + 1.1) * 0.003;
+        targetXRef.current = clamp(targetXRef.current + (idleTargetX - targetXRef.current) * 0.01 + microDriftX, 0.05, 0.95);
+        targetYRef.current = clamp(targetYRef.current + (idleTargetY - targetYRef.current) * 0.01 + microDriftY, 0.08, 0.92);
       }
 
       // Scroll momentum: keep feeding the target while the scroll decelerates.
@@ -529,16 +594,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       // injected as an impulse — when the finger/cursor moves fast, the orbs
       // swing past the stopping point and spring back, exactly like a playful
       // Apple-style spring. `momentum` widens the overshoot; `speed` tightens it.
-      const impulseScale = (0.6 + momentumFactor * 0.8) * speedFactor;
+      const impulseScale = (0.65 + momentumFactor * 0.9) * speedFactor;
       const pointerDx = (pointerTargetXRef.current - prevSmoothXRef.current) * impulseScale;
       const pointerDy = (pointerTargetYRef.current - prevSmoothYRef.current) * impulseScale;
       prevSmoothXRef.current = pointerTargetXRef.current;
       prevSmoothYRef.current = pointerTargetYRef.current;
 
+      // Decay the tracked pointer velocity so a stopped cursor never leaves a
+      // lingering drift impulse in the springs (~0 within half a second).
+      pointerVelXRef.current *= Math.pow(0.9, frame);
+      pointerVelYRef.current *= Math.pow(0.9, frame);
+
       // A single soft cap for the whole family so nothing can teleport, but
       // high enough that a real overshoot is possible (the old 0.024 cap made
       // the orbs feel like they were wading through syrup).
-      const maxVel = 0.085 * speedFactor * (0.5 + momentumFactor);
+      const maxVel = 0.105 * speedFactor * (0.5 + momentumFactor);
       const maxLayerX = reducedMotion ? 0.02 : -0.2;
       const maxLayerY = reducedMotion ? 0.05 : -0.12;
       const states = layerStatesRef.current;
@@ -553,6 +623,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         // anticipates the cursor and overshoots it, then settles back.
         state.vx += pointerDx * def.impulse * frame;
         state.vy += pointerDy * def.impulse * frame;
+        // Direct velocity injection: fast pointer flicks carry real momentum
+        // into the small layers, which visibly overshoots the stopping point
+        // before the spring drags them back. Reduced-motion users get none.
+        if (!reducedMotion) {
+          state.vx += pointerVelXRef.current * def.impulse * 0.01 * speedFactor * frame;
+          state.vy += pointerVelYRef.current * def.impulse * 0.01 * speedFactor * frame;
+        }
         state.vx *= Math.pow(springF, frame);
         state.vy *= Math.pow(springF, frame);
         state.vx = clamp(state.vx, -maxVel, maxVel);
@@ -923,11 +1000,18 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const fourthOrb = { ...DEFAULT_ORBS.fourth, ...(resolvedOrbs.fourth || {}) };
   const fifthOrb = { ...DEFAULT_ORBS.fifth, ...(resolvedOrbs.fifth || {}) };
   // Phones: crank the glow up so it reads as strongly as it does on desktop
-  // (~1.7x opacity, ~1.4x size). Capped so it never turns into a solid blob.
-  const mobileOrbOpacity = isMobile ? 1.7 : 1;
-  const mobileOrbSize = isMobile ? 1.4 : 1;
+  // (~1.6x opacity, ~1.35x size — the softer gradient keeps it a wash, never
+  // a blob). Capped so it never turns into a solid disc.
+  const mobileOrbOpacity = isMobile ? 1.6 : 1;
+  const mobileOrbSize = isMobile ? 1.35 : 1;
   const orbOpacity = (orb: any, fallback = 0) => Math.min(100, Math.max(0, Number(orb?.opacity ?? fallback)) * mobileOrbOpacity);
   const orbSizeVw = (orb: any, fallback = 40) => (Number(orb?.size) || fallback) * mobileOrbSize;
+  // Blend mode: 'screen' makes overlapping orbs ADD their light — the premium
+  // glow harmony where intersections brighten instead of one disc covering
+  // another — on dark themes. Light themes keep plain compositing so the wash
+  // stays soft and ink-like.
+  const orbBlend = isDarkColor(liveTheme.primaryBackground) ? 'screen' : 'normal';
+  const drawerOrbBlend = isDarkColor(liveTheme.cardBackground) ? 'screen' : 'normal';
 
   // Keep the resolved header action mode ("bag" vs "cart") in sync so the
   // storefront can read it on render. Without this, the value was only ever
@@ -949,19 +1033,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
         {orbsEnabled && <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />}
         {orbsEnabled && primaryOrb.enabled !== false && (
-          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(primaryOrb, 58)}vw`, height: `${orbSizeVw(primaryOrb, 58)}vw`, minWidth: 160, minHeight: 160, maxWidth: 720, maxHeight: 720, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12), '#3b82f6'), willChange: 'transform' }} />
+          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(primaryOrb, 58)}vw`, height: `${orbSizeVw(primaryOrb, 58)}vw`, minWidth: 160, minHeight: 160, maxWidth: 720, maxHeight: 720, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12), '#0071e3'), mixBlendMode: orbBlend, willChange: 'transform' }} />
         )}
         {orbsEnabled && secondaryOrb.enabled !== false && (
-          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(secondaryOrb, 44)}vw`, height: `${orbSizeVw(secondaryOrb, 44)}vw`, minWidth: 120, minHeight: 120, maxWidth: 540, maxHeight: 540, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15), '#a855f7'), willChange: 'transform' }} />
+          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(secondaryOrb, 44)}vw`, height: `${orbSizeVw(secondaryOrb, 44)}vw`, minWidth: 120, minHeight: 120, maxWidth: 540, maxHeight: 540, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15), '#bf5af2'), mixBlendMode: orbBlend, willChange: 'transform' }} />
         )}
         {orbsEnabled && tertiaryOrb.enabled !== false && (
-          <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(tertiaryOrb, 28)}vw`, height: `${orbSizeVw(tertiaryOrb, 28)}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8), '#ffd79b'), willChange: 'transform' }} />
+          <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(tertiaryOrb, 28)}vw`, height: `${orbSizeVw(tertiaryOrb, 28)}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8), '#ff9f0a'), mixBlendMode: orbBlend, willChange: 'transform' }} />
         )}
         {orbsEnabled && fourthOrb.enabled !== false && (
-          <div ref={orbFourthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fourthOrb, 36)}vw`, height: `${orbSizeVw(fourthOrb, 36)}vw`, minWidth: 90, minHeight: 90, maxWidth: 420, maxHeight: 420, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fourthOrb.color, orbOpacity(fourthOrb, 8), '#7dd3fc'), willChange: 'transform' }} />
+          <div ref={orbFourthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fourthOrb, 36)}vw`, height: `${orbSizeVw(fourthOrb, 36)}vw`, minWidth: 90, minHeight: 90, maxWidth: 420, maxHeight: 420, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fourthOrb.color, orbOpacity(fourthOrb, 8), '#64d2ff'), mixBlendMode: orbBlend, willChange: 'transform' }} />
         )}
         {orbsEnabled && fifthOrb.enabled !== false && (
-          <div ref={orbFifthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fifthOrb, 24)}vw`, height: `${orbSizeVw(fifthOrb, 24)}vw`, minWidth: 70, minHeight: 70, maxWidth: 300, maxHeight: 300, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fifthOrb.color, orbOpacity(fifthOrb, 6), '#f472b6'), willChange: 'transform' }} />
+          <div ref={orbFifthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fifthOrb, 24)}vw`, height: `${orbSizeVw(fifthOrb, 24)}vw`, minWidth: 70, minHeight: 70, maxWidth: 300, maxHeight: 300, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fifthOrb.color, orbOpacity(fifthOrb, 6), '#ff375f'), mixBlendMode: orbBlend, willChange: 'transform' }} />
         )}
       </div>
       {bannerMessage && (
@@ -1155,7 +1239,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   <div
                     style={{
                       position: 'absolute', left: '-16%', top: '-10%', width: 300, height: 300,
-                      borderRadius: 999, background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12) * 1.9, '#3b82f6', true),
+                      borderRadius: 999, background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12) * 1.9, '#0071e3', true),
+                      mixBlendMode: drawerOrbBlend,
                       animation: 'goyunirOrbDriftA 13s ease-in-out infinite',
                     }}
                   />
@@ -1164,7 +1249,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   <div
                     style={{
                       position: 'absolute', right: '-18%', bottom: '-12%', width: 280, height: 280,
-                      borderRadius: 999, background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15) * 1.8, '#a855f7', true),
+                      borderRadius: 999, background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15) * 1.8, '#bf5af2', true),
+                      mixBlendMode: drawerOrbBlend,
                       animation: 'goyunirOrbDriftB 17s ease-in-out infinite',
                     }}
                   />
@@ -1173,7 +1259,8 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   <div
                     style={{
                       position: 'absolute', left: '38%', bottom: '26%', width: 190, height: 190,
-                      borderRadius: 999, background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8) * 2.2, '#ffd79b', true),
+                      borderRadius: 999, background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8) * 2.2, '#ff9f0a', true),
+                      mixBlendMode: drawerOrbBlend,
                       animation: 'goyunirOrbDriftC 11s ease-in-out infinite',
                     }}
                   />

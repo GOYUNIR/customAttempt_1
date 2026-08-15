@@ -101,7 +101,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       surfaceTransparency: 96,
       radiusStyle: 'squircle',
       cardShadow: 16,
-      backdropBlur: 88,
+      backdropBlur: 86,
       contentSpacing: 'spacious',
     },
     orbs: {
@@ -340,8 +340,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       contentSpacing: 'comfortable',
     },
     orbs: {
-      primary: { color: '#0A0A0A', opacity: 5 },
-      secondary: { color: '#52525B', opacity: 7 },
+      primary: { color: '#0A0A0A', opacity: 8 },
+      secondary: { color: '#52525B', opacity: 10 },
       tertiary: { color: '#D4D4D8', opacity: 9 },
       fourth: { color: '#A1A1AA', opacity: 6 },
       fifth: { color: '#27272A', opacity: 4 },
@@ -496,7 +496,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       contentSpacing: 'comfortable',
     },
     orbs: {
-      primary: { color: '#C05B3C', opacity: 7 },
+      primary: { color: '#C05B3C', opacity: 8 },
       secondary: { color: '#8A6D3B', opacity: 8 },
       tertiary: { color: '#E7DFD1', opacity: 11 },
       fourth: { color: '#F0D88C', opacity: 5 },
