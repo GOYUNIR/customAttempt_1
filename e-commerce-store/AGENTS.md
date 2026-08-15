@@ -197,6 +197,13 @@ the ledger. Settings tabs include:
   transparency, one-click presets (`lib/theme-presets.ts`).
 - **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
 - **Settings → Hero Content / Entry Form / Footer / Storefront copy** — copy overrides.
+  Hero + prose fields are **textareas** (type Enter for a real line break; the
+  storefront renders them with `white-space: pre-line`).
+- **Settings → Behavior** — **Start at the top when the page opens** (default ON):
+  the storefront forces `scrollTo(0,0)` + `history.scrollRestoration = 'manual'`
+  on every load so the browser never reopens a long page mid-content. Saved under
+  `store:config.behavior` (`lib/redis-keys.ts` key = `store:config`, field
+  `behavior.scrollToTopOnLoad`).
 - **Settings → Branding & Share** — brand name, logo (upload or URL), header
   mode, logo size, share title/description/tagline/url, share card colors,
   favicon colors.
@@ -416,7 +423,7 @@ input like `123 realstreet` can never be saved.
 | `CRON_SECRET` | Cron endpoint auth |
 | `RESEND_API_KEY` / `RESEND_FROM` (optional) | Transactional email |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox address autofill (must be set in the SAME env as the deploy + redeploy) |
-| `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. |
+| `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. When none are set, Vercel's system variables `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL` are used as a final fallback so a deployed store always tags its REAL domain. |
 | `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` (optional) | Email send-from brand |
 | `SUPPORT_EMAIL` / `REPLY_TO_EMAIL` (optional) | Support address in emails |
 
@@ -461,6 +468,17 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — Start-at-top setting + share-card Vercel-domain fallback + multi-line text fields + bag/cart live-switch + active drawer & mobile orbs + button-corner artifact pass:**
+  - **🧭 "Site opens mid-page" fixed AND made configurable.** New admin setting **Settings → Behavior → "Start at the top when the page opens"** (default ON), persisted as `store:config.behavior.scrollToTopOnLoad`. When ON (default) `SiteChrome` sets `history.scrollRestoration = 'manual'` and `scrollTo(0,0)` in a `useLayoutEffect` (before first paint — no mid-page flash), plus a `pageshow` handler so back/bfcache restores also reset. Turn it OFF to let the browser restore the visitor's last scroll position. Wired through `store-config.ts`, `/api/store` (`mergePublicConfig`), `/api/admin/settings`, `ThemeProvider` + the layout theme blob, and the admin form.
+  - **🔗 Share-card/link-preview domain fallback.** `lib/env.ts` `getSiteUrl()` now falls back to Vercel's system variables `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL` (bare hostnames normalized to `https://…`) when `NEXT_PUBLIC_URL`/`NEXT_PUBLIC_SITE_URL`/`SITE_URL` are unset — so metadata/`og:image`/email URLs always resolve the store's REAL production domain, never `https://example.com`. `CARD_REVISION` bumped `4 → 5` so messengers re-fetch the card after this deploy. Verified `/og` → 200 `image/png` with the new `?v=7ccbdedd` hash.
+  - **📝 Multi-line text everywhere.** Hero Content + Storefront copy prose fields are now **textareas** (headline, body, eyebrow, story footer, heroTitle, heroSubtitle, priorityDropsSubtitle, footerTagline) and the home hero h1/p/eyebrow, priority-drops subtitle and footer tagline render with `white-space: pre-line` — so `by our hands.\nto your hands.` shows exactly that on the page.
+  - **🛍 Bag/cart icon now switches LIVE (admin preview + storefront).** The admin "Top-right action label" select writes `goyunir-header-action-mode` to localStorage and dispatches a `goyunir-header-action-mode` event; `SiteChrome` listens (plus the `storage` event) and uses the override so the header icon, tooltip, drawer title and empty-state wording swap the instant the buyer toggles the select — before Save. The localStorage write no longer clobbers a valid override on mount. The product page's "Add to {bag|cart}" already reads the same key, so everything agrees.
+  - **✨ Cart/bag drawer orbs are back and ACTIVE.** The drawer now paints 3 compact soft-gradient orbs (primary/secondary/tertiary colors from admin → Orb Glow) behind the content, each with its own slow CSS drift animation (`goyunirOrbDriftA/B/C` — pure transform, compositor-only, zero per-frame JS) and boosted opacity (~1.8–2.2×) so the panel feels alive.
+  - **📱 Orbs are stronger on mobile.** Background orbs get ~1.7× opacity and ~1.4× size below 768px (capped), so the home page glow reads as strongly on a 390px phone as it does on desktop.
+  - **🧹 "Weird outlines around product buttons/corners" pass.** (a) Global `button { appearance: none; -webkit-appearance: none; }` — kills iOS Safari's native button chrome that paints corner rectangles on styled buttons; (b) `-webkit-tap-highlight-color: transparent` on `a`/`button` — the purple UA tap rectangle tinted the SQUARE bounding box of rounded card links, leaving visible corner outlines on mobile; (c) catalog tiles now use the theme's `cardShadowStyle` instead of the hardcoded `0 12px 30px rgba(0,0,0,0.16)`; (d) home/catalog card `<Link>` wrappers got `display: block` + the card's `borderRadius` so focus rings and overflow follow the rounded corners.
+  - Docs: this changelog + AGENTS.md settings/env sections updated in the same change set. No new Redis keys (behavior lives under the existing `store:config`). Verified: `tsc --noEmit` clean, `eslint` 0/0 on changed files, `npm test` 26/26, and live CDP checks — reload restores `scrollY=0`, bag↔cart event swaps the header icon, drawer renders 3 animated orbs, mobile orbs render at 81.2vw (1.4×), hero h1/p computed `white-space: pre-line`, `/og` 200 `image/png`.
+
 
 - **2026-08-15 — Final polish for production sale: flat Liquid Glass + top-bar color settings + desktop-swipe fix + cart/bag icon sync + Redis hash consolidation + admin reorganization + richer demo seeds:**
   - **🎨 Top bar has its OWN color settings now.** New `themeColors.headerBackground` / `headerText` tokens (Settings → Theme Colors → **Top bar**). Empty = auto (headerBackground matches the card surface, headerText is auto-picked readable). Every one of the 11 presets carries header colors; the admin UI has friendly labels + Auto-reset buttons for every theme color input.

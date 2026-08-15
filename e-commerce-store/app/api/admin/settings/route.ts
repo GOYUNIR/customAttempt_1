@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
-      copy, legal, catalog
+      copy, legal, catalog, behavior
     } = body;
     
     // Get current config to merge
@@ -61,6 +61,9 @@ export async function POST(request: Request) {
       copy: copy || current.copy || {},
       legal: legal || current.legal || {},
       catalog: catalog || current.catalog || { sectionOrder: ['upcoming', 'archive', 'live'] },
+      behavior: {
+        scrollToTopOnLoad: behavior?.scrollToTopOnLoad !== false,
+      },
       updatedAt: new Date().toISOString(),
     };
 

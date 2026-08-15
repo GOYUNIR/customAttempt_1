@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -237,6 +237,22 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [theme, setTheme] = useState<any>(liveCtx?.themeColors || null);
   const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
   const [orbs, setOrbs] = useState<any>(liveCtx?.orbs || null);
+  // Site behaviour switches (admin → Settings → Behavior). `scrollToTopOnLoad`
+  // forces the page to start at the TOP on every load/refresh (default ON) so
+  // the browser's saved scroll position never reopens the page mid-content.
+  const [behavior, setBehavior] = useState<any>(liveCtx?.behavior || { scrollToTopOnLoad: true });
+  // Small screens (phones) get a visibility boost on the ambient glow orbs —
+  // the same opacity/size on a 390px viewport reads far weaker than on desktop.
+  // Initialized false so SSR/hydration always agree; updated by a matchMedia
+  // listener on mount + viewport change.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
   // Footer links/copyright — all editable from /admin → Settings → Footer and
   // served through /api/store → config.brandFooterData. The footer NEVER
   // hardcodes social URLs or a brand name.
@@ -300,6 +316,28 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     orbsRef.current = orbs;
   }, [orbs]);
+
+  // "Start at the top" (admin → Settings → Behavior). When enabled (default),
+  // the page ALWAYS opens at the top instead of the browser restoring the last
+  // scroll position mid-page (a common complaint on long stores). Runs in
+  // useLayoutEffect so the jump happens BEFORE the first paint — no flash of
+  // the mid-page content. `scrollRestoration = 'manual'` stops the browser
+  // from fighting us on reload/back; a `pageshow` handler also resets on
+  // bfcache restores (back button to a cached page).
+  const scrollToTopEnabled = behavior?.scrollToTopOnLoad !== false;
+  useLayoutEffect(() => {
+    try {
+      window.history.scrollRestoration = scrollToTopEnabled ? 'manual' : 'auto';
+    } catch { /* not all browsers expose scrollRestoration */ }
+    if (scrollToTopEnabled) {
+      window.scrollTo(0, 0);
+      const onPageShow = (event: PageTransitionEvent) => {
+        if (event.persisted) window.scrollTo(0, 0);
+      };
+      window.addEventListener('pageshow', onPageShow);
+      return () => window.removeEventListener('pageshow', onPageShow);
+    }
+  }, [scrollToTopEnabled]);
 
   // Attach Mapbox address autofill to the cart drawer's shipping field. The
   // helper is a singleton and its collection observes the document for inputs
@@ -595,6 +633,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         setTheme(data?.config?.themeColors || null);
         setBranding(data?.config?.branding || null);
         setOrbs(data?.config?.orbs || null);
+        if (data?.config?.behavior) setBehavior(data.config.behavior);
         if (data?.config?.brandFooterData) setFooterSettings(data.config.brandFooterData);
         if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
         // Prune cart lines whose product/size no longer exists on the backend
@@ -840,7 +879,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
-  const headerActionMode = String(branding?.headerActionMode || 'cart').toLowerCase();
+  // "Top-right action label" (Bag vs Cart). The saved admin value arrives via
+  // branding (SSR blob + /api/store), but the ADMIN PREVIEW also needs the
+  // header to switch the instant the buyer toggles the select (before saving).
+  // The admin writes a localStorage override + dispatches an event; we mirror
+  // Storefront's override behavior so the header icon, tooltip, drawer title
+  // and empty-state wording all agree everywhere immediately.
+  const [actionModeOverride, setActionModeOverride] = useState<'bag' | 'cart' | null>(null);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = window.localStorage.getItem('goyunir-header-action-mode');
+        setActionModeOverride(v === 'bag' || v === 'cart' ? v : null);
+      } catch { /* storage unavailable */ }
+    };
+    read();
+    window.addEventListener('goyunir-header-action-mode', read);
+    window.addEventListener('storage', read);
+    return () => {
+      window.removeEventListener('goyunir-header-action-mode', read);
+      window.removeEventListener('storage', read);
+    };
+  }, []);
+  const headerActionMode = String(actionModeOverride || branding?.headerActionMode || 'cart').toLowerCase();
   const actionTitle = headerActionMode === 'bag' ? 'Bag' : 'Cart';
   // Top-bar brand: admin → Settings → Branding wins; the env fallback (BRAND_NAME /
   // NEXT_PUBLIC_SITE_NAME) is used when Redis is empty; never a hardcoded brand.
@@ -861,13 +922,26 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const tertiaryOrb = { ...DEFAULT_ORBS.tertiary, ...(resolvedOrbs.tertiary || {}) };
   const fourthOrb = { ...DEFAULT_ORBS.fourth, ...(resolvedOrbs.fourth || {}) };
   const fifthOrb = { ...DEFAULT_ORBS.fifth, ...(resolvedOrbs.fifth || {}) };
+  // Phones: crank the glow up so it reads as strongly as it does on desktop
+  // (~1.7x opacity, ~1.4x size). Capped so it never turns into a solid blob.
+  const mobileOrbOpacity = isMobile ? 1.7 : 1;
+  const mobileOrbSize = isMobile ? 1.4 : 1;
+  const orbOpacity = (orb: any, fallback = 0) => Math.min(100, Math.max(0, Number(orb?.opacity ?? fallback)) * mobileOrbOpacity);
+  const orbSizeVw = (orb: any, fallback = 40) => (Number(orb?.size) || fallback) * mobileOrbSize;
 
   // Keep the resolved header action mode ("bag" vs "cart") in sync so the
   // storefront can read it on render. Without this, the value was only ever
   // written inside the promo-link branch with the initial render's value, so
-  // the Admin "Top-right action label" setting never reached the storefront.
+  // Mirror the header action mode into localStorage so the product page's
+  // "Add to {bag|cart}" button and any other consumer agree with the header.
+  // Never clobber an existing valid override (the admin preview writes one the
+  // moment the buyer toggles the select, before saving).
   useEffect(() => {
-    window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
+    try {
+      const stored = window.localStorage.getItem('goyunir-header-action-mode');
+      if (stored === 'bag' || stored === 'cart') return;
+      window.localStorage.setItem('goyunir-header-action-mode', headerActionMode);
+    } catch { /* storage unavailable */ }
   }, [headerActionMode]);
 
   return (
@@ -875,19 +949,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(255,255,255,0.018), transparent 28%)' }}>
         {orbsEnabled && <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.022), transparent 16%)' }} />}
         {orbsEnabled && primaryOrb.enabled !== false && (
-          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(primaryOrb.size) || 58}vw`, height: `${Number(primaryOrb.size) || 58}vw`, minWidth: 160, minHeight: 160, maxWidth: 720, maxHeight: 720, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, primaryOrb.opacity, '#3b82f6'), willChange: 'transform' }} />
+          <div ref={orbPrimaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(primaryOrb, 58)}vw`, height: `${orbSizeVw(primaryOrb, 58)}vw`, minWidth: 160, minHeight: 160, maxWidth: 720, maxHeight: 720, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12), '#3b82f6'), willChange: 'transform' }} />
         )}
         {orbsEnabled && secondaryOrb.enabled !== false && (
-          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(secondaryOrb.size) || 44}vw`, height: `${Number(secondaryOrb.size) || 44}vw`, minWidth: 120, minHeight: 120, maxWidth: 540, maxHeight: 540, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, secondaryOrb.opacity, '#a855f7'), willChange: 'transform' }} />
+          <div ref={orbSecondaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(secondaryOrb, 44)}vw`, height: `${orbSizeVw(secondaryOrb, 44)}vw`, minWidth: 120, minHeight: 120, maxWidth: 540, maxHeight: 540, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15), '#a855f7'), willChange: 'transform' }} />
         )}
         {orbsEnabled && tertiaryOrb.enabled !== false && (
-          <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(tertiaryOrb.size) || 28}vw`, height: `${Number(tertiaryOrb.size) || 28}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, tertiaryOrb.opacity, '#ffd79b'), willChange: 'transform' }} />
+          <div ref={orbTertiaryRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(tertiaryOrb, 28)}vw`, height: `${orbSizeVw(tertiaryOrb, 28)}vw`, minWidth: 90, minHeight: 90, maxWidth: 340, maxHeight: 340, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8), '#ffd79b'), willChange: 'transform' }} />
         )}
         {orbsEnabled && fourthOrb.enabled !== false && (
-          <div ref={orbFourthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(fourthOrb.size) || 36}vw`, height: `${Number(fourthOrb.size) || 36}vw`, minWidth: 90, minHeight: 90, maxWidth: 420, maxHeight: 420, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fourthOrb.color, fourthOrb.opacity, '#7dd3fc'), willChange: 'transform' }} />
+          <div ref={orbFourthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fourthOrb, 36)}vw`, height: `${orbSizeVw(fourthOrb, 36)}vw`, minWidth: 90, minHeight: 90, maxWidth: 420, maxHeight: 420, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fourthOrb.color, orbOpacity(fourthOrb, 8), '#7dd3fc'), willChange: 'transform' }} />
         )}
         {orbsEnabled && fifthOrb.enabled !== false && (
-          <div ref={orbFifthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${Number(fifthOrb.size) || 24}vw`, height: `${Number(fifthOrb.size) || 24}vw`, minWidth: 70, minHeight: 70, maxWidth: 300, maxHeight: 300, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fifthOrb.color, fifthOrb.opacity, '#f472b6'), willChange: 'transform' }} />
+          <div ref={orbFifthRef} style={{ position: 'absolute', left: 0, top: 0, width: `${orbSizeVw(fifthOrb, 24)}vw`, height: `${orbSizeVw(fifthOrb, 24)}vw`, minWidth: 70, minHeight: 70, maxWidth: 300, maxHeight: 300, transform: 'translate3d(0,0,0)', borderRadius: '999px', background: orbGradient(fifthOrb.color, orbOpacity(fifthOrb, 6), '#f472b6'), willChange: 'transform' }} />
         )}
       </div>
       {bannerMessage && (
@@ -1060,7 +1134,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             })()}
           </div>
           {String(copySettings.footerTagline || '').trim() ? (
-            <div style={{ fontSize: 11, lineHeight: 1.6, color: liveTheme.textMuted || '#71717a', maxWidth: 420, margin: '0 auto' }}>{String(copySettings.footerTagline).trim()}</div>
+            <div style={{ fontSize: 11, lineHeight: 1.6, color: liveTheme.textMuted || '#71717a', maxWidth: 420, margin: '0 auto', whiteSpace: 'pre-line' }}>{String(copySettings.footerTagline).trim()}</div>
           ) : null}
           <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
             © {new Date().getFullYear()} {String(footerSettings?.corporateEntityCopyright || branding?.brandName || branding?.shareTitle || 'ALL RIGHTS RESERVED.')}
@@ -1071,6 +1145,42 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, ...glassSurfaceStyle(theme, { bg: drawerBg, dark: true, shadow: cardShadowStyle(theme, 24) }), borderLeft: '1px solid rgba(255,255,255,0.16)' }}>
+            {/* Cart/bag drawer glow — compact, animated orbs behind the content
+                so the panel feels alive (admin → Settings → Orb Glow colors).
+                Painted with soft gradients + CSS drift transforms (no per-frame
+                JS), clipped by the drawer's overflow: hidden. */}
+            {orbsEnabled && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+                {primaryOrb.enabled !== false && (
+                  <div
+                    style={{
+                      position: 'absolute', left: '-16%', top: '-10%', width: 300, height: 300,
+                      borderRadius: 999, background: orbGradient(primaryOrb.color, orbOpacity(primaryOrb, 12) * 1.9, '#3b82f6', true),
+                      animation: 'goyunirOrbDriftA 13s ease-in-out infinite',
+                    }}
+                  />
+                )}
+                {secondaryOrb.enabled !== false && (
+                  <div
+                    style={{
+                      position: 'absolute', right: '-18%', bottom: '-12%', width: 280, height: 280,
+                      borderRadius: 999, background: orbGradient(secondaryOrb.color, orbOpacity(secondaryOrb, 15) * 1.8, '#a855f7', true),
+                      animation: 'goyunirOrbDriftB 17s ease-in-out infinite',
+                    }}
+                  />
+                )}
+                {tertiaryOrb.enabled !== false && (
+                  <div
+                    style={{
+                      position: 'absolute', left: '38%', bottom: '26%', width: 190, height: 190,
+                      borderRadius: 999, background: orbGradient(tertiaryOrb.color, orbOpacity(tertiaryOrb, 8) * 2.2, '#ffd79b', true),
+                      animation: 'goyunirOrbDriftC 11s ease-in-out infinite',
+                    }}
+                  />
+                )}
+              </div>
+            )}
+
             <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <div>

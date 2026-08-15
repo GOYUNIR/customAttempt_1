@@ -39,7 +39,7 @@ without touching a single file.
 | `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification) |
 | `ADMIN_VERIFY_EMAIL` | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`. |
 | `CRON_SECRET` | Protects cron endpoints |
-| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. |
+| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, Vercel's own `VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL` are used automatically so the store always tags its real domain. |
 
 ### Recommended environment variables
 
@@ -74,7 +74,10 @@ In `/admin` → **Settings**:
 5. **Catalog (section order on /catalog)** — choose whether `/catalog` shows
    Upcoming → Past Archives → **Currently Available** (the default, with live at
    the bottom) or any other order.
-6. **Save All Settings.**
+6. **Behavior** — "Start at the top when the page opens" (default ON) keeps the
+   store from reopening mid-page; switch it off to restore the browser's saved
+   scroll position.
+7. **Save All Settings.**
 
 That's it — the whole site now reflects your brand.
 

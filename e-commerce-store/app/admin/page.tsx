@@ -495,6 +495,12 @@ export default function AdminPortal() {
   }>({
     sectionOrder: ['upcoming', 'archive', 'live'],
   });
+  // Site behaviour (admin → Settings → Behavior). Whether the storefront forces
+  // the page to start at the TOP on load (default ON) instead of letting the
+  // browser restore the previous scroll position. Stored under store:config.behavior.
+  const [behaviorSettings, setBehaviorSettings] = useState<{ scrollToTopOnLoad: boolean }>({
+    scrollToTopOnLoad: true,
+  });
   // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
   // so buyers never need code changes to update policies, company name, or the
   // support address. Stored under store:config.legal.
@@ -668,6 +674,7 @@ export default function AdminPortal() {
         if (data.settings.catalog && Array.isArray(data.settings.catalog.sectionOrder)) {
           setCatalogSettings({ sectionOrder: data.settings.catalog.sectionOrder });
         }
+        if (data.settings.behavior) setBehaviorSettings((prev) => ({ ...prev, ...data.settings.behavior }));
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
@@ -1548,6 +1555,7 @@ export default function AdminPortal() {
           copy: copySettings,
           legal: legalSettings,
           catalog: catalogSettings,
+          behavior: behaviorSettings,
           productNotes,
           orbs: orbSettings,
         }),
@@ -3571,18 +3579,42 @@ export default function AdminPortal() {
                   ['ctaLabel', 'Primary button label'],
                   ['storyHeadline', 'Story link label'],
                   ['storyBody', 'Story footer line'],
-                ] as const).map(([key, label]) => (
-                  <label key={key} style={{ fontSize: 11 }}>
-                    {label}
-                    <input
-                      type="text"
-                      value={String(heroSettings[key] ?? '')}
-                      onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.value })}
-                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                    />
-                  </label>
-                ))}
+                ] as const).map(([key, label]) => {
+                  // Longer prose fields are textareas so buyers can add real
+                  // line breaks (the storefront renders them with pre-line).
+                  const isMultiLine = key === 'headline' || key === 'body' || key === 'eyebrow' || key === 'storyBody';
+                  return (
+                    <label key={key} style={{ fontSize: 11 }}>
+                      {label}
+                      {isMultiLine ? (
+                        <textarea
+                          rows={3}
+                          value={String(heroSettings[key] ?? '')}
+                          onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.value })}
+                          placeholder={isMultiLine ? 'You can press Enter for a line break' : undefined}
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, resize: 'vertical' }}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={String(heroSettings[key] ?? '')}
+                          onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.value })}
+                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
               </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                How the storefront behaves when a visitor opens or refreshes a page. Changes apply on the next storefront load.
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={behaviorSettings.scrollToTopOnLoad !== false} onChange={(e) => setBehaviorSettings({ scrollToTopOnLoad: e.target.checked })} />
+                Start at the top when the page opens
+              </label>
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -3635,18 +3667,33 @@ export default function AdminPortal() {
                       ['supportEmail', 'Support email (footer link)'],
                       ['priorityDropsTitle', 'Home "Priority drops" section title'],
                       ['priorityDropsSubtitle', 'Home drops subtitle (default "Explore our creations")'],
-                    ] as [string, string][]).map(([key, label]) => (
-                      <label key={key} style={{ fontSize: 11 }}>
-                        {label}
-                        <input
-                          type="text"
-                          value={String(copySettings[key as keyof typeof copySettings] || '')}
-                          onChange={(e) => setCopySettings((prev) => ({ ...prev, [key]: e.target.value }))}
-                          placeholder="Leave empty to use default"
-                          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                        />
-                      </label>
-                    ))}
+                    ] as [string, string][]).map(([key, label]) => {
+                      // Prose fields are textareas so line breaks can be typed;
+                      // the storefront renders them with white-space: pre-line.
+                      const isMultiLine = key === 'heroTitle' || key === 'heroSubtitle' || key === 'priorityDropsSubtitle' || key === 'footerTagline';
+                      return (
+                        <label key={key} style={{ fontSize: 11 }}>
+                          {label}
+                          {isMultiLine ? (
+                            <textarea
+                              rows={3}
+                              value={String(copySettings[key as keyof typeof copySettings] || '')}
+                              onChange={(e) => setCopySettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                              placeholder="Leave empty to use default"
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5, resize: 'vertical' }}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={String(copySettings[key as keyof typeof copySettings] || '')}
+                              onChange={(e) => setCopySettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                              placeholder="Leave empty to use default"
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                            />
+                          )}
+                        </label>
+                      );
+                    })}
                   </div>
                 </>
               )}
@@ -3811,12 +3858,25 @@ export default function AdminPortal() {
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Top-right action label
-                  <select value={brandingSettings.headerActionMode || 'cart'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, headerActionMode: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
+                  <select
+                    value={brandingSettings.headerActionMode || 'cart'}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setBrandingSettings((prev) => ({ ...prev, headerActionMode: next }));
+                      // Live-update the header preview (and the rest of the
+                      // storefront in this browser) the instant the buyer
+                      // toggles it — the header icon + wording switch before
+                      // Save. SiteChrome listens for this event + storage key.
+                      try { window.localStorage.setItem('goyunir-header-action-mode', next); } catch { /* noop */ }
+                      window.dispatchEvent(new CustomEvent('goyunir-header-action-mode', { detail: { value: next } }));
+                    }}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  >
                     <option value="cart">Cart</option>
                     <option value="bag">Bag</option>
                   </select>
                   <span style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 2 }}>
-                    Changes the icon AND every word site-wide (top bar, drawer, product page, empty states).
+                    Changes the icon AND every word site-wide (top bar, drawer, product page, empty states). Updates live as you switch.
                   </span>
                 </label>
                 <label style={{ fontSize: 11 }}>

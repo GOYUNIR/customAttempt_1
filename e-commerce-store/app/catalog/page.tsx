@@ -8,7 +8,7 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground, themeRadius, themeRadiusNumber, cardSheen } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, themeRadiusNumber, cardSheen, cardShadowStyle } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 
 interface CatalogItem {
@@ -325,7 +325,7 @@ export default function CatalogPage() {
               overflow: 'hidden',
               cursor: 'pointer',
               padding: 0,
-              boxShadow: '0 12px 30px rgba(0,0,0,0.16)',
+              boxShadow: cardShadowStyle(configPalette, 14),
             }}
           >
             <div
@@ -466,7 +466,7 @@ export default function CatalogPage() {
                       key={drop.id}
                       href={drop.slug ? `/${drop.slug}` : '/'}
                       prefetch={false}
-                      style={{ textDecoration: 'none', color: 'inherit' }}
+                      style={{ textDecoration: 'none', color: 'inherit', display: 'block', borderRadius: themeRadius(configPalette, 14) }}
                     >
                       <div
                         style={{

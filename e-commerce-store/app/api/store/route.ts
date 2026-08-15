@@ -152,6 +152,10 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
     gallery: { ...(defaults.gallery || {}), ...(redisConfig.gallery || {}) },
     legal: { ...(defaults.legal || {}), ...(redisConfig.legal || {}) },
     orbs: mergeOrbsConfig(redisConfig?.orbs || (defaults as any).orbs),
+    behavior: {
+      // Start-at-top is the template default; an explicit false disables it.
+      scrollToTopOnLoad: redisConfig?.behavior?.scrollToTopOnLoad !== false,
+    },
   };
 }
 

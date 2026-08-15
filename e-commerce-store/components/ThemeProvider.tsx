@@ -25,6 +25,8 @@ export interface LiveThemeValue {
   catalog?: { sectionOrder?: string[] };
   /** Drop scheduling (timezone + cadence) — used to parse product timestamps. */
   dropSchedule?: Record<string, any>;
+  /** Site behaviour switches (admin → Settings → Behavior). */
+  behavior?: { scrollToTopOnLoad?: boolean };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

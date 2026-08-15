@@ -143,7 +143,17 @@ textarea {
 button,
 [role='button'] {
   touch-action: manipulation;
-  -webkit-tap-highlight-color: rgba(127, 127, 160, 0.18);
+  /* Kill the UA tap-highlight rectangle. On iOS it paints a square tint around
+     the tapped element, so a rounded card wrapped in a <Link> shows visible
+     "outline" artifacts at its corners. The :active press feedback below is the
+     tap confirmation now. */
+  -webkit-tap-highlight-color: transparent;
+  /* Buttons keep their default UA `appearance: auto`, which on iOS Safari
+     paints native rounded-rect chrome at the corners of styled buttons (the
+     "weird outlines around product buttons"). Reset it so only our inline
+     border-radius/background render. */
+  appearance: none;
+  -webkit-appearance: none;
   transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.16s ease, box-shadow 0.2s ease;
 }
 
@@ -161,7 +171,9 @@ button:not(:disabled):active,
  */
 a {
   touch-action: manipulation;
-  -webkit-tap-highlight-color: rgba(127, 127, 160, 0.18);
+  /* See the button rule above — transparent keeps the rounded-card corner
+     outlines off mobile taps. The a:active scale is the tap feedback. */
+  -webkit-tap-highlight-color: transparent;
   transition: opacity 0.18s ease, color 0.18s ease;
 }
 
@@ -226,4 +238,23 @@ textarea {
 @keyframes goyunirKenburns {
   from { transform: scale(1) translate(0, 0); }
   to { transform: scale(1.12) translate(-1.5%, 1%); }
+}
+
+/* Cart/bag drawer orb drift — slow, organic float so the glow reads as
+   "alive" without any per-frame JS. Pure transform animation (compositor-only,
+   never paints). Three variants so each orb drifts at its own rhythm. */
+@keyframes goyunirOrbDriftA {
+  0% { transform: translate3d(-6%, -5%, 0) scale(1); }
+  50% { transform: translate3d(5%, 7%, 0) scale(1.14); }
+  100% { transform: translate3d(-6%, -5%, 0) scale(1); }
+}
+@keyframes goyunirOrbDriftB {
+  0% { transform: translate3d(7%, 4%, 0) scale(1.1); }
+  50% { transform: translate3d(-5%, -7%, 0) scale(0.94); }
+  100% { transform: translate3d(7%, 4%, 0) scale(1.1); }
+}
+@keyframes goyunirOrbDriftC {
+  0% { transform: translate3d(-3%, 8%, 0) scale(0.96); }
+  50% { transform: translate3d(7%, -5%, 0) scale(1.16); }
+  100% { transform: translate3d(-3%, 8%, 0) scale(0.96); }
 }

@@ -129,6 +129,16 @@ export interface StoreConfig {
     /** Order of the /catalog sections: 'live' | 'upcoming' | 'archive'. */
     sectionOrder?: string[];
   };
+  /**
+   * Site behaviour switches (admin → Settings → Behavior). Currently controls
+   * whether the storefront forces the page to start at the TOP on every load
+   * (default ON) instead of letting the browser restore the last scroll
+   * position mid-page.
+   */
+  behavior?: {
+    /** Start at the top of the page on load (true) or restore the browser's saved scroll (false). */
+    scrollToTopOnLoad?: boolean;
+  };
   orbs: OrbsConfig;
   productCatalog: any[];
 }
