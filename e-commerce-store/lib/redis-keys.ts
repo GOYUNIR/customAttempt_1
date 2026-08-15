@@ -237,4 +237,10 @@ export const WAITLIST_KEY = 'customer:waitlist';
 
 /** String — cached Stripe billing-portal configuration id. */
 export const STRIPE_PORTAL_CACHE_KEY = 'cache:stripe_portal_config';
+/** String w/ TTL — per-IP request counter for the PUBLIC `/api/checkout/auto-draw`
+ *  trigger. Ephemeral; lives under `cache:` because it can be deleted anytime
+ *  without affecting correctness (it only throttles abuse). */
+export function autoDrawRateLimitKey(ip: string): string {
+  return `cache:rate:auto_draw:${String(ip || 'unknown').slice(0, 64)}`;
+}
 

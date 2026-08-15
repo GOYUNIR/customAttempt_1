@@ -90,6 +90,17 @@ function normalizeWinnerTiersCsv(value: string): string {
   return nums.length > 0 ? nums.join(',') : '1';
 }
 
+/** URL-safe slug from a product name (used as the auto-fill for the Slug field). */
+function slugifyName(name: string): string {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
 function Bar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max <= 0 ? 0 : Math.round((value / max) * 100);
   return (
@@ -822,9 +833,40 @@ export default function AdminPortal() {
 
   // ===== Save product (UPDATED to send priceCategories) =====
   const saveProduct = async () => {
-    if (!password) { alert('Enter admin password first'); return; }
-    if (!productForm.name) { alert('Product name is required'); return; }
-    
+    if (!password) { showToast('Enter the admin password first'); return; }
+
+    // ── Mistake-proof validation (friendly inline messages, never a bare alert) ──
+    const name = String(productForm.name || '').trim();
+    if (!name) {
+      setProductMsg('❌ Product name is required.');
+      showToast('Product name is required');
+      return;
+    }
+    // Auto-generate the slug from the name when the operator left it blank.
+    const autoSlug = slugifyName(name);
+    const slug = String(productForm.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || autoSlug;
+    if (!slug) {
+      setProductMsg('❌ A URL slug is required (or auto-generated from the name).');
+      showToast('Slug is required');
+      return;
+    }
+    // Every sellable size needs a size label. Dedupe the categories so the same
+    // size can never be saved twice (it would shadow itself at checkout).
+    const seenSizes = new Set<string>();
+    const priceCategories = (productForm.priceCategories || [])
+      .filter((c: any) => String(c?.size || '').trim())
+      .filter((c: any) => {
+        const sizeKey = String(c.size).trim().toLowerCase();
+        if (seenSizes.has(sizeKey)) return false;
+        seenSizes.add(sizeKey);
+        return true;
+      });
+    if (priceCategories.length === 0) {
+      setProductMsg('❌ Add at least one size with a price (e.g. 50ml / 100ml).');
+      showToast('At least one size + price is required');
+      return;
+    }
+    setProductMsg('');
     setProductActionLoading(true);
     try {
       // Build payload with priceCategories
@@ -832,7 +874,9 @@ export default function AdminPortal() {
         password,
         action: 'upsert',
         ...productForm,
-        priceCategories: productForm.priceCategories || [],
+        name,
+        slug,
+        priceCategories,
         notes: productForm.notes || [],
         images: productForm.images || [],
         sortOrder: Number(productForm.sortOrder) || 0,
@@ -878,7 +922,7 @@ export default function AdminPortal() {
 
   // ===== Delete, archive, active toggles (unchanged logic, but now archiving/upcoming does NOT hide) =====
   const deleteProduct = async (id: string) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
     setProductActionLoading(true);
     try {
@@ -892,17 +936,17 @@ export default function AdminPortal() {
         await fetchProducts();
       } else {
         const data = await res.json();
-        alert('Error: ' + (data.error || 'Unknown error'));
+        showToast('Delete failed: ' + (data.error || 'Unknown error'));
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Delete failed: ' + err.message);
     }
     setProductActionLoading(false);
   };
 
   // Archive/Unarchive: now they do NOT affect isActive – they just move the product to the archive list while remaining visible.
   const toggleArchive = async (id: string, currentArchived: boolean) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     const action = currentArchived ? 'unarchive' : 'archive';
     setProductActionLoading(true);
     try {
@@ -917,14 +961,14 @@ export default function AdminPortal() {
         await fetchCatalogStatus();
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Error: ' + err.message);
     }
     setProductActionLoading(false);
   };
 
   // Toggle active: simply toggles visibility without affecting archive/upcoming status
   const toggleActive = async (id: string, currentActive: boolean) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -937,14 +981,14 @@ export default function AdminPortal() {
         await fetchProducts();
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Error: ' + err.message);
     }
     setProductActionLoading(false);
   };
 
   // Upcoming toggle: does not hide, just marks/unmarks as upcoming
   const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     const action = currentUpcoming ? 'removeFromUpcoming' : 'addToUpcoming';
     setProductActionLoading(true);
     try {
@@ -958,13 +1002,13 @@ export default function AdminPortal() {
         await fetchProducts();
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Error: ' + err.message);
     }
     setProductActionLoading(false);
   };
 
   const reorderProducts = async (productId: string, newOrder: number) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -977,7 +1021,7 @@ export default function AdminPortal() {
         await fetchProducts();
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Error: ' + err.message);
     }
     setProductActionLoading(false);
   };
@@ -1024,7 +1068,7 @@ export default function AdminPortal() {
   };
 
   const seedDefaultProducts = async () => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
     setProductActionLoading(true);
     try {
@@ -1047,8 +1091,8 @@ export default function AdminPortal() {
   // USER FUNCTIONS (unchanged)
   // ============================================================
   const saveUser = async () => {
-    if (!password) { alert('Enter admin password first'); return; }
-    if (!userForm.email) { alert('Email is required'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
+    if (!userForm.email) { showToast('Email is required'); return; }
     setProductActionLoading(true);
     try {
       const body: any = {
@@ -1088,7 +1132,7 @@ export default function AdminPortal() {
   };
 
   const deleteUser = async (id: string) => {
-    if (!password) { alert('Enter admin password first'); return; }
+    if (!password) { showToast('Enter the admin password first'); return; }
     if (!confirm('Delete this user?')) return;
     try {
       const res = await adminFetch('/api/admin/users', {
@@ -1101,7 +1145,7 @@ export default function AdminPortal() {
         await fetchUsers();
       }
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      showToast('Error: ' + err.message);
     }
   };
 
@@ -1109,7 +1153,7 @@ export default function AdminPortal() {
   // CATALOG FUNCTIONS (unchanged)
   // ============================================================
   const saveCatalogSettings = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setCatalogLoading(true);
     try {
       const res = await adminFetch('/api/admin/catalog-settings', {
@@ -1138,20 +1182,27 @@ export default function AdminPortal() {
   // PROMO FUNCTIONS (unchanged)
   // ============================================================
   const savePromo = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     const customerDiscount = Number(promoForm.customerDiscountPercent);
     const promoterPayout = Number(promoForm.promoterPayoutPercent);
     const maxUses = Number(promoForm.maxUsesPerEmail);
     const maxUsesTotal = Number(promoForm.maxUsesTotal) || 0;
     
     if (isNaN(customerDiscount) || customerDiscount < 0 || customerDiscount > 50) {
-      return alert('Customer discount must be between 0 and 50');
+      showToast('Customer discount must be between 0 and 50');
+      return;
     }
     if (isNaN(promoterPayout) || promoterPayout < 0 || promoterPayout > 50) {
-      return alert('Promoter payout must be between 0 and 50');
+      showToast('Promoter payout must be between 0 and 50');
+      return;
     }
     if (isNaN(maxUses) || maxUses < 0) {
-      return alert('Max uses must be 0 or more');
+      showToast('Max uses must be 0 or more');
+      return;
+    }
+    if (!String(promoForm.code || '').trim()) {
+      showToast('Promo code is required');
+      return;
     }
     
     try {
@@ -1186,7 +1237,7 @@ export default function AdminPortal() {
   };
 
   const deletePromo = async (code: string) => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     if (!confirm(`Delete promo code ${code}?`)) return;
     await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'delete', code }) });
     await fetchPromos();
@@ -1196,7 +1247,7 @@ export default function AdminPortal() {
   // OTHER FUNCTIONS (unchanged)
   // ============================================================
   const saveSchedule = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'schedule', value: scheduleForm }),
@@ -1205,7 +1256,7 @@ export default function AdminPortal() {
   };
 
   const saveSocial = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     const res = await adminFetch('/api/admin/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password, section: 'socialProof', value: socialForm }),
@@ -1214,7 +1265,7 @@ export default function AdminPortal() {
   };
 
   const runSelftest = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setSelftestRunning(true);
     setSelftestResults(null);
     try {
@@ -1230,22 +1281,22 @@ export default function AdminPortal() {
 
   const toggleReveal = async () => {
     if (revealAddresses) { setRevealAddresses(false); return; }
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setRevealBusy(true);
     try {
       const res = await adminFetch('/api/admin/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
       const data = await res.json();
-      if (!res.ok || !data.ok) return alert(data.error || 'Invalid password');
+      if (!res.ok || !data.ok) return showToast(data.error || 'Invalid password');
       setRevealAddresses(true);
     } catch {
-      alert('Verify failed');
+      showToast('Verify failed');
     } finally {
       setRevealBusy(false);
     }
   };
 
   const triggerDrop = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     if (!confirm('This will run the draw and charge selected winners\' saved cards. Continue?')) return;
     setIsRunning(true);
     setResultMessage('Running…');
@@ -1286,7 +1337,7 @@ export default function AdminPortal() {
   };
 
   const updateAddress = async (entry: any, newAddress: string) => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setShipMsg('Updating address…');
     try {
       const res = await adminFetch('/api/admin/update-address', {
@@ -1315,7 +1366,7 @@ export default function AdminPortal() {
   // /api/admin/update-shipping route persists it on the ledger entry AND emails
   // the customer (and issues any configured post-delivery credit on DELIVERED).
   const updateShipping = async (entry: any) => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setShipMsg('Updating shipping…');
     try {
       const res = await adminFetch('/api/admin/update-shipping', {
@@ -1346,7 +1397,7 @@ export default function AdminPortal() {
   };
 
   const saveRecovery = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     try {
       const res = await adminFetch('/api/admin/recovery-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, ...recovery }) });
       const data = await res.json();
@@ -1357,7 +1408,7 @@ export default function AdminPortal() {
   };
 
   const cancelOrder = async (entry: any) => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     const reason = prompt(`Cancel ${entry.email}'s entry for ${entry.variant} (${entry.size})? Optional reason:`);
     if (reason === null) return;
     try {
@@ -1373,7 +1424,7 @@ export default function AdminPortal() {
   };
 
   const organizeRedis = async () => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     setOrganizeMsg('Migrating legacy keys and tidying the Redis schema...');
     try {
       const res = await adminFetch('/api/admin/organize-redis', {
@@ -1400,12 +1451,13 @@ export default function AdminPortal() {
   /** Wipe & Rebuild Redis — requires the password AND typing the confirmation phrase. */
   const runWipe = async () => {
     if (streamerMode) {
-      alert('Turn streamer mode OFF before running a destructive wipe — the password entry must not be visible on stream.');
+      showToast('Turn Streamer Mode OFF before wiping — the password must not be visible on stream');
       return;
     }
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     if (wipeConfirm.trim().toUpperCase() !== 'WIPE') {
-      return alert('Type WIPE in the confirmation box to erase Redis.');
+      showToast('Type WIPE in the confirmation box to erase Redis');
+      return;
     }
     setWipeBusy(true);
     setWipeMsg('Wiping Redis... this permanently deletes every key.');
@@ -1453,7 +1505,7 @@ export default function AdminPortal() {
         setSettingsMsg('Turn OFF Streamer Mode first, then enter the admin password to save settings.');
         return;
       }
-      return alert('Enter password');
+      return showToast('Enter the admin password first');
     }
     setSettingsLoading(true);
     try {
@@ -1511,8 +1563,8 @@ export default function AdminPortal() {
   };
 
   const notifyReleaseList = async () => {
-    if (!password) return alert('Enter password');
-    if (!selectedAlertProductId) return alert('Choose a product first');
+    if (!password) return showToast('Enter the admin password first');
+    if (!selectedAlertProductId) return showToast('Choose a product first');
     setAlertsMsg('Sending release emails…');
     try {
       const res = await adminFetch('/api/admin/alerts', {
@@ -1532,7 +1584,7 @@ export default function AdminPortal() {
   };
 
   const removeAlertSubscriber = async (email: string) => {
-    if (!password) return alert('Enter password');
+    if (!password) return showToast('Enter the admin password first');
     try {
       const res = await adminFetch('/api/admin/alerts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1691,7 +1743,7 @@ export default function AdminPortal() {
       const res = await adminFetch('/api/admin/export-winners');
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data?.error || 'Export failed.');
+        showToast(data?.error || 'Export failed.');
         return;
       }
       const blob = await res.blob();
@@ -1704,7 +1756,7 @@ export default function AdminPortal() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert('Export failed: ' + err.message);
+      showToast('Export failed: ' + err.message);
     }
   };
 
@@ -2330,11 +2382,32 @@ export default function AdminPortal() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Name *</label>
-                    <input type="text" placeholder="Product name" value={productForm.name} onChange={(e) => setProductForm((p: any) => ({ ...p, name: e.target.value }))} style={inputStyle} />
+                    <input
+                      type="text"
+                      placeholder="Product name"
+                      value={productForm.name}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        setProductForm((p: any) => {
+                          // Live auto-slug: fill the URL field from the name as the
+                          // operator types, but NEVER overwrite a manually edited slug.
+                          const shouldAutoSlug = !String(p.slug || '').trim() || (p._slugAuto === true);
+                          const nextSlug = shouldAutoSlug ? slugifyName(name) : p.slug;
+                          return { ...p, name, slug: nextSlug, _slugAuto: shouldAutoSlug };
+                        });
+                      }}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Slug (URL) – auto‑generated from name</label>
-                    <input type="text" placeholder="slug (e.g. elysian-white)" value={productForm.slug} onChange={(e) => setProductForm((p: any) => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-') }))} style={inputStyle} />
+                    <input
+                      type="text"
+                      placeholder="slug (e.g. elysian-white)"
+                      value={productForm.slug}
+                      onChange={(e) => setProductForm((p: any) => ({ ...p, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-'), _slugAuto: false }))}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Prefix (image folder) – auto from slug</label>
@@ -2895,7 +2968,7 @@ export default function AdminPortal() {
                 </div>
                 {p.payoutOwedCents > 0 && (
                   <button onClick={async () => {
-                    if (!password) return alert('Enter password');
+                    if (!password) return showToast('Enter the admin password first');
                     await adminFetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, action: 'markPaid', code: p.code }) });
                     await fetchPromos();
                   }} style={{ fontSize: 11, color: '#34d399', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>

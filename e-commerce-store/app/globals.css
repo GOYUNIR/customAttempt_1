@@ -8,8 +8,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,14 +22,43 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  /* SF-style system stack first (macOS/iOS), then the best cross-platform
+     fallbacks. Keeps the site feeling native on every device. */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.01em;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Apple-style selection: a soft tint instead of the harsh default blue. */
+::selection {
+  background: rgba(90, 200, 250, 0.28);
+  color: inherit;
+}
+
+/* Slim, unobtrusive scrollbars (WebKit + Firefox). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 120, 130, 0.45) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 130, 0.4);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 140, 150, 0.6);
 }
 
 button,
@@ -52,13 +81,13 @@ button,
 [role='button'] {
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(127, 127, 160, 0.18);
-  transition: transform 0.12s ease, opacity 0.12s ease;
+  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.16s ease, box-shadow 0.2s ease;
 }
 
 button:not(:disabled):active,
 [role='button']:not([aria-disabled='true']):active {
-  transform: scale(0.965);
-  opacity: 0.88;
+  transform: scale(0.955);
+  opacity: 0.9;
 }
 
 /*
@@ -70,6 +99,7 @@ button:not(:disabled):active,
 a {
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(127, 127, 160, 0.18);
+  transition: opacity 0.18s ease, color 0.18s ease;
 }
 
 a:active {
@@ -80,11 +110,38 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Apple-style focus ring: a soft outer glow instead of a harsh 2px outline. */
 button:focus-visible,
 [role='button']:focus-visible,
-a:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(90, 200, 250, 0.35);
+}
+
+input,
+select,
+textarea {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Respect customers who disable motion: collapse the press-down bounce and
+   spinner pulses so nothing feels aggressive. */
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active,
+  [role='button']:not([aria-disabled='true']):active {
+    transform: none;
+    opacity: 0.9;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ── Minimal loading / gallery animation helpers ───────────────────────────── */

@@ -55,6 +55,47 @@ const DEFAULT_ORBS: any = {
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 /**
+ * Per-layer spring physics for the glow orbs. Each orb is its own damped
+ * oscillator chasing the smoothed pointer/idle target with a different
+ * stiffness + friction, which gives the glow real DEPTH (parallax):
+ *
+ *   - The big ambient orbs use a low stiffness + heavy damping → they glide
+ *     majestically and never wobble.
+ *   - The small accent orbs use a high stiffness + light damping → they dart
+ *     toward the cursor and OVERSHOOT past it, then spring back with a playful
+ *     bounce (the way a small mass on a spring would).
+ *
+ * `impulse` scales how much pointer VELOCITY is injected into each layer. When
+ * the cursor/finger moves fast, the injected momentum carries the orb PAST the
+ * stopping point (the overshoot the client asked for), then the spring drags it
+ * back and it settles. `xAmp`/`yAmp`/`xOff`/`yOff` are the same transform
+ * mapping the old single-state loop used, so the visible composition is
+ * unchanged — only the motion character is.
+ */
+const ORB_LAYERS = [
+  { xAmp: 68, yAmp: 72, xOff: -16, yOff: -8, k: 0.0018, friction: 0.942, impulse: 0.4 },
+  { xAmp: -32, yAmp: -26, xOff: 56, yOff: 48, k: 0.0022, friction: 0.948, impulse: 0.55 },
+  { xAmp: 24, yAmp: -18, xOff: 18, yOff: 62, k: 0.0029, friction: 0.956, impulse: 0.85 },
+  { xAmp: -18, yAmp: 22, xOff: -32, yOff: 76, k: 0.0034, friction: 0.954, impulse: 0.75 },
+  { xAmp: 16, yAmp: -30, xOff: 82, yOff: 18, k: 0.0046, friction: 0.968, impulse: 1.5 },
+] as const;
+
+/** Drawer-orbs drift on the same layer states, scaled way down so the compact
+ *  glows sway gently inside the drawer instead of zipping around. */
+const DRAWER_ORB_OFFSETS = [
+  { ax: 20, ay: 18, bx: -10, by: -9 },
+  { ax: -14, ay: 12, bx: 7, by: -6 },
+  { ax: 12, ay: -10, bx: -6, by: 5 },
+  { ax: -9, ay: -11, bx: 4, by: 6 },
+  { ax: 8, ay: 9, bx: -4, by: -5 },
+] as const;
+
+/** Fresh physics state for every orb layer (x, y, vx, vy). */
+function makeOrbLayerStates() {
+  return ORB_LAYERS.map(() => ({ x: 0.5, y: 0.35, vx: 0, vy: 0 }));
+}
+
+/**
  * Small inline spinner for buttons mid-request (paired with the global
  * press-down animation so a tap is NEVER visually unanswered).
  */
@@ -119,10 +160,23 @@ function chromeBackground(color: string, alphaPct: number, fallback: string, min
   return safe >= 100 ? c : `color-mix(in srgb, ${c} ${safe}%, transparent)`;
 }
 
-/** Radial-gradient paint for a glow orb at the given opacity. */
-function orbGradient(color: string, opacity: number, fallback: string, edgeRatio = 0.38) {
+/**
+ * Radial-gradient paint for a glow orb at the given opacity.
+ *
+ * `soft` (used by the cart drawer) tapers the glow far more aggressively
+ * (transparent by 58% of the radius instead of 72%) so a compact orb reads as
+ * a gentle, seamless wash of light — never a visible disc with a hard edge.
+ * An explicit opacity of 0 always returns "transparent" so a disabled glow can
+ * never render.
+ */
+function orbGradient(color: string, opacity: number, fallback: string, soft = false) {
   const hex = normalizeHex(color, fallback);
-  return `radial-gradient(circle, ${hex}${alphaHex(opacity)} 0%, ${hex}${alphaHex(opacity * edgeRatio)} 42%, transparent 72%)`;
+  const pct = Math.max(0, Number(opacity) || 0);
+  if (pct <= 0) return 'transparent';
+  if (soft) {
+    return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 30%, ${hex}${alphaHex(pct * 0.16)} 46%, transparent 60%)`;
+  }
+  return `radial-gradient(circle, ${hex}${alphaHex(pct)} 0%, ${hex}${alphaHex(pct * 0.42)} 34%, ${hex}${alphaHex(pct * 0.14)} 54%, transparent 72%)`;
 }
 
 /**
@@ -140,15 +194,16 @@ function orbGlowOpacity(value: unknown, fallback: number): number {
 }
 
 /**
- * Drawer-specific orb opacity. The cart drawer surface is a near-opaque dark
- * panel, so the admin orb opacity that reads on the (usually light) storefront
- * is nearly invisible inside the drawer. Scale it up (capped) so the glow has
- * the same presence as the page-level orbs, without ever turning into a solid
- * blob.
+ * Drawer-specific orb opacity. The cart drawer surface is a dark panel, so the
+ * admin orb opacity that reads on the storefront is faint inside the drawer.
+ * Scale it up (capped) so the glow has a similar presence — but an EXPLICIT 0
+ * stays 0 (a disabled orb must never render), and the floor is much lower than
+ * the old +18 so a low admin opacity stays subtle instead of forced-visible.
  */
 function drawerOrbOpacity(value: unknown, fallback: number): number {
   const base = orbGlowOpacity(value, fallback);
-  return Math.min(60, Math.max(18, Math.round(base * 2.2 + 10)));
+  if (base <= 0) return 0;
+  return Math.min(52, Math.max(10, Math.round(base * 1.9 + 8)));
 }
 
 function readCart(): CartItem[] {
@@ -241,13 +296,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const noticeTimerRef = useRef<number | null>(null);
   // Background glow + top-bar orb are animated via direct DOM writes (refs) so
   // the ~60fps idle/pointer drift never triggers a React re-render of the app.
-  // Motion is a spring-damper: heavy, smooth, momentum-filled, no sharp snaps.
-  const easedXRef = useRef(0.5);
-  const easedYRef = useRef(0.35);
-  const orbVXRef = useRef(0);
-  const orbVYRef = useRef(0);
+  // Each orb layer is its own damped spring (see ORB_LAYERS): small orbs dart
+  // and overshoot the cursor with a bounce, big orbs glide. The eased position
+  // is clamped a little outside [0,1] so an overshoot is visible instead of
+  // being clipped at the edges of the target range.
+  const layerStatesRef = useRef(makeOrbLayerStates());
   const pointerTargetXRef = useRef(0.5);
   const pointerTargetYRef = useRef(0.35);
+  const prevSmoothXRef = useRef(0.5);
+  const prevSmoothYRef = useRef(0.35);
   const lastFrameAtRef = useRef(0);
   const orbsRef = useRef<any>(null);
   const orbPrimaryRef = useRef<HTMLDivElement | null>(null);
@@ -374,7 +431,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     // the compositor thread, so nothing forces a paint per frame. The orbs are
     // pre-blurred radial gradients (no `filter: blur()`), so the glow is
     // painted once and then only composited.
-    const applyGlow = (x: number, y: number) => {
+    const applyGlow = (states: { x: number; y: number; vx: number; vy: number }[]) => {
       const cfg = orbsRef.current;
       const motion = cfg?.motion || DEFAULT_ORBS.motion;
       const intensity = clamp((motion.intensity ?? 100) / 100, 0.2, 2.5);
@@ -385,43 +442,35 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       const fifth = orbFifthRef.current;
       const vw = window.innerWidth || 1;
       const vh = window.innerHeight || 1;
-      if (primary) {
-        primary.style.transform = `translate3d(${((-16 + x * 68 * intensity) / 100) * vw}px, ${((-8 + y * 72 * intensity) / 100) * vh}px, 0)`;
-      }
-      if (secondary) {
-        secondary.style.transform = `translate3d(${((56 - x * 32 * intensity) / 100) * vw}px, ${((48 - y * 26 * intensity) / 100) * vh}px, 0)`;
-      }
-      if (tertiary) {
-        tertiary.style.transform = `translate3d(${((18 + x * 24 * intensity) / 100) * vw}px, ${((62 - y * 18 * intensity) / 100) * vh}px, 0)`;
-      }
-      if (fourth) {
-        fourth.style.transform = `translate3d(${((-32 - x * 18 * intensity) / 100) * vw}px, ${((76 + y * 22 * intensity) / 100) * vh}px, 0)`;
-      }
-      if (fifth) {
-        fifth.style.transform = `translate3d(${((82 + x * 16 * intensity) / 100) * vw}px, ${((18 - y * 30 * intensity) / 100) * vh}px, 0)`;
-      }
-      // Cart-drawer orbs drift on the same eased target so the ambient glow
-      // keeps moving while the drawer is open. The amplitudes are small and
+      const apply = (el: HTMLDivElement | null, def: (typeof ORB_LAYERS)[number], state: { x: number; y: number }) => {
+        if (!el) return;
+        const x = clamp(state.x, -0.2, 1.2);
+        const y = clamp(state.y, -0.12, 1.12);
+        el.style.transform = `translate3d(${((def.xOff + x * def.xAmp * intensity) / 100) * vw}px, ${((def.yOff + y * def.yAmp * intensity) / 100) * vh}px, 0)`;
+      };
+      apply(primary, ORB_LAYERS[0], states[0] || { x: 0.5, y: 0.35 });
+      apply(secondary, ORB_LAYERS[1], states[1] || { x: 0.5, y: 0.35 });
+      apply(tertiary, ORB_LAYERS[2], states[2] || { x: 0.5, y: 0.35 });
+      apply(fourth, ORB_LAYERS[3], states[3] || { x: 0.5, y: 0.35 });
+      apply(fifth, ORB_LAYERS[4], states[4] || { x: 0.5, y: 0.35 });
+      // Cart-drawer orbs drift on the same layer states so the ambient glow
+      // keeps moving while the drawer is open. The amplitudes are tiny and
       // centered so the glows can never leave the drawer bounds (no clipping).
-      const dPrimary = drawerOrbPrimaryRef.current;
-      const dSecondary = drawerOrbSecondaryRef.current;
-      const dTertiary = drawerOrbTertiaryRef.current;
-      const dFourth = drawerOrbFourthRef.current;
-      const dFifth = drawerOrbFifthRef.current;
-      if (dPrimary) {
-        dPrimary.style.transform = `translate3d(${(x - 0.5) * 34 * intensity}px, ${(y - 0.5) * 30 * intensity}px, 0)`;
-      }
-      if (dSecondary) {
-        dSecondary.style.transform = `translate3d(${(0.5 - x) * 26 * intensity}px, ${(0.55 - y) * 24 * intensity}px, 0)`;
-      }
-      if (dTertiary) {
-        dTertiary.style.transform = `translate3d(${(x - 0.45) * 22 * intensity}px, ${(y - 0.6) * 20 * intensity}px, 0)`;
-      }
-      if (dFourth) {
-        dFourth.style.transform = `translate3d(${(0.5 - x) * 18 * intensity}px, ${(y - 0.5) * 20 * intensity}px, 0)`;
-      }
-      if (dFifth) {
-        dFifth.style.transform = `translate3d(${(x - 0.4) * 16 * intensity}px, ${(0.5 - y) * 18 * intensity}px, 0)`;
+      const dEls = [
+        drawerOrbPrimaryRef.current,
+        drawerOrbSecondaryRef.current,
+        drawerOrbTertiaryRef.current,
+        drawerOrbFourthRef.current,
+        drawerOrbFifthRef.current,
+      ];
+      for (let i = 0; i < dEls.length; i += 1) {
+        const el = dEls[i];
+        if (!el) continue;
+        const state = states[i] || { x: 0.5, y: 0.35 };
+        const off = DRAWER_ORB_OFFSETS[i];
+        const x = clamp(state.x, -0.2, 1.2);
+        const y = clamp(state.y, -0.12, 1.12);
+        el.style.transform = `translate3d(${(off.ax + x * off.bx) * intensity}px, ${(off.ay + y * off.by) * intensity}px, 0)`;
       }
     };
 
@@ -494,28 +543,46 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         0.08, 0.92,
       );
 
-      // Spring-damper toward the smoothed target: this is what gives the orbs
-      // their heavy, momentum-filled feel. Higher `momentum` = less friction,
-      // so the orbs keep gliding after you stop and settle with a soft drift.
-      const stiffness = 0.0022 * speedFactor;
-      const friction = 0.928 + momentumFactor * 0.038;
-      orbVXRef.current += (pointerTargetXRef.current - easedXRef.current) * stiffness * frame;
-      orbVYRef.current += (pointerTargetYRef.current - easedYRef.current) * stiffness * frame;
-      orbVXRef.current *= Math.pow(friction, frame);
-      orbVYRef.current *= Math.pow(friction, frame);
+      // Per-layer damped springs toward the smoothed target. This is what gives
+      // the orbs their depth: big layers glide (heavy damping), small layers
+      // dart and OVERSHOOT the cursor (light damping). Pointer VELOCITY is
+      // injected as an impulse — when the finger/cursor moves fast, the orbs
+      // swing past the stopping point and spring back, exactly like a playful
+      // Apple-style spring. `momentum` widens the overshoot; `speed` tightens it.
+      const impulseScale = (0.6 + momentumFactor * 0.8) * speedFactor;
+      const pointerDx = (pointerTargetXRef.current - prevSmoothXRef.current) * impulseScale;
+      const pointerDy = (pointerTargetYRef.current - prevSmoothYRef.current) * impulseScale;
+      prevSmoothXRef.current = pointerTargetXRef.current;
+      prevSmoothYRef.current = pointerTargetYRef.current;
 
-      // Hard velocity cap — the orbs can never snap or teleport.
-      const maxVel = 0.024 * speedFactor * (0.4 + momentumFactor);
-      orbVXRef.current = clamp(orbVXRef.current, -maxVel, maxVel);
-      orbVYRef.current = clamp(orbVYRef.current, -maxVel, maxVel);
-
-      const easedX = clamp(easedXRef.current + orbVXRef.current * frame, 0.02, 0.98);
-      const easedY = clamp(easedYRef.current + orbVYRef.current * frame, 0.05, 0.95);
-      easedXRef.current = easedX;
-      easedYRef.current = easedY;
+      // A single soft cap for the whole family so nothing can teleport, but
+      // high enough that a real overshoot is possible (the old 0.024 cap made
+      // the orbs feel like they were wading through syrup).
+      const maxVel = 0.085 * speedFactor * (0.5 + momentumFactor);
+      const maxLayerX = reducedMotion ? 0.02 : -0.2;
+      const maxLayerY = reducedMotion ? 0.05 : -0.12;
+      const states = layerStatesRef.current;
+      for (let i = 0; i < states.length && i < ORB_LAYERS.length; i += 1) {
+        const def = ORB_LAYERS[i];
+        const state = states[i];
+        const springK = def.k * speedFactor * (reducedMotion ? 0.6 : 1);
+        const springF = reducedMotion ? Math.min(def.friction, 0.93) : def.friction;
+        state.vx += (pointerTargetXRef.current - state.x) * springK * frame;
+        state.vy += (pointerTargetYRef.current - state.y) * springK * frame;
+        // Momentum impulse: inject the pointer's recent velocity so the orb
+        // anticipates the cursor and overshoots it, then settles back.
+        state.vx += pointerDx * def.impulse * frame;
+        state.vy += pointerDy * def.impulse * frame;
+        state.vx *= Math.pow(springF, frame);
+        state.vy *= Math.pow(springF, frame);
+        state.vx = clamp(state.vx, -maxVel, maxVel);
+        state.vy = clamp(state.vy, -maxVel, maxVel);
+        state.x = clamp(state.x + state.vx * frame, maxLayerX, 1.2);
+        state.y = clamp(state.y + state.vy * frame, maxLayerY, 1.12);
+      }
       glowFrameCount += 1;
       if (glowFrameCount % 2 === 0) {
-        applyGlow(easedX, easedY);
+        applyGlow(states);
       }
       rafId = window.requestAnimationFrame(animateIdle);
     };
@@ -636,7 +703,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     window.addEventListener('touchcancel', onTouchEnd, { passive: true });
     lastFrameAtRef.current = performance.now();
     rafId = window.requestAnimationFrame(animateIdle);
-    applyGlow(easedXRef.current, easedYRef.current);
+    applyGlow(layerStatesRef.current);
     const cueTimer = window.setTimeout(() => setShowScrollCue((current) => (current ? true : current)), 600);
     return () => {
       running = false;
@@ -895,7 +962,13 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           transform: 'translateY(0)',
           transition: 'transform 160ms ease',
           overflow: 'hidden',
-          boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
+          // Apple-style frosted glass: the bar is translucent and blurs whatever
+          // scrolls beneath it. Guarded by @supports via the inline style — if a
+          // browser lacks backdrop-filter it simply shows the (already high-alpha)
+          // chrome background. Static header, so the blur is painted once.
+          WebkitBackdropFilter: 'blur(22px) saturate(170%)',
+          backdropFilter: 'blur(22px) saturate(170%)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 18px 50px rgba(0,0,0,0.18)',
         }}
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
@@ -1020,29 +1093,31 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, WebkitBackdropFilter: 'blur(26px) saturate(160%)', backdropFilter: 'blur(26px) saturate(160%)' }}>
             {/* Orb glows inside the cart drawer — mirrors the storefront glow so
                 the ambient orbs stay visible while the drawer is open (the drawer
-                paints above the page-level orb layer). Every orb is a compact
-                circle (width + aspectRatio 1) positioned fully inside the drawer
-                so the glow can never clip at the edges, and each is drifted by
-                the same rAF loop that animates the page orbs. Opacities use the
-                drawer boost (the drawer surface is near-opaque dark). */}
+                paints above the page-level orb layer). Every orb uses the SOFT
+                gradient (fully transparent by 60% of its radius) at a compact
+                size so it reads as a gentle wash of light — never a disc with a
+                hard edge. An orb with admin opacity 0 renders nothing. The same
+                rAF loop that animates the page orbs sways them (small, centered
+                amplitudes so they can never clip at the drawer edge). */}
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,255,255,0.05), transparent 26%)' }} />
               {orbsEnabled && primaryOrb.enabled !== false && (
-                <div ref={drawerOrbPrimaryRef} style={{ position: 'absolute', top: '8%', right: '6%', width: '46%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(primaryOrb.color, drawerOrbOpacity(primaryOrb.opacity, 16), '#3b82f6') }} />
+                <div ref={drawerOrbPrimaryRef} style={{ position: 'absolute', top: '5%', right: '4%', width: '34%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(primaryOrb.color, drawerOrbOpacity(primaryOrb.opacity, 16), '#3b82f6', true) }} />
               )}
               {orbsEnabled && secondaryOrb.enabled !== false && (
-                <div ref={drawerOrbSecondaryRef} style={{ position: 'absolute', left: '8%', bottom: '8%', width: '42%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(secondaryOrb.color, drawerOrbOpacity(secondaryOrb.opacity, 26), '#a855f7') }} />
+                <div ref={drawerOrbSecondaryRef} style={{ position: 'absolute', left: '3%', bottom: '6%', width: '30%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(secondaryOrb.color, drawerOrbOpacity(secondaryOrb.opacity, 26), '#a855f7', true) }} />
               )}
               {orbsEnabled && tertiaryOrb.enabled !== false && (
-                <div ref={drawerOrbTertiaryRef} style={{ position: 'absolute', right: '14%', bottom: '22%', width: '28%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(tertiaryOrb.color, drawerOrbOpacity(tertiaryOrb.opacity, 12), '#ffd79b') }} />
+                <div ref={drawerOrbTertiaryRef} style={{ position: 'absolute', right: '8%', bottom: '14%', width: '22%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(tertiaryOrb.color, drawerOrbOpacity(tertiaryOrb.opacity, 12), '#ffd79b', true) }} />
               )}
               {orbsEnabled && fourthOrb.enabled !== false && (
-                <div ref={drawerOrbFourthRef} style={{ position: 'absolute', top: '16%', left: '5%', width: '26%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fourthOrb.color, drawerOrbOpacity(fourthOrb.opacity, 10), '#7dd3fc') }} />
+                <div ref={drawerOrbFourthRef} style={{ position: 'absolute', top: '12%', left: '2%', width: '20%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fourthOrb.color, drawerOrbOpacity(fourthOrb.opacity, 10), '#7dd3fc', true) }} />
               )}
               {orbsEnabled && fifthOrb.enabled !== false && (
-                <div ref={drawerOrbFifthRef} style={{ position: 'absolute', right: '9%', bottom: '12%', width: '20%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fifthOrb.color, drawerOrbOpacity(fifthOrb.opacity, 8), '#f472b6') }} />
+                <div ref={drawerOrbFifthRef} style={{ position: 'absolute', right: '6%', bottom: '8%', width: '16%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fifthOrb.color, drawerOrbOpacity(fifthOrb.opacity, 8), '#f472b6', true) }} />
               )}
             </div>
             <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>

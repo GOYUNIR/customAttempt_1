@@ -167,9 +167,18 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   // record in Redis stayed `isUpcoming`, so the product page + entry form kept
   // treating it as upcoming forever. Persist the flip here so the drop actually
   // opens (and the raffle timer starts counting to releaseEndsAt).
-  if (!options.onlyProductName && !options.onlyProductId && !options.onlySlug) {
+  //
+  // IMPORTANT: this must ALSO run when the caller passed a product filter (the
+  // client "timer hit zero" trigger) — otherwise the exact product whose
+  // countdown just ended would stay `isUpcoming` because the filter branch
+  // skipped the flip. The flip is idempotent (isUpcoming: false), so concurrent
+  // triggers are harmless.
+  {
     for (const product of Object.values(products) as any[]) {
       if (!product || product.isUpcoming !== true) continue;
+      if (options.onlyProductId && String(product.id) !== String(options.onlyProductId)) continue;
+      if (options.onlyProductName && String(product.name || '').toLowerCase() !== String(options.onlyProductName).toLowerCase()) continue;
+      if (options.onlySlug && String(product.slug || '').toLowerCase() !== String(options.onlySlug).toLowerCase()) continue;
       const goMs = toMs(product.goLiveAt);
       if (goMs !== null && now >= goMs) {
         try {

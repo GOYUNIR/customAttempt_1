@@ -62,29 +62,34 @@ async function fetchWithRetry(url: string, attempt = 0): Promise<unknown> {
   }
 }
 
-export function fetchStoreJson<T = any>(url: string): Promise<T> {
+export function fetchStoreJson<T = any>(url: string, options?: { force?: boolean }): Promise<T> {
   const existing = inflight.get(url);
   if (existing) return existing as Promise<T>;
 
-  const hit = cache.get(url);
   const now = Date.now();
-  if (hit) {
-    if (now - hit.at < FRESH_TTL_MS) return Promise.resolve(hit.data as T);
+  if (!options?.force) {
+    const hit = cache.get(url);
+    if (hit) {
+      if (now - hit.at < FRESH_TTL_MS) return Promise.resolve(hit.data as T);
 
-    // Stale-while-revalidate: return the last good payload immediately and
-    // refresh in the background (one refresh per URL at a time).
-    if (now - hit.at < STALE_MAX_AGE_MS && !refreshing.has(url)) {
-      refreshing.add(url);
-      fetchWithRetry(url)
-        .then((data) => cache.set(url, { data, at: Date.now() }))
-        .catch(() => {
-          /* keep serving the stale payload */
-        })
-        .finally(() => refreshing.delete(url));
-      return Promise.resolve(hit.data as T);
+      // Stale-while-revalidate: return the last good payload immediately and
+      // refresh in the background (one refresh per URL at a time).
+      if (now - hit.at < STALE_MAX_AGE_MS && !refreshing.has(url)) {
+        refreshing.add(url);
+        fetchWithRetry(url)
+          .then((data) => cache.set(url, { data, at: Date.now() }))
+          .catch(() => {
+            /* keep serving the stale payload */
+          })
+          .finally(() => refreshing.delete(url));
+        return Promise.resolve(hit.data as T);
+      }
     }
   }
 
+  // `force` bypasses the fresh/stale fast-paths entirely (used when a countdown
+  // hit zero and the page needs to see the product's POST-draw state right away,
+  // not a 10s-old snapshot).
   const promise = fetchWithRetry(url)
     .then((data: unknown) => {
       cache.set(url, { data, at: Date.now() });

@@ -241,12 +241,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   }, []);
   const actionLabel = actionMode === 'bag' ? 'bag' : 'cart';
 
-  const fetchProduct = useCallback(async (slug: string) => {
+  const fetchProduct = useCallback(async (slug: string, force = false) => {
     try {
       // Route through fetchStoreJson: dedupes with the rest of the site,
       // serves a stale payload instantly on repeat visits, and retries
       // timeouts once — so a slow connection shows the product fast.
-      const data = await fetchStoreJson<any>(`/api/store?slug=${slug}`);
+      // `force` (used right after a countdown hits zero) bypasses the cache so
+      // the page sees the product's post-drop state instead of a stale snapshot.
+      const data = await fetchStoreJson<any>(`/api/store?slug=${slug}`, force ? { force: true } : undefined);
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
@@ -729,6 +731,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       return;
     }
     let notified = false;
+    let refreshTimer: number | null = null;
     const update = () => {
       const diff = raffleEndsAt - Date.now();
       if (diff <= 0) {
@@ -736,10 +739,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         // The timer hit zero — tell the server to run the draw RIGHT NOW. The
         // server is idempotent (due-check + 90s per-pool cooldown), so this
         // fire-and-forget ping can never double-charge even if several tabs /
-        // visitors hit zero at the same second.
+        // visitors hit zero at the same second. `notifyDropDue` retries on
+        // failure, so a flaky connection can't silently miss the drop.
         if (!notified) {
           notified = true;
           notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
+          // Re-anchor: an "opens in" countdown (upcoming product) that just hit
+          // zero means the drop OPENED — re-fetch so the timer flips to counting
+          // down to releaseEndsAt (or the product resolves as sold-out/archived).
+          if (product?.isUpcoming && product?.slug) {
+            refreshTimer = window.setTimeout(() => {
+              fetchProduct(String(product.slug), true).catch(() => {});
+            }, 1200);
+          }
         }
         return;
       }
@@ -753,8 +765,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     };
     update();
     const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [raffleEndsAt, product]);
+    return () => {
+      window.clearInterval(timer);
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
+  }, [raffleEndsAt, product, fetchProduct]);
 
   const handleRaffleSubmit = async () => {
     if (!email || !selectedSize) {
