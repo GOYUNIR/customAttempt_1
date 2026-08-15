@@ -1,1 +1,1 @@
-{"crons":[{"path":"/api/checkout/cron-draw","schedule":"*/5 * * * *"}]}
+{"crons":[{"path":"/api/checkout/cron-draw","schedule":"0 0 * * *"}]}
