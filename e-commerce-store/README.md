@@ -62,6 +62,10 @@ In `/admin` → **Settings**:
    colors. This drives the top bar, footer, browser tab icon, social share
    card, page titles and emails.
 2. **Theme Colors / Design Presets** — pick a preset or build your own palette.
+   Every preset speaks Apple's design language (continuous squircles, Liquid
+   Glass chrome, soft shadows, airy spacing); the flagship **Apple** preset is
+   the full iOS 26 Liquid Glass look, and **Minimal (Default)** is the clean
+   neutral starting point.
 3. **Footer** — social links, support email, copyright line.
 4. **Legal & Policies** — paste your Terms, Privacy and Shipping content
    (use `## ` for headings, `- ` for bullets, and `{companyName}` /

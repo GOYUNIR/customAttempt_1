@@ -8,7 +8,7 @@ import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
-import { themeRadius, glassBackdrop, cardShadowStyle } from '@/lib/storefront-config';
+import { themeRadius, glassSurfaceStyle, cardShadowStyle } from '@/lib/storefront-config';
 import { scheduleCartPersist, syncCartWithServer } from '@/lib/client-cart-sync';
 
 type CartItem = {
@@ -588,7 +588,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         state.y = clamp(state.y + state.vy * frame, maxLayerY, 1.12);
       }
       glowFrameCount += 1;
-      if (glowFrameCount % 2 === 0) {
+      // Idle throttle: while the visitor isn't interacting (no pointer/scroll/
+      // touch for 1.5s+) the glow only WRITES every 8th frame (~7fps ambient
+      // drift instead of 30fps) — a real compositor/paint saving on static
+      // pages. Physics still integrates every frame (cheap), so the moment the
+      // user moves the cursor or scrolls, the orbs spring back to full-rate
+      // writes with zero visible jump. Reduced-motion users stay on the slow
+      // cadence permanently.
+      const idleThrottle = reducedMotion || idleFor > 1500 ? 8 : 2;
+      if (glowFrameCount % idleThrottle === 0) {
         applyGlow(states);
       }
       rafId = window.requestAnimationFrame(animateIdle);
@@ -939,7 +947,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         )}
       </div>
       {bannerMessage && (
-        <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.35)' }}>
+        <div style={{ position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 150, padding: '8px 12px', borderRadius: 999, background: 'rgba(10,10,12,0.92)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0) 42%)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 40px rgba(0,0,0,0.35)' }}>
           {bannerMessage}{promoCode ? ` · ${promoCode}` : ''}
         </div>
       )}
@@ -948,7 +956,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           <div
             onClick={() => setNotice(null)}
             role="alert"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 999, background: 'rgba(10,10,12,0.96)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.45)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.45)' : notice.type === 'loading' ? 'rgba(125,211,252,0.45)' : 'rgba(255,255,255,0.18)'}`, fontSize: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.5)', cursor: 'pointer' }}>
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 999, background: 'rgba(10,10,12,0.96)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 40%)', color: '#fff', border: `1px solid ${notice.type === 'error' ? 'rgba(248,113,113,0.45)' : notice.type === 'success' || notice.type === 'won' || notice.type === 'entered' ? 'rgba(52,211,153,0.45)' : notice.type === 'loading' ? 'rgba(125,211,252,0.45)' : 'rgba(255,255,255,0.18)'}`, fontSize: 12, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 16px 40px rgba(0,0,0,0.5)', cursor: 'pointer' }}>
             <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
               {notice.type === 'loading' ? (
                 <>
@@ -984,12 +992,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           transform: 'translateY(0)',
           transition: 'transform 160ms ease',
           overflow: 'hidden',
-          // Apple-style frosted glass: the bar is translucent and blurs whatever
-          // scrolls beneath it. Blur amount follows the admin backdropBlur
-          // slider (glassBackdrop). Static header, so the blur is painted once.
-          WebkitBackdropFilter: glassBackdrop(theme),
-          backdropFilter: glassBackdrop(theme),
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)',
+          // Apple Liquid Glass: the bar is translucent and blurs + saturates +
+          // brightens whatever scrolls beneath it, with a specular top sheen
+          // (the "glass catches light" highlight). Blur follows the admin
+          // backdropBlur slider (glassSurfaceStyle). Static header, so the
+          // backdrop-filter is painted once — never re-painted per frame.
+          ...glassSurfaceStyle(theme, { bg: headerBg, shadow: '0 8px 24px rgba(0,0,0,0.06)' }),
         }}
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
@@ -1114,7 +1122,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(127,127,140,0.14)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, WebkitBackdropFilter: glassBackdrop(theme), backdropFilter: glassBackdrop(theme), boxShadow: cardShadowStyle(theme, 24) }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, ...glassSurfaceStyle(theme, { bg: drawerBg, dark: true, shadow: cardShadowStyle(theme, 24) }), borderLeft: '1px solid rgba(255,255,255,0.16)' }}>
             {/* Orb glows inside the cart drawer — mirrors the storefront glow so
                 the ambient orbs stay visible while the drawer is open (the drawer
                 paints above the page-level orb layer). Every orb uses the SOFT

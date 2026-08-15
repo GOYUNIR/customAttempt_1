@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f5f7;
+  --background: #f2f2f7;
   --foreground: #1d1d1f;
   /* Apple design tokens — set live from /admin → Settings by the layout's
      inline theme script (and baked into the server <html> style). */
-  --ui-radius: 22px;
+  --ui-radius: 24px;
   --ui-radius-style: squircle;
-  --ui-card-shadow: 12;
-  --ui-glass-blur: 55;
+  --ui-card-shadow: 14;
+  --ui-glass-blur: 80;
   --ui-spacing-scale: 1;
-  --ui-chrome-alpha: 70;
+  --ui-chrome-alpha: 62;
   --ui-surface-alpha: 100;
 }
 
@@ -59,15 +59,23 @@ p {
   border-radius: var(--ui-radius);
 }
 
-/* Frosted-glass material (Apple tactile feel). Apply to chrome surfaces —
-   header, cart drawer, modals. Chrome opacity is admin-controlled via
-   `themeColors.chromeTransparency`; the blur amount via `themeColors.backdropBlur`
-   is applied inline by the components (CSS calc can't multiply a custom-property
-   number, so the utility class uses a fixed pleasant blur). */
-.glass-panel {
-  background: color-mix(in srgb, var(--background) var(--ui-chrome-alpha)%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  backdrop-filter: blur(18px) saturate(180%);
+/* Liquid Glass material (Apple iOS 26). Apply to chrome surfaces — header,
+   cart drawer, modals, toasts. The admin backdropBlur / chromeTransparency
+   sliders are applied inline by components via glassSurfaceStyle(); this
+   class is the fixed CSS equivalent for static surfaces. The specular top
+   sheen (a bright "glass catches light" gradient) is layered as a
+   background-image so no pseudo-element or z-index juggling is needed. */
+.liquid-glass {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.16) 26%, rgba(255, 255, 255, 0) 54%),
+    color-mix(in srgb, var(--background) var(--ui-chrome-alpha)%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(108%);
+  backdrop-filter: blur(28px) saturate(190%) brightness(108%);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
 /* Soft Apple card shadow (the admin cardShadow slider is applied inline by the

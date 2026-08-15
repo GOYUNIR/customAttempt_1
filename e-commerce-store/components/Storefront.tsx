@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
@@ -1019,7 +1019,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px ${Math.round(72 * contentSpacingScale(configPalette))}px` }}>
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
-        <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), boxShadow: cardShadowStyle(configPalette, 16) }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 16) }}>
           <div
             onMouseEnter={() => setGalleryPaused(true)}
             onMouseLeave={() => { if (!dragActiveRef.current) setGalleryPaused(false); }}
@@ -1208,7 +1208,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
 
-        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
@@ -1222,7 +1222,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         {showCart && cart.length > 0 && (
-          <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
+          <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
             {cart.map((item, index) => (
               <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>

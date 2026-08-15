@@ -200,10 +200,10 @@ const DEFAULT_PRODUCTS = [
 
 const DEFAULT_CONFIG = {
   themeColors: {
-    primaryBackground: '#f5f5f7',
+    primaryBackground: '#f2f2f7',
     cardBackground: '#ffffff',
     cardBorder: 'rgba(0,0,0,0.08)',
-    accentPurple: '#af52de',
+    accentPurple: '#bf5af2',
     accentBlue: '#0071e3',
     textMain: '#1d1d1f',
     textMuted: '#6e6e73',
@@ -211,15 +211,15 @@ const DEFAULT_CONFIG = {
     cardTextMuted: '#6e6e73',
     checkoutCtaButton: '#0071e3',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-    borderRadius: 22,
+    borderRadius: 24,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
-    chromeTransparency: 70,
-    surfaceTransparency: 100,
-    // Apple design-language defaults: squircle corners, soft low-intensity card
-    // shadows, and a subtle frosted-glass backdrop for the chrome surfaces.
+    chromeTransparency: 62,
+    surfaceTransparency: 98,
+    // Apple design-language defaults: squircle corners, soft layered card
+    // shadows, and a heavy Liquid-Glass backdrop for the chrome surfaces.
     radiusStyle: 'squircle',
-    cardShadow: 12,
-    backdropBlur: 55,
+    cardShadow: 14,
+    backdropBlur: 80,
     contentSpacing: 'comfortable',
   },
   // Default Branding & Share — refined noir & gold so a freshly seeded store's

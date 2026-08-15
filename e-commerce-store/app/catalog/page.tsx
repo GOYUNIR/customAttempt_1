@@ -8,7 +8,7 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground, themeRadius, themeRadiusNumber } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, themeRadiusNumber, cardSheen } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 
 interface CatalogItem {
@@ -73,6 +73,10 @@ export default function CatalogPage() {
     String(liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
   );
   const [searchQuery, setSearchQuery] = useState('');
+  // Perf: skip rendering + painting of catalog sections until they're near the
+  // viewport (content-visibility: auto), and reserve layout height so scroll
+  // never jumps. Cast as any — React's CSSProperties doesn't type these yet.
+  const SECTION_CV = { contentVisibility: 'auto', containIntrinsicSize: 'auto 280px' } as any;
   // Live /api/store product payload (lifecycle-enriched) so upcoming/archive
   // cards can show real entry state, drop type, and sold-out dates.
   const [liveProducts, setLiveProducts] = useState<any[]>([]);
@@ -315,6 +319,7 @@ export default function CatalogPage() {
             style={{
               textAlign: 'left',
               background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))'),
+              backgroundImage: cardSheen,
               border: `1px solid ${configPalette.cardBorder}`,
               borderRadius: themeRadius(configPalette, 16),
               overflow: 'hidden',
@@ -442,7 +447,7 @@ export default function CatalogPage() {
           if (section === 'live') {
             if (filteredActiveDrops.length === 0) return null;
             return (
-              <div key="live">
+              <div key="live" style={{ ...SECTION_CV }}>
                 <h2
                   style={{
                     fontSize: '13px',
@@ -465,6 +470,7 @@ export default function CatalogPage() {
                       <div
                         style={{
                           background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
+                          backgroundImage: cardSheen,
                           border: `1px solid ${configPalette.cardBorder}`,
                           borderRadius: themeRadius(configPalette, 14),
                           padding: '14px 16px',
@@ -485,7 +491,7 @@ export default function CatalogPage() {
           }
           if (section === 'upcoming') {
             return (
-              <div key="upcoming">
+              <div key="upcoming" style={{ ...SECTION_CV }}>
                 <h2
                   style={{
                     fontSize: '13px',
@@ -502,7 +508,7 @@ export default function CatalogPage() {
             );
           }
           return (
-            <div key="archive">
+            <div key="archive" style={{ ...SECTION_CV }}>
               <h2
                 style={{
                   fontSize: '13px',

@@ -158,14 +158,14 @@ export default async function RootLayout({
   const radiusRaw = Number(colors.borderRadius);
   const radiusStyle = String(colors.radiusStyle || 'squircle');
   const htmlStyle = {
-    '--ui-radius': `${Number.isFinite(radiusRaw) && radiusRaw >= 0 ? radiusRaw : 22}px`,
-    '--background': colors.primaryBackground || '#f5f5f7',
+    '--ui-radius': `${Number.isFinite(radiusRaw) && radiusRaw >= 0 ? radiusRaw : 24}px`,
+    '--background': colors.primaryBackground || '#f2f2f7',
     '--foreground': colors.textMain || '#1d1d1f',
-    '--ui-chrome-alpha': String(Math.max(40, Math.min(100, Number(colors.chromeTransparency) || 70))),
+    '--ui-chrome-alpha': String(Math.max(40, Math.min(100, Number(colors.chromeTransparency) || 62))),
     '--ui-surface-alpha': String(Math.max(40, Math.min(100, Number(colors.surfaceTransparency) || 100))),
     '--ui-radius-style': radiusStyle,
-    '--ui-card-shadow': String(Number(colors.cardShadow) || 12),
-    '--ui-glass-blur': String(Number(colors.backdropBlur) || 55),
+    '--ui-card-shadow': String(Number(colors.cardShadow) || 14),
+    '--ui-glass-blur': String(Number(colors.backdropBlur) || 80),
     '--ui-spacing-scale': String(contentSpacingScale(colors)),
   } as React.CSSProperties;
   return (
@@ -186,7 +186,7 @@ export default async function RootLayout({
         <script id="goyunir-theme-json" type="application/json" dangerouslySetInnerHTML={{ __html: safeJson }} />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var el=document.getElementById('goyunir-theme-json');var t=el?JSON.parse(el.textContent):null;if(!t)return;var c=t.themeColors||{};var b=document.body.style;if(c.primaryBackground)b.background=c.primaryBackground;if(c.textMain)b.color=c.textMain;if(c.fontFamily)b.fontFamily=c.fontFamily;var r=document.documentElement.style;var rad=Number(c.borderRadius);r.setProperty('--ui-radius',(Number.isFinite(rad)&&rad>=0?rad:22)+'px');r.setProperty('--background',c.primaryBackground||'#f5f5f7');r.setProperty('--foreground',c.textMain||'#1d1d1f');r.setProperty('--ui-chrome-alpha',String(Math.max(40,Math.min(100,Number(c.chromeTransparency)||70))));r.setProperty('--ui-surface-alpha',String(Math.max(40,Math.min(100,Number(c.surfaceTransparency)||100))));r.setProperty('--ui-radius-style',String(c.radiusStyle||'squircle'));r.setProperty('--ui-card-shadow',String(Number(c.cardShadow)||12));r.setProperty('--ui-glass-blur',String(Number(c.backdropBlur)||55));r.setProperty('--ui-spacing-scale',String(c.contentSpacing==='compact'?0.88:(c.contentSpacing==='spacious'?1.15:1)));window.__GOYUNIR_THEME__=t;}catch(e){}})();`,
+            __html: `(function(){try{var el=document.getElementById('goyunir-theme-json');var t=el?JSON.parse(el.textContent):null;if(!t)return;var c=t.themeColors||{};var b=document.body.style;if(c.primaryBackground)b.background=c.primaryBackground;if(c.textMain)b.color=c.textMain;if(c.fontFamily)b.fontFamily=c.fontFamily;var r=document.documentElement.style;var rad=Number(c.borderRadius);r.setProperty('--ui-radius',(Number.isFinite(rad)&&rad>=0?rad:24)+'px');r.setProperty('--background',c.primaryBackground||'#f2f2f7');r.setProperty('--foreground',c.textMain||'#1d1d1f');r.setProperty('--ui-chrome-alpha',String(Math.max(40,Math.min(100,Number(c.chromeTransparency)||62))));r.setProperty('--ui-surface-alpha',String(Math.max(40,Math.min(100,Number(c.surfaceTransparency)||100))));r.setProperty('--ui-radius-style',String(c.radiusStyle||'squircle'));r.setProperty('--ui-card-shadow',String(Number(c.cardShadow)||14));r.setProperty('--ui-glass-blur',String(Number(c.backdropBlur)||80));r.setProperty('--ui-spacing-scale',String(c.contentSpacing==='compact'?0.88:(c.contentSpacing==='spacious'?1.15:1)));window.__GOYUNIR_THEME__=t;}catch(e){}})();`,
           }}
         />
         <ThemeProvider value={liveValue}>

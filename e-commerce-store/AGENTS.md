@@ -162,9 +162,16 @@ Never rebuild them.
 
 - Glow orbs are **pre-blurred radial gradients** animated via direct DOM writes
   (refs) in `SiteChrome.tsx`. Never add `filter: blur()` or `backdrop-filter`
-  to animated/large elements (forces per-frame paints → Chrome lag).
+  to animated/large elements (forces per-frame paints → Chrome lag). The orb
+  loop **idle-throttles** to ~7fps of writes after 1.5s without interaction.
+- Below-the-fold sections on the home page and `/catalog` use
+  `content-visibility: auto` + `contain-intrinsic-size` so offscreen sections
+  skip render/paint entirely. Keep this pattern for any new long section.
 - Home/catalog countdowns only tick while a live countdown is visible.
 - If you add a new public read endpoint, wrap Redis reads in `withTtlCache`.
+- Liquid Glass chrome (header/drawer/toasts) uses the shared
+  `glassSurfaceStyle()` helper; card surfaces use the static `cardSheen`
+  gradient (never backdrop-filter on cards — it repaints on every scroll).
 
 ## Admin Portal (`/admin`)
 
@@ -413,6 +420,18 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — Apple Liquid Glass design system + ALL presets rebuilt on Apple design language + new "Apple" preset + snappier-perf pass + production finalization:**
+  - **🍎 New flagship `Apple` preset** (`lib/theme-presets.ts`, `id: 'apple'`) — the full iOS 26 Liquid Glass look: `#f2f2f7` system background, SF Pro stack, squircle radius 26, heavy `blur(36px) saturate(196%) brightness(110%)` chrome, 96% card translucency, soft layered shadows, spacious rhythm, and iOS-vibrant glow orbs (blue/purple/pink/cyan/orange). It is the FIRST card in `/admin → Settings → Design Presets`.
+  - **🪟 EVERY preset rebuilt on Apple design language.** All 10 existing presets (Minimal, Luxury, Hype Culture, Wellness, Editorial, Monochrome, Deep Navy, Golden Noir, Cyber Neon, Warm Paper) were updated so every one now uses **continuous squircles** (`radiusStyle: 'squircle'`, radius 18–24 — no more `sharp`/`rounded`), **heavy Liquid Glass chrome** (`backdropBlur` 76–86, `chromeTransparency` 56–68), **soft layered card shadows** (`cardShadow` 14–18), and comfortable/spacious page rhythm — while keeping each persona's market identity (colors, type, mood). Taglines updated to match (no more "crisp edges").
+  - **💧 Liquid Glass material system.** New shared helpers in `lib/storefront-config.ts`: `glassSurfaceStyle(themeColors, opts)` returns the full chrome recipe (chrome-tinted translucent bg + **specular top sheen** gradient + hairline border + inner rim highlight + soft outer float) and `glassBackdrop()` now adds a `brightness()` term so glass glows "vibrant" like iOS. Applied to the **header** (specular sheen + rim light), the **cart drawer** (dark-panel variant), the **promo banner** and **toasts** (glass pills). New `.liquid-glass` CSS utility in `app/globals.css` (sheen layered as background-image — no pseudo-element/z-index juggling). Card surfaces across home/catalog/product now wear a **static specular `cardSheen`** (painted-once gradient, NO backdrop-filter — perf-safe) so the whole storefront reads as one glass material.
+  - **⚡ Snappier / less laggy.**
+    - **Orb idle-throttle** (`components/SiteChrome.tsx`): while the visitor isn't interacting (1.5s+ idle) the glow only WRITES every 8th frame (~7fps ambient drift instead of 30fps) — physics stays cheap, and the instant the cursor/scroll/touch moves the orbs spring back to full-rate writes with zero visible jump. Reduced-motion users stay on the slow cadence permanently.
+    - **`content-visibility: auto`** on below-the-fold sections (home priority drops / social proof / member perk + all `/catalog` sections) with `contain-intrinsic-size` reserving layout height — offscreen sections skip render/paint entirely and scroll can never jump.
+    - Default theme tokens aligned across `lib/store-config.ts`, `lib/storefront-config.ts`, the seed route, `/api/store/config`, the layout inline theme script and `:root` (`#f2f2f7`, radius 24, chrome 62, surface 98, shadow 14, blur 80) so an unseeded store and a freshly seeded store both ship the Apple look.
+  - **🗂 Catalog ordering confirmed & documented** — `store:config.catalog.sectionOrder` defaults to `['upcoming','archive','live']` with **Currently Available at the BOTTOM** in every path (store-config default, admin UI default, `/api/catalog/status` fallback, catalog-page sanitizer); operators can reorder from `/admin → Settings → Catalog` but the template default is live-last.
+  - Docs: this changelog + README updated in the same change set. No Redis keys were added or changed. Verified: `tsc --noEmit` clean, full `eslint` clean (0/0), `npm test` 23/23 pass, `npm run build` compiles every route + middleware.
+
 
 - **2026-08-15 — DROP-ON-TIMER-ZERO FIX (round 2 — the real one) + signed-in cart sync + console-noise cleanup + share-card cache-buster:**
   - **💥 Countdowns now ACTUALLY drop the raffle.** The previous fix made the server-side engine work (verified: a dry-run of the real Redis pools draws and charges the winners correctly), but the client countdown still didn't fire the trigger in the common case. Root cause: drop times are stored as NAIVE wall-clock strings (`2026-08-15T06:16` — no `Z`/offset), and every consumer parsed them in its OWN timezone — the product-page countdown in the browser's zone, the draw engine in the server's UTC zone, the catalog/home lifecycle in the browser again. On any machine whose timezone differed from the store's (America/Los_Angeles), a release that had already ended re-anchored to the NEXT GLOBAL drop (`dropSchedule.targetEndDateTime`, often a week away) and showed a bogus "Raffle ends in 6d…" countdown while the pool sat due and un-drawn; the trigger never fired and (without a configured cron) nothing dropped. Fixes:

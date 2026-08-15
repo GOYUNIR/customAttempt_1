@@ -185,10 +185,10 @@ export interface StorefrontConfig {
 }
 
 const defaultThemeColors = {
-  primaryBackground: '#f5f5f7',
+  primaryBackground: '#f2f2f7',
   cardBackground: '#ffffff',
   cardBorder: 'rgba(0,0,0,0.08)',
-  accentPurple: '#af52de',
+  accentPurple: '#bf5af2',
   accentBlue: '#0071e3',
   textMain: '#1d1d1f',
   textMuted: '#6e6e73',
@@ -196,17 +196,17 @@ const defaultThemeColors = {
   cardTextMuted: '#6e6e73',
   checkoutCtaButton: '#0071e3',
   fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-  borderRadius: 22,
+  borderRadius: 24,
   // Transparency (0-100, editable from /admin → Settings → Theme Colors):
   // chromeTransparency controls header/footer/cart-drawer opacity,
   // surfaceTransparency controls card/surface opacity on the storefront.
-  chromeTransparency: 70,
-  surfaceTransparency: 100,
-  // Apple design-language defaults: squircle corners, soft low-intensity card
-  // shadows, and a subtle frosted-glass backdrop for the chrome surfaces.
+  chromeTransparency: 62,
+  surfaceTransparency: 98,
+  // Apple design-language defaults: squircle corners, soft layered card
+  // shadows, and a heavy Liquid-Glass backdrop for the chrome surfaces.
   radiusStyle: 'squircle' as const,
-  cardShadow: 12,
-  backdropBlur: 55,
+  cardShadow: 14,
+  backdropBlur: 80,
   contentSpacing: 'comfortable' as const,
 };
 
@@ -424,8 +424,10 @@ export function cardShadowStyle(themeColors?: Record<string, any> | null, fallba
 /**
  * Frosted-glass `backdrop-filter` value built from the admin
  * `themeColors.backdropBlur` slider (0-100, default ~55). 0 returns `none`
- * (fully opaque chrome), 100 returns a heavy 40px blur + strong saturation —
- * Apple's tactile material feel for the header, cart drawer and modals.
+ * (fully opaque chrome), 100 returns a heavy 40px blur + strong saturation +
+ * a gentle brightness lift — Apple's Liquid Glass material feel for the
+ * header, cart drawer and modals. The `brightness()` term makes the backdrop
+ * slightly "vibrant" (the way iOS glass glows), not just blurred.
  */
 export function glassBackdrop(themeColors?: Record<string, any> | null, fallback = 55): string {
   const raw = Number(themeColors?.backdropBlur);
@@ -433,8 +435,62 @@ export function glassBackdrop(themeColors?: Record<string, any> | null, fallback
   if (pct <= 0) return 'none';
   const px = Math.round(6 + (pct / 100) * 34);
   const sat = Math.round(140 + (pct / 100) * 70);
-  return `blur(${px}px) saturate(${sat}%)`;
+  const bright = Math.round(100 + (pct / 100) * 12);
+  return `blur(${px}px) saturate(${sat}%) brightness(${bright}%)`;
 }
+
+export type GlassSurfaceOptions = {
+  /** Explicit chrome background — overrides the automatic chrome-tinted mix. */
+  bg?: string;
+  /** Dark panel mode (cart drawer, toasts) — brighter specular sheen, lighter hairline. */
+  dark?: boolean;
+  /** Fallback backdropBlur (0-100) when the admin token is missing. */
+  blur?: number;
+  /** Override the outer soft shadow (defaults to a light card float). */
+  shadow?: string;
+};
+
+/**
+ * Apple Liquid Glass — the FULL chrome material in one style object. Use on
+ * the header, cart drawer, modals and toasts so every glass surface shares
+ * the same recipe: a chrome-tinted translucent background, a specular top
+ * sheen (the "glass catches light" gradient), a hairline border, an inner rim
+ * highlight and a soft outer float. Blur / saturation / brightness come from
+ * the admin backdropBlur slider via `glassBackdrop()`.
+ *
+ * Returns a plain style record (no React dependency) so both server and
+ * client components can spread it: `style={{ ...glassSurfaceStyle(theme) }}`.
+ */
+export function glassSurfaceStyle(themeColors?: Record<string, any> | null, opts: GlassSurfaceOptions = {}): Record<string, string> {
+  const blur = glassBackdrop(themeColors, opts.blur ?? 55);
+  const chrome = Number(themeColors?.chromeTransparency);
+  const chromeAlpha = Number.isFinite(chrome) ? Math.max(30, Math.min(100, chrome)) : 62;
+  const base = String(themeColors?.primaryBackground || '#f2f2f7');
+  const bg = opts.bg || (chromeAlpha >= 100 ? base : `color-mix(in srgb, ${base} ${chromeAlpha}%, transparent)`);
+  // Specular top sheen: bright and crisp on light glass, softer on dark panels.
+  const sheen = opts.dark
+    ? 'linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.07) 24%, rgba(255,255,255,0) 48%)'
+    : 'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 26%, rgba(255,255,255,0) 54%)';
+  const borderColor = opts.dark ? 'rgba(255,255,255,0.16)' : String(themeColors?.cardBorder || 'rgba(0,0,0,0.08)');
+  const outer = opts.shadow ?? (opts.dark ? '0 10px 40px rgba(0,0,0,0.35)' : '0 8px 32px rgba(0,0,0,0.10)');
+  return {
+    background: bg,
+    backgroundImage: sheen,
+    WebkitBackdropFilter: blur,
+    backdropFilter: blur,
+    border: `1px solid ${borderColor}`,
+    boxShadow: `inset 0 1px 0 ${opts.dark ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.5)'}, inset 0 -1px 0 rgba(255,255,255,0.05), ${outer}`,
+  };
+}
+
+/** Static specular sheen for CARD surfaces — the top "glass catches light"
+ * highlight. Deliberately cheap: a painted-once gradient with NO backdrop-filter
+ * (perf rule: never blur()/backdrop-filter animated or large elements). Pairs
+ * with the chrome Liquid Glass (`glassSurfaceStyle`) so cards feel like the
+ * same material without the per-frame cost. Spread into a style object's
+ * `backgroundImage` alongside the existing `background` color. */
+export const cardSheen =
+  'linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 26%, rgba(255,255,255,0) 52%)';
 
 /** Multiplier for page rhythm from `themeColors.contentSpacing`. */
 export function contentSpacingScale(themeColors?: Record<string, any> | null): number {
