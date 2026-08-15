@@ -139,6 +139,18 @@ function orbGlowOpacity(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(100, n));
 }
 
+/**
+ * Drawer-specific orb opacity. The cart drawer surface is a near-opaque dark
+ * panel, so the admin orb opacity that reads on the (usually light) storefront
+ * is nearly invisible inside the drawer. Scale it up (capped) so the glow has
+ * the same presence as the page-level orbs, without ever turning into a solid
+ * blob.
+ */
+function drawerOrbOpacity(value: unknown, fallback: number): number {
+  const base = orbGlowOpacity(value, fallback);
+  return Math.min(60, Math.max(18, Math.round(base * 2.2 + 10)));
+}
+
 function readCart(): CartItem[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -243,6 +255,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const orbTertiaryRef = useRef<HTMLDivElement | null>(null);
   const orbFourthRef = useRef<HTMLDivElement | null>(null);
   const orbFifthRef = useRef<HTMLDivElement | null>(null);
+  // Cart-drawer orbs: the drawer paints above the page-level orb layer, so it
+  // carries its own glow layer. These refs let the SAME rAF loop that drives
+  // the page orbs drift the drawer orbs too (they would otherwise be frozen
+  // static blobs while the page orbs keep gliding).
+  const drawerOrbPrimaryRef = useRef<HTMLDivElement | null>(null);
+  const drawerOrbSecondaryRef = useRef<HTMLDivElement | null>(null);
+  const drawerOrbTertiaryRef = useRef<HTMLDivElement | null>(null);
+  const drawerOrbFourthRef = useRef<HTMLDivElement | null>(null);
+  const drawerOrbFifthRef = useRef<HTMLDivElement | null>(null);
   // Tracks whether a finger is actively on the screen. While touching, scroll
   // motion is paused so the orbs keep following the finger instead of being
   // yanked around by the page scroll on mobile.
@@ -378,6 +399,29 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       }
       if (fifth) {
         fifth.style.transform = `translate3d(${((82 + x * 16 * intensity) / 100) * vw}px, ${((18 - y * 30 * intensity) / 100) * vh}px, 0)`;
+      }
+      // Cart-drawer orbs drift on the same eased target so the ambient glow
+      // keeps moving while the drawer is open. The amplitudes are small and
+      // centered so the glows can never leave the drawer bounds (no clipping).
+      const dPrimary = drawerOrbPrimaryRef.current;
+      const dSecondary = drawerOrbSecondaryRef.current;
+      const dTertiary = drawerOrbTertiaryRef.current;
+      const dFourth = drawerOrbFourthRef.current;
+      const dFifth = drawerOrbFifthRef.current;
+      if (dPrimary) {
+        dPrimary.style.transform = `translate3d(${(x - 0.5) * 34 * intensity}px, ${(y - 0.5) * 30 * intensity}px, 0)`;
+      }
+      if (dSecondary) {
+        dSecondary.style.transform = `translate3d(${(0.5 - x) * 26 * intensity}px, ${(0.55 - y) * 24 * intensity}px, 0)`;
+      }
+      if (dTertiary) {
+        dTertiary.style.transform = `translate3d(${(x - 0.45) * 22 * intensity}px, ${(y - 0.6) * 20 * intensity}px, 0)`;
+      }
+      if (dFourth) {
+        dFourth.style.transform = `translate3d(${(0.5 - x) * 18 * intensity}px, ${(y - 0.5) * 20 * intensity}px, 0)`;
+      }
+      if (dFifth) {
+        dFifth.style.transform = `translate3d(${(x - 0.4) * 16 * intensity}px, ${(0.5 - y) * 18 * intensity}px, 0)`;
       }
     };
 
@@ -975,20 +1019,30 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       </footer>
 
       {cartOpen && (
-        <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+        <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText }}>
             {/* Orb glows inside the cart drawer — mirrors the storefront glow so
-                the animated background orbs stay visible while the drawer is open
-                (the drawer paints above the page-level orb layer). */}
+                the ambient orbs stay visible while the drawer is open (the drawer
+                paints above the page-level orb layer). Every orb is a compact
+                circle (width + aspectRatio 1) positioned fully inside the drawer
+                so the glow can never clip at the edges, and each is drifted by
+                the same rAF loop that animates the page orbs. Opacities use the
+                drawer boost (the drawer surface is near-opaque dark). */}
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
               {orbsEnabled && primaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', top: '6%', right: '4%', width: '56%', height: '56%', borderRadius: '999px', background: orbGradient(primaryOrb.color, orbGlowOpacity(primaryOrb.opacity, 16), '#3b82f6') }} />
+                <div ref={drawerOrbPrimaryRef} style={{ position: 'absolute', top: '8%', right: '6%', width: '46%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(primaryOrb.color, drawerOrbOpacity(primaryOrb.opacity, 16), '#3b82f6') }} />
               )}
               {orbsEnabled && secondaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', left: '4%', bottom: '6%', width: '54%', height: '54%', borderRadius: '999px', background: orbGradient(secondaryOrb.color, orbGlowOpacity(secondaryOrb.opacity, 26), '#a855f7') }} />
+                <div ref={drawerOrbSecondaryRef} style={{ position: 'absolute', left: '8%', bottom: '8%', width: '42%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(secondaryOrb.color, drawerOrbOpacity(secondaryOrb.opacity, 26), '#a855f7') }} />
               )}
               {orbsEnabled && tertiaryOrb.enabled !== false && (
-                <div style={{ position: 'absolute', right: '14%', bottom: '26%', width: '34%', height: '34%', borderRadius: '999px', background: orbGradient(tertiaryOrb.color, orbGlowOpacity(tertiaryOrb.opacity, 12), '#ffd79b') }} />
+                <div ref={drawerOrbTertiaryRef} style={{ position: 'absolute', right: '14%', bottom: '22%', width: '28%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(tertiaryOrb.color, drawerOrbOpacity(tertiaryOrb.opacity, 12), '#ffd79b') }} />
+              )}
+              {orbsEnabled && fourthOrb.enabled !== false && (
+                <div ref={drawerOrbFourthRef} style={{ position: 'absolute', top: '16%', left: '5%', width: '26%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fourthOrb.color, drawerOrbOpacity(fourthOrb.opacity, 10), '#7dd3fc') }} />
+              )}
+              {orbsEnabled && fifthOrb.enabled !== false && (
+                <div ref={drawerOrbFifthRef} style={{ position: 'absolute', right: '9%', bottom: '12%', width: '20%', aspectRatio: '1', borderRadius: '999px', transform: 'translate3d(0,0,0)', willChange: 'transform', background: orbGradient(fifthOrb.color, drawerOrbOpacity(fifthOrb.opacity, 8), '#f472b6') }} />
               )}
             </div>
             <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '18px 16px', boxSizing: 'border-box' }}>
