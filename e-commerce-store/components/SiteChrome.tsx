@@ -9,7 +9,7 @@ import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
 import { themeRadius, glassSurfaceStyle, cardShadowStyle } from '@/lib/storefront-config';
-import { scheduleCartPersist, syncCartWithServer } from '@/lib/client-cart-sync';
+import { scheduleCartPersist, setCartSyncSignedIn, syncCartWithServer } from '@/lib/client-cart-sync';
 
 type CartItem = {
   productId: string;
@@ -783,6 +783,9 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         if (data?.user?.email) {
           setSignedIn(true);
           setSignedInEmail(String(data.user.email));
+          // The cart-sync module only talks to the server for signed-in
+          // visitors — signed-out requests return 401 and logged console noise.
+          setCartSyncSignedIn(true);
           // Pull the account's saved cart and merge it with this browser's bag
           // ONCE per page session. A second merge could resurrect items the
           // user removed on another device (stale local copy wins).
@@ -793,12 +796,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         } else {
           setSignedIn(false);
           setSignedInEmail('');
+          setCartSyncSignedIn(false);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSignedIn(false);
           setSignedInEmail('');
+          setCartSyncSignedIn(false);
         }
       });
     return () => {

@@ -8,6 +8,7 @@ import {
   previewSiteUrl,
   resolveClientImageSource,
   revisionHash,
+  toHexColor,
 } from '../lib/share-card-config.ts';
 
 test('safeCssColor keeps valid colors and falls back on junk', () => {
@@ -59,6 +60,18 @@ test('resolveClientImageSource keeps absolute/data, resolves root-relative, drop
   assert.equal(resolveClientImageSource('/images/x/1.jpeg', 'https://s.example'), 'https://s.example/images/x/1.jpeg');
   assert.equal(resolveClientImageSource('a image url', 'https://s.example'), '');
   assert.equal(resolveClientImageSource('', 'https://s.example'), '');
+});
+
+test('toHexColor produces a color-input-safe #rrggbb from any CSS color', () => {
+  // Hex passes through (the exact error case: rgba() values crash color inputs).
+  assert.equal(toHexColor('#D4AF37'), '#d4af37');
+  assert.equal(toHexColor('#fff'), '#ffffff');
+  assert.equal(toHexColor('rgba(0,0,0,0.14)'), '#000000');
+  assert.equal(toHexColor('rgb(212, 175, 55)'), '#d4af37');
+  // 8-digit hex loses its alpha channel (color inputs can't express alpha).
+  assert.equal(toHexColor('#D4AF3755'), '#d4af37');
+  assert.equal(toHexColor('garbage', '#123456'), '#123456');
+  assert.equal(toHexColor('', '#123456'), '#123456');
 });
 
 test('revisionHash is deterministic and changes with input', () => {

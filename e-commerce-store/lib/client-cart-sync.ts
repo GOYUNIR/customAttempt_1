@@ -20,6 +20,15 @@
  */
 
 let persistTimer: number | null = null;
+// Signed-in state, set by SiteChrome from `/api/auth/me`. When signed out we
+// NEVER call `/api/cart/sync` — the route returns 401 for anonymous visitors
+// and every call logged a console error (and hit the server for nothing).
+let signedIn = false;
+
+/** Tell the cart-sync module whether the visitor has a session (from /api/auth/me). */
+export function setCartSyncSignedIn(value: boolean): void {
+  signedIn = Boolean(value);
+}
 
 function readLocalCart(): any[] {
   if (typeof window === 'undefined') return [];
@@ -63,9 +72,10 @@ export function mergeCarts(serverItems: any[], localItems: any[]): any[] {
 }
 
 /** Debounced POST of the current bag to the account cart. No-op when signed
- *  out (the route returns 401 and we ignore it). */
+ *  out (skipped entirely — the route would return 401 and log a console error). */
 export function scheduleCartPersist(items?: any[]): void {
   if (typeof window === 'undefined') return;
+  if (!signedIn) return;
   if (persistTimer !== null) window.clearTimeout(persistTimer);
   const payload = items || readLocalCart();
   persistTimer = window.setTimeout(() => {
@@ -84,6 +94,7 @@ export function scheduleCartPersist(items?: any[]): void {
  *  server cart was loaded (i.e. the user is signed in). */
 export async function syncCartWithServer(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
+  if (!signedIn) return false;
   try {
     const res = await fetch('/api/cart/sync', { credentials: 'same-origin' });
     if (!res.ok) return false;

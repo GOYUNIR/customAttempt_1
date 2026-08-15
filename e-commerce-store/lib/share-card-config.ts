@@ -133,6 +133,35 @@ export function resolveClientImageSource(value: unknown, origin: string): string
 }
 
 /**
+ * Convert ANY CSS color into a `#rrggbb` hex string suitable for the `value`
+ * attribute of an `<input type="color">`. Color inputs reject `rgba()`/`rgb()`
+ * values with "The specified value 'rgba(…)' does not conform to the required
+ * format" (which the browser logs once per render — hundreds of times when the
+ * theme editor re-renders with `cardBorder: rgba(…)`). Hex values pass through,
+ * `rgb()`/`rgba()` are converted channel-wise, everything else falls back.
+ */
+export function toHexColor(value: unknown, fallback = '#000000'): string {
+  const raw = String(value ?? '').trim();
+  let s = raw.toLowerCase();
+  if (s.startsWith('#')) s = s.slice(1);
+  if (s.length === 3 || s.length === 4) {
+    s = s
+      .split('')
+      .map((c) => c + c)
+      .join('');
+  }
+  if (s.length === 6 && /^[0-9a-f]{6}$/.test(s)) return `#${s}`;
+  // Drop an 8-digit hex's alpha channel (color inputs can't express alpha).
+  if (s.length === 8 && /^[0-9a-f]{8}$/.test(s)) return `#${s.slice(0, 6)}`;
+  const rgb = raw.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  if (rgb) {
+    const toHex = (n: string) => Math.max(0, Math.min(255, Math.round(Number(n)))).toString(16).padStart(2, '0');
+    return `#${toHex(rgb[1])}${toHex(rgb[2])}${toHex(rgb[3])}`;
+  }
+  return fallback;
+}
+
+/**
  * Deterministic 8-hex-char content hash (FNV-1a). `generateMetadata` appends it
  * to the `og:image` URL as a cache-buster: whenever branding changes the URL
  * changes, so WhatsApp/Discord/iMessage (which cache previews aggressively by

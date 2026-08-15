@@ -6,6 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
+import { toHexColor } from '@/lib/share-card-config';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -3333,7 +3334,7 @@ export default function AdminPortal() {
                     {key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="color" 
-                      value={String(value || '#000000')} 
+                      value={toHexColor(value)} 
                       onChange={(e) => setThemeSettings({ ...themeSettings, [key]: e.target.value })}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                   </label>
@@ -3484,7 +3485,7 @@ export default function AdminPortal() {
 
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Hero Content</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
-                The intro section on the home page (the “GOYUNIR / HIGH-CADENCE RELEASES” block). Every line is editable.
+                The intro section on the home page (the brand / location block). Every line is editable.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {([
@@ -3771,17 +3772,20 @@ export default function AdminPortal() {
                   shareText: brandingSettings.shareText,
                   iconBackground: brandingSettings.iconBackground,
                   iconText: brandingSettings.iconText,
-                }).map(([key, value]) => (
-                  <label key={key} style={{ fontSize: 11 }}>
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
-                    <input
-                      type={key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 'color' : 'text'}
-                      value={String(value || '')}
-                      onChange={(e) => setBrandingSettings((prev) => ({ ...prev, [key]: e.target.value }))}
-                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 4 : 10, height: key.includes('Background') || key.includes('Accent') || key.includes('Text') ? 40 : undefined }}
-                    />
-                  </label>
-                ))}
+                }).map(([key, value]) => {
+                  const isColorField = key.includes('Background') || key.includes('Accent') || key.includes('Text');
+                  return (
+                    <label key={key} style={{ fontSize: 11 }}>
+                      {key.replace(/([A-Z])/g, ' $1').trim()}
+                      <input
+                        type={isColorField ? 'color' : 'text'}
+                        value={isColorField ? toHexColor(value) : String(value || '')}
+                        onChange={(e) => setBrandingSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: isColorField ? 4 : 10, height: isColorField ? 40 : undefined }}
+                      />
+                    </label>
+                  );
+                })}
               </div>
 
               <LinkPreviewGallery branding={brandingSettings} themeColors={themeSettings} />
@@ -3811,7 +3815,7 @@ export default function AdminPortal() {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                             <label style={{ fontSize: 11 }}>
                               Color
-                              <input type="color" value={orb.color || '#3b82f6'} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], color: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
+                              <input type="color" value={toHexColor(orb.color, '#3b82f6')} onChange={(e) => setOrbSettings((prev: any) => ({ ...prev, [key]: { ...prev[key], color: e.target.value } }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: 4, height: 40 }} />
                             </label>
                             <label style={{ fontSize: 11 }}>
                               Opacity

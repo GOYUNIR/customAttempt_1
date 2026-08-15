@@ -174,8 +174,8 @@ export default function HomePage() {
   // defaults to "Explore our creations" instead of the old "Curated by our team".
   const priorityDropsTitle = String(copyOverrides.priorityDropsTitle || 'Priority drops');
   const priorityDropsSubtitle = String(copyOverrides.priorityDropsSubtitle || 'Explore our creations');
-  const heroTitle = String(copyOverrides.heroTitle || heroContent.headline || 'Luxury releases with private-club energy, built for decisive collectors.');
-  const heroSubtitle = String(copyOverrides.heroSubtitle || heroContent.body || 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.');
+  const heroTitle = String(copyOverrides.heroTitle || heroContent.headline || 'by our hands. to your hands.');
+  const heroSubtitle = String(copyOverrides.heroSubtitle || heroContent.body || 'homemade & designed, with real ingredients, with real hands. for real people.');
   // Apple "less is more" rhythm: the admin contentSpacing setting scales the
   // page padding and section gaps so a buyer can dial the whitespace up/down.
   const spacing = contentSpacingScale(configPalette);
@@ -185,7 +185,7 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'HIGH-CADENCE RELEASES'}</div>
+          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
           <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroTitle}</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
             {heroSubtitle}
@@ -225,7 +225,7 @@ export default function HomePage() {
                     <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <div style={{ fontSize: 11, color: product.soldOut ? '#fbbf24' : configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px' }}>{product.soldOut ? 'Social proof' : (index === 0 ? 'Primary release' : 'Featured release')}</div>
+                        <div style={{ fontSize: 11, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px' }}>Featured release</div>
                         <div style={{ fontSize: 11, color: product.soldOut ? '#fcd34d' : configPalette.accentBlue, fontWeight: 700 }}>{product.soldOut ? 'Sold out' : 'Open now'}</div>
                       </div>
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4, color: configPalette.cardTextMain }}>{product.name}</div>
@@ -236,7 +236,7 @@ export default function HomePage() {
                       </div>
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: configPalette.accentBlue }}>
-                          {product.soldOut ? 'Sold out — proof of demand' : product.isUpcoming ? 'Reserve your place' : 'Enter allocation'}
+                          {product.soldOut ? 'Sold out' : product.isUpcoming ? 'Reserve your place' : 'Enter allocation'}
                         </span>
                         <span style={{ fontSize: 13, color: configPalette.accentBlue }}>→</span>
                       </div>
@@ -260,7 +260,7 @@ export default function HomePage() {
         {soldOutProducts.length > 0 && (
           <section style={{ ...SECTION_CV, animation: 'goyunirFadeUp 780ms cubic-bezier(.22,1,.36,1) backwards' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Social proof</div>
+              <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Featured releases</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>Sold out releases keep the story alive</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: Math.round(10 * spacing) }}>

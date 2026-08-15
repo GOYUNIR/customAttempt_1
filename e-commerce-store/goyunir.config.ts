@@ -4,13 +4,13 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   themeColors: {
     primaryBackground: '#f5f5f7',
     cardBackground: '#ffffff',
-    cardBorder: 'rgba(0,0,0,0.08)',
+    cardBorder: 'rgba(0,0,0,0.14)',
     accentPurple: '#af52de',
     accentBlue: '#0071e3',
     textMain: '#1d1d1f',
-    textMuted: '#6e6e73',
+    textMuted: '#52525a',
     cardTextMain: '#1d1d1f',
-    cardTextMuted: '#6e6e73',
+    cardTextMuted: '#52525a',
     checkoutCtaButton: '#0071e3',
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
     borderRadius: 22,
@@ -62,12 +62,12 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   },
 
   heroContent: {
-    eyebrow: 'HIGH-CADENCE RELEASES',
-    headline: 'Luxury releases with private-club energy, built for decisive collectors.',
-    body: 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.',
+    eyebrow: 'CALIFORNIA USA',
+    headline: 'by our hands. to your hands.',
+    body: 'homemade & designed, with real ingredients, with real hands. for real people.',
     ctaLabel: 'Browse drops',
     storyHeadline: 'Our Story',
-    storyBody: 'Low supply. Fast conversion. Quiet exclusivity.',
+    storyBody: 'take control.',
   },
 
   socialProof: {

@@ -20,7 +20,7 @@ import { contentSpacingScale } from '@/lib/storefront-config';
  * broken one. This is exactly why "the share card still doesn't work after the
  * last fix" happens: the branding hash never changed, so the URL never changed.
  */
-const CARD_REVISION = 3;
+const CARD_REVISION = 4;
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
