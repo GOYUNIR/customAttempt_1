@@ -283,7 +283,7 @@ export default function CatalogPage() {
               Built for attention-scarce traffic: live now, what is next, and what already moved.
             </p>
           </div>
-          <Link href="/" style={{ padding: '10px 14px', borderRadius: 999, background: '#f3efe6', color: '#09090b', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+          <Link href="/" prefetch={false} style={{ padding: '10px 14px', borderRadius: 999, background: '#f3efe6', color: '#09090b', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
             View what&apos;s active
           </Link>
         </div>

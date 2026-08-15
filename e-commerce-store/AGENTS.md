@@ -245,12 +245,10 @@ the ledger. Settings tabs include:
 cart checkout, waitlist, standalone address form and account address update
 must be a COMPLETE address: street number + street name, city, state/region,
 ZIP/postal code and country. `parseShippingAddress()` returns a specific
-`missing_*` reason; `validateShippingAddress()` maps it to a helpful message.
-US addresses require a state + 5-digit ZIP; common international formats
-(UK/CA postals, 4-6 digit postals, ~40 countries) are recognised. Anything
-unrecognised is rejected — `123 realstreet` can never be saved. When Mapbox
-autofill is live and validation fails, the submit handlers append a hint to
-pick a suggestion (the dropdown fills the full address).
+`missing_*` reason; `validateShippingAddress()` maps it to ONE short, friendly
+message that tells the customer to select the full address from the dropdown —
+picking a suggestion always fills a complete, shippable address, and partial
+input like `123 realstreet` can never be saved.
 
 ### Promo codes
 
@@ -301,7 +299,12 @@ pick a suggestion (the dropdown fills the full address).
   resolves `NEXT_PUBLIC_URL` → `NEXT_PUBLIC_SITE_URL` → `SITE_URL` with a neutral
   fallback. `getBrandName()` / `getSupportEmail()` / `neutralBrandName()` /
   `fallbackSiteUrl()` are the other brand-safe helpers — **use them instead of
-  reading `process.env.*` directly** in customer-facing code.
+  reading `process.env.*` directly** in customer-facing code. In request-scoped
+  metadata (`app/layout.tsx` `generateMetadata`, `app/opengraph-image.tsx`) the
+  site URL also falls back to the CURRENT REQUEST's host via `lib/request-url.ts`
+  (`getRequestSiteUrl()`), so link previews never resolve against a stock
+  `https://example.com` placeholder when env vars and the admin Share URL are
+  both unset.
 
 ## Environment Variables (set in Vercel)
 
@@ -361,6 +364,37 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-14 — Share-link fix (request-host URLs) + address UX copy cleanup:**
+  - **Link previews no longer resolve to the stock `https://example.com`
+    placeholder** when the buyer hasn't set `NEXT_PUBLIC_URL` /
+    `NEXT_PUBLIC_SITE_URL` / `SITE_URL` or the admin Branding → Share URL.
+    `generateMetadata` (`app/layout.tsx`) and the OG card (`app/opengraph-image.tsx`)
+    now fall back to the CURRENT REQUEST's host via the new server-only
+    `lib/request-url.ts` → `getRequestSiteUrl()` (env URL → request host →
+    admin Share URL → neutral placeholder). `metadataBase`, `og:url`, canonical
+    and `og:image` now always point at the real deployed domain, so
+    WhatsApp/iMessage/Discord show the branded card instead of a broken stock
+    link.
+  - **Address autofill status line simplified** (Storefront + cart drawer in
+    `components/Storefront.tsx` / `components/SiteChrome.tsx`): both
+    "Address autofill on…" variants now just say **"Use address dropdown"**.
+  - **Address validation message decluttered** (`lib/address-validation.ts`):
+    the verbose per-reason paragraphs ("Add the country…", "Add the ZIP /
+    postal code…", …) are replaced with ONE short, friendly message:
+    **"Please select your full address from the dropdown so we can ship it to
+    you."** The client-side "Tip: pick a complete address from the autofill
+    suggestions…" suffix was removed from both Storefront and SiteChrome.
+    `tests/address-validation.test.ts` updated to match.
+  - **"preloaded but not used" CSS console spam gone.** Every `<Link>` now sets
+    `prefetch={false}` (header/footer chrome, admin, home/catalog product cards,
+    auth pages, story/legal/not-found links). The whole app is one single CSS
+    chunk and every route is dynamic, so route prefetching re-preloaded the
+    already-applied stylesheet and Chrome logged
+    `The resource ...css was preloaded using link preload but not used...`
+    repeatedly (9× on `/admin`). `prefetch={false}` stops the router from
+    injecting those duplicate CSS preloads with no UX cost on dynamic routes.
+  - Docs: AGENTS.md + README updated; no Redis keys were added or changed.
 
 - **2026-08-14 — Orb visibility fixes (home page + cart drawer) + mobile header nav:**
   - **Home-page orbs now glow exactly like the catalog/product pages** (`app/page.tsx`).

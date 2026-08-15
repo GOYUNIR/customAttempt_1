@@ -33,6 +33,7 @@ export default async function StoryPage() {
     }}>
       <Link
         href="/"
+        prefetch={false}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -52,7 +53,7 @@ export default async function StoryPage() {
         ← Back to store
       </Link>
       <div style={{ display: 'flex', gap: 16, marginBottom: 32, fontSize: 12, letterSpacing: 2 }}>
-        <Link href="/catalog" style={{ color: configPalette.textMuted, textDecoration: 'none' }}>CATALOG</Link>
+        <Link href="/catalog" prefetch={false} style={{ color: configPalette.textMuted, textDecoration: 'none' }}>CATALOG</Link>
         <span style={{ color: configPalette.cardTextMain }}>STORY</span>
       </div>
       <h1 style={{ fontFamily: 'serif', fontSize: 32, margin: '0 0 16px' }}>{hero.storyHeadline || 'Our Story'}</h1>

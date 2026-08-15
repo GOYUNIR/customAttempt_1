@@ -6,6 +6,7 @@ import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { getSiteUrl, neutralBrandName } from '@/lib/env';
+import { getRequestSiteUrl } from '@/lib/request-url';
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
@@ -45,12 +46,17 @@ export async function generateMetadata(): Promise<Metadata> {
   const shareDescription = String(branding.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || 'Private releases, handled cleanly.');
   // The site URL is NEVER hardcoded — set NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL /
   // SITE_URL in the platform (Vercel) and it flows into metadata, canonical, OG
-  // and emails. See lib/env.ts for the full alias chain. The admin shareUrl is
-  // the fallback so a buyer that only sets Branding → Share URL still gets a
-  // working link-preview card.
+  // and emails. See lib/env.ts for the full alias chain. When the platform env
+  // is unset we fall back to the CURRENT REQUEST's host (so a deployed store
+  // always tags its real domain), then the admin Branding → Share URL, then a
+  // neutral placeholder. Without the request-host fallback, link previews used
+  // to resolve og:url / og:image against "https://example.com" and messengers
+  // showed a stock, broken card.
   const envSiteUrl = getSiteUrl();
-  const base = envSiteUrl || (String(branding.shareUrl || '').replace(/\/+$/, '') || 'https://example.com');
-  const canonicalUrl = branding.shareUrl && /^https?:\/\//i.test(String(branding.shareUrl)) ? String(branding.shareUrl).replace(/\/$/, '') : base;
+  const requestSiteUrl = await getRequestSiteUrl();
+  const adminShareUrl = String(branding.shareUrl || '').trim().replace(/\/+$/, '');
+  const base = envSiteUrl || requestSiteUrl || adminShareUrl || 'https://example.com';
+  const canonicalUrl = adminShareUrl && /^https?:\/\//i.test(adminShareUrl) ? adminShareUrl : base;
   const ogImageUrl = `${base.replace(/\/+$/, '')}/opengraph-image`;
 
   return {

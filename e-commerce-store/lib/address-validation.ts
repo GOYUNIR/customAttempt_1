@@ -225,12 +225,18 @@ export function parseShippingAddress(raw: string): AddressParseResult {
   };
 }
 
-const FULL_ADDRESS_EXAMPLE =
-  '"123 Main Street, Los Angeles, CA 90210, United States"';
+/**
+ * When an address fails validation we point the customer at the address
+ * dropdown — picking a suggestion always fills the complete, shippable
+ * address. One short, friendly message covers every missing component; the
+ * per-reason detail lives in `parseShippingAddress` for diagnostics.
+ */
+const FULL_ADDRESS_FROM_DROPDOWN_MESSAGE =
+  'Please select your full address from the dropdown so we can ship it to you.';
 
 /**
  * Validate a shipping address string. Returns `null` when the address is a
- * complete, shippable address, otherwise a human-readable reason.
+ * complete, shippable address, otherwise a short, human-readable reason.
  */
 export function validateShippingAddress(address: string): string | null {
   const v = String(address || '').trim();
@@ -239,18 +245,5 @@ export function validateShippingAddress(address: string): string | null {
   const result = parseShippingAddress(v);
   if (result.ok) return null;
 
-  switch (result.reason) {
-    case 'missing_country':
-      return `Add the country to your shipping address (e.g. ${FULL_ADDRESS_EXAMPLE}). A complete address is required so we can ship to you.`;
-    case 'missing_postal':
-      return `Add the ZIP / postal code to your shipping address (e.g. ${FULL_ADDRESS_EXAMPLE}).`;
-    case 'missing_street':
-      return `Add the street number and street name (e.g. ${FULL_ADDRESS_EXAMPLE}).`;
-    case 'missing_state':
-      return `Add the state to your shipping address (e.g. ${FULL_ADDRESS_EXAMPLE}).`;
-    case 'missing_city':
-      return `Add the city to your shipping address (e.g. ${FULL_ADDRESS_EXAMPLE}).`;
-    default:
-      return `Enter your full shipping address (street number + street name, city, state, ZIP and country). For example ${FULL_ADDRESS_EXAMPLE}.`;
-  }
+  return FULL_ADDRESS_FROM_DROPDOWN_MESSAGE;
 }

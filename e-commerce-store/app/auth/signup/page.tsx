@@ -178,9 +178,9 @@ export default function SignupPage() {
                 <input type="checkbox" checked={termsAgreed} onChange={(e) => setTermsAgreed(e.target.checked)} style={{ marginTop: 1, accentColor: configPalette.checkoutCtaButton }} />
                 <span>
                   I agree to the{' '}
-                  <Link href="/terms" target="_blank" style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Terms of Service</Link>{' '}
+                  <Link href="/terms" target="_blank" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Terms of Service</Link>{' '}
                   and{' '}
-                  <Link href="/privacy" target="_blank" style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Privacy Policy</Link>.
+                  <Link href="/privacy" target="_blank" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'underline' }}>Privacy Policy</Link>.
                 </span>
               </label>
               <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.45, cursor: 'pointer', marginTop: -8 }}>

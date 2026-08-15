@@ -58,7 +58,7 @@ test('parses address components', () => {
 });
 
 test('reports the specific missing component', () => {
-  assert.match(validateShippingAddress('123 Main Street, Los Angeles, CA 90210') || '', /country/i);
-  assert.match(validateShippingAddress('123 Main Street, Los Angeles, CA, United States') || '', /ZIP|postal/i);
-  assert.match(validateShippingAddress('Los Angeles, CA 90210, United States') || '', /street/i);
+  assert.match(validateShippingAddress('123 Main Street, Los Angeles, CA 90210') || '', /dropdown/i);
+  assert.match(validateShippingAddress('123 Main Street, Los Angeles, CA, United States') || '', /dropdown/i);
+  assert.match(validateShippingAddress('Los Angeles, CA 90210, United States') || '', /dropdown/i);
 });

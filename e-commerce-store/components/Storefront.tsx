@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
 import NotFoundView from '@/components/NotFoundView';
@@ -15,16 +15,11 @@ const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
 /**
  * Address quality gate for checkout. The validator requires a COMPLETE
  * shippable address (street # + name, city, state, ZIP, country) — see
- * lib/address-validation.ts. Mapbox autofill suggestions fill the whole
- * address, so when autofill is live we add a hint to pick a suggestion.
+ * lib/address-validation.ts. Its short message guides the customer to the
+ * address dropdown, which always fills a full, shippable address.
  */
 function addressValidationError(address: string): string | null {
-  const error = validateShippingAddress(address);
-  if (!error) return null;
-  const hint = isMapboxAutofillActive()
-    ? ' Tip: pick a complete address from the autofill suggestions as you type — partial addresses can\'t be shipped to.'
-    : '';
-  return error + hint;
+  return validateShippingAddress(address);
 }
 
 function getProductPriceCategory(product: any, size: string) {
@@ -1070,7 +1065,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
             <span style={{ width: 7, height: 7, borderRadius: 999, background: mapboxHint === 'autofill-on' ? '#22c55e' : mapboxHint === 'autofill-off' ? '#f59e0b' : '#ef4444', boxShadow: `0 0 0 2px ${mapboxHint === 'autofill-on' ? 'rgba(34,197,94,0.16)' : mapboxHint === 'autofill-off' ? 'rgba(245,158,11,0.16)' : 'rgba(239,68,68,0.16)'}` }} />
             {mapboxHint === 'autofill-on'
-              ? 'Address autofill on — pick a suggestion to fill the full address'
+              ? 'Use address dropdown'
               : mapboxHint === 'autofill-off'
                 ? 'Address autofill off — enter your full address manually'
                 : mapboxHint === 'no-token'

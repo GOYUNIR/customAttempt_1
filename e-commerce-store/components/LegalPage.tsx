@@ -60,7 +60,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
         fontSize: 14,
       }}
     >
-      <Link href="/" style={backLinkStyle}>
+      <Link href="/" prefetch={false} style={backLinkStyle}>
         ← Back to store
       </Link>
       <h1 style={{ fontSize: 28, margin: '24px 0 8px' }}>{titles[page]}</h1>

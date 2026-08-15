@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus, isMapboxAutofillActive } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
 
@@ -21,16 +21,11 @@ type CartItem = {
 /**
  * Address quality gate for checkout. The validator requires a COMPLETE
  * shippable address (street # + name, city, state, ZIP, country) — see
- * lib/address-validation.ts. Mapbox autofill suggestions fill the whole
- * address, so when autofill is live we add a hint to pick a suggestion.
+ * lib/address-validation.ts. Its short message guides the customer to the
+ * address dropdown, which always fills a full, shippable address.
  */
 function addressValidationError(address: string): string | null {
-  const error = validateShippingAddress(address);
-  if (!error) return null;
-  const hint = isMapboxAutofillActive()
-    ? ' Tip: pick a complete address from the autofill suggestions as you type — partial addresses can\'t be shipped to.'
-    : '';
-  return error + hint;
+  return validateShippingAddress(address);
 }
 
 const CART_KEY = 'goyunir-cart';
@@ -842,6 +837,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
           <Link
             href="/catalog"
+            prefetch={false}
             aria-label="Catalog & search"
             title="Catalog & search"
             style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${headerText === '#0a0a0c' ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
@@ -853,6 +849,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
         <Link
           href="/"
+          prefetch={false}
           style={{
             position: 'absolute',
             left: '50%',
@@ -882,6 +879,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: 1 }}>
           <Link
             href="/account"
+            prefetch={false}
             aria-label={signedIn ? 'Your account (signed in)' : 'Account'}
             title={signedIn ? 'Your account (signed in)' : 'Account'}
             style={{
@@ -927,10 +925,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       <footer style={{ background: chromeBackground(liveTheme.primaryBackground, chromeAlpha, 'rgba(8,8,10,0.96)'), borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: liveTheme.textMuted || '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
-            <Link href="/terms" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Terms</Link>
-            <Link href="/privacy" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Privacy</Link>
-            <Link href="/shipping" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Shipping</Link>
-            <Link href="/account" style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
+            <Link href="/terms" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Terms</Link>
+            <Link href="/privacy" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Privacy</Link>
+            <Link href="/shipping" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Shipping</Link>
+            <Link href="/account" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
             {(() => {
@@ -1039,7 +1037,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
                       <span style={{ width: 6, height: 6, borderRadius: 999, background: mapboxHint === 'autofill-on' ? '#22c55e' : mapboxHint === 'autofill-off' ? '#f59e0b' : '#ef4444' }} />
                       {mapboxHint === 'autofill-on'
-                        ? 'Address autofill on'
+                        ? 'Use address dropdown'
                         : mapboxHint === 'autofill-off'
                           ? 'Address autofill off — enter manually'
                           : mapboxHint === 'no-token'

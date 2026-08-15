@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
         </form>
         {message && <p style={{ marginTop: 12, fontSize: 12, color: message.includes('Unable') ? '#f87171' : '#34d399' }}>{message}</p>}
         <p style={{ marginTop: 14, fontSize: 12, color: configPalette.cardTextMuted }}>
-          Back to <Link href="/auth/login" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>login</Link>
+          Back to <Link href="/auth/login" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>login</Link>
         </p>
       </div>
     </main>

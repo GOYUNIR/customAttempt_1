@@ -164,9 +164,10 @@ Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
 
 Every entry, cart checkout, waitlist and address update requires a **complete,
 shippable address** (street number + street name, city, state/region, ZIP/postal
-code and country). Garbage like `123 realstreet` is rejected with a clear
-message. Mapbox Address Autofill is the fast path: picking a suggestion fills
-the whole address. See `lib/address-validation.ts`.
+code and country). Partial input like `123 realstreet` is rejected with one
+short, friendly message that points the customer to the address dropdown —
+Mapbox Address Autofill is the fast path and always fills the whole address.
+See `lib/address-validation.ts`.
 
 ### Admin extras
 

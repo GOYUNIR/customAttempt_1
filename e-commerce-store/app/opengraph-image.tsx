@@ -1,6 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { getSiteUrl } from '@/lib/env';
+import { getRequestSiteUrl } from '@/lib/request-url';
 
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
@@ -31,8 +32,18 @@ export default async function OpenGraphImage() {
   );
   const text = String(branding.shareText || themeColors.textMain || '#F5F2E9');
   // The URL shown on the card is NEVER hardcoded — derive it from the platform
-  // env (NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL / SITE_URL) or the admin shareUrl.
-  const siteUrl = String(getSiteUrl() || branding.shareUrl || '').replace(/^https?:\/\//, '').replace(/\/+$/, '') || 'example.com';
+  // env (NEXT_PUBLIC_URL / NEXT_PUBLIC_SITE_URL / SITE_URL), then the current
+  // request's host (so the card always shows the real deployed domain), then
+  // the admin shareUrl.
+  const siteUrl =
+    String(
+      getSiteUrl() ||
+        (await getRequestSiteUrl()) ||
+        branding.shareUrl ||
+        '',
+    )
+      .replace(/^https?:\/\//, '')
+      .replace(/\/+$/, '') || 'example.com';
 
   return new ImageResponse(
     (

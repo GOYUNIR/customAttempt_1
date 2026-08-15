@@ -41,6 +41,7 @@ export default function NotFoundView() {
         </p>
         <Link
           href="/catalog"
+          prefetch={false}
           style={{
             padding: '12px 28px',
             borderRadius: '30px',

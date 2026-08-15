@@ -85,13 +85,13 @@ export default function LoginPage() {
             Encrypted credential handoff
           </div>
           <div style={{ textAlign: 'right', marginTop: -6 }}>
-            <Link href="/auth/forgot-password" style={{ color: configPalette.accentBlue, textDecoration: 'none', fontSize: 12 }}>Forgot password?</Link>
+            <Link href="/auth/forgot-password" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'none', fontSize: 12 }}>Forgot password?</Link>
           </div>
           {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
           <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 10, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Logging in…' : 'Log In'}</button>
         </form>
         <p style={{ marginTop: 16, fontSize: 13, color: configPalette.cardTextMuted, textAlign: 'center' }}>
-          Don&apos;t have an account? <Link href="/auth/signup" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Sign up</Link>
+          Don&apos;t have an account? <Link href="/auth/signup" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Sign up</Link>
         </p>
       </div>
     </main>

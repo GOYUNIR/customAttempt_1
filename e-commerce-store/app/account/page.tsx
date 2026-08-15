@@ -548,6 +548,7 @@ export default function AccountPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <Link
             href="/"
+            prefetch={false}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -627,8 +628,8 @@ export default function AccountPage() {
               Account login is required to prevent address and entry access by guessing card digits. Entries are linked to your email — sign in to see them.
             </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Link href="/auth/login" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.checkoutCtaButton || '#635bff', color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
-              <Link href="/auth/signup" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
+              <Link href="/auth/login" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.checkoutCtaButton || '#635bff', color: '#fff', textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Log in</Link>
+              <Link href="/auth/signup" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textDecoration: 'none', fontSize: 12, fontWeight: 700 }}>Create account</Link>
             </div>
           </div>
         )}

@@ -1848,7 +1848,7 @@ export default function AdminPortal() {
             <button onClick={refreshAll} disabled={isRefreshing} style={{ ...buttonGhost, padding: '6px 12px' }}>
               {isRefreshing ? '⟳' : '🔄 Refresh'}
             </button>
-            <Link href="/" style={{ color: '#888', fontSize: 12, textDecoration: 'none', padding: '6px 0' }}>← Store</Link>
+            <Link href="/" prefetch={false} style={{ color: '#888', fontSize: 12, textDecoration: 'none', padding: '6px 0' }}>← Store</Link>
           </div>
         </div>
 

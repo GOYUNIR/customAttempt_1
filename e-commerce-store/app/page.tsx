@@ -154,12 +154,12 @@ export default function HomePage() {
               </button>
             ) : (
               activeProducts.length > 0 && (
-                <Link href="/catalog" style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                <Link href="/catalog" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
                   Browse catalog
                 </Link>
               )
             )}
-            <Link href="/story" style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardTextMain === '#0a0a0c' ? 'rgba(10,10,12,0.25)' : 'rgba(255,255,255,0.22)'}`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+            <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardTextMain === '#0a0a0c' ? 'rgba(10,10,12,0.25)' : 'rgba(255,255,255,0.22)'}`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
               {heroContent.storyHeadline || 'Our Story'}
             </Link>
             <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
@@ -177,7 +177,7 @@ export default function HomePage() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {activeProducts.map((product: any, index: number) => (
-                <Link key={product.id} href={`/${product.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div style={{ borderRadius: 22, overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217'), boxShadow: '0 16px 48px rgba(0,0,0,0.22)', marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
                     <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
                     <div style={{ padding: 14 }}>
@@ -222,7 +222,7 @@ export default function HomePage() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {soldOutProducts.map((product: any) => (
-                <Link key={product.id} href={`/${product.slug}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div style={{ padding: '12px 14px', borderRadius: 16, background: 'rgba(255,255,255,0.04)', border: `1px solid ${configPalette.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: configPalette.cardTextMain }}>{product.name}</div>
@@ -249,9 +249,9 @@ export default function HomePage() {
               </div>
             </div>
             {authUser ? (
-              <Link href="/account" style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.accentBlue, color: '#04101f', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>My account</Link>
+              <Link href="/account" prefetch={false} style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.accentBlue, color: '#04101f', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>My account</Link>
             ) : (
-              <Link href="/auth/signup" style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
+              <Link href="/auth/signup" prefetch={false} style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
             )}
           </div>
         </section>
