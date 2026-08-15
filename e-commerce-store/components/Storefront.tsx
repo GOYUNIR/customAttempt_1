@@ -8,6 +8,7 @@ import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { notifyDropDue } from '@/lib/client-auto-draw';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -727,10 +728,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setCountdownLabel('');
       return;
     }
+    let notified = false;
     const update = () => {
       const diff = raffleEndsAt - Date.now();
       if (diff <= 0) {
         setCountdownLabel('Raffle closed');
+        // The timer hit zero — tell the server to run the draw RIGHT NOW. The
+        // server is idempotent (due-check + 90s per-pool cooldown), so this
+        // fire-and-forget ping can never double-charge even if several tabs /
+        // visitors hit zero at the same second.
+        if (!notified) {
+          notified = true;
+          notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
+        }
         return;
       }
       const total = Math.floor(diff / 1000);
@@ -744,7 +754,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     update();
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
-  }, [raffleEndsAt]);
+  }, [raffleEndsAt, product]);
 
   const handleRaffleSubmit = async () => {
     if (!email || !selectedSize) {

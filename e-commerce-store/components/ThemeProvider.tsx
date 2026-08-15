@@ -21,6 +21,8 @@ export interface LiveThemeValue {
   footer?: Record<string, string>;
   /** Legal & policy content for the /terms, /privacy and /shipping pages. */
   legal?: Record<string, string>;
+  /** Catalog presentation settings (section order on /catalog). */
+  catalog?: { sectionOrder?: string[] };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

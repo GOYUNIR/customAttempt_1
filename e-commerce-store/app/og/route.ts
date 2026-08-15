@@ -83,7 +83,14 @@ export async function GET() {
         text,
         siteUrl,
       }),
-      { ...size },
+      {
+        ...size,
+        // Crawlers/messengers + CDNs must revalidate the PNG — the `?v=`
+        // cache-buster on the og:image URL changes when branding changes, but
+        // this header stops an intermediary from serving a STALE card PNG that
+        // predates a branding save.
+        headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
+      },
     );
   } catch (err) {
     // Never 500: fall back to a minimal branded card so previews always render.
@@ -106,7 +113,10 @@ export async function GET() {
           },
           createElement('div', { style: { fontSize: 64, fontWeight: 800, letterSpacing: 6 } }, 'STORE'),
         ),
-        { ...size },
+        {
+          ...size,
+          headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
+        },
       );
     } catch {
       return new Response('OG image generation failed', { status: 500 });

@@ -273,6 +273,32 @@ message that tells the customer to select the full address from the dropdown —
 picking a suggestion always fills a complete, shippable address, and partial
 input like `123 realstreet` can never be saved.
 
+### Auto-draw / drops (fires when the timer hits zero)
+
+- **One engine, three triggers.** `lib/auto-draw.ts` → `runAutoDraws()` is the ONLY
+  draw implementation. It reads products from Redis (`store:products` — NEVER the
+  static `goyunir.config.ts` catalog, which is why drops used to silently never
+  fire for admin-created products), decides per-pool due-ness from the product's
+  own timings, and charges winners with the same logic the old cron used.
+- **Due-ness rules** (`shouldRunPoolDraw`): force → draw; product `isArchived` →
+  final draw; product `releaseEndsAt` passed → draw (the "timer hit zero" case);
+  otherwise fall back to the global drop-schedule cadence. Upcoming products whose
+  `goLiveAt` passed are auto-activated (the Redis record is flipped to live) so
+  the raffle timer starts counting to `releaseEndsAt`.
+- **Triggers:** (1) the client countdown pings `/api/checkout/auto-draw`
+  (`lib/client-auto-draw.ts` → `notifyDropDue()`) from the product page, catalog
+  and home page the second a countdown hits zero — a drop happens immediately with
+  NO cron; (2) the Vercel cron (`vercel.json`: `*/5 * * * *` →
+  `/api/checkout/cron-draw`, auth via `x-vercel-cron` / `Authorization: Bearer
+  $CRON_SECRET`) is the server-side safety net; (3) the admin → Draws → Trigger
+  Drop path (unchanged).
+- **Anti-double-draw:** the runner checks `entries:last_auto:<product>:<size>`
+  and skips a pool drawn within the last 90s unless the caller forced it (cron).
+  `dryRun=1` simulates the draw without charging/archiving (used by the admin
+  self-test and support).
+- **Admin-created product lifecycle** is now persisted: go-live flips are written
+  to `store:products`, and sold-out pools are archived to `ops:catalog_archive`.
+
 ### Promo codes
 
 - Codes stored in `promo:codes` (hash). Customer discount %, promoter payout
@@ -387,6 +413,18 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — DROP-ON-TIMER-ZERO FIX (critical) + email URL / share card / catalog ordering / tap feedback final pass:**
+  - **💥 Auto-draw now actually fires.** Root cause of "when the timer hit 0, no drop happened": the cron routes (`/api/cron/auto-draw`, `/api/checkout/cron-draw`) iterated the STATIC `GOYUNIR_STORE_SUITE.productCatalog` to resolve pool products, so products created in the admin portal (which live ONLY in `store:products`) never drew — and `vercel.json` had NO cron configured at all. Verified against the live store: product "Elysian White — Launch Draw" ended 04:45 with an entry in its pool and zero draws.
+  - **New shared draw engine `lib/auto-draw.ts`** — `runAutoDraws()` reads products from Redis (never static config), decides per-pool due-ness from the PRODUCT's own `releaseEndsAt` (passed → draw), `isArchived` (final draw), or the global schedule cadence, auto-activates upcoming products whose `goLiveAt` passed (persists the Redis flip), and runs the same winner-charging logic the old cron used. All three triggers now call it: `/api/cron/auto-draw`, `/api/checkout/cron-draw` (rewritten to thin wrappers; auth unchanged), and the NEW **`/api/checkout/auto-draw`** (public, client-triggered, supports `productId`/`productName`/`slug` filters + `dryRun=1` that simulates without charging/archiving).
+  - **Client-side "timer hit zero" triggers** (`lib/client-auto-draw.ts` → `notifyDropDue()`): the product-page raffle countdown (`components/Storefront.tsx`), the catalog tiles (`app/catalog/page.tsx`) and the home-page drop countdowns (`app/page.tsx`) ping the auto-draw endpoint the second a countdown hits zero — the drop happens immediately, no cron needed. The server dedupes (per-pool `entries:last_auto` + 90s cooldown) so a stampede of visitors can't double-draw.
+  - **`vercel.json` cron re-added** — `*/5 * * * *` → `/api/checkout/cron-draw` as the server-side safety net (Vercel auto-attaches `Authorization: Bearer $CRON_SECRET` + `x-vercel-cron: 1`). Without SOME trigger the draws never ran; the client trigger + cron now guarantee a drop.
+  - **Email "Create account to redeem" link fixed** — it rendered `https:///auth/signup` (broken) because a malformed site URL (`https:` / `https://`) survived `getSiteUrl()`. New `lib/url-utils.ts` → `normalizeSiteBase()` validates scheme+host and falls back safely; `lib/env.ts` `getSiteUrl()` now returns '' for scheme-only/domain-only values; `siteUrlFromRequest` in `/api/checkout/confirm-setup` uses the real request host instead of a stock `https://example.com` fallback. Tests added.
+  - **Share card cache-buster fixed for real messengers.** `/og` returns 200/`image/png` (verified locally). The remaining real-world failure was messenger caching: WhatsApp/iMessage cache previews by URL for days, and the `?v=` hash only changed when branding changed. `app/layout.tsx` now folds a `CARD_REVISION` constant into the hash (bump it on any card-code change) so this deploy forces a re-fetch, and `app/og/route.ts` sends `Cache-Control: public, max-age=0, must-revalidate`. Metadata `base` is now built through `normalizeSiteBase` so a bare-domain admin `shareUrl` can never produce a relative `og:image`/broken `metadataBase`.
+  - **Catalog category ordering is admin-configurable.** Default: **Currently Available at the BOTTOM** (`['upcoming','archive','live']`). New `store:config.catalog.sectionOrder` (Settings → **Catalog (section order on /catalog)** with up/down controls) flows through `/api/store` config, `/api/catalog/status` (`sectionOrder` field) and `useLiveTheme()`. `app/catalog/page.tsx` renders sections in that order.
+  - **Catalog consistency:** `/api/catalog/status` now enriches static `catalogPreview` upcoming/archive entries with the REAL product's `checkoutMode`/`isRaffle`/`slug`/`goLiveAt` (matched by slug or name), so Raffle/FCFS tags and countdowns show consistently on configured cards — and product-derived lifecycle reconciliation keeps items from appearing in both Upcoming and Currently Available.
+  - **Tap feedback:** links styled as buttons (catalog "View what's active", home "Create account", product pills) now get the same instant press-down animation as `<button>` (`app/globals.css`), so a tap on a slow connection is never visually unanswered.
+  - Docs: this changelog + README updated; no NEW Redis keys were added (all keys already documented). Verified: `tsc --noEmit` clean, `eslint` clean, `npm test` 18/18 pass, `npm run build` compiles all routes; auto-draw dry-run validated against live Redis (ended pool detected + winner simulated, zero writes).
 
 - **2026-08-15 — Unified border-radius system (one admin setting drives ALL pages) + /story uniformity:**
   - **New shared radius helpers** `themeRadius()` / `themeRadiusNumber()` in `lib/storefront-config.ts`

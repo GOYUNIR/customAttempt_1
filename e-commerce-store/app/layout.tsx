@@ -8,6 +8,18 @@ import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { getSiteUrl, neutralBrandName } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
 import { revisionHash } from '@/lib/share-card-config';
+import { normalizeSiteBase } from '@/lib/url-utils';
+
+/**
+ * Bump this constant ANY time the share-card code changes (markup, colors,
+ * image handling). It is folded into the og:image `?v=` cache-buster, so a
+ * deployed fix changes the preview URL even when the buyer hasn't re-saved
+ * branding — forcing WhatsApp / iMessage / Discord (which cache previews by
+ * URL for days) to re-fetch the NEW card instead of forever serving the old
+ * broken one. This is exactly why "the share card still doesn't work after the
+ * last fix" happens: the branding hash never changed, so the URL never changed.
+ */
+const CARD_REVISION = 2;
 
 // Render the page shell per-request so the live /admin → Settings theme
 // (colors/font/branding) is baked into the server HTML. Without this, the
@@ -35,6 +47,7 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
     gallery: config.gallery || {},
     footer: config.brandFooterData || {},
     legal: config.legal || {},
+    catalog: config.catalog || {},
   };
   return liveValue;
 }
@@ -56,14 +69,19 @@ export async function generateMetadata(): Promise<Metadata> {
   const envSiteUrl = getSiteUrl();
   const requestSiteUrl = await getRequestSiteUrl();
   const adminShareUrl = String(branding.shareUrl || '').trim().replace(/\/+$/, '');
-  const base = envSiteUrl || requestSiteUrl || adminShareUrl || 'https://example.com';
+  // ALWAYS an absolute https/http base. normalizeSiteBase rejects bare domains
+  // (it promotes them to https) and falls back through env → example.com, so
+  // metadataBase can never be a relative/broken URL (which 500s the page and
+  // kills EVERY link preview).
+  const base = normalizeSiteBase(envSiteUrl || requestSiteUrl || adminShareUrl || '');
   const canonicalUrl = adminShareUrl && /^https?:\/\//i.test(adminShareUrl) ? adminShareUrl : base;
   // The share card is served by the /og route handler. The `?v=` cache-buster
-  // is derived from the CURRENT branding/theme, so when the buyer edits
-  // Branding → Share the og:image URL CHANGES — forcing WhatsApp/iMessage/
-  // Discord (which cache previews by URL for days) to re-fetch the fresh card
-  // instead of forever showing a stale one.
-  const ogImageUrl = `${base.replace(/\/+$/, '')}/og?v=${revisionHash({ branding, themeColors: config.themeColors || {} })}`;
+  // is derived from the CURRENT branding/theme PLUS the CARD_REVISION code
+  // constant, so when the buyer edits Branding → Share — OR we ship a card-code
+  // fix — the og:image URL CHANGES, forcing WhatsApp/iMessage/Discord (which
+  // cache previews by URL for days) to re-fetch the fresh card instead of
+  // forever showing a stale/broken one.
+  const ogImageUrl = `${base}/og?v=${revisionHash({ branding, themeColors: config.themeColors || {}, cardRevision: CARD_REVISION })}`;
 
   return {
     metadataBase: new URL(base),

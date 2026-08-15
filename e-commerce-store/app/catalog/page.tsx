@@ -1,11 +1,12 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, themeRadiusNumber } from '@/lib/storefront-config';
 
@@ -37,6 +38,17 @@ interface ActiveDrop {
   isRaffle?: boolean;
 }
 
+/** Valid /catalog section ids + sanitizer (module-scope so hooks deps stay stable).
+ * The append-order doubles as the fallback default: Upcoming → Past Archives →
+ * Currently Available (live at the BOTTOM). */
+const VALID_SECTIONS = ['upcoming', 'archive', 'live'] as const;
+function sanitizeSectionOrder(arr: unknown): string[] {
+  const list = Array.isArray(arr) ? arr.map(String) : [];
+  const valid = list.filter((s) => (VALID_SECTIONS as readonly string[]).includes(s));
+  for (const s of VALID_SECTIONS) if (!valid.includes(s)) valid.push(s);
+  return valid;
+}
+
 export default function CatalogPage() {
   // Live theme palette — initialized from the server-baked /admin → Settings
   // theme (no flash) and upgraded to whatever /api/store serves so design
@@ -56,6 +68,11 @@ export default function CatalogPage() {
   // cards can show real entry state, drop type, and sold-out dates.
   const [liveProducts, setLiveProducts] = useState<any[]>([]);
   const router = useRouter();
+  // Catalog section order — admin-configurable from /admin → Settings → Catalog.
+  // Default: live ("Currently Available") at the BOTTOM.
+  const [catalogOrder, setCatalogOrder] = useState<string[]>(() =>
+    sanitizeSectionOrder(liveCtx?.catalog?.sectionOrder),
+  );
   // Navigation feedback: the catalog stays mounted while Next fetches the
   // product page's RSC payload, so on a slow connection a tile tap could
   // otherwise look unhandled. This overlay announces the tap instantly.
@@ -79,19 +96,9 @@ export default function CatalogPage() {
     return () => window.clearInterval(timer);
   }, [needsClock]);
 
-  const formatCountdown = (value?: string) => {
-    const target = value ? new Date(value).getTime() : NaN;
-    if (!Number.isFinite(target)) return null;
-    const diff = target - clock;
-    if (diff <= 0) return 'Live now';
-    const total = Math.floor(diff / 1000);
-    const days = Math.floor(total / 86400);
-    const hours = Math.floor((total % 86400) / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-  };
-
+  // When any tile's countdown reaches zero, tell the server to run the drop
+  // NOW (go-live activation for upcoming items, draw for ended raffles). Fires
+  // once per tile per page session — the server dedupes across visitors.
   const loadCatalog = useCallback(async () => {
     setIsLoading(true);
     setStatusError('');
@@ -109,6 +116,9 @@ export default function CatalogPage() {
       if (Array.isArray(data.archiveScents)) {
         setArchiveScents(data.archiveScents);
       }
+      if (Array.isArray(data.sectionOrder)) {
+        setCatalogOrder(sanitizeSectionOrder(data.sectionOrder));
+      }
     } catch {
       setActiveDrops([]);
       setUpcomingDrops([]);
@@ -118,6 +128,37 @@ export default function CatalogPage() {
       setIsLoading(false);
     }
   }, []);
+  const dropNotifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!clock) return;
+    const consider = (item: CatalogItem | ActiveDrop) => {
+      const slug = String(item.slug || item.name || '');
+      if (dropNotifiedRef.current.has(slug)) return;
+      const target = String((item as CatalogItem).goLiveAt || (item as CatalogItem).availableFrom || '');
+      const ms = target ? new Date(target).getTime() : NaN;
+      if (Number.isFinite(ms) && ms <= clock) {
+        dropNotifiedRef.current.add(slug);
+        notifyDropDue({ slug });
+        // Refresh so the item moves sections immediately (e.g. an upcoming
+        // product whose go-live passed becomes a live drop on screen).
+        loadCatalog();
+      }
+    };
+    [...activeDrops, ...upcomingDrops, ...archiveScents].forEach(consider);
+  }, [clock, activeDrops, upcomingDrops, archiveScents, loadCatalog]);
+
+  const formatCountdown = (value?: string) => {
+    const target = value ? new Date(value).getTime() : NaN;
+    if (!Number.isFinite(target)) return null;
+    const diff = target - clock;
+    if (diff <= 0) return 'Live now';
+    const total = Math.floor(diff / 1000);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  };
 
   useEffect(() => {
     loadCatalog();
@@ -126,6 +167,9 @@ export default function CatalogPage() {
     fetchStoreJson('/api/store').then((data) => {
       if (data?.config?.themeColors) {
         setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
+      }
+      if (data?.config?.catalog?.sectionOrder) {
+        setCatalogOrder(sanitizeSectionOrder(data.config.catalog.sectionOrder));
       }
       if (Array.isArray(data?.allProducts)) {
         setLiveProducts(data.allProducts);
@@ -383,73 +427,87 @@ export default function CatalogPage() {
           </div>
         )}
 
-        {filteredActiveDrops.length > 0 && (
-          <>
-            <h2
-              style={{
-                fontSize: '13px',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                color: configPalette.textMain,
-                margin: '0 0 12px 0',
-              }}
-            >
-              Currently Available
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredActiveDrops.map((drop) => (
-                <Link
-                  key={drop.id}
-                  href={drop.slug ? `/${drop.slug}` : '/'}
-                  prefetch={false}
-                  style={{ textDecoration: 'none', color: 'inherit' }}
+        {catalogOrder.map((section, sectionIndex) => {
+          const topMargin = sectionIndex === 0 ? '0 0 12px 0' : '32px 0 12px 0';
+          if (section === 'live') {
+            if (filteredActiveDrops.length === 0) return null;
+            return (
+              <div key="live">
+                <h2
+                  style={{
+                    fontSize: '13px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px',
+                    color: configPalette.textMain,
+                    margin: topMargin,
+                  }}
                 >
-                  <div
-                    style={{
-                      background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
-                      border: `1px solid ${configPalette.cardBorder}`,
-                      borderRadius: themeRadius(configPalette, 14),
-                      padding: '14px 16px',
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
-                    <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
-                    <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
-                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
-                      {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  Currently Available
+                </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {filteredActiveDrops.map((drop) => (
+                    <Link
+                      key={drop.id}
+                      href={drop.slug ? `/${drop.slug}` : '/'}
+                      prefetch={false}
+                      style={{ textDecoration: 'none', color: 'inherit' }}
+                    >
+                      <div
+                        style={{
+                          background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
+                          border: `1px solid ${configPalette.cardBorder}`,
+                          borderRadius: themeRadius(configPalette, 14),
+                          padding: '14px 16px',
+                        }}
+                      >
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
+                        <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
+                        <div style={{ fontSize: '10px', color: drop.soldOut ? '#fbbf24' : '#d6c29c', marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
+                          {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (section === 'upcoming') {
+            return (
+              <div key="upcoming">
+                <h2
+                  style={{
+                    fontSize: '13px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px',
+                    color: configPalette.accentBlue,
+                    margin: topMargin,
+                  }}
+                >
+                  Upcoming Releases
+                </h2>
+                {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'), 'upcoming')}
+              </div>
+            );
+          }
+          return (
+            <div key="archive">
+              <h2
+                style={{
+                  fontSize: '13px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  color: configPalette.accentPurple,
+                  margin: topMargin,
+                }}
+              >
+                Past Archives
+              </h2>
+              {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
             </div>
-          </>
-        )}
-
-        <h2
-          style={{
-            fontSize: '13px',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            color: configPalette.accentBlue,
-            margin: '32px 0 12px 0',
-          }}
-        >
-          Upcoming Releases
-        </h2>
-        {renderGrid(filteredUpcomingDrops, isLoading ? 'Loading…' : (normalizedQuery ? 'No releases matched your search.' : 'No upcoming releases announced yet.'), 'upcoming')}
-
-        <h2
-          style={{
-            fontSize: '13px',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            color: configPalette.accentPurple,
-            margin: '32px 0 12px 0',
-          }}
-        >
-          Past Archives
-        </h2>
-        {renderGrid(filteredArchiveScents, isLoading ? 'Loading…' : (normalizedQuery ? 'No archives matched your search.' : 'No archived items yet.'), 'archive')}
+          );
+        })}
 
         {filteredActiveDrops.length === 0 && filteredUpcomingDrops.length === 0 && filteredArchiveScents.length === 0 && !isLoading && !statusError && (
           <div style={{ marginTop: 24 }}>

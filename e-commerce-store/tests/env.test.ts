@@ -40,3 +40,20 @@ test('brand + support helpers respect aliases and neutral fallbacks', () => {
     process.env = { ...original };
   }
 });
+
+test('getSiteUrl rejects malformed values that would build https:/// links', () => {
+  const original = { ...process.env };
+  try {
+    for (const broken of ['https://', 'https:', 'http:', 'a image url', 'goyunir.com', 'not a url']) {
+      process.env.NEXT_PUBLIC_URL = broken;
+      process.env.NEXT_PUBLIC_SITE_URL = '';
+      delete process.env.SITE_URL;
+      assert.equal(getSiteUrl(), '', `getSiteUrl(${JSON.stringify(broken)}) must be empty`);
+    }
+    // Valid scheme + host is kept (path/port preserved, trailing slash removed).
+    process.env.NEXT_PUBLIC_URL = 'https://store.example.com/path/';
+    assert.equal(getSiteUrl(), 'https://store.example.com');
+  } finally {
+    process.env = { ...original };
+  }
+});

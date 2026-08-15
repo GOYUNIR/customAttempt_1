@@ -24,9 +24,20 @@ function readEnv(...names: string[]): string {
   return '';
 }
 
-/** Canonical public site URL (no trailing slash). Empty when unset. */
+/** Canonical public site URL (no trailing slash). Empty when unset OR when the
+ * configured value is malformed (e.g. a bare `https:` / `https://` from a
+ * partial env paste) so callers never build broken links like `https:///…`. */
 export function getSiteUrl(): string {
-  return readEnv('NEXT_PUBLIC_URL', 'NEXT_PUBLIC_SITE_URL', 'SITE_URL').replace(/\/+$/, '');
+  const raw = readEnv('NEXT_PUBLIC_URL', 'NEXT_PUBLIC_SITE_URL', 'SITE_URL').replace(/\/+$/, '');
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) return '';
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.host) return '';
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return '';
+  }
 }
 
 /** Brand name used in emails/metadata. Empty when unset — callers decide the neutral fallback. */

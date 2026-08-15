@@ -67,7 +67,10 @@ In `/admin` → **Settings**:
    (use `## ` for headings, `- ` for bullets, and `{companyName}` /
    `{supportEmail}` tokens). The `/terms`, `/privacy` and `/shipping` pages
    render from this — no code changes needed when your policies change.
-5. **Save All Settings.**
+5. **Catalog (section order on /catalog)** — choose whether `/catalog` shows
+   Upcoming → Past Archives → **Currently Available** (the default, with live at
+   the bottom) or any other order.
+6. **Save All Settings.**
 
 That's it — the whole site now reflects your brand.
 
@@ -102,12 +105,19 @@ Everything happens in `/admin`:
 1. A customer enters with email + shipping address and saves a card via Stripe
    (no charge yet).
 2. One entry per email per product+size is enforced automatically (server-side).
-3. At the scheduled time — or when you click **Trigger Draw** — winners are
-   picked randomly up to the configured winner tiers / inventory and their
-   saved cards are charged.
+3. **When a product's countdown hits zero, the drop fires automatically** — the
+   storefront pings `/api/checkout/auto-draw` the instant the timer ends, and a
+   Vercel cron (`vercel.json`, every 5 minutes) is the server-side safety net.
+   The draw engine reads each product from Redis (never the static config), so
+   admin-created products draw too. Winners are picked randomly up to the
+   configured winner tiers / inventory and their saved cards are charged.
 4. Non-winners and unfinished checkouts are never deleted — everything is
    logged in the searchable ledger in `/admin`.
 5. After a draw, the pool resets so customers can enter the next cycle.
+
+> Set `CRON_SECRET` in Vercel so the scheduled safety-net cron
+> (`/api/checkout/cron-draw`) is authorized. The client-side countdown trigger
+> works with or without it.
 
 Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
 

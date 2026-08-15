@@ -112,6 +112,11 @@ export interface StoreConfig {
     upcomingDrops: any[];
     archiveScents: any[];
   };
+  /** Catalog presentation settings (section order on /catalog). */
+  catalog?: {
+    /** Order of the /catalog sections: 'live' | 'upcoming' | 'archive'. */
+    sectionOrder?: string[];
+  };
   orbs: OrbsConfig;
   productCatalog: any[];
 }
@@ -196,6 +201,11 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     upcomingDrops: [],
     archiveScents: [],
   },
+  // Default /catalog section order: live at the BOTTOM (per the template
+  // default) — operators can reorder from /admin → Settings → Catalog.
+  catalog: {
+    sectionOrder: ['upcoming', 'archive', 'live'],
+  },
   orbs: {
     enabled: true,
     primary: { enabled: true, color: '#3b82f6', opacity: 16, size: 58 },
@@ -240,6 +250,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
       socialProof: { ...DEFAULT_CONFIG.socialProof, ...config.socialProof },
       brandFooterData: { ...DEFAULT_CONFIG.brandFooterData, ...config.brandFooterData },
       catalogPreview: { ...DEFAULT_CONFIG.catalogPreview, ...config.catalogPreview },
+      catalog: { ...DEFAULT_CONFIG.catalog, ...config.catalog },
       orbs: mergeOrbsConfig(config.orbs),
     } as StoreConfig;
   } catch {

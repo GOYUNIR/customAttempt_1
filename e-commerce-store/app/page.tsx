@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { neutralBrandName } from '@/lib/env';
@@ -56,6 +57,22 @@ export default function HomePage() {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [needsCountdown]);
+
+  // When a live product's raffle/entry timer hits zero on the home page, ping
+  // the server to run the drop immediately (idempotent server-side).
+  const dropNotifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!nowTick) return;
+    for (const product of activeProducts) {
+      const id = String(product?.id || '');
+      if (!id || dropNotifiedRef.current.has(id)) continue;
+      const endMs = product.releaseEndsAt ? new Date(product.releaseEndsAt).getTime() : NaN;
+      if (Number.isFinite(endMs) && endMs <= nowTick) {
+        dropNotifiedRef.current.add(id);
+        notifyDropDue({ productId: id, productName: String(product?.name || ''), slug: String(product?.slug || '') });
+      }
+    }
+  }, [nowTick, activeProducts]);
 
   useEffect(() => {
     async function checkProducts() {

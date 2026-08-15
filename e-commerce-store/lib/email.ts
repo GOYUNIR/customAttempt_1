@@ -1,6 +1,9 @@
 import { Resend } from 'resend';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { normalizeSiteBase } from '@/lib/url-utils';
+
+export { normalizeSiteBase };
 
 function getResend() {
   const key = process.env.RESEND_API_KEY;
@@ -95,7 +98,7 @@ export async function sendEntryConfirmedEmail(opts: {
 
   const orderRef = formatOrderRef(opts.orderRef || '') || buildOrderRef(opts.to, opts.product, opts.size);
 
-  const siteBase = (opts.siteUrl || '').replace(/\/+$/, '') || getSiteUrl() || fallbackSiteUrl();
+  const siteBase = normalizeSiteBase(opts.siteUrl);
   const purchasePointsPerDollar = Math.max(0, Number(opts.purchasePointsPerDollar) || 10);
   const expectedPoints =
     typeof opts.listPrice === 'number' && opts.listPrice > 0
@@ -530,7 +533,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
-  const siteBase = getSiteUrl() || fallbackSiteUrl();
+  const siteBase = normalizeSiteBase(undefined);
   const eligibleProducts = Array.isArray(opts.eligibleProductSlugs) ? opts.eligibleProductSlugs.join(', ') : '';
   const eligibleSizes = Array.isArray(opts.eligibleSizes) ? opts.eligibleSizes.join(', ') : '';
   try {
@@ -550,7 +553,7 @@ export async function sendDeliveryIncentiveEmail(opts: {
           ${eligibleProducts ? `<p style="margin:0 0 8px">Eligible release(s): <strong>${eligibleProducts}</strong></p>` : ''}
           ${eligibleSizes ? `<p style="margin:0 0 14px">Eligible size(s): <strong>${eligibleSizes}</strong></p>` : ''}
           <p style="margin:0 0 14px;color:#4b5563">This code is linked to your email, limited to one use, and cannot be transferred or stacked.</p>
-          <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="${siteBase.replace(/\/$/, '')}/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
+          <p style="margin:0 0 14px;color:#4b5563">Create a free account to redeem this credit and track your orders: <a href="${siteBase}/auth/signup" style="color:#111;font-weight:600">Create account</a></p>
           <p style="margin:0;color:#666;font-size:13px">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
         </div>
       `,

@@ -20,19 +20,28 @@ import {
   ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
+import { normalizeSiteBase } from '@/lib/url-utils';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
-import { getSiteUrl } from '@/lib/env';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
 function siteUrlFromRequest(request: Request) {
   const env = getSiteUrl();
   if (env) return env;
+  // The request host is the most truthful base for confirmation emails sent in
+  // response to a customer action — never fall back to a stock example.com.
   try {
+    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    if (forwardedHost) {
+      const host = String(forwardedHost).split(',')[0].trim();
+      const proto = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+      return normalizeSiteBase(`${proto}://${host}`);
+    }
     const u = new URL(request.url);
-    return `${u.protocol}//${u.host}`;
+    return normalizeSiteBase(`${u.protocol}//${u.host}`);
   } catch {
-    return 'https://example.com';
+    return fallbackSiteUrl();
   }
 }
 

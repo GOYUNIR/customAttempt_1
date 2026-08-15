@@ -455,6 +455,14 @@ export default function AdminPortal() {
     priorityDropsTitle: '',
     priorityDropsSubtitle: '',
   });
+  // Catalog presentation — section order on /catalog. Default: live at the
+  // BOTTOM (upcoming → archives → currently available). Stored under
+  // store:config.catalog.sectionOrder.
+  const [catalogSettings, setCatalogSettings] = useState<{
+    sectionOrder: string[];
+  }>({
+    sectionOrder: ['upcoming', 'archive', 'live'],
+  });
   // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
   // so buyers never need code changes to update policies, company name, or the
   // support address. Stored under store:config.legal.
@@ -477,6 +485,7 @@ export default function AdminPortal() {
   const [settingsMsg, setSettingsMsg] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -624,6 +633,9 @@ export default function AdminPortal() {
         if (data.settings.gallery) setGallerySettings((prev) => ({ ...prev, ...data.settings.gallery }));
         if (data.settings.copy) setCopySettings((prev) => ({ ...prev, ...data.settings.copy }));
         if (data.settings.legal) setLegalSettings((prev) => ({ ...prev, ...data.settings.legal }));
+        if (data.settings.catalog && Array.isArray(data.settings.catalog.sectionOrder)) {
+          setCatalogSettings({ sectionOrder: data.settings.catalog.sectionOrder });
+        }
         if (data.settings.productNotes) setProductNotes(data.settings.productNotes);
         if (data.settings.orbs) setOrbSettings((prev: any) => mergeOrbSettings(prev || DEFAULT_ORBS, data.settings.orbs));
       }
@@ -1458,6 +1470,7 @@ export default function AdminPortal() {
           gallery: gallerySettings,
           copy: copySettings,
           legal: legalSettings,
+          catalog: catalogSettings,
           productNotes,
           orbs: orbSettings,
         }),
@@ -3343,6 +3356,58 @@ export default function AdminPortal() {
                         />
                       </label>
                     ))}
+                  </div>
+                </>
+              )}
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+                <button
+                  onClick={() => setCatalogOpen((v) => !v)}
+                  style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  {catalogOpen ? '▾' : '▸'} Catalog (section order on /catalog)
+                </button>
+              </h4>
+              {catalogOpen && (
+                <>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px', lineHeight: 1.5 }}>
+                    Choose the order the sections appear on the public /catalog page. Default keeps
+                    &quot;Currently Available&quot; at the bottom so upcoming + past releases lead. Use the
+                    up/down buttons to reorder, then Save All Settings.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {catalogSettings.sectionOrder.map((section, index) => {
+                      const label = section === 'live' ? 'Currently Available' : section === 'upcoming' ? 'Upcoming Releases' : 'Past Archives';
+                      return (
+                        <div key={section} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: '#15151b', border: '1px solid #26262e' }}>
+                          <span style={{ fontSize: 11, color: '#ddd', flex: 1, fontWeight: 700 }}>{index + 1}. {label}</span>
+                          <button
+                            onClick={() => setCatalogSettings((prev) => {
+                              if (index === 0) return prev;
+                              const next = [...prev.sectionOrder];
+                              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                              return { sectionOrder: next };
+                            })}
+                            disabled={index === 0}
+                            style={{ border: 'none', background: '#26262e', color: index === 0 ? '#555' : '#eee', borderRadius: 6, padding: '5px 10px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: 11 }}
+                          >
+                            ↑ Up
+                          </button>
+                          <button
+                            onClick={() => setCatalogSettings((prev) => {
+                              if (index === prev.sectionOrder.length - 1) return prev;
+                              const next = [...prev.sectionOrder];
+                              [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                              return { sectionOrder: next };
+                            })}
+                            disabled={index === catalogSettings.sectionOrder.length - 1}
+                            style={{ border: 'none', background: '#26262e', color: index === catalogSettings.sectionOrder.length - 1 ? '#555' : '#eee', borderRadius: 6, padding: '5px 10px', cursor: index === catalogSettings.sectionOrder.length - 1 ? 'not-allowed' : 'pointer', fontSize: 11 }}
+                          >
+                            ↓ Down
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               )}

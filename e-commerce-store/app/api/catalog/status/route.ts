@@ -25,6 +25,7 @@ export async function GET() {
         activeDrops: [],
         upcomingDrops: [],
         archiveScents: [],
+        sectionOrder: [],
         archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
@@ -55,6 +56,7 @@ async function buildCatalogPayload() {
         activeDrops: [],
         upcomingDrops: [],
         archiveScents: [],
+        sectionOrder: ['upcoming', 'archive', 'live'],
         archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
@@ -72,6 +74,12 @@ async function buildCatalogPayload() {
     const catalogPreview = storeConfig.catalogPreview || {};
     const configuredUpcoming = Array.isArray(catalogPreview.upcomingDrops) ? catalogPreview.upcomingDrops : [];
     const configuredArchive = Array.isArray(catalogPreview.archiveScents) ? catalogPreview.archiveScents : [];
+    // Admin-configurable /catalog section order (Settings → Catalog). Default:
+    // live at the BOTTOM. Unknown ids are dropped and missing ones appended.
+    const rawOrder = storeConfig.catalog?.sectionOrder;
+    const sectionOrder = Array.isArray(rawOrder)
+      ? [...new Set([...rawOrder.map(String), 'live', 'upcoming', 'archive'].filter((s) => ['live', 'upcoming', 'archive'].includes(s)))]
+      : ['upcoming', 'archive', 'live'];
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
 
@@ -129,6 +137,30 @@ async function buildCatalogPayload() {
       };
     });
 
+    // Lookup by slug OR name so static `catalogPreview` entries can inherit the
+    // REAL product's Raffle/FCFS mode, slug, go-live date and sold-out state —
+    // otherwise configured upcoming/archive cards silently missed the tags that
+    // product-derived cards always show (the "inconsistent catalog" bug).
+    const productLookup = new Map<string, any>();
+    for (const p of sortedProducts) {
+      if (p.slug) productLookup.set(String(p.slug).toLowerCase(), p);
+      if (p.name) productLookup.set(String(p.name).toLowerCase(), p);
+    }
+    const enrichConfigured = (item: any) => {
+      const key = String(item?.slug || item?.name || '').toLowerCase();
+      const match = key ? productLookup.get(key) : null;
+      if (!match) return item;
+      return {
+        ...item,
+        slug: item.slug || match.slug || match.name,
+        goLiveAt: item.goLiveAt || match.goLiveAt || '',
+        checkoutMode: normalizeMode(match),
+        isRaffle: normalizeMode(match) === 'RAFFLE',
+      };
+    };
+    const configuredUpcomingEnriched = configuredUpcoming.map(enrichConfigured);
+    const configuredArchiveEnriched = configuredArchive.map(enrichConfigured);
+
     const activeDrops = sortedProducts
       .filter((p) => p.isActive && !p.isArchived && !p.isUpcoming && !archivedProductIds.includes(p.id))
       .map((p) => ({
@@ -171,7 +203,7 @@ async function buildCatalogPayload() {
     );
 
     const upcomingDrops = sortProducts(
-      [...upcomingFromProducts, ...configuredUpcoming]
+      [...upcomingFromProducts, ...configuredUpcomingEnriched]
         .filter((item: any) => !activeSlugs.has(String(item.slug || item.name || '').toLowerCase()))
         .filter((item: any) => !archivedProductSlugs.has(String(item.slug || item.name || '').toLowerCase()))
         .filter(
@@ -196,7 +228,7 @@ async function buildCatalogPayload() {
       }));
 
     const archiveScents = sortProducts(
-      [...archiveFromProducts, ...configuredArchive].filter(
+      [...archiveFromProducts, ...configuredArchiveEnriched].filter(
         (item: any, index: number, all: any[]) =>
           all.findIndex((v: any) => String(v.slug || v.name) === String(item.slug || item.name)) === index,
       ),
@@ -206,6 +238,7 @@ async function buildCatalogPayload() {
       activeDrops,
       upcomingDrops,
       archiveScents,
+      sectionOrder,
       archivedProductIds,
       soldOutProductIds: sortedProducts.filter((item) => item.soldOut === true).map((item) => item.id),
       notesByProductId: {},
@@ -219,6 +252,7 @@ async function buildCatalogPayload() {
       activeDrops: [],
       upcomingDrops: [],
       archiveScents: [],
+      sectionOrder: [],
       archivedProductIds: [],
       soldOutProductIds: [],
       notesByProductId: {},
