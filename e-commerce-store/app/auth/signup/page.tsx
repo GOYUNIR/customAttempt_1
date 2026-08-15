@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { useLiveTheme } from '@/components/ThemeProvider';
+import { themeRadius } from '@/lib/storefront-config';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -147,7 +148,7 @@ export default function SignupPage() {
 
   const inputStyle = {
     padding: 12,
-    borderRadius: 8,
+    borderRadius: themeRadius(configPalette, 8),
     background: configPalette.cardBackground,
     border: `1px solid ${configPalette.cardBorder}`,
     color: configPalette.cardTextMain,
@@ -159,7 +160,7 @@ export default function SignupPage() {
 
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 16, padding: '24px 20px', maxWidth: 360, width: '100%', boxSizing: 'border-box' }}>
+      <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 16), padding: '24px 20px', maxWidth: 360, width: '100%', boxSizing: 'border-box' }}>
         {step === 'form' ? (
           <>
             <h2 style={{ fontSize: 20, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 6px' }}>Create your account</h2>
@@ -188,7 +189,7 @@ export default function SignupPage() {
                 <span>Email me updates about upcoming drops, releases, and rewards. (Unsubscribe anytime.)</span>
               </label>
               {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
-              <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 10, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Signing up…' : 'Sign Up'}</button>
+              <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 999, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Signing up…' : 'Sign Up'}</button>
             </form>
             <p style={{ marginTop: 16, fontSize: 13, color: configPalette.cardTextMuted, textAlign: 'center' }}>
               Already have an account? <Link href="/auth/login" style={{ color: configPalette.accentBlue, textDecoration: 'none' }}>Log In</Link>
@@ -203,7 +204,7 @@ export default function SignupPage() {
               We sent a 6-digit code to <strong style={{ color: configPalette.cardTextMain }}>{pendingEmail}</strong>. Enter it to verify the inbox is real — your welcome points and member credit unlock right after.
             </p>
             {devCode && (
-              <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.35)', fontSize: 12, color: '#facc15', lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: themeRadius(configPalette, 10), background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.35)', fontSize: 12, color: '#facc15', lineHeight: 1.5 }}>
                 <strong>Dev mode code:</strong> <span style={{ letterSpacing: 4, fontWeight: 800 }}>{devCode}</span> (production sends this only by email)
               </div>
             )}
@@ -217,8 +218,8 @@ export default function SignupPage() {
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 6, fontSize: 16, marginBottom: 12 }}
             />
             {verifyMsg && <p style={{ color: verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', fontSize: 12, lineHeight: 1.5, margin: '0 0 12px' }}>{verifyMsg}</p>}
-            <button onClick={handleVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: 12, borderRadius: 10, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer', width: '100%' }}>{verifyBusy ? 'Verifying…' : 'Verify & unlock rewards'}</button>
-            <button onClick={handleResend} disabled={verifyBusy} style={{ marginTop: 8, width: '100%', padding: 10, borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: verifyBusy ? 'not-allowed' : 'pointer' }}>Resend code</button>
+            <button onClick={handleVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: 12, borderRadius: 999, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer', width: '100%' }}>{verifyBusy ? 'Verifying…' : 'Verify & unlock rewards'}</button>
+            <button onClick={handleResend} disabled={verifyBusy} style={{ marginTop: 8, width: '100%', padding: 10, borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: verifyBusy ? 'not-allowed' : 'pointer' }}>Resend code</button>
             <p style={{ marginTop: 14, fontSize: 11, color: configPalette.cardTextMuted, textAlign: 'center', lineHeight: 1.5 }}>
               Codes expire in 30 minutes. Prefer to finish later? You can verify anytime from your account after logging in.
             </p>

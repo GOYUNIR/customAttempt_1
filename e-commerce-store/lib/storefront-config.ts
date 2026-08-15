@@ -361,6 +361,25 @@ export function surfaceBackground(color?: string, transparencyPct?: number | str
 }
 
 /**
+ * Resolve the admin "Border Radius (px)" token (`themeColors.borderRadius`) as a
+ * NUMBER. This is the SINGLE source of truth for card/surface roundness across
+ * EVERY storefront surface (home, catalog, product, account, auth, story,
+ * legal, waitlist, 404) — the exact value that already drives the product page,
+ * site chrome, story and legal pages. `fallback` applies only when the token is
+ * missing / non-numeric / negative. Buttons and pills keep their fully-rounded
+ * 999px shape by design — that pill language is intentional and NOT tokenized.
+ */
+export function themeRadiusNumber(themeColors?: Record<string, any> | null, fallback = 16): number {
+  const r = Number(themeColors?.borderRadius);
+  return Number.isFinite(r) && r >= 0 ? r : fallback;
+}
+
+/** CSS `px` string version of `themeRadiusNumber` (e.g. `"12px"`). */
+export function themeRadius(themeColors?: Record<string, any> | null, fallback = 16): string {
+  return `${themeRadiusNumber(themeColors, fallback)}px`;
+}
+
+/**
  * A heroContent blob is "legacy" when it was written by the OLD admin settings
  * (before the story fields existed) — i.e. it lacks both `storyHeadline` and
  * `storyBody`. Such blobs were never actually displayed (the home page used to

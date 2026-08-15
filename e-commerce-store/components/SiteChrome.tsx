@@ -8,6 +8,7 @@ import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
+import { themeRadius } from '@/lib/storefront-config';
 
 type CartItem = {
   productId: string;
@@ -751,10 +752,6 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // Readable foreground for the top bar: hardcoded white text is invisible on
   // light presets (e.g. white header), so derive it from the header background.
   const headerText = readableTextOn(liveTheme.cardBackground);
-  const uiRadius = (fallback: number) => {
-    const r = Number(liveTheme.borderRadius);
-    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
-  };
   const headerMode = String(branding?.headerMode || 'both').toLowerCase();
   const showBrandText = headerMode !== 'logo';
   const showBrandLogo = headerMode !== 'text';
@@ -1005,12 +1002,12 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {cart.length === 0 ? (
-                <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: uiRadius(20), padding: 18, color: drawerTextMuted, fontSize: 13, lineHeight: 1.6 }}>
+                <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: themeRadius(liveTheme, 20), padding: 18, color: drawerTextMuted, fontSize: 13, lineHeight: 1.6 }}>
                   Your {actionTitle.toLowerCase()} is empty. Add direct-purchase items from a product page to review them here.
                 </div>
               ) : (
                 cart.map((item, index) => (
-                  <div key={`${item.productId}-${item.size}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: uiRadius(18), padding: 12, background: 'rgba(255,255,255,0.04)' }}>
+                  <div key={`${item.productId}-${item.size}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: themeRadius(liveTheme, 18), padding: 12, background: 'rgba(255,255,255,0.04)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>{item.name}</div>

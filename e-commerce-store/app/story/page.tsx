@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { isLegacyHeroContent, surfaceBackground } from '@/lib/storefront-config';
+import { isLegacyHeroContent, surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
 import { getSupportEmail } from '@/lib/env';
 
@@ -19,19 +19,15 @@ export default async function StoryPage() {
   const companyName = String(legal.companyName || branding.brandName || branding.shareTitle || DEFAULT_LEGAL.companyName);
   const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support@example.com');
 
-  // Follow the admin border-radius token so the page matches the storefront.
-  const radius = (fallback: number) => {
-    const r = Number(configPalette.borderRadius);
-    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
-  };
-
   const storyHeadline = String(hero.storyHeadline || 'Our Story');
   const storyBody = String(hero.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.');
 
   // Same surface every card on the site uses, so cardTextMain/cardTextMuted are
-  // guaranteed readable on ANY design preset (light or dark).
+  // guaranteed readable on ANY design preset (light or dark). Border radius
+  // comes from the SAME shared themeRadius() helper as every other page, so
+  // the admin "Border Radius (px)" setting applies here identically.
   const contentCard = {
-    borderRadius: radius(22),
+    borderRadius: themeRadius(configPalette, 22),
     border: `1px solid ${configPalette.cardBorder}`,
     background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency),
     padding: '20px 18px',
@@ -62,7 +58,7 @@ export default async function StoryPage() {
           justifyContent: 'center',
           minHeight: 44,
           padding: '0 18px',
-          borderRadius: radius(999),
+          borderRadius: 999,
           fontSize: 13,
           fontWeight: 600,
           color: configPalette.cardTextMain,
@@ -81,7 +77,7 @@ export default async function StoryPage() {
           prefetch={false}
           style={{
             padding: '7px 14px',
-            borderRadius: radius(999),
+            borderRadius: 999,
             fontSize: 11,
             fontWeight: 700,
             letterSpacing: '1.5px',
@@ -96,7 +92,7 @@ export default async function StoryPage() {
         <span
           style={{
             padding: '7px 14px',
-            borderRadius: radius(999),
+            borderRadius: 999,
             fontSize: 11,
             fontWeight: 700,
             letterSpacing: '1.5px',
@@ -109,7 +105,7 @@ export default async function StoryPage() {
         </span>
       </div>
 
-      <h1 style={{ fontFamily: 'serif', fontSize: 32, margin: '0 0 16px', color: configPalette.textMain }}>{storyHeadline}</h1>
+      <h1 style={{ fontFamily: 'Georgia, Times New Roman, serif', fontSize: 32, margin: '0 0 16px', color: configPalette.textMain }}>{storyHeadline}</h1>
 
       <div style={contentCard}>
         <p style={{ color: configPalette.cardTextMuted, margin: 0 }}>{storyBody}</p>

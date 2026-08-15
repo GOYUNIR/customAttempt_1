@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
-import { surfaceBackground } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { getSupportEmail } from '@/lib/env';
 
 /**
@@ -24,12 +24,6 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
   const companyName = String(legal.companyName || brandName);
   const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
   const blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
-
-  // Follow the admin border-radius token so the page matches the storefront.
-  const radius = (fallback: number) => {
-    const r = Number(colors.borderRadius);
-    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
-  };
 
   const titles: Record<LegalPageKey, string> = {
     terms: 'Terms of Service',
@@ -61,7 +55,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
           justifyContent: 'center',
           minHeight: 44,
           padding: '0 18px',
-          borderRadius: radius(999),
+          borderRadius: 999,
           fontSize: 13,
           fontWeight: 600,
           color: colors.cardTextMain,
@@ -80,7 +74,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
       <div
         style={{
           marginTop: 16,
-          borderRadius: radius(22),
+          borderRadius: themeRadius(colors, 22),
           border: `1px solid ${colors.cardBorder}`,
           background: surfaceBackground(colors.cardBackground, colors.surfaceTransparency),
           padding: '20px 22px',

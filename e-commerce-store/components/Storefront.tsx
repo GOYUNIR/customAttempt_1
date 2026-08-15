@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import NotFoundView from '@/components/NotFoundView';
 
@@ -225,10 +225,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // Storefront copy overrides — admin → Settings → Storefront copy. A non-empty
   // value overrides the built-in labels (entry CTA etc.).
   const [copySettings, setCopySettings] = useState<Record<string, any>>(liveCtx?.copy || {});
-  const uiRadius = (fallback: number) => {
-    const r = Number(configPalette.borderRadius);
-    return Number.isFinite(r) && r >= 0 ? `${r}px` : `${fallback}px`;
-  };
   // Header action label ("Bag" vs "Cart"). The admin value is mirrored into
   // localStorage by SiteChrome; reading it here during RENDER caused a React
   // hydration mismatch (#418 — SSR says "cart", client says "bag") whenever the
@@ -988,7 +984,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
       <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <section style={{ borderRadius: uiRadius(24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
           <div
             onMouseEnter={() => setGalleryPaused(true)}
             onMouseLeave={() => { if (!dragActiveRef.current) setGalleryPaused(false); }}
@@ -1056,7 +1052,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
             <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: 16, background: 'rgba(255,255,255,0.03)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.08)'}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: themeRadius(configPalette, 16), background: 'rgba(255,255,255,0.03)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.08)'}` }}>
               <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>
               <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
             </div>
@@ -1068,7 +1064,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           </div>
         </section>
 
-        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -1177,11 +1173,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
 
-        <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
-              <div key={`${note.label}-${index}`} style={{ borderRadius: 16, background: 'rgba(0,0,0,0.25)', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
+              <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: 'rgba(0,0,0,0.25)', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
                 <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
                 <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55 }}>{note.text}</div>
@@ -1191,7 +1187,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </section>
 
         {showCart && cart.length > 0 && (
-          <section style={{ borderRadius: uiRadius(20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
+          <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), padding: 14, color: configPalette.cardTextMain }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Cart</div>
             {cart.map((item, index) => (
               <div key={`${item.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0' }}>

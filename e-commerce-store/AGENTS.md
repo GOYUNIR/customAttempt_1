@@ -388,6 +388,37 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-15 — Unified border-radius system (one admin setting drives ALL pages) + /story uniformity:**
+  - **New shared radius helpers** `themeRadius()` / `themeRadiusNumber()` in `lib/storefront-config.ts`
+    — the SINGLE source of truth for the admin "Border Radius (px)" setting
+    (`themeColors.borderRadius`). Before this change the token only reached the
+    product page, site chrome, /story and legal pages (each via its OWN duplicated
+    `uiRadius`/`radius` local helper), while home, catalog, account, auth, the
+    waitlist and the 404 used hardcoded radii (14/16/18/20/22/24/28/30px). Now every
+    storefront surface reads the same token: change `/admin → Settings → Theme
+    Colors → Border Radius (px)` and the roundness of every main-page card, panel,
+    tile, modal, input and banner changes together. Buttons/pills stay fully-rounded
+    999px by design (that pill language is intentional and not tokenized).
+  - **Duplicated helpers removed:** the local `uiRadius` in `components/Storefront.tsx`
+    and `components/SiteChrome.tsx`, and the local `radius` in `app/story/page.tsx`
+    and `components/LegalPage.tsx`, are gone — all four now import the shared
+    `themeRadius`. No more drift between pages.
+  - **Wired into every page** (replacing hardcoded values): `app/page.tsx` home hero
+    + product cards + sold-out cards + member-perk section; `app/catalog/page.tsx`
+    tiles, info/search/error surfaces, detail modal sheet + image + Close (now a
+    999 pill); `app/account/page.tsx` all cards, verify/rewards/credits/password
+    panels, entry cards, action buttons (Save/Cancel/Edit/Cancel entry/Update
+    payment → pills); all four `/auth` pages (panel + inputs; submit buttons →
+    pills); `components/ReleaseWaitlist.tsx` card; home "release opens" chip → pill.
+  - **/story is now uniform with the rest of the site:** it uses the SAME shared
+    `themeRadius` (so on light presets its card radius now matches every other card
+    instead of being a different number), and its headline uses the same
+    `'Georgia, Times New Roman, serif'` display typeface as the home hero, product
+    page, account and legal pages.
+  - Docs: this changelog entry. No Redis keys were added or changed. Verified:
+    `tsc --noEmit` clean, full `eslint` clean (0/0), `npm test` 14/14 pass,
+    `npm run build` compiles every route + middleware.
+
 - **2026-08-15 — Theme-consistent contrast pass (story page + all content pages):**
   - **Story page is readable on EVERY design preset.** Root cause: `app/story/page.tsx`
     rendered `cardTextMain`/`cardTextMuted` (tokens designed for CARD surfaces)

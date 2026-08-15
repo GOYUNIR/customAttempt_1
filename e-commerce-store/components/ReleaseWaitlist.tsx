@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { themeRadius } from '@/lib/storefront-config';
 
 /** Small inline spinner shown while the subscribe request is in flight. */
 function ButtonSpinner({ light = true }: { light?: boolean }) {
@@ -82,7 +83,7 @@ export default function ReleaseWaitlist({
   };
 
   return (
-    <section style={{ border: `1px solid ${c.cardBorder}`, borderRadius: 24, padding: '18px 16px', background: c.cardBackground || 'linear-gradient(180deg, rgba(18,18,23,0.96), rgba(10,10,12,0.96))', boxShadow: '0 18px 50px rgba(0,0,0,0.24)', color: cardText }}>
+    <section style={{ border: `1px solid ${c.cardBorder}`, borderRadius: themeRadius(c, 24), padding: '18px 16px', background: c.cardBackground || 'linear-gradient(180deg, rgba(18,18,23,0.96), rgba(10,10,12,0.96))', boxShadow: '0 18px 50px rgba(0,0,0,0.24)', color: cardText }}>
       <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: c.accentBlue || '#7dd3fc', marginBottom: 8 }}>Private release list</div>
       <h3 style={{ margin: '0 0 8px', fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', lineHeight: 1.1, color: cardText }}>{headline}</h3>
       <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.65, color: cardTextMuted }}>{body}</p>

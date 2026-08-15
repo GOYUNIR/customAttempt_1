@@ -44,7 +44,7 @@ export default function NotFoundView() {
           prefetch={false}
           style={{
             padding: '12px 28px',
-            borderRadius: '30px',
+            borderRadius: 999,
             background: c.textMain || '#ffffff',
             color: c.primaryBackground || '#000000',
             textDecoration: 'none',

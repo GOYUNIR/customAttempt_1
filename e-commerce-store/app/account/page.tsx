@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
-import { surfaceBackground } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 
 interface EntryRecord {
@@ -572,7 +572,7 @@ export default function AccountPage() {
               onClick={handleLogout}
               style={{
                 padding: '8px 16px',
-                borderRadius: 8,
+                borderRadius: 999,
                 border: '1px solid #f87171',
                 background: 'transparent',
                 color: '#f87171',
@@ -596,7 +596,7 @@ export default function AccountPage() {
         </div>
 
         {isLoggedIn && user && user.emailVerified === false && (
-          <div style={{ background: configPalette.cardBackground, border: '1px solid rgba(250,204,21,0.35)', borderRadius: 20, padding: 18, marginBottom: 18 }}>
+          <div style={{ background: configPalette.cardBackground, border: '1px solid rgba(250,204,21,0.35)', borderRadius: themeRadius(configPalette, 20), padding: 18, marginBottom: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: '#facc15', boxShadow: '0 0 0 3px rgba(250,204,21,0.16)' }} />
               <div style={{ fontSize: 13, fontWeight: 700, color: configPalette.cardTextMain }}>Confirm your email to unlock rewards</div>
@@ -612,7 +612,7 @@ export default function AccountPage() {
                 value={verifyCode}
                 onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="6-digit code"
-                style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
+                style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
               />
               <button onClick={handleAccountVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : '#facc15', color: '#1a1a06', fontWeight: 700, fontSize: 12, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer' }}>
                 {verifyBusy ? 'Verifying…' : 'Verify'}
@@ -624,7 +624,7 @@ export default function AccountPage() {
         )}
 
         {!isLoggedIn && (
-          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 20, padding: 20, marginBottom: 18 }}>
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 20), padding: 20, marginBottom: 18 }}>
             <p style={{ margin: '0 0 12px', fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
               Account login is required to prevent address and entry access by guessing card digits. Entries are linked to your email — sign in to see them.
             </p>
@@ -636,7 +636,7 @@ export default function AccountPage() {
         )}
 
         {isLoggedIn && user && (
-          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: 22, padding: 20, marginBottom: 14 }}>
+          <div style={{ background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 22), padding: 20, marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 6 }}>Rewards balance</div>
@@ -655,7 +655,7 @@ export default function AccountPage() {
                 <div
                   style={{
                     padding: '10px 12px',
-                    borderRadius: 12,
+                    borderRadius: themeRadius(configPalette, 12),
                     background: welcomePromoUsed ? 'rgba(148,163,184,0.06)' : 'rgba(34,197,94,0.08)',
                     border: welcomePromoUsed ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(34,197,94,0.2)',
                     fontSize: 12,
@@ -671,7 +671,7 @@ export default function AccountPage() {
                   <div style={{ fontWeight: 800, letterSpacing: 1, color: welcomePromoUsed ? '#94a3b8' : '#34c759', marginTop: 4, wordBreak: 'break-all' }}>{user.welcomePromoCode}</div>
                 </div>
               ) : (
-                <div style={{ padding: '10px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5, maxWidth: 220 }}>
+                <div style={{ padding: '10px 12px', borderRadius: themeRadius(configPalette, 12), background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 12, lineHeight: 1.5, maxWidth: 220 }}>
                   <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Unlock your welcome credit — 10% off your first release.</div>
                   <button
                     onClick={claimWelcome}
@@ -687,7 +687,7 @@ export default function AccountPage() {
         )}
 
             {isLoggedIn && (
-              <div style={{ marginTop: 0, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}>
+              <div style={{ marginTop: 0, padding: '16px 18px', borderRadius: themeRadius(configPalette, 18), background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}>
                 <div style={{ color: configPalette.cardTextMuted, fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 8 }}>Redeem points for store credit</div>
                 <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginBottom: 8 }}>
                   {rewardsConfig.pointsPerDollar
@@ -702,7 +702,7 @@ export default function AccountPage() {
                     placeholder="Points"
                     value={redeemPointsInput}
                     onChange={(e) => setRedeemPointsInput(e.target.value)}
-                    style={{ flex: 1, padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }}
+                    style={{ flex: 1, padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }}
                   />
                   <button onClick={redeemPoints} disabled={redeeming} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#7dd3fc', color: '#07121f', fontWeight: 700, fontSize: 12, cursor: redeeming ? 'not-allowed' : 'pointer' }}>
                     {redeeming ? 'Redeeming…' : 'Redeem'}
@@ -732,7 +732,7 @@ export default function AccountPage() {
             )}
 
             {isLoggedIn && creditPromos.length > 0 && (
-              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: themeRadius(configPalette, 18), background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
                 <div style={{ color: configPalette.cardTextMuted, fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 4 }}>Your credits & codes</div>
                 {creditPromos.map((promo) => (
                   <div
@@ -802,7 +802,7 @@ export default function AccountPage() {
             )}
 
             {isLoggedIn && (
-              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: 18, background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 14, padding: '16px 18px', borderRadius: themeRadius(configPalette, 18), background: configPalette.cardBackground, border: `1px solid ${configPalette.cardBorder}`, fontSize: 12, lineHeight: 1.5 }}>
                 {!showPwdForm ? (
                   <button
                     onClick={() => setShowPwdForm(true)}
@@ -821,9 +821,9 @@ export default function AccountPage() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Change password</div>
-                    <input type="password" placeholder="Current password" value={pwdCurrent} onChange={(e) => setPwdCurrent(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
-                    <input type="password" placeholder="New password (min 6 chars)" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
-                    <input type="password" placeholder="Confirm new password" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.target.value)} style={{ padding: 9, borderRadius: 10, background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="Current password" value={pwdCurrent} onChange={(e) => setPwdCurrent(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="New password (min 6 chars)" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="Confirm new password" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
                     {pwdMsg && <div style={{ fontSize: 11, color: pwdMsg.includes('updated') ? '#34d399' : '#f87171' }}>{pwdMsg}</div>}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={changePassword} disabled={pwdBusy} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#f3f4f6', color: '#09090b', fontWeight: 700, fontSize: 12, cursor: pwdBusy ? 'not-allowed' : 'pointer' }}>
@@ -882,7 +882,7 @@ export default function AccountPage() {
                   style={{
                     background: configPalette.cardBackground,
                     border: `1px solid ${configPalette.cardBorder}`,
-                    borderRadius: 16,
+                    borderRadius: themeRadius(configPalette, 16),
                     padding: 16,
                   }}
                 >
@@ -972,7 +972,7 @@ export default function AccountPage() {
                             style={{
                               width: '100%',
                               padding: 10,
-                              borderRadius: 10,
+                              borderRadius: themeRadius(configPalette, 10),
                               background: '#16161a',
                               border: `1px solid ${configPalette.cardBorder}`,
                               color: '#fff',
@@ -987,7 +987,7 @@ export default function AccountPage() {
                               style={{
                                 flex: 1,
                                 minHeight: 44,
-                                borderRadius: 10,
+                                borderRadius: 999,
                                 border: 'none',
                                 background: '#34c759',
                                 color: '#000',
@@ -1003,7 +1003,7 @@ export default function AccountPage() {
                               style={{
                                 flex: 1,
                                 minHeight: 44,
-                                borderRadius: 10,
+                                borderRadius: 999,
                                 border: `1px solid ${configPalette.cardBorder}`,
                                 background: 'transparent',
                                 color: '#aaa',
@@ -1025,7 +1025,7 @@ export default function AccountPage() {
                             style={{
                               minHeight: 44,
                               padding: '0 14px',
-                              borderRadius: 10,
+                              borderRadius: 999,
                               border: `1px solid ${configPalette.cardBorder}`,
                               background: 'transparent',
                               color: '#ccc',
@@ -1041,7 +1041,7 @@ export default function AccountPage() {
                             style={{
                               minHeight: 44,
                               padding: '0 14px',
-                              borderRadius: 10,
+                              borderRadius: 999,
                               border: '1px solid #ff3b30',
                               background: 'transparent',
                               color: '#ff3b30',
@@ -1057,7 +1057,7 @@ export default function AccountPage() {
                             style={{
                               minHeight: 44,
                               padding: '0 14px',
-                              borderRadius: 10,
+                              borderRadius: 999,
                               border: `1px solid ${configPalette.cardBorder}`,
                               background: 'transparent',
                               color: '#60a5fa',
@@ -1088,7 +1088,7 @@ export default function AccountPage() {
                 style={{
                   width: '100%',
                   minHeight: 48,
-                  borderRadius: 30,
+                  borderRadius: 999,
                   background: 'transparent',
                   border: `1px solid ${configPalette.cardBorder}`,
                   color: configPalette.textMain,

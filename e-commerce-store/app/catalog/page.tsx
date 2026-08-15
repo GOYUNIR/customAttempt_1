@@ -7,7 +7,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, themeRadiusNumber } from '@/lib/storefront-config';
 
 interface CatalogItem {
   name: string;
@@ -262,7 +262,7 @@ export default function CatalogPage() {
               textAlign: 'left',
               background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))'),
               border: `1px solid ${configPalette.cardBorder}`,
-              borderRadius: '16px',
+              borderRadius: themeRadius(configPalette, 16),
               overflow: 'hidden',
               cursor: 'pointer',
               padding: 0,
@@ -342,7 +342,7 @@ export default function CatalogPage() {
             View what&apos;s active
           </Link>
         </div>
-        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.02)'), fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
+        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.02)'), fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.6 }}>
           Live releases are open for entry right now. Upcoming and archived drops stay on the record so collectors can see the full story and get ahead of the next opening.
         </div>
 
@@ -350,7 +350,7 @@ export default function CatalogPage() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          style={{ marginBottom: 20, padding: '10px 12px', borderRadius: 16, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.03)'), display: 'flex', alignItems: 'center', gap: 8 }}
+          style={{ marginBottom: 20, padding: '10px 12px', borderRadius: themeRadius(configPalette, 16), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.03)'), display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: configPalette.accentBlue }}>
             <circle cx="11" cy="11" r="6" />
@@ -370,7 +370,7 @@ export default function CatalogPage() {
         </motion.div>
 
         {statusError && (
-          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.08)', fontSize: 12, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: themeRadius(configPalette, 12), border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.08)', fontSize: 12, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>
             <span>{statusError}</span>
             <button onClick={loadCatalog} style={{ border: 'none', background: 'rgba(248,113,113,0.18)', color: '#fecaca', borderRadius: 999, padding: '6px 12px', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>Retry</button>
           </div>
@@ -408,7 +408,7 @@ export default function CatalogPage() {
                     style={{
                       background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, configPalette.cardBackground),
                       border: `1px solid ${configPalette.cardBorder}`,
-                      borderRadius: '14px',
+                      borderRadius: themeRadius(configPalette, 14),
                       padding: '14px 16px',
                     }}
                   >
@@ -490,7 +490,7 @@ export default function CatalogPage() {
                 maxWidth: '480px',
                 margin: '0 auto',
                 background: configPalette.cardBackground,
-                borderRadius: '24px 24px 0 0',
+                borderRadius: `${themeRadiusNumber(configPalette, 24)}px ${themeRadiusNumber(configPalette, 24)}px 0 0`,
                 padding: '24px 20px 40px',
                 boxSizing: 'border-box',
               }}
@@ -499,7 +499,7 @@ export default function CatalogPage() {
                 style={{
                   width: '100%',
                   aspectRatio: '4/3',
-                  borderRadius: '16px',
+                  borderRadius: themeRadius(configPalette, 16),
                   background: selectedItem.image ? `url(${selectedItem.image}) center/cover` : '#1a1a1a',
                   marginBottom: '16px',
                 }}
@@ -518,7 +518,7 @@ export default function CatalogPage() {
                 style={{
                   width: '100%',
                   padding: '14px',
-                  borderRadius: '30px',
+                  borderRadius: 999,
                   background: configPalette.textMain,
                   color: configPalette.primaryBackground,
                   border: 'none',
