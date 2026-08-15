@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
@@ -1017,9 +1017,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
 
   return (
-    <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '16px 14px 60px' }}>
-      <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <section style={{ borderRadius: themeRadius(configPalette, 24), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency) }}>
+    <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px ${Math.round(72 * contentSpacingScale(configPalette))}px` }}>
+      <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
+        <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), boxShadow: cardShadowStyle(configPalette, 16) }}>
           <div
             onMouseEnter={() => setGalleryPaused(true)}
             onMouseLeave={() => { if (!dragActiveRef.current) setGalleryPaused(false); }}
@@ -1087,7 +1087,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
             <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderRadius: themeRadius(configPalette, 16), background: 'rgba(255,255,255,0.03)', border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : 'rgba(255,255,255,0.08)'}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : configPalette.cardBorder}` }}>
               <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>
               <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
             </div>
@@ -1131,8 +1131,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           {/* Mapbox address autofill requires the field to live inside a <form>. */}
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
-            <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
@@ -1152,7 +1152,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ marginBottom: 8 }}>
             {showPromoField ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 10, borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+                <input type="text" placeholder="Promo code" value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())} style={{ flex: 1, minWidth: 180, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${promoValid === false ? '#ef4444' : promoValid === true ? '#22c55e' : configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
                 <button onClick={applyPromo} disabled={promoBusy} style={{ padding: '10px 14px', borderRadius: 10, border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, color: configPalette.cardTextMain, fontWeight: 700, cursor: promoBusy ? 'not-allowed' : 'pointer', opacity: promoBusy ? 0.6 : 1 }}>{promoBusy ? 'Checking…' : 'Apply'}</button>
                 <button onClick={() => setShowPromoField(false)} style={{ padding: '10px 12px', borderRadius: 10, border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
               </div>
@@ -1212,7 +1212,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.textMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(product.notes || []).map((note: any, index: number) => (
-              <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: 'rgba(0,0,0,0.25)', padding: 12, border: `1px solid ${configPalette.cardBorder}` }}>
+              <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, padding: 14, border: `1px solid ${configPalette.cardBorder}` }}>
                 <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
                 <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55 }}>{note.text}</div>

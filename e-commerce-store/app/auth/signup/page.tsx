@@ -148,8 +148,8 @@ export default function SignupPage() {
 
   const inputStyle = {
     padding: 12,
-    borderRadius: themeRadius(configPalette, 8),
-    background: configPalette.cardBackground,
+    borderRadius: themeRadius(configPalette, 12),
+    background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`,
     border: `1px solid ${configPalette.cardBorder}`,
     color: configPalette.cardTextMain,
     fontSize: 14,

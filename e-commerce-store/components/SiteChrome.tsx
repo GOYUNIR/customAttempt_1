@@ -8,7 +8,7 @@ import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
-import { themeRadius } from '@/lib/storefront-config';
+import { themeRadius, glassBackdrop, cardShadowStyle } from '@/lib/storefront-config';
 import { scheduleCartPersist, syncCartWithServer } from '@/lib/client-cart-sync';
 
 type CartItem = {
@@ -740,14 +740,21 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!theme) return;
     const root = document.documentElement;
-    const radius = Number(theme.borderRadius) >= 0 ? `${Number(theme.borderRadius)}px` : '12px';
+    const radius = Number(theme.borderRadius) >= 0 ? `${Number(theme.borderRadius)}px` : '22px';
     root.style.setProperty('--ui-radius', radius);
-    root.style.setProperty('--background', theme.primaryBackground || '#0a0a0a');
-    root.style.setProperty('--foreground', theme.textMain || '#ffffff');
-    root.style.setProperty('--ui-chrome-alpha', String(clamp(Number(theme.chromeTransparency ?? 94), 0, 100)));
+    root.style.setProperty('--background', theme.primaryBackground || '#f5f5f7');
+    root.style.setProperty('--foreground', theme.textMain || '#1d1d1f');
+    root.style.setProperty('--ui-chrome-alpha', String(clamp(Number(theme.chromeTransparency ?? 70), 0, 100)));
     root.style.setProperty('--ui-surface-alpha', String(clamp(Number(theme.surfaceTransparency ?? 100), 0, 100)));
-    document.body.style.background = theme.primaryBackground || '#0a0a0a';
-    document.body.style.color = theme.textMain || '#ffffff';
+    root.style.setProperty('--ui-radius-style', String(theme.radiusStyle || 'squircle'));
+    root.style.setProperty('--ui-card-shadow', String(Number(theme.cardShadow) || 12));
+    root.style.setProperty('--ui-glass-blur', String(Number(theme.backdropBlur) || 55));
+    root.style.setProperty(
+      '--ui-spacing-scale',
+      String(theme.contentSpacing === 'compact' ? 0.88 : theme.contentSpacing === 'spacious' ? 1.15 : 1),
+    );
+    document.body.style.background = theme.primaryBackground || '#f5f5f7';
+    document.body.style.color = theme.textMain || '#1d1d1f';
     if (theme.fontFamily) document.body.style.fontFamily = theme.fontFamily;
   }, [theme]);
 
@@ -966,24 +973,23 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           left: 0,
           width: '100%',
           minHeight: '84px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid rgba(127,127,140,0.14)',
           background: `${headerBg}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '12px 12px 14px',
+          padding: '12px 16px 14px',
           zIndex: 100,
           boxSizing: 'border-box',
           transform: 'translateY(0)',
           transition: 'transform 160ms ease',
           overflow: 'hidden',
           // Apple-style frosted glass: the bar is translucent and blurs whatever
-          // scrolls beneath it. Guarded by @supports via the inline style — if a
-          // browser lacks backdrop-filter it simply shows the (already high-alpha)
-          // chrome background. Static header, so the blur is painted once.
-          WebkitBackdropFilter: 'blur(22px) saturate(170%)',
-          backdropFilter: 'blur(22px) saturate(170%)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 18px 50px rgba(0,0,0,0.18)',
+          // scrolls beneath it. Blur amount follows the admin backdropBlur
+          // slider (glassBackdrop). Static header, so the blur is painted once.
+          WebkitBackdropFilter: glassBackdrop(theme),
+          backdropFilter: glassBackdrop(theme),
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -1px 0 rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)',
         }}
       >
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-start', flex: 1 }}>
@@ -1108,7 +1114,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       {cartOpen && (
         <div onClick={() => setCartOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, WebkitBackdropFilter: 'blur(26px) saturate(160%)', backdropFilter: 'blur(26px) saturate(160%)' }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: 'min(92vw, 360px)', height: '100%', position: 'relative', overflow: 'hidden', background: drawerBg, borderLeft: '1px solid rgba(127,127,140,0.14)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', color: drawerText, WebkitBackdropFilter: glassBackdrop(theme), backdropFilter: glassBackdrop(theme), boxShadow: cardShadowStyle(theme, 24) }}>
             {/* Orb glows inside the cart drawer — mirrors the storefront glow so
                 the ambient orbs stay visible while the drawer is open (the drawer
                 paints above the page-level orb layer). Every orb uses the SOFT

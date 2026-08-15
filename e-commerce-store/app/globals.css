@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #060608;
-  --foreground: #f5f5f7;
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  /* Apple design tokens — set live from /admin → Settings by the layout's
+     inline theme script (and baked into the server <html> style). */
+  --ui-radius: 22px;
+  --ui-radius-style: squircle;
+  --ui-card-shadow: 12;
+  --ui-glass-blur: 55;
+  --ui-spacing-scale: 1;
+  --ui-chrome-alpha: 70;
+  --ui-surface-alpha: 100;
 }
 
 @theme inline {
@@ -29,6 +38,42 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: 0.01em;
+}
+
+/* Apple typography hierarchy: heavy, tight headings on a light body. Inline
+   component styles always win where they set their own values; these are the
+   sensible defaults for any heading that doesn't. */
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+
+/* Precise squircle-ish corners: the admin "Border Radius" token + a 1.35x
+   horizontal-scale approximation of Apple's continuous-corner curve. Used for
+   elements that want the native squircle feel without an inline radius. */
+.goyunir-squircle {
+  border-radius: var(--ui-radius);
+}
+
+/* Frosted-glass material (Apple tactile feel). Apply to chrome surfaces —
+   header, cart drawer, modals. Chrome opacity is admin-controlled via
+   `themeColors.chromeTransparency`; the blur amount via `themeColors.backdropBlur`
+   is applied inline by the components (CSS calc can't multiply a custom-property
+   number, so the utility class uses a fixed pleasant blur). */
+.glass-panel {
+  background: color-mix(in srgb, var(--background) var(--ui-chrome-alpha)%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+}
+
+/* Soft Apple card shadow (the admin cardShadow slider is applied inline by the
+   components via cardShadowStyle(); this class is the fixed CSS equivalent). */
+.soft-shadow {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 * {

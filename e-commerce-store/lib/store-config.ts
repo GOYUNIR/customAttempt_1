@@ -48,6 +48,14 @@ export interface StoreConfig {
     chromeTransparency?: number;
     /** Card/surface opacity (0-100) — set from /admin → Settings. */
     surfaceTransparency?: number;
+    /** Corner style: 'squircle' (default) | 'rounded' | 'sharp'. */
+    radiusStyle?: 'squircle' | 'rounded' | 'sharp';
+    /** Soft card shadow intensity (0-100). */
+    cardShadow?: number;
+    /** Frosted-glass backdrop blur (0-100) for chrome surfaces. */
+    backdropBlur?: number;
+    /** Page rhythm: 'compact' | 'comfortable' (default) | 'spacious'. */
+    contentSpacing?: 'compact' | 'comfortable' | 'spacious';
   };
   availableSizes: string[];
   homeRedirectSlug?: string;
@@ -123,21 +131,25 @@ export interface StoreConfig {
 
 const DEFAULT_CONFIG: Partial<StoreConfig> = {
   themeColors: {
-    primaryBackground: '#0a0a0a',
-    cardBackground: '#111111',
-    cardBorder: '#222222',
-    accentPurple: '#a855f7',
-    accentBlue: '#3b82f6',
-    textMain: '#ffffff',
-    textMuted: '#888888',
-    cardTextMain: '#ffffff',
-    cardTextMuted: '#c9c9d3',
-    checkoutCtaButton: '#635bff',
-    fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-    borderRadius: 12,
+    primaryBackground: '#f5f5f7',
+    cardBackground: '#ffffff',
+    cardBorder: 'rgba(0,0,0,0.08)',
+    accentPurple: '#af52de',
+    accentBlue: '#0071e3',
+    textMain: '#1d1d1f',
+    textMuted: '#6e6e73',
+    cardTextMain: '#1d1d1f',
+    cardTextMuted: '#6e6e73',
+    checkoutCtaButton: '#0071e3',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    borderRadius: 22,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
-    chromeTransparency: 94,
+    chromeTransparency: 70,
     surfaceTransparency: 100,
+    radiusStyle: 'squircle',
+    cardShadow: 12,
+    backdropBlur: 55,
+    contentSpacing: 'comfortable',
   },
   availableSizes: ['Standard'],
   dropSchedule: {

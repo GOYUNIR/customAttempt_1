@@ -612,7 +612,7 @@ export default function AccountPage() {
                 value={verifyCode}
                 onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="6-digit code"
-                style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
+                style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
               />
               <button onClick={handleAccountVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : '#facc15', color: '#1a1a06', fontWeight: 700, fontSize: 12, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer' }}>
                 {verifyBusy ? 'Verifying…' : 'Verify'}
@@ -702,7 +702,7 @@ export default function AccountPage() {
                     placeholder="Points"
                     value={redeemPointsInput}
                     onChange={(e) => setRedeemPointsInput(e.target.value)}
-                    style={{ flex: 1, padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }}
+                    style={{ flex: 1, padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }}
                   />
                   <button onClick={redeemPoints} disabled={redeeming} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#7dd3fc', color: '#07121f', fontWeight: 700, fontSize: 12, cursor: redeeming ? 'not-allowed' : 'pointer' }}>
                     {redeeming ? 'Redeeming…' : 'Redeem'}
@@ -821,9 +821,9 @@ export default function AccountPage() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ color: configPalette.cardTextMuted, fontSize: 11 }}>Change password</div>
-                    <input type="password" placeholder="Current password" value={pwdCurrent} onChange={(e) => setPwdCurrent(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
-                    <input type="password" placeholder="New password (min 6 chars)" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
-                    <input type="password" placeholder="Confirm new password" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 10), background: '#16161a', border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="Current password" value={pwdCurrent} onChange={(e) => setPwdCurrent(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="New password (min 6 chars)" value={pwdNew} onChange={(e) => setPwdNew(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
+                    <input type="password" placeholder="Confirm new password" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.target.value)} style={{ padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 12 }} />
                     {pwdMsg && <div style={{ fontSize: 11, color: pwdMsg.includes('updated') ? '#34d399' : '#f87171' }}>{pwdMsg}</div>}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={changePassword} disabled={pwdBusy} style={{ padding: '9px 14px', borderRadius: 999, border: 'none', background: '#f3f4f6', color: '#09090b', fontWeight: 700, fontSize: 12, cursor: pwdBusy ? 'not-allowed' : 'pointer' }}>
@@ -972,10 +972,10 @@ export default function AccountPage() {
                             style={{
                               width: '100%',
                               padding: 10,
-                              borderRadius: themeRadius(configPalette, 10),
-                              background: '#16161a',
+                              borderRadius: themeRadius(configPalette, 12),
+                              background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`,
                               border: `1px solid ${configPalette.cardBorder}`,
-                              color: '#fff',
+                              color: configPalette.cardTextMain,
                               fontSize: 12,
                               boxSizing: 'border-box',
                             }}

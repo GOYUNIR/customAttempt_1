@@ -111,17 +111,18 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
 }
 
 const cardStyle: React.CSSProperties = {
-  padding: 20,
-  borderRadius: 16,
-  background: '#111',
-  border: '1px solid #27272a',
+  padding: 22,
+  borderRadius: 18,
+  background: '#141417',
+  border: '1px solid #2a2a30',
+  boxShadow: '0 1px 2px rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.14)',
 };
 
 const inputStyle: React.CSSProperties = {
   padding: 10,
-  borderRadius: 8,
-  background: '#09090b',
-  border: '1px solid #27272a',
+  borderRadius: 10,
+  background: '#0d0d10',
+  border: '1px solid #303036',
   color: '#fff',
   fontSize: 13,
   boxSizing: 'border-box',
@@ -130,6 +131,7 @@ const inputStyle: React.CSSProperties = {
 /** Font-family presets shown in the Settings → Font Family dropdown, each option
  *  rendered in its own typeface so admins see a live preview of the style. */
 const FONT_OPTIONS: { label: string; value: string }[] = [
+  { label: 'SF Pro / system (Apple default)', value: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" },
   { label: 'Inter — clean modern sans', value: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" },
   { label: 'Space Grotesk — techy geometric sans', value: "'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif" },
   { label: 'Sora — rounded friendly sans', value: "'Sora', 'Inter', 'Segoe UI', Arial, sans-serif" },
@@ -1893,8 +1895,8 @@ export default function AdminPortal() {
   // RENDER (UPDATED product form with dynamic categories, explanations, file upload)
   // ============================================================
   return (
-    <main style={{ minHeight: '100vh', padding: '28px 16px 60px', background: '#060606', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ maxWidth: 860, margin: '0 auto' }}>
+    <main style={{ minHeight: '100vh', padding: '32px 20px 72px', background: '#060608', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
           <div>
             <h1 style={{ fontSize: 22, margin: 0, fontWeight: 700, letterSpacing: '-0.02em' }}>Store Admin</h1>
@@ -3178,7 +3180,7 @@ export default function AdminPortal() {
               {/* Sticky top save button — stays visible while scrolling the long settings form.
                   top: 92 keeps it BELOW the fixed storefront header (84px) instead of sliding
                   underneath it while you scroll. */}
-              <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 12, background: 'rgba(10,10,12,0.94)', border: '1px solid #2a2a2e', boxShadow: '0 10px 28px rgba(0,0,0,0.35)' }}>
+              <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.9)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.3)' }}>
                 <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading}>
                   {settingsLoading ? 'Saving…' : 'Save All Settings'}
                 </button>
@@ -3238,7 +3240,7 @@ export default function AdminPortal() {
               <h4 style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Theme Colors</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 {Object.entries(themeSettings)
-                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency')
+                  .filter(([key]) => key !== 'fontFamily' && key !== 'borderRadius' && key !== 'chromeTransparency' && key !== 'surfaceTransparency' && key !== 'radiusStyle' && key !== 'cardShadow' && key !== 'backdropBlur' && key !== 'contentSpacing')
                   .map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
                     {key.replace(/([A-Z])/g, ' $1').trim()}
@@ -3258,10 +3260,10 @@ export default function AdminPortal() {
                     type="range"
                     min={40}
                     max={100}
-                    value={Number(themeSettings.chromeTransparency ?? 94)}
+                    value={Number(themeSettings.chromeTransparency ?? 70)}
                     onChange={(e) => setThemeSettings({ ...themeSettings, chromeTransparency: Number(e.target.value) })}
                     style={{ display: 'block', width: '100%', marginTop: 8 }} />
-                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.chromeTransparency ?? 94)}%</span>
+                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.chromeTransparency ?? 70)}% — lower = more frosted glass</span>
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Surface opacity (cards on product / catalog pages)
@@ -3273,6 +3275,58 @@ export default function AdminPortal() {
                     onChange={(e) => setThemeSettings({ ...themeSettings, surfaceTransparency: Number(e.target.value) })}
                     style={{ display: 'block', width: '100%', marginTop: 8 }} />
                   <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.surfaceTransparency ?? 100)}%</span>
+                </label>
+              </div>
+
+              {/* Apple design language — precise squircles, tactile glass, soft depth. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                <label style={{ fontSize: 11 }}>
+                  Corner style (squircles)
+                  <select
+                    value={String(themeSettings.radiusStyle || 'squircle')}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, radiusStyle: e.target.value as 'squircle' | 'rounded' | 'sharp' })}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
+                  >
+                    <option value="squircle">Squircle (Apple continuous curve)</option>
+                    <option value="rounded">Rounded</option>
+                    <option value="sharp">Sharp (flat)</option>
+                  </select>
+                  <span style={{ fontSize: 10, color: '#888' }}>Refines the Border Radius (px) below.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Page spacing (whitespace)
+                  <select
+                    value={String(themeSettings.contentSpacing || 'comfortable')}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, contentSpacing: e.target.value as 'compact' | 'comfortable' | 'spacious' })}
+                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
+                  >
+                    <option value="compact">Compact</option>
+                    <option value="comfortable">Comfortable (default)</option>
+                    <option value="spacious">Spacious</option>
+                  </select>
+                  <span style={{ fontSize: 10, color: '#888' }}>&ldquo;Less is more&rdquo; — airy pages breathe.</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Card shadow intensity
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Number(themeSettings.cardShadow ?? 12)}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, cardShadow: Number(e.target.value) })}
+                    style={{ display: 'block', width: '100%', marginTop: 8 }} />
+                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.cardShadow ?? 12)} — 0 is flat, ~12 is Apple&apos;s soft depth</span>
+                </label>
+                <label style={{ fontSize: 11 }}>
+                  Frosted-glass blur (header / drawer)
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Number(themeSettings.backdropBlur ?? 55)}
+                    onChange={(e) => setThemeSettings({ ...themeSettings, backdropBlur: Number(e.target.value) })}
+                    style={{ display: 'block', width: '100%', marginTop: 8 }} />
+                  <span style={{ fontSize: 10, color: '#888' }}>{Number(themeSettings.backdropBlur ?? 55)} — 0 = solid chrome, 100 = heavy glass</span>
                 </label>
               </div>
 

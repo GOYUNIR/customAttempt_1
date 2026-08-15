@@ -119,6 +119,15 @@ export interface StorefrontConfig {
     chromeTransparency?: number;
     /** Card/surface opacity (0-100) — set from /admin → Settings. */
     surfaceTransparency?: number;
+    /** Corner style: 'squircle' (Apple continuous curve — default), 'rounded',
+     *  or 'sharp'. Scales the configured borderRadius token. */
+    radiusStyle?: 'squircle' | 'rounded' | 'sharp';
+    /** Soft card shadow intensity (0-100) — 0 = flat, ~12 = Apple default. */
+    cardShadow?: number;
+    /** Frosted-glass backdrop blur (0-100) for the header / cart drawer / modals. */
+    backdropBlur?: number;
+    /** Page rhythm: 'compact' | 'comfortable' (default) | 'spacious'. */
+    contentSpacing?: 'compact' | 'comfortable' | 'spacious';
   };
   availableSizes: string[];
   homeRedirectSlug?: string;
@@ -176,23 +185,29 @@ export interface StorefrontConfig {
 }
 
 const defaultThemeColors = {
-  primaryBackground: '#0a0a0a',
-  cardBackground: '#111111',
-  cardBorder: '#222222',
-  accentPurple: '#a855f7',
-  accentBlue: '#3b82f6',
-  textMain: '#ffffff',
-  textMuted: '#888888',
-  cardTextMain: '#ffffff',
-  cardTextMuted: '#c9c9d3',
-  checkoutCtaButton: '#635bff',
-  fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-  borderRadius: 12,
+  primaryBackground: '#f5f5f7',
+  cardBackground: '#ffffff',
+  cardBorder: 'rgba(0,0,0,0.08)',
+  accentPurple: '#af52de',
+  accentBlue: '#0071e3',
+  textMain: '#1d1d1f',
+  textMuted: '#6e6e73',
+  cardTextMain: '#1d1d1f',
+  cardTextMuted: '#6e6e73',
+  checkoutCtaButton: '#0071e3',
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  borderRadius: 22,
   // Transparency (0-100, editable from /admin → Settings → Theme Colors):
   // chromeTransparency controls header/footer/cart-drawer opacity,
   // surfaceTransparency controls card/surface opacity on the storefront.
-  chromeTransparency: 94,
+  chromeTransparency: 70,
   surfaceTransparency: 100,
+  // Apple design-language defaults: squircle corners, soft low-intensity card
+  // shadows, and a subtle frosted-glass backdrop for the chrome surfaces.
+  radiusStyle: 'squircle' as const,
+  cardShadow: 12,
+  backdropBlur: 55,
+  contentSpacing: 'comfortable' as const,
 };
 
 const defaultDropSchedule: DropScheduleConfig = {
@@ -364,19 +379,69 @@ export function surfaceBackground(color?: string, transparencyPct?: number | str
  * Resolve the admin "Border Radius (px)" token (`themeColors.borderRadius`) as a
  * NUMBER. This is the SINGLE source of truth for card/surface roundness across
  * EVERY storefront surface (home, catalog, product, account, auth, story,
- * legal, waitlist, 404) — the exact value that already drives the product page,
- * site chrome, story and legal pages. `fallback` applies only when the token is
- * missing / non-numeric / negative. Buttons and pills keep their fully-rounded
- * 999px shape by design — that pill language is intentional and NOT tokenized.
+ * legal, waitlist, 404). The configured `radiusStyle` further refines it:
+ *
+ *   - `squircle` (default) — the configured px value, Apple's precise
+ *     continuous-corner feel.
+ *   - `rounded` — ~72% of the configured value (smaller, softer corners).
+ *   - `sharp` — clamped to 4px (flat, editorial).
+ *
+ * `fallback` applies only when the token is missing / non-numeric / negative.
+ * Buttons and pills keep their fully-rounded 999px shape by design — that pill
+ * language is intentional and NOT tokenized.
  */
-export function themeRadiusNumber(themeColors?: Record<string, any> | null, fallback = 16): number {
+export function themeRadiusNumber(themeColors?: Record<string, any> | null, fallback = 22): number {
   const r = Number(themeColors?.borderRadius);
-  return Number.isFinite(r) && r >= 0 ? r : fallback;
+  const base = Number.isFinite(r) && r >= 0 ? r : fallback;
+  const style = String(themeColors?.radiusStyle || 'squircle');
+  if (style === 'sharp') return Math.min(4, Math.round(base));
+  if (style === 'rounded') return Math.max(2, Math.round(base * 0.72));
+  return Math.round(base);
 }
 
-/** CSS `px` string version of `themeRadiusNumber` (e.g. `"12px"`). */
-export function themeRadius(themeColors?: Record<string, any> | null, fallback = 16): string {
+/** CSS `px` string version of `themeRadiusNumber` (e.g. `"22px"`). */
+export function themeRadius(themeColors?: Record<string, any> | null, fallback = 22): string {
   return `${themeRadiusNumber(themeColors, fallback)}px`;
+}
+
+/**
+ * Apple-style soft, low-intensity card shadow built from the admin
+ * `themeColors.cardShadow` slider (0-100, default ~12). 0 returns `none` (flat
+ * surfaces), 100 returns a pronounced layered shadow. Deliberately subtle at the
+ * default so cards read as tactile materials, not glowing boxes.
+ */
+export function cardShadowStyle(themeColors?: Record<string, any> | null, fallback = 12): string {
+  const raw = Number(themeColors?.cardShadow);
+  const pct = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : fallback;
+  if (pct <= 0) return 'none';
+  const y = 1 + pct * 0.18;
+  const blur = 12 + pct * 0.48;
+  const a1 = 0.05 + pct * 0.0035;
+  const a2 = 0.02 + pct * 0.002;
+  return `0 1px 2px rgba(0,0,0,${a2.toFixed(3)}), 0 ${y.toFixed(1)}px ${blur.toFixed(1)}px rgba(0,0,0,${a1.toFixed(3)})`;
+}
+
+/**
+ * Frosted-glass `backdrop-filter` value built from the admin
+ * `themeColors.backdropBlur` slider (0-100, default ~55). 0 returns `none`
+ * (fully opaque chrome), 100 returns a heavy 40px blur + strong saturation —
+ * Apple's tactile material feel for the header, cart drawer and modals.
+ */
+export function glassBackdrop(themeColors?: Record<string, any> | null, fallback = 55): string {
+  const raw = Number(themeColors?.backdropBlur);
+  const pct = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : fallback;
+  if (pct <= 0) return 'none';
+  const px = Math.round(6 + (pct / 100) * 34);
+  const sat = Math.round(140 + (pct / 100) * 70);
+  return `blur(${px}px) saturate(${sat}%)`;
+}
+
+/** Multiplier for page rhythm from `themeColors.contentSpacing`. */
+export function contentSpacingScale(themeColors?: Record<string, any> | null): number {
+  const mode = String(themeColors?.contentSpacing || 'comfortable');
+  if (mode === 'compact') return 0.88;
+  if (mode === 'spacious') return 1.15;
+  return 1;
 }
 
 /**

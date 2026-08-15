@@ -2,21 +2,27 @@ import { buildStorefrontConfig } from './lib/storefront-config';
 
 export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   themeColors: {
-    primaryBackground: '#0a0a0a',
-    cardBackground: '#111111',
-    cardBorder: '#222222',
-    accentPurple: '#a855f7',
-    accentBlue: '#3b82f6',
-    textMain: '#ffffff',
-    textMuted: '#888888',
-    cardTextMain: '#ffffff',
-    cardTextMuted: '#c9c9d3',
-    checkoutCtaButton: '#635bff',
-    fontFamily: "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
-    borderRadius: 12,
+    primaryBackground: '#f5f5f7',
+    cardBackground: '#ffffff',
+    cardBorder: 'rgba(0,0,0,0.08)',
+    accentPurple: '#af52de',
+    accentBlue: '#0071e3',
+    textMain: '#1d1d1f',
+    textMuted: '#6e6e73',
+    cardTextMain: '#1d1d1f',
+    cardTextMuted: '#6e6e73',
+    checkoutCtaButton: '#0071e3',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    borderRadius: 22,
     // Transparency (0-100): chrome = header/footer/drawer, surface = cards.
-    chromeTransparency: 94,
+    chromeTransparency: 70,
     surfaceTransparency: 100,
+    // Apple design-language defaults: squircle corners, soft low-intensity card
+    // shadows, and a subtle frosted-glass backdrop for the chrome surfaces.
+    radiusStyle: 'squircle',
+    cardShadow: 12,
+    backdropBlur: 55,
+    contentSpacing: 'comfortable',
   },
 
   availableSizes: ['Standard'],

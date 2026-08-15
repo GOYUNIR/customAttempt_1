@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
         <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: '0 0 8px', color: configPalette.cardTextMain }}>Recover account</h1>
         <p style={{ color: configPalette.cardTextMuted, fontSize: 13, margin: '0 0 24px' }}>Enter your account email and we will send a secure reset link.</p>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <input type="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: themeRadius(configPalette, 8), background: '#16161a', border: '1px solid #27272a', color: '#fff', fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
+          <input type="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: 12, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 14, boxSizing: 'border-box', width: '100%' }} />
           <button type="submit" disabled={busy} style={{ padding: 12, borderRadius: 999, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{busy ? 'Sending…' : 'Send reset link'}</button>
         </form>
         {message && <p style={{ marginTop: 12, fontSize: 12, color: message.includes('Unable') ? '#f87171' : '#34d399' }}>{message}</p>}

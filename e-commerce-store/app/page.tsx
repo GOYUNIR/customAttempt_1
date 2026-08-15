@@ -7,7 +7,7 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { neutralBrandName } from '@/lib/env';
 
@@ -163,12 +163,15 @@ export default function HomePage() {
   const priorityDropsSubtitle = String(copyOverrides.priorityDropsSubtitle || 'Explore our creations');
   const heroTitle = String(copyOverrides.heroTitle || heroContent.headline || 'Luxury releases with private-club energy, built for decisive collectors.');
   const heroSubtitle = String(copyOverrides.heroSubtitle || heroContent.body || 'Handmade, low-volume, and intentionally scarce. Each release is tuned for trust, speed, and the feeling that not everyone gets through.');
+  // Apple "less is more" rhythm: the admin contentSpacing setting scales the
+  // page padding and section gaps so a buyer can dial the whitespace up/down.
+  const spacing = contentSpacingScale(configPalette);
 
   return (
-    <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: '26px 16px 72px', fontFamily: 'system-ui, sans-serif' }}>
+    <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
-      <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 28), padding: '22px 18px', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(14,14,16,0.96), rgba(8,8,10,0.96))'), boxShadow: '0 24px 70px rgba(0,0,0,0.28)', animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+      <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
+        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'HIGH-CADENCE RELEASES'}</div>
           <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain }}>{heroTitle}</h1>
           <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px' }}>
@@ -202,10 +205,10 @@ export default function HomePage() {
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{priorityDropsTitle}</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>{priorityDropsSubtitle}</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: Math.round(14 * spacing) }}>
               {activeProducts.map((product: any, index: number) => (
                 <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{ borderRadius: themeRadius(configPalette, 22), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, product.soldOut ? 'linear-gradient(135deg, rgba(17,17,17,0.96), rgba(28,28,28,0.96))' : '#121217'), boxShadow: '0 16px 48px rgba(0,0,0,0.22)', marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+                  <div style={{ borderRadius: themeRadius(configPalette, 22), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), boxShadow: cardShadowStyle(configPalette, 14), marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
                     <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -247,10 +250,10 @@ export default function HomePage() {
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>Social proof</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted }}>Sold out releases keep the story alive</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: Math.round(10 * spacing) }}>
               {soldOutProducts.map((product: any) => (
                 <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{ padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.06)'), border: `1px solid ${configPalette.cardBorder}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: '14px 16px', borderRadius: themeRadius(configPalette, 18), background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), border: `1px solid ${configPalette.cardBorder}`, boxShadow: cardShadowStyle(configPalette, 10), display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: configPalette.cardTextMain }}>{product.name}</div>
                       <div style={{ fontSize: 11, color: configPalette.cardTextMuted, marginTop: 2 }}>{product.tagline || product.desc}</div>
