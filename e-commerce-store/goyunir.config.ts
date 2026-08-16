@@ -233,6 +233,21 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         { size: 'Sampler Set', price: 19, stripeId: '', winnerTiers: '0' },
         { size: 'Full Bottle', price: 145, stripeId: '', winnerTiers: '0' },
       ],
+      samplerSizes: [
+        {
+          size: 'Sampler Set',
+          label: 'Trial',
+          fullSize: 'Full Bottle',
+          creditCents: 1500,
+          minOrderSubtotalCents: 9000,
+          neverExpires: false,
+          expiresDays: 60,
+          codePrefix: 'NOIR',
+          eligibleProductSlugs: ['noir-citrus-instant-drop'],
+          eligibleSizes: ['Full Bottle'],
+          note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade.',
+        },
+      ],
       notes: [
         { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },
       ],

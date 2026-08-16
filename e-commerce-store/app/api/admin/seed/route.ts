@@ -45,13 +45,15 @@ const DEFAULT_PRODUCTS = [
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 2,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'First-come, first-served. Customers add sizes to the cart and pay immediately — no draw, no waiting.' },
-      { label: 'WHY', name: 'Why this drop matters', text: 'This product demos the cart flow, multi-size pricing (Sampler vs Full Bottle), and the delivery incentive: buying the sampler credits you toward the full size.' },
+      { label: 'WHY', name: 'Why this drop matters', text: 'This product demos the cart flow, multi-size pricing (Sampler vs Full Bottle), and the per-size trial incentive: buying the Sampler Set issues a $15 credit toward the Full Bottle after delivery.' },
       { label: 'PROS', name: 'Pros', text: 'Fastest checkout path, immediate revenue, and perfect for social-driven traffic.' },
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Can sell through instantly and skips the anticipation of a draw.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Immediate conversion from social clicks, bundles, and upselling a cheap entry into a full purchase.' },
     ],
     priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'],
+    samplerSizes: [{ size: 'Sampler Set', label: 'Trial', fullSize: 'Full Bottle', creditCents: 1500, minOrderSubtotalCents: 9000, neverExpires: false, expiresDays: 60, codePrefix: 'NOIR', eligibleProductSlugs: ['noir-citrus-instant-drop'], eligibleSizes: ['Full Bottle'], note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade.' }],
+    createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p4', name: 'Amber Pulse — Direct Release', slug: 'amber-pulse-direct-release', prefix: 'baseItem2', tagline: 'FCFS / LIVE', desc: 'Cart-compatible direct release with three price points for mixed traffic.',
@@ -194,7 +196,9 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Bundles, memberships, and any drop where the goal is maximizing order value.' },
     ],
     priceCategories: [{ size: 'Discovery Kit', price: 42, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 168, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Grand Size', price: 240, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 4, maxPerCart: 4, maxRaffleAllocationLimit: 0, totalInventory: 220, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 30, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 2000, deliveryIncentiveMinOrderSubtotalCents: 12000, deliveryIncentiveExpiresDays: 45, deliveryIncentiveCodePrefix: 'GILDE', deliveryIncentiveTriggerSizes: ['Discovery Kit'], deliveryIncentiveEligibleProductSlugs: ['gilded-hour-member-bundle'], deliveryIncentiveEligibleSizes: ['Full Bottle', 'Grand Size'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 4, maxPerCart: 4, maxRaffleAllocationLimit: 0, totalInventory: 220, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 30, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 2000, deliveryIncentiveMinOrderSubtotalCents: 12000, deliveryIncentiveExpiresDays: 45, deliveryIncentiveCodePrefix: 'GILDE', deliveryIncentiveTriggerSizes: ['Discovery Kit'], deliveryIncentiveEligibleProductSlugs: ['gilded-hour-member-bundle'], deliveryIncentiveEligibleSizes: ['Full Bottle', 'Grand Size'],
+    samplerSizes: [{ size: 'Discovery Kit', label: 'Discovery', fullSize: 'Full Bottle', creditCents: 2000, minOrderSubtotalCents: 12000, neverExpires: false, expiresDays: 45, codePrefix: 'GILDE', eligibleProductSlugs: ['gilded-hour-member-bundle'], eligibleSizes: ['Full Bottle', 'Grand Size'], note: 'Three minis so you can live with the scent for a week before committing to the full bottle.' }],
+    createdAt: NOW, updatedAt: NOW,
   },
 ];
 

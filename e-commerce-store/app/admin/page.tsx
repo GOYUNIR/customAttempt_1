@@ -247,6 +247,17 @@ function normalizeWinnerTiersCsv(value: string): string {
   return nums.length > 0 ? nums.join(',') : '1';
 }
 
+/** Sampler credit helpers: the admin edits dollars, storage keeps cents. */
+const samplerCentsToDollars = (cents: number | null | undefined): string =>
+  cents === null || cents === undefined ? '' : String(Number(cents) / 100);
+
+const samplerDollarsToCents = (dollars: string): number | null => {
+  const trimmed = String(dollars || '').trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  return Number.isFinite(num) && num >= 0 ? Math.max(0, Math.round(num * 100)) : null;
+};
+
 /** URL-safe slug from a product name (used as the auto-fill for the Slug field). */
 function slugifyName(name: string): string {
   return String(name || '')
@@ -948,6 +959,9 @@ export default function AdminPortal() {
     deliveryIncentiveEligibleProductSlugs: [],
     deliveryIncentiveEligibleSizes: [],
     deliveryIncentiveTriggerSizes: [],
+    // Per-size sampler records: each entry marks ONE size in Pricing & Sizes as
+    // a trial SKU and can override the product-level credit defaults.
+    samplerSizes: [],
     sortOrder: 0,
     notes: [],
     images: [],
@@ -1314,6 +1328,8 @@ export default function AdminPortal() {
       deliveryIncentiveEligibleProductSlugs: [],
       deliveryIncentiveEligibleSizes: [],
       deliveryIncentiveTriggerSizes: [],
+      // Per-size sampler records (trial SKUs) — see Trial sizes & sample credits.
+      samplerSizes: [],
       sortOrder: 0,
       categories: [],
       notes: [],
@@ -1342,6 +1358,30 @@ export default function AdminPortal() {
       customDropSchedule: product.customDropSchedule && typeof product.customDropSchedule === 'object' && Object.keys(product.customDropSchedule).length > 0
         ? product.customDropSchedule
         : null,
+      // Per-size sampler records. Products saved with the OLD "Trigger on
+      // size(s) CSV" get their legacy trigger sizes promoted into per-sampler
+      // records (each falling back to the product-level credit defaults) so the
+      // new per-size editor shows every sampler and nothing is lost.
+      samplerSizes: (() => {
+        const existing = Array.isArray(product.samplerSizes) ? product.samplerSizes : [];
+        if (existing.length > 0) return existing;
+        const legacy = product.deliveryIncentiveEnabled === true && Array.isArray(product.deliveryIncentiveTriggerSizes)
+          ? product.deliveryIncentiveTriggerSizes.map(String).filter(Boolean)
+          : [];
+        return legacy.map((size: string) => ({
+          size,
+          label: '',
+          fullSize: '',
+          creditCents: null,
+          minOrderSubtotalCents: null,
+          neverExpires: null,
+          expiresDays: null,
+          codePrefix: '',
+          eligibleProductSlugs: null,
+          eligibleSizes: null,
+          note: '',
+        }));
+      })(),
       priceCategories: categories,
       notes: product.notes || [],
       images: product.images || [],
@@ -1378,18 +1418,106 @@ export default function AdminPortal() {
   };
 
   const removePriceCategory = (index: number) => {
-    setProductForm((prev: any) => ({
-      ...prev,
-      priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index)
-    }));
+    setProductForm((prev: any) => {
+      const removedSize = String(prev.priceCategories?.[index]?.size || '').trim();
+      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+      const removedKey = removedSize.toLowerCase();
+      const nextSamplers = removedKey
+        ? samplers.filter((s: any) => String(s?.size || '').trim().toLowerCase() !== removedKey)
+        : samplers;
+      return {
+        ...prev,
+        priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index),
+        samplerSizes: nextSamplers,
+      };
+    });
   };
 
   const updatePriceCategory = (index: number, field: string, value: any) => {
     setProductForm((prev: any) => {
       const updated = [...prev.priceCategories];
+      const previousSize = String(updated[index]?.size || '').trim();
       updated[index] = { ...updated[index], [field]: value };
+      // Keep sampler records attached when a sampler size is renamed, and point
+      // any "credits toward" target at the new name if it referenced this size.
+      if (field === 'size') {
+        const nextSize = String(value || '').trim();
+        const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+        if (previousSize && nextSize && samplers.some((s: any) => String(s?.size || '').trim().toLowerCase() === previousSize.toLowerCase())) {
+          return {
+            ...prev,
+            priceCategories: updated,
+            samplerSizes: samplers.map((s: any) =>
+              String(s?.size || '').trim().toLowerCase() === previousSize.toLowerCase()
+                ? { ...s, size: nextSize, fullSize: String(s?.fullSize || '').trim().toLowerCase() === previousSize.toLowerCase() ? nextSize : s?.fullSize }
+                : s,
+            ),
+          };
+        }
+      }
       return { ...prev, priceCategories: updated };
     });
+  };
+
+  // Mark/unmark a size as a sampler (trial SKU) directly from Pricing & Sizes.
+  const toggleSampler = (index: number) => {
+    const cat = productForm.priceCategories?.[index];
+    if (!cat) return;
+    const size = String(cat.size || '').trim();
+    if (!size) {
+      setProductMsg('❌ Give the size a name first, then mark it as a sampler.');
+      showToast('Name the size first');
+      return;
+    }
+    setProductForm((prev: any) => {
+      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+      const key = size.toLowerCase();
+      if (samplers.some((s: any) => String(s?.size || '').trim().toLowerCase() === key)) {
+        return { ...prev, samplerSizes: samplers.filter((s: any) => String(s?.size || '').trim().toLowerCase() !== key) };
+      }
+      return {
+        ...prev,
+        samplerSizes: [
+          ...samplers,
+          {
+            size,
+            label: '',
+            fullSize: '',
+            creditCents: null,
+            minOrderSubtotalCents: null,
+            neverExpires: null,
+            expiresDays: null,
+            codePrefix: '',
+            eligibleProductSlugs: null,
+            eligibleSizes: null,
+            note: '',
+          },
+        ],
+      };
+    });
+  };
+
+  // Update one field on a sampler record (matched by the size's exact name).
+  const updateSampler = (size: string, patch: any) => {
+    setProductForm((prev: any) => {
+      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+      return {
+        ...prev,
+        samplerSizes: samplers.map((s: any) =>
+          String(s?.size || '').trim().toLowerCase() === String(size || '').trim().toLowerCase() ? { ...s, ...patch } : s,
+        ),
+      };
+    });
+  };
+
+  // Remove a sampler record from the per-sampler panel (matched by name).
+  const removeSamplerByName = (size: string) => {
+    setProductForm((prev: any) => ({
+      ...prev,
+      samplerSizes: (Array.isArray(prev.samplerSizes) ? prev.samplerSizes : []).filter(
+        (s: any) => String(s?.size || '').trim().toLowerCase() !== String(size || '').trim().toLowerCase(),
+      ),
+    }));
   };
 
   // ===== Handle image/video file uploads =====
@@ -3383,11 +3511,34 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
                         style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
                       />
+                      {(() => {
+                        const isSamplerCat = Array.isArray(productForm.samplerSizes)
+                          && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase());
+                        return (
+                          <button
+                            onClick={() => toggleSampler(idx)}
+                            title={isSamplerCat
+                              ? 'Remove the sampler marker — this size is no longer a trial SKU.'
+                              : 'Mark as a sampler: the customer can try this size first and gets a credit toward the full size after delivery.'}
+                            style={{
+                              ...buttonGhost,
+                              padding: '2px 8px',
+                              fontSize: 10,
+                              borderRadius: 999,
+                              background: isSamplerCat ? 'rgba(34,197,94,0.12)' : 'transparent',
+                              borderColor: isSamplerCat ? '#22c55e' : '#2e2e35',
+                              color: isSamplerCat ? '#4ade80' : '#8b95a7',
+                            }}
+                          >
+                            {isSamplerCat ? '🧪 Sample' : 'Sample'}
+                          </button>
+                        );
+                      })()}
                       <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
                     </div>
                   ))}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it.</span>
+                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below.</span>
                   </div>
                 </SectionCard>
 
@@ -3593,21 +3744,35 @@ export default function AdminPortal() {
                     </div>
                   </div>
                 </SectionCard>
-                {/* ============ POST-DELIVERY CREDIT ============ */}
+                {/* ============ TRIAL SIZES & SAMPLE CREDITS ============ */}
                 <SectionCard
-                  title="Post-delivery credit"
-                  description="Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum. Generated credits remain usable until they are manually removed."
+                  title="Trial sizes &amp; sample credits"
+                  description="Mark a size as a sampler (trial SKU) in Pricing &amp; Sizes, then fine-tune how each sampler converts. When a sampler order is marked delivered, the buyer gets a one-time credit code bound to their email — so the full size costs &ldquo;the difference&rdquo;. This is the big-brand try-first pattern: every trial SKU tells its own story, never one generic line."
                 >
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, gridColumn: '1 / -1' }}>
-                      <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} />
-                      <span>Enable delivery credit</span>
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Credit value (cents)
-                      <input type="number" min={0} value={productForm.deliveryIncentiveCreditCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: Number(e.target.value) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
-                      <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
+                    <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} style={{ marginTop: 2 }} />
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#e5e7eb' }}>Enable trial credits</div>
+                      <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>Off = no sampler messaging on the storefront and no credit codes issued at delivery.</div>
+                    </div>
+                  </div>
+
+                  {productForm.deliveryIncentiveEnabled === true && (
+                    <>
+                      {/* Product-level defaults — every sampler falls back to these. */}
+                      <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                          Product defaults
+                        </div>
+                        <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
+                          Every sampler falls back to these when its own field below is left blank — set one sane default, then fine-tune a single size.
+                        </p>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <label style={{ fontSize: 10, color: '#888' }}>Default credit value ($)
+                            <input type="number" step="0.01" min={0} value={samplerCentsToDollars(productForm.deliveryIncentiveCreditCents ?? 0)} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: samplerDollarsToCents(e.target.value) ?? 0 }))} style={inputStyle} />
+                          </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>Default minimum next order ($)
+                      <input type="number" step="0.01" min={0} value={samplerCentsToDollars(productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0)} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: samplerDollarsToCents(e.target.value) ?? 0 }))} style={inputStyle} />
                     </label>
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
                       <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 10, whiteSpace: 'nowrap' }}>
@@ -3615,39 +3780,101 @@ export default function AdminPortal() {
                         <span>Never expires</span>
                       </label>
                       {productForm.deliveryIncentiveNeverExpires !== true && (
-                        <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
+                        <label style={{ fontSize: 10, color: '#888' }}>Default validity (days)
                           <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
                         </label>
                       )}
                     </div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Code prefix
+                    <label style={{ fontSize: 10, color: '#888' }}>Default code prefix
                       <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
                     </label>
-                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
-                      <strong style={{ color: '#aab6c8' }}>Code prefix</strong> — the generated code looks like <code style={{ color: '#cbd5e1' }}>{String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()}-XXXXXXXX</code>. Letters/numbers only, up to 8 chars; leave blank for the default <code style={{ color: '#cbd5e1' }}>DROP-</code>.
-                    </p>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Trigger on size(s) CSV
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveTriggerSizes) ? productForm.deliveryIncentiveTriggerSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveTriggerSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
-                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
-                      <strong style={{ color: '#aab6c8' }}>Trigger on size(s) CSV</strong> — which size(s) of THIS product issue the credit when purchased and marked delivered. Leave blank to trigger on every size.
-                    </p>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV (default)
                       <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
                     </label>
-                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
-                      <strong style={{ color: '#aab6c8' }}>Eligible product slugs CSV</strong> — the products the generated code can be used on (e.g. <code style={{ color: '#cbd5e1' }}>full-size-perfume, travel-spray</code>). Leave blank to allow the code anywhere.
-                    </p>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV
+                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV (default)
                       <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
                     </label>
-                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
-                      <strong style={{ color: '#aab6c8' }}>Eligible size(s) CSV</strong> — which sizes the code works on within the eligible products (e.g. <code style={{ color: '#cbd5e1' }}>100ml, 50ml</code>). Leave blank to allow every size of the eligible products.
-                    </p>
-                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '2px 0 0', lineHeight: 1.6 }}>
-                      The credit is a one-time code bound to the buyer&apos;s email. <strong style={{ color: '#aab6c8' }}>Never expires</strong> keeps it usable until manually removed; otherwise it lapses after the Validity window.
-                    </p>
-                  </div>
+                        </div>
+                        <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 0', lineHeight: 1.6 }}>
+                          <strong style={{ color: '#aab6c8' }}>Eligible products / sizes</strong> restrict where the generated code can be used (e.g. <code style={{ color: '#cbd5e1' }}>full-size-perfume</code> and <code style={{ color: '#cbd5e1' }}>100ml, 50ml</code>). Blank = the code works anywhere. The generated code looks like <code style={{ color: '#cbd5e1' }}>{String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()}-XXXXX-XXX</code>; letters/numbers only.
+                        </p>
+                      </div>
+
+                      {/* Per-sampler setup — one card per size marked "Sample" in Pricing & Sizes. */}
+                      {(Array.isArray(productForm.samplerSizes) ? productForm.samplerSizes : []).length === 0 ? (
+                        <div style={{ padding: '12px 14px', borderRadius: 10, border: '1px dashed #2e2e35', fontSize: 11, color: '#8b95a7', lineHeight: 1.6 }}>
+                          No samplers yet — flip the <strong style={{ color: '#4ade80' }}>🧪 Sample</strong> toggle on a size in <strong style={{ color: '#cbd5e1' }}>Pricing &amp; Sizes</strong> above, then its setup card appears here. Every sampler gets its own badge, upgrade target and credit.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {(Array.isArray(productForm.samplerSizes) ? productForm.samplerSizes : []).map((sampler: any, sidx: number) => {
+                            const samplerSizeKey = String(sampler?.size || '').trim();
+                            const otherCats = (productForm.priceCategories || []).filter(
+                              (c: any) => String(c?.size || '').trim().toLowerCase() !== samplerSizeKey.toLowerCase(),
+                            );
+                            const expiryState = sampler?.neverExpires === true ? 'never' : sampler?.neverExpires === false ? 'expires' : 'default';
+                            return (
+                              <div key={`sampler-${samplerSizeKey || sidx}`} style={{ padding: 12, borderRadius: 10, background: '#0b0b0d', border: '1px solid rgba(34,197,94,0.35)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#4ade80', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 999, padding: '3px 10px' }}>🧪 {samplerSizeKey || 'Sample size'}</span>
+                                    <span style={{ fontSize: 10, color: '#8b95a7' }}>trial SKU — fields left blank use the product defaults</span>
+                                  </div>
+                                  <button onClick={() => removeSamplerByName(samplerSizeKey)} style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Remove sampler</button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                  <label style={{ fontSize: 10, color: '#888' }}>Badge label (shown on the size chip)
+                                    <input type="text" value={sampler?.label || ''} onChange={(e) => updateSampler(samplerSizeKey, { label: e.target.value })} placeholder="Trial / Discovery / Mini" style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888' }}>Credits toward
+                                    <select value={sampler?.fullSize || ''} onChange={(e) => updateSampler(samplerSizeKey, { fullSize: e.target.value })} style={inputStyle}>
+                                      <option value="">Any next order</option>
+                                      {otherCats.map((c: any) => (
+                                        <option key={c.size} value={c.size}>{c.size}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888' }}>Credit value ($)
+                                    <input type="number" step="0.01" min={0} value={samplerCentsToDollars(sampler?.creditCents)} onChange={(e) => updateSampler(samplerSizeKey, { creditCents: samplerDollarsToCents(e.target.value) })} placeholder={samplerCentsToDollars(productForm.deliveryIncentiveCreditCents ?? 0) || '0'} style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888' }}>Minimum next order ($)
+                                    <input type="number" step="0.01" min={0} value={samplerCentsToDollars(sampler?.minOrderSubtotalCents)} onChange={(e) => updateSampler(samplerSizeKey, { minOrderSubtotalCents: samplerDollarsToCents(e.target.value) })} placeholder={samplerCentsToDollars(productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0) || '0'} style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888' }}>Credit expiry
+                                    <select value={expiryState} onChange={(e) => updateSampler(samplerSizeKey, { neverExpires: e.target.value === 'never' ? true : e.target.value === 'expires' ? false : null })} style={inputStyle}>
+                                      <option value="default">Use product default</option>
+                                      <option value="never">Never expires</option>
+                                      <option value="expires">Expires after N days</option>
+                                    </select>
+                                  </label>
+                                  {expiryState === 'expires' && (
+                                    <label style={{ fontSize: 10, color: '#888' }}>Validity (days)
+                                      <input type="number" min={1} value={sampler?.expiresDays ?? ''} onChange={(e) => updateSampler(samplerSizeKey, { expiresDays: e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 60) })} placeholder={String(productForm.deliveryIncentiveExpiresDays ?? 60)} style={inputStyle} />
+                                    </label>
+                                  )}
+                                  <label style={{ fontSize: 10, color: '#888' }}>Code prefix
+                                    <input type="text" value={sampler?.codePrefix || ''} onChange={(e) => updateSampler(samplerSizeKey, { codePrefix: e.target.value.toUpperCase() })} placeholder={String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()} style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Customer-facing note (optional)
+                                    <input type="text" value={sampler?.note || ''} onChange={(e) => updateSampler(samplerSizeKey, { note: e.target.value })} placeholder="Blank = auto-generated from the size, credit and full-size target" style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV (this sampler)
+                                    <input type="text" value={Array.isArray(sampler?.eligibleProductSlugs) ? sampler.eligibleProductSlugs.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV (this sampler)
+                                    <input type="text" value={Array.isArray(sampler?.eligibleSizes) ? sampler.eligibleSizes.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
+                                  </label>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <p style={{ fontSize: 10, color: '#8b95a7', margin: '8px 0 0', lineHeight: 1.6 }}>
+                        Each credit is a one-time code bound to the buyer&apos;s email, issued when the sampler order is marked <strong style={{ color: '#aab6c8' }}>delivered</strong> in Shipping. <strong style={{ color: '#aab6c8' }}>Never expires</strong> keeps it usable until manually removed; otherwise it lapses after the validity window.
+                      </p>
+                    </>
+                  )}
                 </SectionCard>
 
                 {/* ============ NOTES ============ */}

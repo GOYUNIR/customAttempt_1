@@ -13,6 +13,7 @@ import {
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
+import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 
@@ -66,6 +67,18 @@ type PublicStoreProduct = {
   deliveryIncentiveEnabled?: boolean;
   deliveryIncentiveTriggerSizes?: string[];
   deliveryIncentiveCreditCents?: number;
+  /** Per-size trial-SKU records — the storefront uses these for badges + per-size copy. */
+  samplerSizes?: Array<{
+    size: string;
+    label?: string;
+    fullSize?: string;
+    creditCents?: number | null;
+    minOrderSubtotalCents?: number | null;
+    neverExpires?: boolean | null;
+    expiresDays?: number | null;
+    codePrefix?: string | null;
+    note?: string | null;
+  }>;
 };
 
 function toMs(value: unknown, timezone?: string): number | null {
@@ -125,6 +138,7 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     deliveryIncentiveEnabled: raw?.deliveryIncentiveEnabled === true,
     deliveryIncentiveTriggerSizes: Array.isArray(raw?.deliveryIncentiveTriggerSizes) ? raw.deliveryIncentiveTriggerSizes.map(String) : [],
     deliveryIncentiveCreditCents: Math.max(0, Number(raw?.deliveryIncentiveCreditCents || 0)),
+    samplerSizes: normalizeSamplerSizes(raw?.samplerSizes, Array.isArray(raw?.priceCategories) ? raw.priceCategories : []),
   };
 }
 

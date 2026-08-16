@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories } from '@/lib/storefront-config';
+import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
@@ -291,7 +292,29 @@ export async function POST(request: Request) {
     deliveryIncentiveCodePrefix: has('deliveryIncentiveCodePrefix') ? String(body.deliveryIncentiveCodePrefix || '') : (existing?.deliveryIncentiveCodePrefix || ''),
     deliveryIncentiveEligibleProductSlugs: Array.isArray(body.deliveryIncentiveEligibleProductSlugs) ? body.deliveryIncentiveEligibleProductSlugs.map(String) : (existing?.deliveryIncentiveEligibleProductSlugs || []),
     deliveryIncentiveEligibleSizes: Array.isArray(body.deliveryIncentiveEligibleSizes) ? body.deliveryIncentiveEligibleSizes.map(String) : (existing?.deliveryIncentiveEligibleSizes || []),
-    deliveryIncentiveTriggerSizes: Array.isArray(body.deliveryIncentiveTriggerSizes) ? body.deliveryIncentiveTriggerSizes.map(String) : (existing?.deliveryIncentiveTriggerSizes || []),
+    // Per-size sampler records (trial SKUs). Each entry references a size in
+    // `priceCategories` and can override the product-level credit defaults.
+    // Normalized through the shared helper so a sampler can never point at a
+    // size that doesn't exist on the product.
+    samplerSizes: (() => {
+      const priceCats = Array.isArray(body.priceCategories)
+        ? body.priceCategories
+        : (Array.isArray(existing?.priceCategories) ? existing.priceCategories : []);
+      if (has('samplerSizes')) return normalizeSamplerSizes(body.samplerSizes, priceCats);
+      if (Array.isArray(existing?.samplerSizes)) return normalizeSamplerSizes(existing.samplerSizes, priceCats);
+      return [];
+    })(),
+    // Keep the legacy CSV in sync with the sampler records so older consumers
+    // (or a product loaded before this migration) still see the same sizes.
+    deliveryIncentiveTriggerSizes: (() => {
+      const samplers = normalizeSamplerSizes(
+        has('samplerSizes') ? body.samplerSizes : existing?.samplerSizes,
+        Array.isArray(body.priceCategories) ? body.priceCategories : (Array.isArray(existing?.priceCategories) ? existing.priceCategories : []),
+      );
+      if (samplers.length > 0) return samplers.map((s) => s.size);
+      if (has('deliveryIncentiveTriggerSizes')) return Array.isArray(body.deliveryIncentiveTriggerSizes) ? body.deliveryIncentiveTriggerSizes.map(String) : (existing?.deliveryIncentiveTriggerSizes || []);
+      return Array.isArray(existing?.deliveryIncentiveTriggerSizes) ? existing.deliveryIncentiveTriggerSizes : [];
+    })(),
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

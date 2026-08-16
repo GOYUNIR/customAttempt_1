@@ -195,7 +195,11 @@ the ledger. Settings tabs include:
   IDs, inventory, winner tiers, images **+ videos** (PNG/JPEG/JPG/SVG/WEBP/GIF/BMP +
   MP4/MOV/MKV/AVI/WEBM), per-photo **crop tool with live desktop/mobile previews**
   (crops stored per-media in the product's `crops` array, parallel to `images`),
-  sort order.
+  sort order. Every size in Pricing & Sizes can be marked as a **sampler (trial
+  SKU)**; the **Trial sizes & sample credits** panel then configures each sampler
+  individually (badge label, "credits toward" full-size target, credit $, min
+  order, expiry, code prefix, eligibility, customer-facing note) with
+  product-level defaults as fallback.
 - **Settings → Theme Colors / Design Presets** — colors, fonts, radius,
   transparency, one-click presets (`lib/theme-presets.ts`).
 - **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
@@ -511,6 +515,15 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-16 — Per-size sampler ("trial SKU") engine — the "Try a sample first" line is no longer one generic message for everything:**
+  - **🎯 Mark ANY size as a sampler right in Pricing & Sizes.** Each size row gained a **"🧪 Sample" toggle chip** (green when on). Toggling it adds/removes a `samplerSizes` record for that size — no more "Trigger on size(s) CSV" free-text. Renaming a sampler size re-syncs its record (and any "credits toward" pointer); deleting a size prunes its sampler. Editing a product saved with the old CSV **auto-promotes** legacy trigger sizes into per-sampler records so nothing is lost.
+  - **⚙️ "Trial sizes & sample credits" panel (replaces "Post-delivery credit").** Product-level **defaults** (credit $, min next-order $, never-expires + days, code prefix, eligible products/sizes) stay as the fallback, then **one setup card per sampler size**: badge label (Trial / Discovery / Mini), **"Credits toward"** (pick the exact full-size SKU, or "any next order"), per-sampler credit $, per-sampler min order $, tri-state expiry (use default / never / N days), per-sampler code prefix, customer-facing note, and per-sampler eligible products/sizes — every field blank = uses the product default.
+  - **🧮 Storefront now tells EACH sampler's own story** (`lib/sampler-config.ts` → `samplerPresentation`): the selected sampler gets a headline ("Try the Trial first"), copy that names its exact size + credit + upgrade target, and a **math strip** (`Sample $19 → credit −$15 → Full Bottle $130`) with a progress bar showing what % of the full size the credit covers. Selecting a **non-sampler** size shows a gentle "Want to try it first?" nudge instead of the full card. Size chips carry the green **🧪 badge** (e.g. "Trial", "Discovery"). No more identical line for every size.
+  - **📦 Delivery credits are issued per-sampler.** `/api/admin/update-shipping` + `/api/admin/shipping-status` resolve the effective sampler config via `resolveSamplerConfig()` (per-sampler overrides win; product defaults fall back; legacy `deliveryIncentiveTriggerSizes` still work), so a big-credit sampler and a small-credit sampler on the same product issue different credits/codes.
+  - **🧪 Seeded demos** — Noir Citrus ("Sampler Set" → Trial → Full Bottle, $15 credit) and Gilded Hour ("Discovery Kit" → Discovery → Full Bottle, $20 credit) ship with full per-sampler configs; `goyunir.config.ts` static catalog updated to match.
+  - **Backward compatible:** `deliveryIncentiveTriggerSizes` is now a *mirror* of `samplerSizes` on save, so old consumers still see the right sizes; products without `samplerSizes` render exactly as before.
+  - New file `lib/sampler-config.ts` (types + `normalizeSamplerSizes` / `isSamplerSize` / `resolveSamplerConfig` / `formatMoneyCents` / `samplerPresentation`); new `tests/sampler-config.test.ts` (10 cases). No new Redis keys (`samplerSizes` lives on the product object in `store:products`). Verified: `npm test` 58/58, `tsc --noEmit` clean, `npm run lint` 0/0, `npm run build` compiles every route + middleware.
 
 - **2026-08-16 — Everything-you-asked-for mega-pass (categories · share-card studio · streamer overhaul · emails/ledger fix · ref prefix · per-size inventory · credits · Mapbox enforcement):**
   - **🏷 PRODUCT CATEGORIES — createable & deletable.** New admin list under **Settings → Catalog → Product categories** (add/rename/delete chips, pre-seeded: Perfume · Clothes · Shoes · Food · Tools · Tires · Pastries · Beanies · Winter · Summer · Men · Unisex · Women). Products get a category picker in the product form (multi-select chips) persisted as `product.categories`. The **/catalog page has a category filter bar** (All categories + each tag) that filters live/upcoming/archive sections, and home cards + the product page render category chips. Stored inside the existing `store:config.catalog.categories` (no new Redis keys). Deleting a category never destroys product tags — the chips just stop filtering.

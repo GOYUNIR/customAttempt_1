@@ -11,6 +11,7 @@ import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { isVideoMedia, coverStyle, normalizeCrop, DEFAULT_CROP } from '@/lib/media';
+import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -1103,6 +1104,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
   const canCheckoutDirect = checkoutMode === 'FCFS';
   const isRaffleProduct = checkoutMode === 'RAFFLE';
+  // Per-size trial ("sampler") presentation — the copy + math are specific to
+  // the size the customer has selected (never one generic line for all sizes).
+  const samplerPres = samplerPresentation(product, selectedSize);
   const fallbackImage = getFallbackImage(product);
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
 
@@ -1271,20 +1275,51 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {(product.priceCategories || []).map((cat: any) => {
-                const isSample = product.deliveryIncentiveEnabled === true && Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.includes(cat.size);
+                const chipIsSample = isSamplerSize(product, cat.size);
+                const chipBadge = chipIsSample
+                  ? String((product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase())?.label || 'Sample')
+                  : '';
                 const accent = configPalette.checkoutCtaButton || '#635bff';
                 return (
-                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${accent}` : `1px solid ${configPalette.cardBorder}`, background: selectedSize === cat.size ? accent : 'transparent', color: selectedSize === cat.size ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: selectedSize === cat.size ? 700 : 500 }}>
+                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${accent}` : (chipIsSample ? '1px solid rgba(34,197,94,0.45)' : `1px solid ${configPalette.cardBorder}`), background: selectedSize === cat.size ? accent : (chipIsSample ? 'rgba(34,197,94,0.1)' : 'transparent'), color: selectedSize === cat.size ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: selectedSize === cat.size ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
-                    {isSample ? ' · Sample' : ''}
+                    {chipIsSample && (
+                      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999, background: selectedSize === cat.size ? 'rgba(255,255,255,0.22)' : 'rgba(34,197,94,0.18)', border: selectedSize === cat.size ? '1px solid rgba(255,255,255,0.4)' : '1px solid rgba(34,197,94,0.5)', color: selectedSize === cat.size ? '#ffffff' : '#4ade80' }}>🧪 {chipBadge}</span>
+                    )}
                   </button>
                 );
               })}
             </div>
-            {product.deliveryIncentiveEnabled === true && ((Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.length > 0) || Number(product.deliveryIncentiveCreditCents || 0) > 0) && (
-              <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.18)', fontSize: 11, color: '#86efac', lineHeight: 1.5 }}>
-                🧪 Try a sample first: your {Array.isArray(product.deliveryIncentiveTriggerSizes) && product.deliveryIncentiveTriggerSizes.length > 0 ? String(product.deliveryIncentiveTriggerSizes[0]) : 'sample'} purchase is credited toward a full-size order — you only pay the difference.
-                {Number(product.deliveryIncentiveCreditCents || 0) > 0 && ` Every sample order includes a $${(Number(product.deliveryIncentiveCreditCents) / 100).toFixed(0)} credit after delivery.`}
+
+            {samplerPres.selected.isSampler && (
+              <div style={{ marginTop: 10, padding: '12px 14px', borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.22)', fontSize: 11, color: '#a7f3d0', lineHeight: 1.55 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#4ade80', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  🧪 {samplerPres.selected.headline}
+                </div>
+                <div>{samplerPres.selected.body}</div>
+                {samplerPres.selected.math && (
+                  <div style={{ marginTop: 10, padding: '9px 10px', borderRadius: 10, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ color: '#d1fae5' }}>{samplerPres.selected.badge === 'Sample' ? 'Sample' : samplerPres.selected.badge} · <strong>{formatMoneyCents(samplerPres.selected.math.samplePriceCents)}</strong></span>
+                      <span style={{ color: '#86efac' }}>credit −<strong>{formatMoneyCents(samplerPres.selected.math.creditCents)}</strong></span>
+                      <span style={{ color: '#ffffff', fontWeight: 800 }}>{samplerPres.selected.math.fullSize} <strong>{formatMoneyCents(samplerPres.selected.math.remainingCents)}</strong></span>
+                    </div>
+                    <div style={{ marginTop: 8, height: 5, borderRadius: 999, background: 'rgba(34,197,94,0.18)', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, samplerPres.selected.math.pctCovered)}%`, height: '100%', background: '#4ade80', borderRadius: 999 }} />
+                    </div>
+                    <div style={{ marginTop: 5, fontSize: 9, color: '#86efac', letterSpacing: '0.4px' }}>
+                      Your credit covers {samplerPres.selected.math.pctCovered}% of the {samplerPres.selected.math.fullSize}
+                    </div>
+                  </div>
+                )}
+                {samplerPres.selected.note && (
+                  <div style={{ marginTop: 8, color: '#d1fae5', fontSize: 10 }}>{samplerPres.selected.note}</div>
+                )}
+              </div>
+            )}
+            {!samplerPres.selected.isSampler && samplerPres.nudge && (
+              <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 10.5, color: '#86efac', lineHeight: 1.5 }}>
+                🧪 Want to try it first? The {samplerPres.nudge.size} is {formatMoneyCents(samplerPres.nudge.priceCents)} and includes a {formatMoneyCents(samplerPres.nudge.creditCents)} credit after delivery{samplerPres.nudge.fullSize ? ` toward the ${samplerPres.nudge.fullSize}` : ''}.
               </div>
             )}
           </div>
