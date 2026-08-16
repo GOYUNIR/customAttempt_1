@@ -14,7 +14,12 @@ import { fallbackSiteUrl, getSiteUrl } from './env.ts';
  */
 export function normalizeSiteBase(raw: string | undefined): string {
   let value = String(raw || '').trim();
-  if (!value) value = getSiteUrl();
+  // Reject Vercel-dashboard env-var placeholders that leak into configured
+  // values (`$vercel_project_production_url`, `https://$…`) — the URL parser
+  // accepts `$` as a hostname character, so without this guard the base would
+  // be a nonexistent domain and every og:image/email link built on it would
+  // 404. Treat them as unset → fall back to the env chain → example.com.
+  if (!value || value.includes('$')) value = getSiteUrl();
   if (!value) return fallbackSiteUrl();
 
   if (/^https?:\/\//i.test(value)) {

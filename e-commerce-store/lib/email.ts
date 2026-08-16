@@ -693,7 +693,10 @@ export function sendAdminVerificationEmail(opts: { to: string; code: string; sit
   return sendCodeEmail({
     to: opts.to,
     code: opts.code,
-    subject: `${emailBrandName()} — Admin sign-in code`,
+    // The code lives in the SUBJECT so it shows in the phone's push-notification
+    // preview (and the mailbox list) — the operator can read and type it without
+    // opening the email. iOS Mail + Android Gmail also use it for OTP autofill.
+    subject: `${emailBrandName()} — Admin sign-in code: ${opts.code}`,
     headline: 'Admin sign-in verification',
     body: 'A request was made to open the store admin portal. Enter this one-time code to finish signing in.',
   });
@@ -704,7 +707,8 @@ export function sendCustomerVerificationEmail(opts: { to: string; code: string; 
   return sendCodeEmail({
     to: opts.to,
     code: opts.code,
-    subject: `${emailBrandName()} — Confirm your email`,
+    // Same notification-preview trick as the admin 2FA email.
+    subject: `${emailBrandName()} — Your verification code: ${opts.code}`,
     headline: 'Confirm your email address',
     body: `We need to make sure ${opts.to} is really you before your welcome points and one-time member credit are unlocked. Enter this one-time code to verify your account.`,
     ctaLabel: 'Verify my email',

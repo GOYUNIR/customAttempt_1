@@ -38,6 +38,14 @@ function readEnv(...names: string[]): string {
 export function getSiteUrl(): string {
   const raw = readEnv('NEXT_PUBLIC_URL', 'NEXT_PUBLIC_SITE_URL', 'SITE_URL').replace(/\/+$/, '');
   if (raw) {
+    // A value like `$vercel_project_production_url` (or `https://$…`) is the
+    // Vercel dashboard's env-var placeholder text that leaked into a configured
+    // variable — Vercel never expands it at runtime, and the URL parser happily
+    // accepts `$` inside a hostname, so every og:image / canonical / email URL
+    // would point at a NONEXISTENT domain (link previews silently never load).
+    // Treat any value containing `$` as unset so callers fall back to the real
+    // request host instead of building a broken URL.
+    if (raw.includes('$')) return '';
     if (!/^https?:\/\//i.test(raw)) return '';
     try {
       const parsed = new URL(raw);
@@ -52,7 +60,7 @@ export function getSiteUrl(): string {
   // production alias domain (e.g. `goyunir.com`), `VERCEL_URL` the per-deploy
   // URL. Both are bare hostnames → normalize to `https://host`.
   const vercelHost = readEnv('VERCEL_PROJECT_PRODUCTION_URL', 'VERCEL_URL').replace(/\/+$/, '');
-  if (vercelHost && !/\s/.test(vercelHost) && !vercelHost.includes('/')) {
+  if (vercelHost && !/\s/.test(vercelHost) && !vercelHost.includes('/') && !vercelHost.includes('$')) {
     return `https://${vercelHost}`;
   }
   return '';

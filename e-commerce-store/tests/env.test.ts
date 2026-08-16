@@ -57,3 +57,32 @@ test('getSiteUrl rejects malformed values that would build https:/// links', () 
     process.env = { ...original };
   }
 });
+
+test('getSiteUrl rejects Vercel dashboard env placeholders that leak into values', () => {
+  const original = { ...process.env };
+  try {
+    // The exact failure seen live: an env var holds the dashboard's placeholder
+    // text (never expanded), and the URL parser ACCEPTS `$` as a hostname char,
+    // so without this guard og:image/canonical URLs pointed at a nonexistent
+    // `https://$vercel_project_production_url` domain and link previews broke.
+    for (const placeholder of [
+      '$vercel_project_production_url',
+      'https://$vercel_project_production_url',
+      '$VERCEL_PROJECT_PRODUCTION_URL',
+      'https://$VERCEL_URL',
+      'https://sub.$env_domain.example.com',
+    ]) {
+      process.env.NEXT_PUBLIC_URL = placeholder;
+      process.env.NEXT_PUBLIC_SITE_URL = '';
+      delete process.env.SITE_URL;
+      assert.equal(getSiteUrl(), '', `getSiteUrl(${JSON.stringify(placeholder)}) must be empty`);
+    }
+    // The Vercel system-var fallback is also placeholder-safe.
+    process.env.NEXT_PUBLIC_URL = '';
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    process.env.SITE_URL = '$vercel_project_production_url';
+    assert.equal(getSiteUrl(), '');
+  } finally {
+    process.env = { ...original };
+  }
+});

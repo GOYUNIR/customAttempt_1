@@ -105,7 +105,9 @@ export function cardBackgroundStyle(
  * top-right domain can never render blank. */
 export function cardSiteUrlDisplay(value: unknown, fallback = 'example.com'): string {
   let raw = String(value ?? '').trim().replace(/\/+$/, '');
-  if (!raw) return fallback;
+  // An unresolved Vercel env placeholder (`$vercel_project_production_url`) is
+  // never a real domain — never print it on the card.
+  if (!raw || raw.includes('$')) return fallback;
   raw = raw.replace(/^https?:\/\//i, '');
   raw = raw.replace(/^\/+/, '').trim();
   if (!raw || raw === 'http:' || raw === 'https:') return fallback;
@@ -119,6 +121,9 @@ export function cardSiteUrlDisplay(value: unknown, fallback = 'example.com'): st
  */
 export function previewSiteUrl(shareUrl: unknown, origin: string): string {
   const s = String(shareUrl ?? '').trim().replace(/\/+$/, '');
+  // Unresolved Vercel placeholders (`$vercel_project_production_url`) are never
+  // real domains — fall back to the origin so the admin preview link stays valid.
+  if (!s || s.includes('$')) return origin || 'https://example.com';
   if (/^https?:\/\//i.test(s)) return s;
   if (s && !s.includes('://')) return `https://${s}`;
   return origin || 'https://example.com';

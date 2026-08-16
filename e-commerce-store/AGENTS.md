@@ -233,6 +233,14 @@ the ledger. Settings tabs include:
   request (30 days when "remember this device" is checked, else 24h), so a
   leaked password alone can't reach the portal or its APIs. Codes are 6 digits,
   expire in 10 min, lock after 5 wrong tries, and resends are throttled to 1/min.
+  **The code is in the email SUBJECT line** (`… — Admin sign-in code: 482913`),
+  so it shows right in the phone's push-notification preview without opening the
+  email (same for customer verify emails). The gate's code field is an OTP
+  field (`autocomplete="one-time-code"` + WebKit `textContentType` set via ref)
+  so iOS/Android show a one-tap autofill suggestion above the keyboard, and the
+  code **auto-verifies the instant all 6 digits are present** (typed, pasted, or
+  autofilled) — no extra tap. A "Paste code from clipboard" button covers the
+  desktop copy-paste path.
 - **Streamer Mode** — default ON on load. Masks every customer email, shipping
   address and card number and disables the password field (fixed bullet mask —
   the real password length is never visible) so the portal is safe to share on
@@ -435,6 +443,15 @@ input like `123 realstreet` can never be saved.
   (`getRequestSiteUrl()`), so link previews never resolve against a stock
   `https://example.com` placeholder when env vars and the admin Share URL are
   both unset.
+- ⚠️ **Vercel dashboard placeholders are rejected everywhere.** The URL parser
+  accepts `$` inside a hostname, so a `NEXT_PUBLIC_URL` value that contains the
+  Vercel env-var placeholder text (`$vercel_project_production_url`, `https://$…`)
+  used to silently produce `https://$vercel_project_production_url/og…` — a
+  nonexistent domain, which is why link previews never loaded. `getSiteUrl()`,
+  `normalizeSiteBase()`, `getRequestSiteUrl()`, `cardSiteUrlDisplay()` and
+  `previewSiteUrl()` ALL treat any value containing `$` as unset and fall back
+  through the chain (env → request host → example.com). If a shared link shows
+  no card, check the Vercel env vars for a `$…` placeholder first.
 
 ## Environment Variables (set in Vercel)
 
@@ -494,6 +511,11 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — Share card FIXED for real (Vercel env placeholder) + 2FA autofill & notification codes:**
+  - **🃏 THE share-card bug.** The live site's `og:image`/`og:url`/canonical tags were `https://$vercel_project_production_url/og…` — a Vercel dashboard env-var PLACEHOLDER had leaked into a configured URL variable (`NEXT_PUBLIC_URL` or an alias). The WHATWG URL parser accepts `$` as a hostname character, so `getSiteUrl()` happily returned it as a "valid" base and every link preview pointed at a NONEXISTENT domain — messengers could never fetch the card, no matter how many times the card code itself was fixed. **Fix:** `getSiteUrl()` (`lib/env.ts`), `normalizeSiteBase()` (`lib/url-utils.ts`), `getRequestSiteUrl()` (`lib/request-url.ts`), `cardSiteUrlDisplay()` and `previewSiteUrl()` (`lib/share-card-config.ts`) now ALL treat any value containing `$` as unset and fall back through env → request host → neutral placeholder. A deployed store with the placeholder still in the env will now serve the REAL request-host domain (`https://goyunir.com/og?...`) automatically — no Vercel dashboard change required. `CARD_REVISION` bumped 6→7 so the og:image URL changes and WhatsApp/iMessage/Discord re-fetch. Tests: 5 new cases in `tests/env.test.ts` + `tests/url-utils.test.ts` + `tests/share-card-config.test.ts` (39/39 pass).
+  - **📱 2FA "autofill + read from notifications" — done.** (a) The one-time code now lives in the email **SUBJECT** (`… — Admin sign-in code: 482913`, same for customer verify emails), so it shows right in the phone's push-notification preview and the mailbox list — no opening the email. (b) The code fields (admin gate + signup verify step + /account verify card) are proper OTP fields: `autocomplete="one-time-code"`, `inputMode="numeric"`, `pattern="[0-9]*"`, `autoFocus`, and the WebKit `textContentType="oneTimeCode"` property set via ref (React's web typings don't expose it) — iOS/Android show a one-tap autofill suggestion above the keyboard the moment the email lands. (c) **Auto-verify**: as soon as all 6 digits are present (typed, pasted, or autofilled) the code submits itself — a per-gate `lastSubmittedCodeRef` guards against re-submitting a wrong code, and resends reset it. (d) A "📋 Paste code from clipboard" button covers the desktop path. The gate copy now says exactly where the code is.
+  - Docs: AGENTS.md updated (admin 2FA section + URL/placeholder section + this changelog). No Redis keys were added or changed. Verified: `npm test` 39/39, `tsc --noEmit` clean, `eslint` clean on every touched file, `npm run build` compiles every route + the proxy middleware, and the dev server hot-reloads the new card hash (`961bb98c` → `9a198141`).
 
 - **2026-08-15 — Finalization & polish pass (all reported issues):**
   - **📈 "Total raffle entries not inflating thru the day" — FIXED.** The auto-increment only ran on the authenticated cron route (`/api/analytics/social-tick`), and Vercel Hobby allows max ONE cron run per day — so the boost never ticked during the day. New shared engine `lib/social-proof.ts` (`maybeAutoIncrementSocialProof`) is now called by BOTH the cron route AND the PUBLIC `/api/analytics/heartbeat` (rate-limited 120/min/IP) the home page calls on every load — so real visitor traffic nudges the counter upward through the day, with hard daily caps/gap windows that a script can't blow past. Defaults bumped (chance 0.15→0.18, amount 1→2, max/day 4→15, min-gap 3h→1h) in all five config paths (static + seed + `/api/store/config`), and the home page now POLLS the heartbeat every 30s so the displayed count refreshes live. The cron `social-tick` route is unchanged in behavior (same shared engine).

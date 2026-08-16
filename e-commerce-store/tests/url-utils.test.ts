@@ -40,3 +40,31 @@ test('normalizeSiteBase never emits a broken https:/// link', () => {
     process.env = { ...original };
   }
 });
+
+test('normalizeSiteBase rejects Vercel placeholder tokens so OG URLs never point at a nonexistent host', () => {
+  const original = { ...process.env };
+  try {
+    delete process.env.NEXT_PUBLIC_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    delete process.env.SITE_URL;
+    // `$vercel_project_production_url` parses as a "valid" URL host, so without
+    // the guard the og:image URL became https://$vercel_project_production_url/og
+    // and messengers could never fetch the card.
+    for (const placeholder of [
+      '$vercel_project_production_url',
+      'https://$vercel_project_production_url',
+      '$VERCEL_PROJECT_PRODUCTION_URL',
+      'https://$VERCEL_URL',
+    ]) {
+      assert.equal(
+        normalizeSiteBase(placeholder),
+        'https://example.com',
+        `normalizeSiteBase(${JSON.stringify(placeholder)}) must fall back`,
+      );
+    }
+    // A healthy configured value still wins once the env placeholder is gone.
+    assert.equal(normalizeSiteBase('goyunir.com'), 'https://goyunir.com');
+  } finally {
+    process.env = { ...original };
+  }
+});

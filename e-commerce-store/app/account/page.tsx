@@ -132,6 +132,9 @@ export default function AccountPage() {
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyMsg, setVerifyMsg] = useState('');
   const [verifyBusy, setVerifyBusy] = useState(false);
+  // Guards the AUTO-VERIFY: a 6-digit code is submitted exactly once (a wrong
+  // code isn't re-submitted on every re-render, and a resend resets it).
+  const lastVerifyCodeRef = useRef('');
 
   const handleAccountVerify = async () => {
     if (!user?.email) return;
@@ -173,7 +176,8 @@ export default function AccountPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setVerifyMsg(data.devCode ? `Dev-mode code: ${data.devCode}` : 'A fresh code was sent. Check your email (and spam).');
+        setVerifyMsg(data.devCode ? `Dev-mode code: ${data.devCode}` : 'A fresh code was sent — it shows in your email notification.');
+        lastVerifyCodeRef.current = '';
       } else {
         setVerifyMsg(data.error || 'Could not resend the code.');
       }
@@ -182,6 +186,19 @@ export default function AccountPage() {
     }
     setVerifyBusy(false);
   };
+
+  // AUTO-VERIFY: as soon as all 6 digits are present (typed, pasted, or filled
+  // by the iOS/Android one-time-code autofill bar) submit immediately.
+  useEffect(() => {
+    if (verifyBusy) return;
+    const code = verifyCode.trim();
+    if (code.length === 6 && code !== lastVerifyCodeRef.current) {
+      lastVerifyCodeRef.current = code;
+      handleAccountVerify();
+    }
+    // handleAccountVerify is stable per-mount; keying on code length + busy is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyCode, verifyBusy]);
 
   const copyCode = async (code: string) => {
     try {
@@ -607,10 +624,16 @@ export default function AccountPage() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input
                 type="text"
+                name="one-time-code"
+                autoComplete="one-time-code"
                 inputMode="numeric"
+                pattern="[0-9]*"
                 maxLength={6}
                 value={verifyCode}
                 onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                ref={(el) => {
+                  if (el) (el as HTMLInputElement & { textContentType?: string }).textContentType = 'oneTimeCode';
+                }}
                 placeholder="6-digit code"
                 style={{ flex: 1, minWidth: 130, padding: 9, borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, fontSize: 13, letterSpacing: 4, textAlign: 'center' }}
               />

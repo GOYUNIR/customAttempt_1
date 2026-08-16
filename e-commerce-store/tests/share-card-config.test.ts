@@ -48,10 +48,21 @@ test('cardSiteUrlDisplay strips protocol and trailing slashes', () => {
   assert.equal(cardSiteUrlDisplay(null, 'example.com'), 'example.com');
 });
 
+test('cardSiteUrlDisplay never prints a Vercel env placeholder on the card', () => {
+  // The URL parser accepts `$` in a hostname, so the placeholder must be
+  // rejected explicitly or the card's domain would read "$vercel_project_production_url".
+  for (const placeholder of ['$vercel_project_production_url', 'https://$vercel_project_production_url', '$VERCEL_URL']) {
+    assert.equal(cardSiteUrlDisplay(placeholder, 'example.com'), 'example.com');
+  }
+});
+
 test('previewSiteUrl builds a clickable link from a bare domain', () => {
   assert.equal(previewSiteUrl('https://a.example', 'https://x.example'), 'https://a.example');
   assert.equal(previewSiteUrl('a.example', 'https://x.example'), 'https://a.example');
   assert.equal(previewSiteUrl('', 'https://x.example'), 'https://x.example');
+  // Vercel placeholder tokens fall back to the origin, never a fake domain.
+  assert.equal(previewSiteUrl('$vercel_project_production_url', 'https://x.example'), 'https://x.example');
+  assert.equal(previewSiteUrl('https://$vercel_project_production_url', 'https://x.example'), 'https://x.example');
 });
 
 test('resolveClientImageSource keeps absolute/data, resolves root-relative, drops junk', () => {

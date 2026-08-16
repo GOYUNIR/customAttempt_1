@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -24,6 +24,9 @@ export default function SignupPage() {
   const [verifyMsg, setVerifyMsg] = useState('');
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [devCode, setDevCode] = useState('');
+  // Guards the AUTO-VERIFY: a 6-digit code is submitted exactly once (a wrong
+  // code isn't re-submitted on every re-render, and a resend resets it).
+  const lastSubmittedCodeRef = useRef('');
   // Live theme palette — initialized from the server-baked theme (no flash) and
   // refreshed from /api/store so design presets apply to the auth pages too.
   const liveCtx = useLiveTheme();
@@ -77,7 +80,8 @@ export default function SignupPage() {
         setPendingEmail(data.email || email);
         setDevCode(data.devCode || '');
         setVerifyCode('');
-        setVerifyMsg(data.devCode ? 'Account created. Enter the dev-mode code below to finish.' : 'Account created — check your email for the 6-digit code.');
+        lastSubmittedCodeRef.current = '';
+        setVerifyMsg(data.devCode ? 'Account created. Enter the dev-mode code below to finish.' : 'Account created — the code is in the email subject line, so it shows right in your notification.');
         setStep('verify');
         notify({ id: 'auth-signup', type: 'success', message: 'Account created — verify your email to unlock your rewards.' });
       } else if (res.ok) {
@@ -135,8 +139,9 @@ export default function SignupPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setVerifyMsg(data.devCode ? 'A fresh code was sent. Dev-mode code below.' : 'A fresh code was sent. Check your email (and spam).');
+        setVerifyMsg(data.devCode ? 'A fresh code was sent. Dev-mode code below.' : 'A fresh code was sent — it shows in your email notification.');
         if (data.devCode) setDevCode(data.devCode);
+        lastSubmittedCodeRef.current = '';
       } else {
         setVerifyMsg(data.error || 'Could not resend the code.');
       }
@@ -145,6 +150,19 @@ export default function SignupPage() {
     }
     setVerifyBusy(false);
   };
+
+  // AUTO-VERIFY: as soon as all 6 digits are present (typed, pasted, or filled
+  // by the iOS/Android one-time-code autofill bar) submit immediately.
+  useEffect(() => {
+    if (verifyBusy || step !== 'verify') return;
+    const code = verifyCode.trim();
+    if (code.length === 6 && code !== lastSubmittedCodeRef.current) {
+      lastSubmittedCodeRef.current = code;
+      handleVerify();
+    }
+    // handleVerify is stable per-mount; keying on code length + busy + step is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyCode, verifyBusy, step]);
 
   const inputStyle = {
     padding: 12,
@@ -210,10 +228,17 @@ export default function SignupPage() {
             )}
             <input
               type="text"
+              name="one-time-code"
+              autoComplete="one-time-code"
               inputMode="numeric"
+              pattern="[0-9]*"
               maxLength={6}
+              autoFocus
               value={verifyCode}
               onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              ref={(el) => {
+                if (el) (el as HTMLInputElement & { textContentType?: string }).textContentType = 'oneTimeCode';
+              }}
               placeholder="6-digit code"
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 6, fontSize: 16, marginBottom: 12 }}
             />

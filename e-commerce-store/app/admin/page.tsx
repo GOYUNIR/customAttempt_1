@@ -847,6 +847,10 @@ export default function AdminPortal() {
   // on every re-render). Reset when the gate closes so a mid-session re-lock
   // (401 ADMIN_2FA_REQUIRED) auto-sends a fresh code again.
   const verifyAutoSentRef = useRef(false);
+  // Guards the AUTO-VERIFY: a 6-digit code is submitted exactly once per gate
+  // open (not re-submitted on every re-render while it stays at 6 digits, and
+  // never after a resend replaced the challenge).
+  const lastSubmittedCodeRef = useRef('');
 
   const [isRunning, setIsRunning] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -2245,8 +2249,9 @@ export default function AdminPortal() {
       const data = await res.json();
       if (res.ok) {
         setVerifyEmail(data.sentTo || '');
-        setVerifyMsg(`Code sent to ${data.sentTo || 'your admin inbox'}. Check your email (and spam).`);
+        setVerifyMsg(`Code sent to ${data.sentTo || 'your admin inbox'} — it's in the email subject line, so it shows right in your notification.`);
         setVerifyDevCode(data.devCode || '');
+        lastSubmittedCodeRef.current = '';
       } else {
         setVerifyMsg(data.error || 'Could not send the code.');
       }
@@ -2292,8 +2297,9 @@ export default function AdminPortal() {
       });
       const data = await res.json();
       if (res.ok) {
-        setVerifyMsg('A fresh code was sent. Check your email (and spam).');
+        setVerifyMsg('A fresh code was sent — it shows in your email notification.');
         setVerifyDevCode(data.devCode || '');
+        lastSubmittedCodeRef.current = '';
       } else {
         setVerifyMsg(data.error || 'Could not resend the code.');
       }
@@ -2317,6 +2323,44 @@ export default function AdminPortal() {
     // keying on the gate state alone is intentional — re-running exactly when
     // the gate opens/closes is the desired behaviour.
   }, [adminVerified]);
+
+  // AUTO-VERIFY: the instant all 6 digits are present (typed, pasted, or filled
+  // by the iOS/Android one-time-code autofill bar) the code is submitted
+  // immediately — no extra "Verify & unlock" tap. The ref keeps a wrong code
+  // from being re-submitted on every re-render, and a resend resets it.
+  useEffect(() => {
+    if (adminVerified !== false || verifyBusy) return;
+    const code = verifyCode.trim();
+    if (code.length === 6 && code !== lastSubmittedCodeRef.current) {
+      lastSubmittedCodeRef.current = code;
+      confirmAdminVerifyCode();
+    }
+    // confirmAdminVerifyCode is stable per-mount (only touches setters); keying
+    // on the code length + busy flag is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyCode, adminVerified, verifyBusy]);
+
+  // Read a 6-digit code from the clipboard and fill the field (desktop
+  // convenience — e.g. a mail app that copied the code for you). iOS/Android
+  // get native OTP autofill from the notification instead.
+  const pasteVerifyCode = async () => {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+        const text = await navigator.clipboard.readText();
+        const digits = String(text || '').replace(/\D/g, '').slice(0, 6);
+        if (digits.length === 6) {
+          setVerifyMsg('Pasted — verifying…');
+          setVerifyCode(digits);
+          return;
+        }
+        setVerifyMsg('The clipboard does not contain a 6-digit code.');
+      } else {
+        setVerifyMsg('Clipboard access is unavailable here — tap the field and paste with Ctrl/Cmd+V.');
+      }
+    } catch {
+      setVerifyMsg('Clipboard access was blocked — tap the field and paste with Ctrl/Cmd+V.');
+    }
+  };
 
   // CSV export uses fetch (not a plain <a>) so the admin password never travels
   // in the URL — proxy.ts Basic Auth + the 2FA device cookie authorize it.
@@ -2478,14 +2522,34 @@ export default function AdminPortal() {
             </div>
           )}
           <input
+            id="admin-verify-code"
             type="text"
+            name="one-time-code"
+            autoComplete="one-time-code"
             inputMode="numeric"
+            pattern="[0-9]*"
             maxLength={6}
+            autoFocus
             value={verifyCode}
             onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            ref={(el) => {
+              // WebKit's OTP-autofill trigger (iOS): React's web typings don't
+              // expose `textContentType`, so set the DOM property directly.
+              if (el) (el as HTMLInputElement & { textContentType?: string }).textContentType = 'oneTimeCode';
+            }}
             placeholder="6-digit code"
-            style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: 12, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 16, letterSpacing: 6, textAlign: 'center', marginBottom: 12 }}
+            style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: 12, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 16, letterSpacing: 6, textAlign: 'center', marginBottom: 8 }}
           />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button
+              type="button"
+              onClick={pasteVerifyCode}
+              disabled={verifyBusy}
+              style={{ background: 'transparent', border: 'none', color: '#a1a1aa', fontSize: 11, cursor: verifyBusy ? 'not-allowed' : 'pointer', padding: '2px 4px', textDecoration: 'underline' }}
+            >
+              📋 Paste code from clipboard
+            </button>
+          </div>
           {/* The label wraps the checkbox so the whole row is tappable. Some
               mobile browsers don't toggle a label-wrapped controlled checkbox
               reliably (the tap lands on the text, not the input), so we also
@@ -2514,7 +2578,7 @@ export default function AdminPortal() {
           </div>
           {verifyMsg && <p style={{ marginTop: 12, fontSize: 12, color: verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', lineHeight: 1.5 }}>{verifyMsg}</p>}
           <p style={{ marginTop: 14, fontSize: 10, color: '#666', lineHeight: 1.5 }}>
-            Set <code style={{ color: '#999' }}>ADMIN_VERIFY_EMAIL</code> (or <code style={{ color: '#999' }}>SUPPORT_EMAIL</code>) in the platform environment to choose where these codes are delivered. Codes expire in 10 minutes; wrong codes lock the email for 15 minutes after 5 tries.
+            The code is in the email <strong style={{ color: '#999' }}>subject line</strong>, so it shows right in your phone&apos;s notification — no need to open the email. On iOS/Android it also appears as a one-tap autofill above this field, and it verifies automatically the moment all 6 digits are in. Set <code style={{ color: '#999' }}>ADMIN_VERIFY_EMAIL</code> (or <code style={{ color: '#999' }}>SUPPORT_EMAIL</code>) in the platform environment to choose where these codes are delivered. Codes expire in 10 minutes; wrong codes lock the email for 15 minutes after 5 tries.
           </p>
         </div>
       </main>

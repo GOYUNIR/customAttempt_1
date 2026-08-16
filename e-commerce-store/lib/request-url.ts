@@ -18,7 +18,9 @@ export async function getRequestSiteUrl(): Promise<string> {
     const host = String(forwardedHost || h.get('host') || '')
       .split(',')[0]
       .trim();
-    if (!host) return '';
+    // A `$` in the host is an unresolved Vercel placeholder (never a real
+    // domain) — reject it so metadata/OG URLs can't point at a nonexistent host.
+    if (!host || host.includes('$')) return '';
     const forwardedProto = h.get('x-forwarded-proto');
     const proto = String(forwardedProto || 'https').split(',')[0].trim() || 'https';
     return `${proto}://${host}`.replace(/\/+$/, '');
