@@ -7,7 +7,7 @@ import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, hasMixedCheckoutModes } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { isImageMedia, isVideoMedia } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
@@ -258,7 +258,12 @@ export default function HomePage() {
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <div style={{ fontSize: 11, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px' }}>Featured release</div>
-                        <div style={{ fontSize: 11, color: product.soldOut ? '#fcd34d' : configPalette.accentBlue, fontWeight: 700 }}>{product.soldOut ? 'Sold out' : 'Open now'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {hasMixedCheckoutModes(product) && (
+                            <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.6px', padding: '2px 6px', borderRadius: 999, background: 'color-mix(in srgb, #a855f7 16%, transparent)', color: configPalette.accentPurple, border: '1px solid color-mix(in srgb, #a855f7 40%, transparent)' }} title="Some sizes run a raffle, others sell instantly">RAFFLE + FCFS</span>
+                          )}
+                          <div style={{ fontSize: 11, color: product.soldOut ? '#fcd34d' : configPalette.accentBlue, fontWeight: 700 }}>{product.soldOut ? 'Sold out' : 'Open now'}</div>
+                        </div>
                       </div>
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4, color: configPalette.cardTextMain }}>{product.name}</div>
                       <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.tagline || product.desc}</div>

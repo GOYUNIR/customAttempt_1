@@ -15,7 +15,7 @@ import {
 } from '@/lib/server-config';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -27,14 +27,6 @@ type CartInputItem = {
   size: string;
   quantity?: number;
 };
-
-function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
-  const mode = String(product?.checkoutMode || '').toUpperCase();
-  if (mode === 'FCFS') return 'FCFS';
-  if (mode === 'RAFFLE') return 'RAFFLE';
-  if (product?.isRaffle === false) return 'FCFS';
-  return 'RAFFLE';
-}
 
 /** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
  * fallback 'GU') so refs built here match what the admin portal shows. */
@@ -168,7 +160,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `${product.name} limit is ${maxPerEmail} per email.` }, { status: 409 });
       }
 
-      if (getCheckoutMode(product) === 'FCFS') {
+      if (getSizeCheckoutMode(product, item.size) === 'FCFS') {
         const priorCharges = await countChargedByEmail(redis, email, variant, item.size);
         if (priorCharges + item.quantity > maxPerEmail) {
           return NextResponse.json({ error: `${product.name} limit reached for this email.` }, { status: 409 });

@@ -1280,14 +1280,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {cart.length === 0 ? (
                 <div style={{ border: '1px dashed rgba(255,255,255,0.12)', borderRadius: themeRadius(liveTheme, 20), padding: 18, color: drawerTextMuted, fontSize: 13, lineHeight: 1.6 }}>
-                  Your {actionTitle.toLowerCase()} is empty. Add direct-purchase items from a product page to review them here.
+                  Your {actionTitle.toLowerCase()} is empty. Add items from a product page to review them here.
                 </div>
               ) : (
                 cart.map((item, index) => (
                   <div key={`${item.productId}-${item.size}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: themeRadius(liveTheme, 18), padding: 12, background: 'rgba(255,255,255,0.04)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>{item.name}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: drawerText, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {item.name}
+                          <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: (item.checkoutMode || '').toUpperCase() === 'FCFS' ? 'rgba(59,130,246,0.18)' : 'rgba(245,158,11,0.18)', border: (item.checkoutMode || '').toUpperCase() === 'FCFS' ? '1px solid rgba(59,130,246,0.5)' : '1px solid rgba(245,158,11,0.5)', color: (item.checkoutMode || '').toUpperCase() === 'FCFS' ? '#93c5fd' : '#fbbf24' }}>
+                            {(item.checkoutMode || '').toUpperCase() === 'FCFS' ? 'buy' : 'raffle'}
+                          </span>
+                        </div>
                         <div style={{ fontSize: 11, color: drawerTextMuted, marginTop: 3 }}>{item.size}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>

@@ -700,6 +700,13 @@ export function isConfiguredPrice(price: unknown): boolean {
   return Number.isFinite(numeric) && numeric > 0 && numeric < UNCONFIGURED_PRICE_SENTINEL;
 }
 
+// Per-size checkout mode ("a product can be BOTH a raffle and a direct-sale"):
+// shared by the storefront, checkout routes and the auto-draw engine. The
+// implementation lives in lib/checkout-mode.ts (self-contained for the node
+// test runner); this re-export keeps every existing `@/lib/storefront-config`
+// import working.
+export { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes } from './checkout-mode';
+
 export function getProductPrice(product: StorefrontProduct, size: string): number {
   const category = findPriceCategory(product, size);
   if (category && Number.isFinite(Number(category.price))) {

@@ -22,6 +22,8 @@ export const dynamic = 'force-dynamic';
 type PublicPriceCategory = {
   size: string;
   price: number;
+  /** Per-size checkout mode ('RAFFLE' | 'FCFS'); a product can mix formats. */
+  checkoutMode?: 'RAFFLE' | 'FCFS';
 };
 
 type PublicStoreProduct = {
@@ -121,6 +123,13 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     priceCategories: priceCats.map((category: any) => ({
       size: String(category?.size || 'Standard'),
       price: Math.max(0, Number(category?.price || 0)),
+      // Per-size checkout mode (RAFFLE vs FCFS) — a product can mix formats
+      // (e.g. a sampler size sells instantly while the full size runs a raffle).
+      checkoutMode: (() => {
+        const mode = String(category?.checkoutMode || '').toUpperCase();
+        if (mode === 'RAFFLE' || mode === 'FCFS') return mode;
+        return undefined;
+      })(),
     })),
     // Category tags from the admin-managed list (Settings → Catalog).
     categories: Array.isArray(raw?.categories) ? raw.categories.map(String) : [],

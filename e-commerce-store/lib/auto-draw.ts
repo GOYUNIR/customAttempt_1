@@ -57,6 +57,7 @@ import {
   isConfiguredPrice,
   shouldRunDraw,
   getNextRecurringAnchorMs,
+  getSizeCheckoutMode,
 } from '@/lib/storefront-config';
 import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
@@ -326,6 +327,11 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       const productSize = sizeFromPoolKey(poolKey);
       const product = productsByName.get(String(productName).toLowerCase());
       if (!product) continue; // pool for a deleted/renamed product — leave untouched
+
+      // Mixed-format products: a size marked FCFS sells instantly at checkout and
+      // is NEVER part of the raffle. Guard so a stale/forced FCFS pool can never
+      // be drawn (and never have its countdown rolled forward).
+      if (getSizeCheckoutMode(product, productSize) === 'FCFS') continue;
 
       const listLength = await redis.llen(poolKey);
 

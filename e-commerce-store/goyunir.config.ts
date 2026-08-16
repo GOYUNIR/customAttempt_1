@@ -227,11 +227,11 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       name: 'Noir Citrus — Instant Drop',
       slug: 'noir-citrus-instant-drop',
       prefix: 'baseItem1',
-      tagline: 'FCFS / LIVE',
-      desc: 'Fast-checkout direct buy drop for cart flow.',
+      tagline: 'MIXED / LIVE',
+      desc: 'A single release, two ways to buy: the Sampler Set sells instantly (FCFS) while the Full Bottle runs a raffle.',
       priceCategories: [
-        { size: 'Sampler Set', price: 19, stripeId: '', winnerTiers: '0' },
-        { size: 'Full Bottle', price: 145, stripeId: '', winnerTiers: '0' },
+        { size: 'Sampler Set', price: 19, stripeId: '', winnerTiers: '0', checkoutMode: 'FCFS' },
+        { size: 'Full Bottle', price: 145, stripeId: '', winnerTiers: '2,2', checkoutMode: 'RAFFLE' },
       ],
       samplerSizes: [
         {
@@ -256,9 +256,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       totalInventory: 160,
       winnerTiers: [0],
       isActive: true,
-      isRaffle: false,
-      checkoutMode: 'FCFS',
-      productType: 'checkout',
+      isRaffle: true,
+      checkoutMode: 'RAFFLE',
+      productType: 'raffle',
     },
   ] as any[], // cast to any to allow extra fields not in StorefrontProduct
 });

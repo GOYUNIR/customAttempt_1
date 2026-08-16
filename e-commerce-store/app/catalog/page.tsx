@@ -303,6 +303,11 @@ export default function CatalogPage() {
         const isEnterable = (liveProduct?.isActive ?? item.isActive) === true && inventoryRemaining > 0;
         const checkoutMode = String(liveProduct?.checkoutMode || item.checkoutMode || '').toUpperCase();
         const isRaffle = checkoutMode === 'RAFFLE' || liveProduct?.isRaffle === true || item.isRaffle === true;
+        // Mixed-format release: some sizes run a raffle, others sell instantly.
+        const sizeModes = Array.isArray(liveProduct?.priceCategories)
+          ? (liveProduct.priceCategories as any[]).map((c: any) => String(c?.checkoutMode || '').toUpperCase()).filter((m: string) => m === 'RAFFLE' || m === 'FCFS')
+          : [];
+        const mixedFormats = sizeModes.includes('RAFFLE') && sizeModes.includes('FCFS');
         const soldOutAt = String(liveProduct?.soldOutAt || item.soldOutAt || '').trim();
         const soldOutDate = soldOutAt
           ? (() => {
@@ -391,10 +396,10 @@ export default function CatalogPage() {
                 {archiveBadge.text}
               </div>
             )}
-            {(section === 'upcoming' || section === 'archive') && (isRaffle || checkoutMode === 'FCFS' || (section === 'archive' && soldOutDate)) && (
+            {(section === 'upcoming' || section === 'archive') && (isRaffle || checkoutMode === 'FCFS' || mixedFormats || (section === 'archive' && soldOutDate)) && (
               <div style={{ marginTop: 6, fontSize: 9, color: configPalette.cardTextMuted || '#a1a1aa', letterSpacing: '0.5px' }}>
-                {(isRaffle || checkoutMode === 'FCFS') && (isRaffle ? 'Raffle' : 'FCFS')}
-                {section === 'archive' && soldOutDate && ((isRaffle || checkoutMode === 'FCFS') ? ` · ${soldOutDate}` : soldOutDate)}
+                {mixedFormats ? 'Raffle + FCFS' : (isRaffle || checkoutMode === 'FCFS') ? (isRaffle ? 'Raffle' : 'FCFS') : ''}
+                {section === 'archive' && soldOutDate && ((isRaffle || checkoutMode === 'FCFS' || mixedFormats) ? ` · ${soldOutDate}` : soldOutDate)}
               </div>
             )}
           </div>

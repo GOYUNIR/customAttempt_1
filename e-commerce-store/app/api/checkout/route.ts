@@ -2,20 +2,12 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
-
-function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
-  const mode = String(product?.checkoutMode || '').toUpperCase();
-  if (mode === 'FCFS') return 'FCFS';
-  if (mode === 'RAFFLE') return 'RAFFLE';
-  if (product?.isRaffle === false) return 'FCFS';
-  return 'RAFFLE';
-}
 
 /** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
  * fallback 'GU') so refs built here match what the admin portal shows. */
@@ -90,7 +82,7 @@ export async function POST(request: Request) {
     const productSlug = String(product.slug || product.id);
     const variant = String(product.name || product.id);
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const checkoutMode = getCheckoutMode(product);
+    const checkoutMode = getSizeCheckoutMode(product, String(size || ''));
     const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && (product.isArchived === true || product.isUpcoming === true));
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
     const refPrefix = await getRefPrefix(redis);

@@ -199,7 +199,11 @@ the ledger. Settings tabs include:
   SKU)**; the **Trial sizes & sample credits** panel then configures each sampler
   individually (badge label, "credits toward" full-size target, credit $, min
   order, expiry, code prefix, eligibility, customer-facing note) with
-  product-level defaults as fallback.
+  product-level defaults as fallback. **Every size can also carry its own
+  checkout mode** (Auto / RAFFLE / FCFS), so one product can mix formats — e.g.
+  a sampler sells instantly while the full size runs a raffle
+  (`lib/checkout-mode.ts` is the single resolver used by the storefront,
+  checkout routes and draw engine; FCFS sizes are never drawn).
 - **Settings → Theme Colors / Design Presets** — colors, fonts, radius,
   transparency, one-click presets (`lib/theme-presets.ts`).
 - **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
@@ -325,7 +329,9 @@ input like `123 realstreet` can never be saved.
   fire for admin-created products), decides per-pool due-ness from the product's
   own timings, and charges winners with the same logic the old cron used.
 - **Due-ness rules** (`evaluatePoolDue`): force → draw; product `isArchived` →
-  final draw. A product with an explicit `releaseEndsAt` uses that as its CYCLE
+  final draw; a size marked **FCFS** (per-size checkout mode, see
+  `lib/checkout-mode.ts`) is NEVER drawn — the runner skips its pool entirely,
+  so a mixed-format product's direct-sale sizes can never be raffle-charged. A product with an explicit `releaseEndsAt` uses that as its CYCLE
   boundary — the pool is NEVER drawn before the countdown ends (a cron run or
   unrelated ping must not charge winners early), then draws once the timer hits
   zero. Recurring raffles (a schedule can produce a next draw:
@@ -515,6 +521,15 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-16 — Mixed-format releases (RAFFLE + FCFS on ONE product) + sampler-card contrast fix:**
+  - **🎟 A product can now be BOTH a raffle AND a direct-sale at the same time — per-size.** Each row in **Pricing & Sizes** gained a per-size mode select (**Auto (product) / 🎟 RAFFLE / ⚡ FCFS**). Leave it on Auto to follow the product-level Checkout Mode, or mix formats — e.g. the sampler sells instantly while the full bottle runs a raffle. Stored as `checkoutMode` on each `priceCategories[]` entry (persisted through `/api/admin/products`; the admin route sanitizes it to `RAFFLE`/`FCFS`/removed). No new Redis keys.
+  - **🧭 One resolver, every consumer agrees.** New self-contained `lib/checkout-mode.ts` (`getSizeCheckoutMode(product, size)` / `hasMixedCheckoutModes` / `sizeCheckoutModes`, re-exported from `@/lib/storefront-config`). Wired into: the product page (CTA, countdown, add-to-bag, badges), `/api/checkout` (single product), `/api/checkout/cart` (per-line partition into the FCFS payment session + raffle setup session — mixed carts already created two sessions), and `lib/auto-draw.ts` (**FCFS sizes are NEVER drawn** — a stale/forced FCFS pool is skipped before the due-check so it can't be drawn or have its timer rolled forward).
+  - **🖼 Storefront tells the story.** The product page shows the selected size's mode pill (RAFFLE / FCFS, plus a purple **MIXED** pill when the product mixes formats) and a mixed-format ribbon ("2 raffle sizes and 1 instant-buy size — pick a size above"). Size chips carry tiny `raffle`/`buy` tags (adaptive colors per theme). The sampler card shows an **INSTANT BUY** badge when the selected sampler is FCFS, and the CTA flips between "Enter allocation" (raffle size) and "Secure piece · $X" (FCFS size).
+  - **📋 Catalog, home + admin badges.** `/api/store` now passes per-size `checkoutMode` through `priceCategories[].checkoutMode`. Home product cards and catalog tiles show a **RAFFLE + FCFS** pill for mixed products; the admin Drops list shows a MIXED pill and the Checkout Mode card shows a live "N raffle · M instant-buy" summary (with override count).
+  - **🎨 Sampler-card contrast FIXED (the "sample note stuff is super hard to read" complaint).** The trial card, math strip, size-chip sample badge and nudge previously used hardcoded light-green text (`#a7f3d0`, `#4ade80`…) that vanished on light themes. They now use an **adaptive green palette** computed from the card surface's luminance: light cards get deep forest greens (`#14532d`/`#166534` on `#f0fdf4`), dark cards get bright mint (`#d1fae5`/`#4ade80` on translucent green). The customer-facing sampler note font-size was bumped 10 → 11 for legibility.
+  - **🧪 Seeded demos now show the feature.** Noir Citrus (p3) and Gilded Hour (p14) are now **mixed-format**: the sampler/Discovery Kit size is FCFS instant-buy, the Full Bottle (and Grand Size) run raffles with winner tiers. Static `goyunir.config.ts` p3 updated to match.
+  - Tests: new `tests/size-checkout-mode.test.ts` (9 cases). Verified: `npm test` 67/67, `npm run typecheck` clean, `npm run lint` 0/0, `npm run build` compiles every route + middleware.
 
 - **2026-08-16 — Per-size sampler ("trial SKU") engine — the "Try a sample first" line is no longer one generic message for everything:**
   - **🎯 Mark ANY size as a sampler right in Pricing & Sizes.** Each size row gained a **"🧪 Sample" toggle chip** (green when on). Toggling it adds/removes a `samplerSizes` record for that size — no more "Trigger on size(s) CSV" free-text. Renaming a sampler size re-syncs its record (and any "credits toward" pointer); deleting a size prunes its sampler. Editing a product saved with the old CSV **auto-promotes** legacy trigger sizes into per-sampler records so nothing is lost.

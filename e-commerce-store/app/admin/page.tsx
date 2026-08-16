@@ -3422,8 +3422,33 @@ export default function AdminPortal() {
                       <option value="FCFS">FCFS — first come, first served</option>
                     </select>
                     <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                      Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout.
+                      Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout. <strong>Per-size override:</strong> each size row in Pricing &amp; Sizes has its own mode — leave it on <em>Auto (product)</em> to follow this setting, or mix formats (e.g. sampler = FCFS instant buy, full size = RAFFLE). FCFS sizes are never drawn and charge immediately at checkout.
                     </div>
+                    {(() => {
+                      const perCat = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
+                      const overrides = perCat.filter((c: any) => String(c?.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(c?.checkoutMode || '').toUpperCase() === 'FCFS');
+                      const raffleOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'RAFFLE').length;
+                      const fcfsOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'FCFS').length;
+                      const productDefault = productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+                      const autoRaffle = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'RAFFLE').length;
+                      const autoFcfs = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'FCFS').length;
+                      const totalRaffle = raffleOverrides + autoRaffle;
+                      const totalFcfs = fcfsOverrides + autoFcfs;
+                      const mixed = totalRaffle > 0 && totalFcfs > 0;
+                      return (
+                        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
+                          <span style={{ padding: '3px 8px', borderRadius: 999, background: mixed ? 'rgba(168,85,247,0.14)' : (totalRaffle > 0 ? 'rgba(245,158,11,0.14)' : 'rgba(59,130,246,0.14)'), border: mixed ? '1px solid rgba(168,85,247,0.4)' : (totalRaffle > 0 ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(59,130,246,0.4)'), color: mixed ? '#c084fc' : (totalRaffle > 0 ? '#fbbf24' : '#93c5fd'), fontWeight: 700 }}>
+                            {mixed ? 'MIXED FORMAT' : totalRaffle > 0 ? 'RAFFLE' : 'FCFS'}
+                          </span>
+                          <span style={{ color: '#8b95a7' }}>
+                            {totalRaffle > 0 ? <span style={{ color: '#fbbf24' }}>🎟 {totalRaffle} raffle</span> : null}
+                            {totalRaffle > 0 && totalFcfs > 0 ? ' · ' : ''}
+                            {totalFcfs > 0 ? <span style={{ color: '#93c5fd' }}>⚡ {totalFcfs} instant-buy</span> : null}
+                            {overrides.length > 0 ? <span style={{ color: '#555' }}> ({overrides.length} size override{overrides.length === 1 ? '' : 's'})</span> : null}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
@@ -3511,6 +3536,16 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
                         style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
                       />
+                      <select
+                        title="Checkout mode for THIS size. Leave on Auto to follow the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
+                        value={cat.checkoutMode || ''}
+                        onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
+                        style={{ ...inputStyle, width: 122, padding: 6, fontSize: 10, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : String(cat.checkoutMode || '').toUpperCase() === 'FCFS' ? '#60a5fa' : '#8b95a7' }}
+                      >
+                        <option value="">Auto (product)</option>
+                        <option value="RAFFLE">🎟 RAFFLE</option>
+                        <option value="FCFS">⚡ FCFS</option>
+                      </select>
                       {(() => {
                         const isSamplerCat = Array.isArray(productForm.samplerSizes)
                           && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase());
@@ -3755,6 +3790,9 @@ export default function AdminPortal() {
                       <div style={{ fontSize: 12, fontWeight: 700, color: '#e5e7eb' }}>Enable trial credits</div>
                       <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>Off = no sampler messaging on the storefront and no credit codes issued at delivery.</div>
                     </div>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5, marginTop: -6, marginBottom: 10, padding: '8px 9px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)' }}>
+                    💡 <strong>Pair it with mixed formats:</strong> set this sampler&apos;s size mode to <strong style={{ color: '#93c5fd' }}>⚡ FCFS</strong> in Pricing &amp; Sizes above and it becomes an <em>instant-buy trial</em> while the full size keeps running a raffle — exactly the &ldquo;try the sampler, enter the draw for the full bottle&rdquo; pattern.
                   </div>
 
                   {productForm.deliveryIncentiveEnabled === true && (
@@ -4062,6 +4100,19 @@ export default function AdminPortal() {
                           {isUpcoming && <Pill color="#3b82f6" background="rgba(59,130,246,0.14)">Upcoming</Pill>}
                           {product.soldOutBehavior === 'archive_after_delay' && <Pill color="#d6c29c" background="rgba(214,194,156,0.14)">Delayed archive</Pill>}
                           {isHidden && <Pill color="#f87171" background="rgba(248,113,113,0.14)">Hidden</Pill>}
+                          {(() => {
+                            const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+                            if (cats.length === 0) return null;
+                            const productMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' || product.isRaffle === false ? 'FCFS' : 'RAFFLE';
+                            const effective = cats.map((c: any) => {
+                              const m = String(c?.checkoutMode || '').toUpperCase();
+                              return (m === 'RAFFLE' || m === 'FCFS') ? m : productMode;
+                            });
+                            const hasR = effective.includes('RAFFLE');
+                            const hasF = effective.includes('FCFS');
+                            if (hasR && hasF) return <Pill color="#c084fc" background="rgba(168,85,247,0.16)">MIXED</Pill>;
+                            return <Pill color={hasR ? '#fbbf24' : '#93c5fd'} background={hasR ? 'rgba(245,158,11,0.14)' : 'rgba(59,130,246,0.14)'}>{hasR ? 'RAFFLE' : 'FCFS'}</Pill>;
+                          })()}
                           <span style={{ color: '#888', marginLeft: 8 }}>Order: {product.sortOrder || 0}</span>
                         </div>
                         {product.priceCategories && (

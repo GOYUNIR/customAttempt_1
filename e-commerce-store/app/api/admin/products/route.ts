@@ -227,7 +227,22 @@ export async function POST(request: Request) {
     prefix: has('prefix') ? String(body.prefix || '') : (existing?.prefix || ''),
     tagline: has('tagline') ? String(body.tagline || '') : (existing?.tagline || ''),
     desc: has('desc') ? String(body.desc || '') : (existing?.desc || ''),
-    priceCategories: Array.isArray(body.priceCategories) ? body.priceCategories : (existing?.priceCategories || [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }]),
+    priceCategories: (() => {
+      const cats = Array.isArray(body.priceCategories)
+        ? body.priceCategories
+        : (existing?.priceCategories || [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }]);
+      // Per-size checkout mode ('RAFFLE' | 'FCFS' | empty = follow product).
+      // A product can mix formats — FCFS sizes sell instantly, RAFFLE sizes draw.
+      return cats.map((c: any) => {
+        const mode = String(c?.checkoutMode || '').toUpperCase();
+        if (mode !== 'RAFFLE' && mode !== 'FCFS') {
+          const out = { ...(c || {}) };
+          delete out.checkoutMode;
+          return out;
+        }
+        return { ...(c || {}), checkoutMode: mode };
+      });
+    })(),
     isActive: body.isActive !== undefined ? toBool(body.isActive, existing?.isActive ?? false) : (existing?.isActive ?? false),
     isArchived: body.isArchived !== undefined ? toBool(body.isArchived, existing?.isArchived ?? false) : (existing?.isArchived ?? false),
     isUpcoming: body.isUpcoming !== undefined ? toBool(body.isUpcoming, existing?.isUpcoming ?? false) : (existing?.isUpcoming ?? false),

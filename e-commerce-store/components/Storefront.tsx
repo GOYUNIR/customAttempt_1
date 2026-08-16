@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
@@ -756,7 +756,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       notify({ type: 'error', message: 'This size is not ready yet.' });
       return;
     }
-    const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
+    const checkoutMode = getSizeCheckoutMode(product, selectedSize);
     const isRaffleEntry = checkoutMode === 'RAFFLE';
 
     // Block re-adding an item the customer already secured as a raffle/waitlist
@@ -1101,9 +1101,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const priceCat = getProductPriceCategory(product, selectedSize);
   const price = priceCat?.price || 0;
-  const checkoutMode = String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
+  // Mixed-format releases: each size can be a raffle OR a direct-sale (FCFS)
+  // item — e.g. a sampler sells instantly while the full bottle runs a raffle.
+  // The selected size decides the CTA, the countdown and the cart line mode.
+  const checkoutMode = getSizeCheckoutMode(product, selectedSize);
   const canCheckoutDirect = checkoutMode === 'FCFS';
   const isRaffleProduct = checkoutMode === 'RAFFLE';
+  const hasMixedModes = hasMixedCheckoutModes(product);
+  const sizeModes = sizeCheckoutModes(product);
+  const mixedRaffleCount = Object.values(sizeModes).filter((m) => m === 'RAFFLE').length;
+  const mixedFcfsCount = Object.values(sizeModes).filter((m) => m === 'FCFS').length;
   // Per-size trial ("sampler") presentation — the copy + math are specific to
   // the size the customer has selected (never one generic line for all sizes).
   const samplerPres = samplerPresentation(product, selectedSize);
@@ -1144,6 +1151,80 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         : String(copySettings.statusLive || '').trim() || 'Reserved for collectors moving early, before the allocation tightens further.';
   const checkoutDisabled = soldOut || !selectedSize || !isConfiguredPrice(price);
   const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
+
+  // ── Adaptive trial-card palette ─────────────────────────────────────────────
+  // The sampler card previously used hardcoded light-green text that vanished on
+  // light themes. The card surface (cardBackground) decides which green family
+  // is readable: dark surfaces get bright mint, light surfaces get deep forest.
+  const cardIsLight = (() => {
+    const hex = String(configPalette?.cardBackground || '#ffffff').replace('#', '');
+    if (hex.length < 6) return false;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    if ([r, g, b].some((v) => Number.isNaN(v))) return false;
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.58;
+  })();
+  const trialColors = cardIsLight
+    ? {
+        cardBg: '#f0fdf4',
+        cardBorder: 'rgba(21,128,61,0.30)',
+        headline: '#166534',
+        body: '#14532d',
+        mathBg: 'rgba(21,128,61,0.06)',
+        mathBorder: 'rgba(21,128,61,0.22)',
+        mathDim: '#15803d',
+        mathStrong: '#14532d',
+        credit: '#15803d',
+        note: '#3f6212',
+        barTrack: 'rgba(21,128,61,0.16)',
+        barFill: '#16a34a',
+        chipBg: 'rgba(21,128,61,0.10)',
+        chipBorder: 'rgba(21,128,61,0.42)',
+        chipText: '#15803d',
+        nudgeText: '#166534',
+        nudgeBg: 'rgba(21,128,61,0.06)',
+        nudgeBorder: 'rgba(21,128,61,0.20)',
+      }
+    : {
+        cardBg: 'rgba(34,197,94,0.10)',
+        cardBorder: 'rgba(34,197,94,0.30)',
+        headline: '#4ade80',
+        body: '#d1fae5',
+        mathBg: 'rgba(34,197,94,0.12)',
+        mathBorder: 'rgba(34,197,94,0.24)',
+        mathDim: '#d1fae5',
+        mathStrong: '#ffffff',
+        credit: '#86efac',
+        note: '#bbf7d0',
+        barTrack: 'rgba(34,197,94,0.20)',
+        barFill: '#4ade80',
+        chipBg: 'rgba(34,197,94,0.12)',
+        chipBorder: 'rgba(34,197,94,0.50)',
+        chipText: '#4ade80',
+        nudgeText: '#86efac',
+        nudgeBg: 'rgba(34,197,94,0.08)',
+        nudgeBorder: 'rgba(34,197,94,0.22)',
+      };
+  // Mode pills (RAFFLE / FCFS badges on the title + size chips): bright variants
+  // on dark cards, deep ink variants on light cards so they stay readable.
+  const modePill = cardIsLight
+    ? {
+        raffleBg: 'rgba(180,83,9,0.12)',
+        raffleText: '#92400e',
+        raffleBorder: 'rgba(180,83,9,0.35)',
+        fcfsBg: 'rgba(29,78,216,0.10)',
+        fcfsText: '#1e40af',
+        fcfsBorder: 'rgba(29,78,216,0.35)',
+      }
+    : {
+        raffleBg: 'rgba(245,158,11,0.16)',
+        raffleText: '#fbbf24',
+        raffleBorder: 'rgba(245,158,11,0.45)',
+        fcfsBg: 'rgba(59,130,246,0.16)',
+        fcfsText: '#93c5fd',
+        fcfsBorder: 'rgba(59,130,246,0.45)',
+      };
 
   return (
     <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px ${Math.round(72 * contentSpacingScale(configPalette))}px` }}>
@@ -1243,7 +1324,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: soldOut ? '#fbbf24' : configPalette.accentBlue }}>{activeProductLabel}</div>
-              <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{checkoutMode}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {hasMixedModes && (
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: 'color-mix(in srgb, #a855f7 16%, transparent)', color: cardIsLight ? '#7e22ce' : '#d8b4fe', border: cardIsLight ? '1px solid rgba(126,34,206,0.35)' : '1px solid rgba(168,85,247,0.45)' }} title={`${mixedRaffleCount} size(s) run a raffle · ${mixedFcfsCount} sell instantly`}>MIXED</span>
+                )}
+                <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: canCheckoutDirect ? modePill.fcfsBg : modePill.raffleBg, color: canCheckoutDirect ? modePill.fcfsText : modePill.raffleText, border: `1px solid ${canCheckoutDirect ? modePill.fcfsBorder : modePill.raffleBorder}` }}>
+                  {canCheckoutDirect ? 'FCFS' : 'RAFFLE'}
+                </span>
+              </div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
             {Array.isArray(product.categories) && product.categories.length > 0 && (
@@ -1260,6 +1348,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>
               <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
             </div>
+            {hasMixedModes && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.5, color: configPalette.cardTextMuted, padding: '10px 12px', borderRadius: themeRadius(configPalette, 14), background: `color-mix(in srgb, #a855f7 7%, ${configPalette.cardBackground})`, border: cardIsLight ? '1px solid rgba(126,34,206,0.25)' : '1px solid rgba(168,85,247,0.30)' }}>
+                <span style={{ fontSize: 13, lineHeight: 1 }}>🎟</span>
+                <span>
+                  This release mixes formats — <strong style={{ color: cardIsLight ? '#92400e' : '#fbbf24' }}>{mixedRaffleCount} raffle size{mixedRaffleCount === 1 ? '' : 's'}</strong> and{' '}
+                  <strong style={{ color: cardIsLight ? '#1e40af' : '#93c5fd' }}>{mixedFcfsCount} instant-buy size{mixedFcfsCount === 1 ? '' : 's'}</strong>. Pick a size above to see its option.
+                </span>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {galleryImages.map((image: string, index: number) => (
                 <button key={`${image}-${index}`} onClick={() => setSelectedImageIndex(index)} style={{ width: 54, height: 54, borderRadius: 10, border: selectedImageIndex === index ? `1px solid ${configPalette.accentPurple}` : `1px solid ${configPalette.cardBorder}`, background: isVideoMedia(image) ? '#0b0b0d' : `url(${image}) center/cover`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', overflow: 'hidden' }} title={isVideoMedia(image) ? 'Video' : `Photo ${index + 1}`}>
@@ -1279,12 +1376,17 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 const chipBadge = chipIsSample
                   ? String((product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase())?.label || 'Sample')
                   : '';
+                const chipMode = getSizeCheckoutMode(product, cat.size);
                 const accent = configPalette.checkoutCtaButton || '#635bff';
+                const chipSelected = selectedSize === cat.size;
                 return (
-                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '8px 12px', borderRadius: 999, border: selectedSize === cat.size ? `1px solid ${accent}` : (chipIsSample ? '1px solid rgba(34,197,94,0.45)' : `1px solid ${configPalette.cardBorder}`), background: selectedSize === cat.size ? accent : (chipIsSample ? 'rgba(34,197,94,0.1)' : 'transparent'), color: selectedSize === cat.size ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: selectedSize === cat.size ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+                    <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
+                      {chipMode === 'FCFS' ? 'buy' : 'raffle'}
+                    </span>
                     {chipIsSample && (
-                      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999, background: selectedSize === cat.size ? 'rgba(255,255,255,0.22)' : 'rgba(34,197,94,0.18)', border: selectedSize === cat.size ? '1px solid rgba(255,255,255,0.4)' : '1px solid rgba(34,197,94,0.5)', color: selectedSize === cat.size ? '#ffffff' : '#4ade80' }}>🧪 {chipBadge}</span>
+                      <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : trialColors.chipBg, border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : trialColors.chipBorder, color: chipSelected ? '#ffffff' : trialColors.chipText }}>🧪 {chipBadge}</span>
                     )}
                   </button>
                 );
@@ -1292,33 +1394,36 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
 
             {samplerPres.selected.isSampler && (
-              <div style={{ marginTop: 10, padding: '12px 14px', borderRadius: 12, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.22)', fontSize: 11, color: '#a7f3d0', lineHeight: 1.55 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: '#4ade80', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ marginTop: 10, padding: '13px 14px', borderRadius: themeRadius(configPalette, 14), background: trialColors.cardBg, border: `1px solid ${trialColors.cardBorder}`, fontSize: 11.5, color: trialColors.body, lineHeight: 1.6 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: trialColors.headline, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
                   🧪 {samplerPres.selected.headline}
+                  {hasMixedModes && samplerPres.selected.isSampler && (
+                    <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: '0.6px', padding: '2px 7px', borderRadius: 999, background: modePill.fcfsBg, color: modePill.fcfsText, border: `1px solid ${modePill.fcfsBorder}` }}>INSTANT BUY</span>
+                  )}
                 </div>
                 <div>{samplerPres.selected.body}</div>
                 {samplerPres.selected.math && (
-                  <div style={{ marginTop: 10, padding: '9px 10px', borderRadius: 10, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                  <div style={{ marginTop: 10, padding: '10px 11px', borderRadius: 10, background: trialColors.mathBg, border: `1px solid ${trialColors.mathBorder}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ color: '#d1fae5' }}>{samplerPres.selected.badge === 'Sample' ? 'Sample' : samplerPres.selected.badge} · <strong>{formatMoneyCents(samplerPres.selected.math.samplePriceCents)}</strong></span>
-                      <span style={{ color: '#86efac' }}>credit −<strong>{formatMoneyCents(samplerPres.selected.math.creditCents)}</strong></span>
-                      <span style={{ color: '#ffffff', fontWeight: 800 }}>{samplerPres.selected.math.fullSize} <strong>{formatMoneyCents(samplerPres.selected.math.remainingCents)}</strong></span>
+                      <span style={{ color: trialColors.mathDim }}>{samplerPres.selected.badge === 'Sample' ? 'Sample' : samplerPres.selected.badge} · <strong>{formatMoneyCents(samplerPres.selected.math.samplePriceCents)}</strong></span>
+                      <span style={{ color: trialColors.credit }}>credit −<strong>{formatMoneyCents(samplerPres.selected.math.creditCents)}</strong></span>
+                      <span style={{ color: trialColors.mathStrong, fontWeight: 800 }}>{samplerPres.selected.math.fullSize} <strong>{formatMoneyCents(samplerPres.selected.math.remainingCents)}</strong></span>
                     </div>
-                    <div style={{ marginTop: 8, height: 5, borderRadius: 999, background: 'rgba(34,197,94,0.18)', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, samplerPres.selected.math.pctCovered)}%`, height: '100%', background: '#4ade80', borderRadius: 999 }} />
+                    <div style={{ marginTop: 8, height: 5, borderRadius: 999, background: trialColors.barTrack, overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.min(100, samplerPres.selected.math.pctCovered)}%`, height: '100%', background: trialColors.barFill, borderRadius: 999 }} />
                     </div>
-                    <div style={{ marginTop: 5, fontSize: 9, color: '#86efac', letterSpacing: '0.4px' }}>
+                    <div style={{ marginTop: 5, fontSize: 9.5, color: trialColors.credit, letterSpacing: '0.4px' }}>
                       Your credit covers {samplerPres.selected.math.pctCovered}% of the {samplerPres.selected.math.fullSize}
                     </div>
                   </div>
                 )}
                 {samplerPres.selected.note && (
-                  <div style={{ marginTop: 8, color: '#d1fae5', fontSize: 10 }}>{samplerPres.selected.note}</div>
+                  <div style={{ marginTop: 8, color: trialColors.note, fontSize: 11, lineHeight: 1.55 }}>{samplerPres.selected.note}</div>
                 )}
               </div>
             )}
             {!samplerPres.selected.isSampler && samplerPres.nudge && (
-              <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 12, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.16)', fontSize: 10.5, color: '#86efac', lineHeight: 1.5 }}>
+              <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 12, background: trialColors.nudgeBg, border: `1px solid ${trialColors.nudgeBorder}`, fontSize: 11, color: trialColors.nudgeText, lineHeight: 1.55 }}>
                 🧪 Want to try it first? The {samplerPres.nudge.size} is {formatMoneyCents(samplerPres.nudge.priceCents)} and includes a {formatMoneyCents(samplerPres.nudge.creditCents)} credit after delivery{samplerPres.nudge.fullSize ? ` toward the ${samplerPres.nudge.fullSize}` : ''}.
               </div>
             )}

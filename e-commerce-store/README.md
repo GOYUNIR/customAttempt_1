@@ -100,7 +100,12 @@ Everything happens in `/admin`:
   (`priceCategories`), prices, Stripe Price IDs, inventory, winner tiers,
   images **and videos** (PNG · JPEG · JPG · SVG · WEBP · GIF · BMP + MP4 · MOV ·
   MKV · AVI · WEBM), per-photo **crop with live desktop/mobile previews**, and
-  sort order. New products are **hidden** until you publish them.
+  sort order. New products are **hidden** until you publish them. **Every size
+  has its own checkout mode** (Auto / RAFFLE / FCFS), so one product can be
+  *both* — e.g. a sampler that sells instantly while the full bottle runs a
+  raffle. FCFS sizes charge immediately and are never drawn; RAFFLE sizes run
+  the draw. Size chips, the product-page CTA and the cart all reflect each
+  size's mode automatically.
 - **Catalog** — move items between Upcoming / Archive previews.
 - **Draws** — trigger a draw manually, view draw history, search the permanent
   entry ledger.
