@@ -16,6 +16,7 @@ import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normal
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { brandLogoRef, publicMediaRef } from '@/lib/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,8 +100,9 @@ function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
 function sanitizeProduct(raw: any): PublicStoreProduct {
   const checkoutMode = normalizeCheckoutMode(raw);
   const priceCats = Array.isArray(raw?.priceCategories) ? raw.priceCategories : [];
+  const id = String(raw?.id || '');
   return {
-    id: String(raw?.id || ''),
+    id,
     name: String(raw?.name || ''),
     slug: String(raw?.slug || ''),
     prefix: String(raw?.prefix || ''),
@@ -116,7 +118,10 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     isArchived: raw?.isArchived === true || raw?.isArchived === 'true',
     isUpcoming: raw?.isUpcoming === true || raw?.isUpcoming === 'true',
     notes: Array.isArray(raw?.notes) ? raw.notes : [],
-    images: Array.isArray(raw?.images) ? raw.images.filter(Boolean) : [],
+    // Base64 data-URL media is replaced with immutable /media/... refs so the
+    // payload stays small (the app/media route streams the bytes from Redis
+    // and Vercel's edge cache serves them). URLs / relative paths pass through.
+    images: Array.isArray(raw?.images) ? raw.images.map((image: unknown, index: number) => publicMediaRef(image, id, index)).filter(Boolean) : [],
     // Per-media crop records (parallel to images). Kept so the product-page
     // gallery can apply the exact framing the operator chose in admin.
     crops: Array.isArray(raw?.crops) ? raw.crops : undefined,
@@ -189,7 +194,14 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
     checkout: {
       requireAddressAutofill: redisConfig?.checkout?.requireAddressAutofill !== false,
     },
-    branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
+    branding: {
+      ...(defaults.branding || {}),
+      ...(redisConfig.branding || {}),
+      // The logo is stored as a base64 data URL in Redis — serve it through
+      // /media/logo (edge-cached, immutable) instead of shipping the raw bytes
+      // in every store payload and every SSR HTML page.
+      logoUrl: brandLogoRef((redisConfig.branding || {}).logoUrl ?? (defaults.branding || {}).logoUrl),
+    },
     rewards: { ...(defaults.rewards || {}), ...(redisConfig.rewards || {}) },
     gallery: { ...(defaults.gallery || {}), ...(redisConfig.gallery || {}) },
     legal: { ...(defaults.legal || {}), ...(redisConfig.legal || {}) },
@@ -273,8 +285,14 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requestedSlug = String(url.searchParams.get('slug') || '').trim();
 
-    const payload = await withTtlCache(`store:${requestedSlug || '*'}:v1`, 10_000, () => buildStorePayload(requestedSlug));
-    return NextResponse.json(payload);
+    const payload = await withTtlCache(`store:${requestedSlug || '*'}:v2`, 10_000, () => buildStorePayload(requestedSlug));
+    // Edge-cache the (now small) payload: Vercel's CDN serves it instead of
+    // streaming it from the origin on every request — the single biggest Fast
+    // Origin Transfer saving. Fresh within the documented ~10s window (same as
+    // the server-side TTL cache). No max-age, so browsers always revalidate.
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30' },
+    });
   } catch (err: any) {
     console.error('[store] failed', err?.message || err);
     return NextResponse.json({ error: 'Store unavailable. Please try again.' }, { status: 500 });

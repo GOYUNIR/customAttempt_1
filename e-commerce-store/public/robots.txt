@@ -1,0 +1,6 @@
+# Block all web crawlers / bots while this store is in private testing.
+# Remove this file (or relax the rules) when you are ready to be indexed.
+# This file ALSO protects Fast Origin Transfer: crawlers no longer re-fetch
+# every page + API + og:image, which used to drain the Hobby quota.
+User-agent: *
+Disallow: /

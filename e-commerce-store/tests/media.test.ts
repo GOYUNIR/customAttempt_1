@@ -7,6 +7,8 @@ import {
   isImageMedia,
   aspectRatioLabel,
   coverStyle,
+  publicMediaRef,
+  brandLogoRef,
 } from '../lib/media.ts';
 
 test('normalizeCrop clamps and fills defaults', () => {
@@ -43,6 +45,38 @@ test('aspectRatioLabel reports the nearest common ratio', () => {
   assert.equal(aspectRatioLabel(16, 9), '16:9');
   assert.equal(aspectRatioLabel(1, 1), '1:1');
   assert.equal(aspectRatioLabel(0, 0), '—');
+});
+
+test('publicMediaRef turns data URLs into versioned /media refs, passes URLs through', () => {
+  // JPEG data URL → /media/<productId>/<index>.jpg?v=<hash>
+  const ref = publicMediaRef('data:image/jpeg;base64,/9j/4AAQ', 'p1', 0);
+  assert.match(ref, /^\/media\/p1\/0\.jpg\?v=[0-9a-z]+$/);
+  // Video data URL → .mp4 ref (so isVideoMedia keeps detecting it)
+  const videoRef = publicMediaRef('data:video/mp4;base64,AAAA', 'prod_x', 2);
+  assert.match(videoRef, /^\/media\/prod_x\/2\.mp4\?v=[0-9a-z]+$/);
+  assert.equal(isVideoMedia(videoRef), true);
+  assert.equal(isImageMedia(ref), true);
+  // Relative paths, absolute URLs, empty and junk pass through untouched.
+  assert.equal(publicMediaRef('/images/x/1.jpeg', 'p1', 0), '/images/x/1.jpeg');
+  assert.equal(publicMediaRef('https://cdn.example.com/photo.jpg', 'p1', 0), 'https://cdn.example.com/photo.jpg');
+  assert.equal(publicMediaRef('', 'p1', 0), '');
+  assert.equal(publicMediaRef(null, 'p1', 0), '');
+  // Deterministic + versioned: same bytes → same ref, different bytes → new ref.
+  assert.equal(publicMediaRef('data:image/png;base64,aaaa', 'p1', 1), publicMediaRef('data:image/png;base64,aaaa', 'p1', 1));
+  assert.notEqual(
+    publicMediaRef('data:image/png;base64,aaaa', 'p1', 1),
+    publicMediaRef('data:image/png;base64,bbbb', 'p1', 1),
+  );
+});
+
+test('brandLogoRef maps a data-URL logo to /media/logo and passes URLs through', () => {
+  const ref = brandLogoRef('data:image/jpeg;base64,/9j/4AAQ');
+  assert.match(ref, /^\/media\/logo\?v=[0-9a-z]+$/);
+  assert.equal(brandLogoRef('https://example.com/logo.png'), 'https://example.com/logo.png');
+  assert.equal(brandLogoRef('/uploads/logo.png'), '/uploads/logo.png');
+  assert.equal(brandLogoRef(''), '');
+  assert.equal(brandLogoRef(undefined), '');
+  assert.notEqual(brandLogoRef('data:image/png;base64,aaaa'), brandLogoRef('data:image/png;base64,bbbb'));
 });
 
 test('coverStyle maps the crop region onto the box exactly', () => {

@@ -48,6 +48,82 @@ export function cropsEqual(a: unknown, b: unknown): boolean {
 
 const VIDEO_EXT_RE = /\.(mp4|mov|mkv|avi|webm)(?:[?#].*)?$/i;
 
+/**
+ * Public media refs — the origin-transfer fix.
+ *
+ * Product galleries / the brand logo are stored in Redis as base64 `data:`
+ * URLs. Passing those through `/api/store` (and baking them into every SSR
+ * page's theme blob) made the JSON ~3MB and forced the origin to re-send the
+ * whole thing on EVERY request. Instead, public payloads carry a small
+ * relative ref (`/media/<productId>/<index>.<ext>?v=<hash>`) and the
+ * `app/media/[...parts]` route streams the bytes from Redis with long-lived
+ * `Cache-Control`, so Vercel's edge cache serves them after ONE origin hit.
+ *
+ * The `?v=` hash is derived from the data-URL bytes, so replacing an image in
+ * admin produces a NEW URL — old edge-cached copies are never served stale.
+ */
+const MEDIA_DATA_URL_RE = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.*)$/i;
+
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+  'image/bmp': '.bmp',
+  'image/avif': '.avif',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/x-matroska': '.mkv',
+  'video/x-msvideo': '.avi',
+  'video/avi': '.avi',
+  'video/webm': '.webm',
+};
+
+/** Map a data-URL MIME type to a file extension ('' for unknown types). */
+export function mimeToMediaExtension(mime: string): string {
+  return MIME_TO_EXT[String(mime || '').toLowerCase()] || '';
+}
+
+/** Stable-ish content hash — used ONLY as a cache-buster for media URLs. */
+function mediaVersionHash(value: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    h ^= value.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/**
+ * Convert ONE product media source for a PUBLIC payload. `data:` URLs become
+ * immutable `/media/...` refs; absolute URLs and relative paths (seed images
+ * like `/images/…/1.jpeg`) pass through untouched; junk becomes ''.
+ */
+export function publicMediaRef(src: unknown, productId: string, index: number): string {
+  const s = String(src || '');
+  if (!s || !/^data:/i.test(s)) return s;
+  const match = MEDIA_DATA_URL_RE.exec(s);
+  if (!match) return '';
+  const ext = mimeToMediaExtension(match[1]);
+  const version = mediaVersionHash(s);
+  return `/media/${encodeURIComponent(productId)}/${index}${ext}?v=${version}`;
+}
+
+/**
+ * Convert the brand logo for a PUBLIC payload. `data:` URLs become an
+ * immutable `/media/logo?v=…` ref; absolute URLs / empty values pass through.
+ */
+export function brandLogoRef(src: unknown): string {
+  const s = String(src || '');
+  if (!s || !/^data:/i.test(s)) return s;
+  const match = MEDIA_DATA_URL_RE.exec(s);
+  if (!match) return '';
+  const version = mediaVersionHash(s);
+  return `/media/logo?v=${version}`;
+}
+
 /** True when a media source is a video (data:video/… or a known video URL). */
 export function isVideoMedia(src: unknown): boolean {
   const s = String(src || '');

@@ -170,6 +170,24 @@ Never rebuild them.
   in `ThemeProvider` (`components/ThemeProvider.tsx` + `useLiveTheme()`).
 - Admin writes bypass caches; **storefront display data can lag a few seconds**
   (up to 30s for branding/metadata).
+- **Edge caching (the Fast Origin Transfer fix).** Public GET routes return an
+  explicit `Cache-Control` so Vercel's edge cache serves the body after ONE
+  origin render instead of streaming it on every request: `/api/store`
+  (`public, s-maxage=10, stale-while-revalidate=30`), `/api/catalog/status`
+  (`s-maxage=15`), `/api/config/public` (`s-maxage=30`), `/og` (`max-age=3600,
+  s-maxage=86400`), `/icon` (`max-age=86400, s-maxage=86400`). Never set
+  `max-age` on the JSON routes — browsers should always revalidate.
+- **Base64 data-URL media is NEVER shipped in public payloads anymore.** Product
+  images/videos + the brand logo are stored in Redis as base64 data URLs;
+  `lib/media.ts` (`publicMediaRef` / `brandLogoRef`) rewrites them into small
+  immutable refs (`/media/<productId>/<index>.<ext>?v=<hash>` and
+  `/media/logo?v=<hash>`) in `/api/store`, `/api/catalog/status` and the layout
+  theme blob. The `app/media/[...parts]` route streams the bytes from Redis with
+  `Cache-Control: public, max-age=31536000, immutable`; the `?v=` hash changes
+  whenever the admin replaces an asset so stale edge copies are never served.
+  This took `/api/store` from ~3MB to ~59KB and removed the 57KB logo base64
+  from every SSR HTML page. `public/robots.txt` blocks all crawlers while the
+  store is in private testing (remove it to be indexed).
 
 ### Performance rules
 
@@ -521,6 +539,14 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-16 — Fast Origin Transfer drain FIXED (10GB Hobby quota burned 2.5GB in 30 min) — robots.txt + edge caching + payload shrink:**
+  - **📉 Root cause found and measured against the live site.** `/api/store` served **~3.0MB per request** (product galleries + the brand logo are stored in Redis as base64 `data:` URLs, and products were duplicated across `allProducts` + each section array) and `/api/catalog/status` ~600KB — while BOTH routes returned NO `Cache-Control`, so Vercel streamed the full body from the origin on EVERY request (`private, no-cache`). The `/og` card re-rendered on EVERY request too (`max-age=0, must-revalidate`, no ETag). 2.5GB ÷ 3MB ≈ **one `/api/store` fetch every ~2s** — a crawler/bot/monitor can easily sustain that with no human traffic. (Client-side loop audit found no runaway fetch loops: the countdown draw-trigger re-fetch loop was already fixed via `dueHandledRef`; the home-page heartbeat polls every 30s but returns 25 bytes.)
+  - **🚫 `public/robots.txt` — `User-agent: *` + `Disallow: /`** blocks all web crawlers while the store is in private testing (remove the file to be indexed).
+  - **🗄 Base64 media moved OUT of public payloads.** New `lib/media.ts` helpers `publicMediaRef()` / `brandLogoRef()` rewrite `data:` URLs into immutable refs (`/media/<productId>/<index>.<ext>?v=<hash>` and `/media/logo?v=<hash>`); new **`app/media/[...parts]/route.ts`** streams the bytes from Redis (`Content-Type` from the data URL, `Cache-Control: public, max-age=31536000, s-maxage=31536000, immutable`, `?v=` hash = content-address so admin image replacements get a NEW URL). Wired into `/api/store` `sanitizeProduct`, `/api/catalog/status` tile images, `/api/store` `mergePublicConfig` branding, and `app/layout.tsx` `buildLiveTheme` (the theme blob no longer carries the 57KB base64 logo on every HTML page). URLs / relative paths (`/images/...`) pass through untouched; `isVideoMedia` still detects refs by extension (`.mp4` etc.).
+  - **⏱ Edge caching on every hot dynamic route** (Vercel's CDN serves the body after ONE origin render — this is the actual Fast Origin Transfer fix): `/api/store` → `public, s-maxage=10, stale-while-revalidate=30`; `/api/catalog/status` → `s-maxage=15`; `/api/config/public` → `s-maxage=30`; `/og` → `public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400` (the `?v=` cache-buster already changes the URL on branding saves); `/icon` → `max-age=86400, s-maxage=86400`. No `max-age` on the JSON routes so browsers always revalidate.
+  - **✅ Measured before/after (local build against the live Redis):** `/api/store` **3,009,759 → 59,024 bytes** (~98% smaller, 0 data URLs left); `/api/catalog/status` **603KB → 5.7KB**; home HTML drops the 57KB logo blob; all 7 unique `/media` refs resolve 200 with correct `Content-Type`; `/media/logo` 200; missing media 404s; `/robots.txt`, `/og` and `/icon` serve with the new cache headers.
+  - **Tests:** `tests/media.test.ts` gained 2 suites (10 assertions) for `publicMediaRef`/`brandLogoRef` (video refs stay video-detected, deterministic `?v=`, URL pass-through). `npm test` 81/81, `tsc --noEmit` clean, `npm run lint` 0/0, `npm run build` compiles every route + middleware (incl. the new `/media/[...parts]` route). No Redis keys were added or changed.
 
 - **2026-08-16 — "Total raffle entries" fluff tick REINED IN (min 3 / max 4 per day, 2–8h spacing):**
   - **🎛 The over-inflation is gone.** The social-proof auto-tick defaults were max **15/day** with a **1h** min gap — the counter visibly exploded through the day. New defaults (all overridable from /admin → Draws → Automation → **Social Proof Counter**): **minimum 3 ticks/day** (new `autoIncrementMinPerDay` field, guaranteed), **hard cap 4 ticks/day** (`autoIncrementMaxPerDay` 15→4), **2h min gap** (`autoIncrementMinHourGap` 1→2), **8h max gap** unchanged. Updated in ALL five config paths (`goyunir.config.ts`, `lib/store-config.ts` defaults, `lib/storefront-config.ts` `defaultSocialProof`, `/api/store/config`, seed route) + the engine fallbacks in `lib/social-proof.ts`.

@@ -15,5 +15,7 @@ export async function GET() {
     const productOverrides = await getAllProductOverrides(redis, GOYUNIR_STORE_SUITE.productCatalog.map((p) => p.id));
     return { globalScheduleOverride, productOverrides };
   });
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
+  });
 }

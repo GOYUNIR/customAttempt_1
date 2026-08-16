@@ -93,11 +93,11 @@ export async function GET() {
       }),
       {
         ...size,
-        // Crawlers/messengers + CDNs must revalidate the PNG — the `?v=`
-        // cache-buster on the og:image URL changes when branding changes, but
-        // this header stops an intermediary from serving a STALE card PNG that
-        // predates a branding save.
-        headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
+        // Long-lived cache: the `?v=` cache-buster on the og:image URL changes
+        // whenever branding changes, so the edge can hold each card version for
+        // a day while crawlers always get a FRESH card for a NEW url. This also
+        // stops crawler re-fetches from regenerating the PNG at the origin.
+        headers: { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
       },
     );
   } catch (err) {
@@ -127,7 +127,7 @@ export async function GET() {
         ),
         {
           ...size,
-          headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
+          headers: { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
         },
       );
     } catch {

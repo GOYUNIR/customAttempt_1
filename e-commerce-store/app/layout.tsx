@@ -7,6 +7,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { getSiteUrl, neutralBrandName } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
+import { brandLogoRef } from '@/lib/media';
 import { revisionHash } from '@/lib/share-card-config';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { contentSpacingScale } from '@/lib/storefront-config';
@@ -39,9 +40,15 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
   const heroContent = isLegacyHeroContent(config.heroContent)
     ? { ...(defaults.heroContent || {}) }
     : { ...(defaults.heroContent || {}), ...(config.heroContent || {}) };
+  // The logo is stored as a base64 data URL in Redis — serve it through the
+  // edge-cached /media/logo route instead of baking 50KB+ of base64 into the
+  // theme JSON blob of EVERY server-rendered HTML page (a real origin-transfer
+  // saving on every page load).
+  const branding = { ...(config.branding || {}) };
+  if (branding.logoUrl) branding.logoUrl = brandLogoRef(branding.logoUrl);
   const liveValue: LiveThemeValue = {
     themeColors,
-    branding: config.branding || {},
+    branding,
     orbs: mergeOrbsConfig(config.orbs),
     heroContent,
     copy: config.copy || {},

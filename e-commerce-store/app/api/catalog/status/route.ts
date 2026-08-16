@@ -12,6 +12,7 @@ import {
   OVERRIDE_SCHEDULE_FIELD,
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { publicMediaRef } from '@/lib/media';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -20,8 +21,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const payload = await withTtlCache('catalog:status:v1', 15_000, () => buildCatalogPayload());
-    return NextResponse.json(payload);
+    const payload = await withTtlCache('catalog:status:v2', 15_000, () => buildCatalogPayload());
+    // Edge-cache so Vercel's CDN serves the catalog instead of streaming it
+    // from the origin on every request (matches the 15s server TTL).
+    return NextResponse.json(payload, {
+      headers: { 'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=30' },
+    });
   } catch (err: any) {
     console.error('[catalog/status] Error:', err?.message || err);
     return NextResponse.json(
@@ -203,7 +208,7 @@ async function buildCatalogPayload() {
         tagline: p.tagline || 'LIMITED DROP',
         desc: p.desc || '',
         slug: p.slug,
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+        image: publicMediaRef(p.images?.[0], p.id, 0) || `/images/${p.prefix}/1.jpeg`,
         soldOut: p.soldOut === true,
         inventoryRemaining: p.inventoryRemaining,
         checkoutMode: normalizeMode(p),
@@ -226,7 +231,7 @@ async function buildCatalogPayload() {
         status: 'Upcoming',
         eta: p.goLiveAt ? `Opens ${p.goLiveAt}` : p.tagline || 'Coming soon',
         goLiveAt: p.goLiveAt || '',
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+        image: publicMediaRef(p.images?.[0], p.id, 0) || `/images/${p.prefix}/1.jpeg`,
         description: p.desc || '',
         slug: p.slug,
         checkoutMode: normalizeMode(p),
@@ -255,7 +260,7 @@ async function buildCatalogPayload() {
       .map((p) => ({
         name: p.name,
         status: 'Archived',
-        image: p.images?.[0] || `/images/${p.prefix}/1.jpeg`,
+        image: publicMediaRef(p.images?.[0], p.id, 0) || `/images/${p.prefix}/1.jpeg`,
         description: p.desc || p.notes?.[0]?.text || '',
         availableFrom: p.availableFrom || 'Previously available',
         slug: p.slug,

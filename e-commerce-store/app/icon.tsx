@@ -48,7 +48,10 @@ export default async function Icon() {
           )}
         </div>
       ),
-      size,
+      {
+        ...size,
+        headers: { 'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400' },
+      },
     );
   } catch (err) {
     console.error('[icon] favicon render failed, serving fallback', err);
@@ -71,7 +74,10 @@ export default async function Icon() {
             S
           </div>
         ),
-        size,
+        {
+          ...size,
+          headers: { 'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400' },
+        },
       );
     } catch {
       return new Response('Favicon generation failed', { status: 500 });
