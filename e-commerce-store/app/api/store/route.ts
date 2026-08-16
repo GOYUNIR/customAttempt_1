@@ -12,7 +12,7 @@ import {
   OVERRIDE_SOCIAL_PROOF_FIELD,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs } from '@/lib/storefront-config';
+import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 
@@ -43,6 +43,8 @@ type PublicStoreProduct = {
   /** Per-media crop records (parallel to `images`) for the gallery framing. */
   crops?: Array<{ x: number; y: number; w: number; h: number }>;
   priceCategories: PublicPriceCategory[];
+  /** Category tags from the admin-managed list (Settings → Catalog). */
+  categories?: string[];
   totalInventory?: number;
   inventoryRemaining?: number;
   soldOut?: boolean;
@@ -81,7 +83,7 @@ function normalizeCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
 
 function sanitizeProduct(raw: any): PublicStoreProduct {
   const checkoutMode = normalizeCheckoutMode(raw);
-  const categories = Array.isArray(raw?.priceCategories) ? raw.priceCategories : [];
+  const priceCats = Array.isArray(raw?.priceCategories) ? raw.priceCategories : [];
   return {
     id: String(raw?.id || ''),
     name: String(raw?.name || ''),
@@ -103,10 +105,12 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     // Per-media crop records (parallel to images). Kept so the product-page
     // gallery can apply the exact framing the operator chose in admin.
     crops: Array.isArray(raw?.crops) ? raw.crops : undefined,
-    priceCategories: categories.map((category: any) => ({
+    priceCategories: priceCats.map((category: any) => ({
       size: String(category?.size || 'Standard'),
       price: Math.max(0, Number(category?.price || 0)),
     })),
+    // Category tags from the admin-managed list (Settings → Catalog).
+    categories: Array.isArray(raw?.categories) ? raw.categories.map(String) : [],
     totalInventory: Math.max(0, Number(raw?.totalInventory || 0)),
     inventoryRemaining: undefined,
     soldOut: false,
@@ -151,6 +155,16 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
       archiveScents: Array.isArray(redisConfig?.catalogPreview?.archiveScents)
         ? redisConfig.catalogPreview.archiveScents
         : defaults.catalogPreview?.archiveScents || [],
+    },
+    catalog: {
+      sectionOrder:
+        Array.isArray(redisConfig?.catalog?.sectionOrder) && redisConfig.catalog.sectionOrder.length > 0
+          ? redisConfig.catalog.sectionOrder
+          : defaults.catalog?.sectionOrder || ['upcoming', 'archive', 'live'],
+      categories: normalizeCategories(redisConfig?.catalog?.categories ?? defaults.catalog?.categories),
+    },
+    checkout: {
+      requireAddressAutofill: redisConfig?.checkout?.requireAddressAutofill !== false,
     },
     branding: { ...(defaults.branding || {}), ...(redisConfig.branding || {}) },
     rewards: { ...(defaults.rewards || {}), ...(redisConfig.rewards || {}) },

@@ -7,20 +7,35 @@ function hashSeed(seed: string): string {
   return (Math.abs(hash >>> 0)).toString(36).toUpperCase();
 }
 
-export function buildOrderRef(email: string, productId: string, size: string): string {
-  const seed = `${String(email || 'anon').trim().toLowerCase()}|${String(productId || 'product').trim()}|${String(size || 'standard').trim().toLowerCase()}`;
-  const token = hashSeed(seed).slice(0, 8);
-  return `GY-${token}`;
+/** Sanitize an admin-configured order-ref prefix: uppercase, keep only A-Z0-9,
+ * strip to max 4 chars, and default to 'GU' when empty/invalid. Callers read
+ * the configured value from `store:config.refPrefix` and pass it through here
+ * so a malformed/brand-new config can never produce a broken ref. */
+export function normalizeRefPrefix(value: unknown): string {
+  const raw = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 4);
+  return raw || 'GU';
 }
 
-export function formatOrderRef(value: string | null | undefined): string {
+export function buildOrderRef(email: string, productId: string, size: string, prefix?: string): string {
+  const seed = `${String(email || 'anon').trim().toLowerCase()}|${String(productId || 'product').trim()}|${String(size || 'standard').trim().toLowerCase()}`;
+  const token = hashSeed(seed).slice(0, 8);
+  return `${normalizeRefPrefix(prefix)}-${token}`;
+}
+
+export function formatOrderRef(value: string | null | undefined, prefix?: string): string {
   const trimmed = String(value || '').trim();
   if (!trimmed) return '';
-  if (/^GOY-/i.test(trimmed)) {
-    return `GY-${trimmed.slice(4)}`;
-  }
-  if (/^GY-/i.test(trimmed)) {
-    return trimmed.toUpperCase();
+  const refPrefix = normalizeRefPrefix(prefix);
+  // Normalize legacy GOY-/GY-/GU- prefixed refs to the NEW configured prefix
+  // while preserving the token portion (e.g. GY-abc123 with prefix 'GU' →
+  // GU-abc123; GOY-abc123 → GU-abc123). Unknown refs pass through uppercased.
+  const legacy = /^(GOY|GY|GU)-(.+)$/i.exec(trimmed);
+  if (legacy) {
+    return `${refPrefix}-${legacy[2].toUpperCase()}`;
   }
   return trimmed.toUpperCase();
 }

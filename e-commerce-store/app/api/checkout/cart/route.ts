@@ -11,8 +11,9 @@ import {
   promoUsedKey,
   promoPendingKey,
   poolKey,
+  STORE_CONFIG_KEY,
 } from '@/lib/server-config';
-import { buildOrderRef } from '@/lib/order-ref';
+import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
@@ -33,6 +34,18 @@ function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
   if (mode === 'RAFFLE') return 'RAFFLE';
   if (product?.isRaffle === false) return 'FCFS';
   return 'RAFFLE';
+}
+
+/** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
+ * fallback 'GU') so refs built here match what the admin portal shows. */
+async function getRefPrefix(redis: any): Promise<string> {
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    return normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    return 'GU';
+  }
 }
 
 async function countChargedByEmail(redis: any, email: string, variant: string, size: string) {
@@ -104,6 +117,8 @@ export async function POST(request: Request) {
 
     const limited = await rateLimitedResponse('checkout_cart', request, 20, 60);
     if (limited) return limited;
+
+    const refPrefix = await getRefPrefix(redis);
 
     // Resolve the deployment origin for Stripe success/cancel URLs. In a Next.js
     // route handler `origin` is NOT a global (that's browser-only), so derive it
@@ -318,7 +333,7 @@ export async function POST(request: Request) {
       const returnSlug = summaryItems[0]?.variant
         ? (allProducts[summaryItems[0].productId]?.slug || Object.values(allProducts)[0]?.slug || 'catalog')
         : (Object.values(allProducts)[0]?.slug || 'catalog');
-      const orderRef = buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size);
+      const orderRef = buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size, refPrefix);
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         customer: customer.id,
@@ -365,7 +380,7 @@ export async function POST(request: Request) {
       const returnSlug = raffleSummaryItems[0]?.variant
         ? (allProducts[raffleSummaryItems[0].productId]?.slug || Object.values(allProducts)[0]?.slug || 'catalog')
         : (Object.values(allProducts)[0]?.slug || 'catalog');
-      const orderRef = buildOrderRef(email, raffleSummaryItems[0].productId, raffleSummaryItems[0].size);
+      const orderRef = buildOrderRef(email, raffleSummaryItems[0].productId, raffleSummaryItems[0].size, refPrefix);
       const session = await stripe.checkout.sessions.create({
         mode: 'setup',
         customer: customer.id,

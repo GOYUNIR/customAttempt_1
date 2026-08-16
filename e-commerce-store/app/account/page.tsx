@@ -5,6 +5,8 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { useLiveTheme } from '@/components/ThemeProvider';
+import { ensureMapboxAutofill, getAutofillAddressValue } from '@/lib/mapbox-autofill';
+import { validateShippingAddress } from '@/lib/address-validation';
 
 interface EntryRecord {
   variant: string;
@@ -210,6 +212,13 @@ export default function AccountPage() {
     }
   };
 
+  // Attach Mapbox address autofill to the address editor (the SDK only loads
+  // when a token is configured; the singleton observes the document for the
+  // `autocomplete="shipping street-address"` input inside the <form> above).
+  useEffect(() => {
+    ensureMapboxAutofill();
+  }, []);
+
   // Check if user is logged in via session
   useEffect(() => {
     fetch('/api/auth/me')
@@ -330,6 +339,19 @@ export default function AccountPage() {
   };
 
   const saveAddress = async (entry: EntryRecord) => {
+    // When the store requires the Mapbox dropdown address, the FULL composed
+    // address lives in the DOM (the SDK writes it there) — read it like the
+    // checkout form does, then validate completeness before saving.
+    const liveAddress = getAutofillAddressValue() || addressDraft;
+    const requireAutofill = (liveCtx as any)?.checkout?.requireAddressAutofill !== false;
+    if (requireAutofill) {
+      const addrErr = validateShippingAddress(liveAddress);
+      if (addrErr) {
+        setMessage(addrErr);
+        notify({ id: 'account-address', type: 'error', message: addrErr });
+        return;
+      }
+    }
     setIsBusy(true);
     notify({ id: 'account-address', type: 'loading', message: 'Updating your shipping address...', persist: true });
     try {
@@ -341,7 +363,7 @@ export default function AccountPage() {
           last4: last4 || undefined,
           variant: entry.variant,
           size: entry.size,
-          newAddress: addressDraft,
+          newAddress: liveAddress,
         }),
       });
       const data = await res.json();
@@ -987,11 +1009,16 @@ export default function AccountPage() {
                   {canEdit && (
                     <>
                       {editingAddressFor === `${entry.variant}-${entry.size}` ? (
-                        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <form
+                          style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}
+                          onSubmit={(e) => { e.preventDefault(); saveAddress(entry); }}
+                        >
                           <input
                             type="text"
                             value={addressDraft}
                             onChange={(e) => setAddressDraft(e.target.value)}
+                            autoComplete="shipping street-address"
+                            placeholder="Select your full address from the dropdown"
                             style={{
                               width: '100%',
                               padding: 10,
@@ -1037,7 +1064,7 @@ export default function AccountPage() {
                               Cancel
                             </button>
                           </div>
-                        </div>
+                        </form>
                       ) : (
                         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                           <button

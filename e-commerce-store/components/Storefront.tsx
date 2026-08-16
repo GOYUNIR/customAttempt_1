@@ -1242,6 +1242,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <div style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{checkoutMode}</div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
+            {Array.isArray(product.categories) && product.categories.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {product.categories.map((cat: string) => (
+                  <span key={cat} style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999, background: `color-mix(in srgb, ${configPalette.accentPurple} 14%, transparent)`, color: configPalette.accentPurple, border: `1px solid color-mix(in srgb, ${configPalette.accentPurple} 30%, transparent)` }}>
+                    {cat}
+                  </span>
+                ))}
+              </div>
+            )}
             <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : configPalette.cardBorder}` }}>
               <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>

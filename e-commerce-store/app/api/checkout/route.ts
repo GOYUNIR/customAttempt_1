@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey } from '@/lib/server-config';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
@@ -15,6 +15,18 @@ function getCheckoutMode(product: any): 'RAFFLE' | 'FCFS' {
   if (mode === 'RAFFLE') return 'RAFFLE';
   if (product?.isRaffle === false) return 'FCFS';
   return 'RAFFLE';
+}
+
+/** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
+ * fallback 'GU') so refs built here match what the admin portal shows. */
+async function getRefPrefix(redis: any): Promise<string> {
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    return normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    return 'GU';
+  }
 }
 
 async function countChargedByEmail(redis: any, email: string, variant: string, size: string) {
@@ -81,7 +93,8 @@ export async function POST(request: Request) {
     const checkoutMode = getCheckoutMode(product);
     const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && (product.isArchived === true || product.isUpcoming === true));
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
-    const orderRef = buildOrderRef(normalizedEmail, variant, String(size));
+    const refPrefix = await getRefPrefix(redis);
+    const orderRef = buildOrderRef(normalizedEmail, variant, String(size), refPrefix);
     let priceCents = basePriceCents;
     const normalizedPromo = String(promoCode || ref || '').trim().toUpperCase();
 
@@ -114,8 +127,8 @@ export async function POST(request: Request) {
           const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
           for (const row of poolItems) {
             const parsed = safeParseRedisItem<any>(row);
-            if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail && formatOrderRef(String(parsed.orderRef || ''))) {
-              originalRef = formatOrderRef(String(parsed.orderRef || '')) || originalRef;
+            if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail && formatOrderRef(String(parsed.orderRef || ''), refPrefix)) {
+              originalRef = formatOrderRef(String(parsed.orderRef || ''), refPrefix) || originalRef;
               break;
             }
           }

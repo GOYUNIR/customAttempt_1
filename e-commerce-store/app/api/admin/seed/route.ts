@@ -337,6 +337,19 @@ const DEFAULT_CONFIG = {
       { name: 'Cinder Wave — Archive', status: 'Archived', image: '/images/baseItem1/1.jpeg', description: 'Historic raffle archive record.', slug: 'cinder-wave-archive' },
     ],
   },
+  // Catalog presentation settings (admin → Settings → Catalog). Section order
+  // defaults to live at the BOTTOM; `categories` is the seeded admin-managed
+  // list buyers can add/rename/delete — products are tagged with any subset.
+  catalog: {
+    sectionOrder: ['upcoming', 'archive', 'live'],
+    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  },
+  // Checkout & orders policy (admin → Settings → Checkout & Orders). When ON
+  // (default) customer "update address" flows require the full Mapbox-dropdown
+  // address; the admin portal can override and save a partial address.
+  checkout: {
+    requireAddressAutofill: true,
+  },
   orbs: {
     enabled: true,
     primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },

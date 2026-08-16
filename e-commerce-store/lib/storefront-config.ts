@@ -191,6 +191,19 @@ export interface StorefrontConfig {
     upcomingDrops: CatalogPreviewItem[];
     archiveScents: CatalogPreviewItem[];
   };
+  /** Catalog presentation settings (admin → Settings → Catalog). */
+  catalog?: {
+    /** Order of the /catalog sections: 'live' | 'upcoming' | 'archive'. */
+    sectionOrder?: string[];
+    /** Admin-managed product categories; products are tagged with any subset. */
+    categories?: string[];
+  };
+  /** Checkout & orders policy (admin → Settings → Checkout & Orders). */
+  checkout?: {
+    /** When ON (default), customer "update address" flows require the full
+     *  Mapbox-dropdown address — a partial address can never be saved. */
+    requireAddressAutofill?: boolean;
+  };
   orbs: OrbsConfig;
   /** Legal & policy content for /terms, /privacy, /shipping (admin-editable). */
   legal: StoreLegalConfig;
@@ -291,6 +304,51 @@ const defaultFooter = {
   shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
   corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
 };
+
+/** Default catalog presentation settings (admin → Settings → Catalog). */
+const defaultCatalogSettings: NonNullable<StorefrontConfig['catalog']> = {
+  // Default /catalog section order: live at the BOTTOM (per the template
+  // default) — operators can reorder from /admin → Settings → Catalog.
+  sectionOrder: ['upcoming', 'archive', 'live'],
+  // Seeded admin-managed categories (Settings → Catalog → Categories).
+  categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+};
+
+/** Default checkout & orders policy (admin → Settings → Checkout & Orders). */
+const defaultCheckoutSettings: NonNullable<StorefrontConfig['checkout']> = {
+  requireAddressAutofill: true,
+};
+
+/**
+ * Normalize an arbitrary value into a clean category list: trim, dedupe
+ * (case-insensitive, first occurrence wins), strip entries longer than 40
+ * chars, and keep at most the first 60 entries. Never throws.
+ */
+export function normalizeCategories(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value) {
+    const clean = String(raw ?? '').trim();
+    if (!clean || clean.length > 40) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 60) break;
+  }
+  return out;
+}
+
+/**
+ * Whether customer "update address" flows must reject partial addresses
+ * (require the full Mapbox-dropdown address). Defaults to TRUE when the
+ * config flag is absent. The admin portal can turn this off and save a
+ * partial address regardless.
+ */
+export function requireAddressAutofill(config: Record<string, any> | null | undefined): boolean {
+  return config?.checkout?.requireAddressAutofill !== false;
+}
 
 // Default orb system — background glow orbs plus the animated top-bar orb.
 // Every value here is editable live from /admin → Settings → Orb Glow.
@@ -573,6 +631,15 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     catalogPreview: {
       upcomingDrops: normalizeCatalogItems(input.catalogPreview?.upcomingDrops),
       archiveScents: normalizeCatalogItems(input.catalogPreview?.archiveScents),
+    },
+    catalog: {
+      sectionOrder: Array.isArray(input.catalog?.sectionOrder) && input.catalog.sectionOrder.length > 0
+        ? input.catalog.sectionOrder.map(String)
+        : defaultCatalogSettings.sectionOrder,
+      categories: normalizeCategories(input.catalog?.categories ?? defaultCatalogSettings.categories),
+    },
+    checkout: {
+      requireAddressAutofill: input.checkout?.requireAddressAutofill ?? defaultCheckoutSettings.requireAddressAutofill,
     },
     orbs: mergeOrbsConfig(input.orbs),
     legal: { ...DEFAULT_LEGAL, ...(input.legal ?? {}) },

@@ -48,6 +48,7 @@ import {
   saveLiveState,
   sizeFromPoolKey,
   STORE_CONFIG_KEY,
+  USERS_KEY,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
@@ -59,7 +60,7 @@ import {
 } from '@/lib/storefront-config';
 import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
 import { dropTimestampToMs, formatStoreWallClock, splitEntriesByCycleEnd } from '@/lib/drop-timestamps';
 
@@ -69,6 +70,26 @@ export { productNameFromPoolKey };
  * it. Stops a stampede of "timer hit zero" pings from re-drawing the same pool
  * over and over while inventory is still being allocated. */
 const CLIENT_RE_RUN_COOLDOWN_MS = 90_000;
+
+/** Look up whether an email has a store account and its current rewards balance
+ * (same store:users scan the checkout routes use) so winner/recovery emails
+ * always reflect the CURRENT account state, never a stale guest snapshot. */
+async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
+  try {
+    if (!email) return { hasAccount: false, rewardsBalance: 0 };
+    const raw = await redis.hgetall(USERS_KEY);
+    if (!raw) return { hasAccount: false, rewardsBalance: 0 };
+    for (const [, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
+        return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
+      }
+    }
+    return { hasAccount: false, rewardsBalance: 0 };
+  } catch {
+    return { hasAccount: false, rewardsBalance: 0 };
+  }
+}
 
 export interface AutoDrawOptions {
   redis?: any;
@@ -244,6 +265,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   // code-level fallback — priority is override > store config > static.
   const scheduleOverrideForTz = await getGlobalScheduleOverride(redis).catch(() => null);
   const storeConfigForSchedule = safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY).catch(() => null)) || {};
+  const refPrefix = normalizeRefPrefix(storeConfigForSchedule?.refPrefix || 'GU');
   const globalSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
     ...(storeConfigForSchedule?.dropSchedule || {}),
@@ -399,7 +421,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         const customerId = resolveCustomerId(winnerData) || null;
         const shippingAddress = winnerData.shippingAddress || winnerData.address || 'No Address Logged';
         const promoCode = String(winnerData.promoCode || '').trim().toUpperCase();
-        const orderRef = formatOrderRef(String(winnerData.orderRef || '')) || buildOrderRef(winnerEmail, productName, productSize);
+        const orderRef = formatOrderRef(String(winnerData.orderRef || ''), refPrefix) || buildOrderRef(winnerEmail, productName, productSize, refPrefix);
 
         if (successfulPoolCaptures >= inventoryLimit) {
           remainingEntries.push(typeof winnerStr === 'string' ? winnerStr : JSON.stringify(rawWinnerData));
@@ -509,6 +531,8 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents, orderRef,
             });
 
+            const userRewards = await lookupUserRewards(redis, winnerEmail);
+
             await sendWinnerEmail({
               to: winnerEmail,
               product: productName,
@@ -520,6 +544,8 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               orderRef,
               shippingAddress: shippingAddress || undefined,
               siteUrl,
+              hasAccount: userRewards.hasAccount || undefined,
+              rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
             });
 
             processedWinners.push({

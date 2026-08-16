@@ -136,6 +136,21 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     ],
   },
 
+  // Catalog presentation settings (admin → Settings → Catalog). Section order
+  // defaults to live at the BOTTOM; `categories` is the seeded admin-managed
+  // list buyers can add/rename/delete — products are tagged with any subset.
+  catalog: {
+    sectionOrder: ['upcoming', 'archive', 'live'],
+    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  },
+
+  // Checkout & orders policy (admin → Settings → Checkout & Orders). When ON
+  // (default) customer "update address" flows require the full Mapbox-dropdown
+  // address; the admin portal can override and save a partial address.
+  checkout: {
+    requireAddressAutofill: true,
+  },
+
   // Glow orb system (editable live from /admin → Settings → Orb Glow).
   // Background glow orbs behind the storefront content. Opacities stay LOW on
   // purpose — the glow is an ambient wash, not a blob. The top-bar orb and the

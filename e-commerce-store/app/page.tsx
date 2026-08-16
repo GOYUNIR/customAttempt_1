@@ -262,6 +262,15 @@ export default function HomePage() {
                       </div>
                       <div style={{ fontSize: 19, fontFamily: 'Georgia, Times New Roman, serif', marginBottom: 4, color: configPalette.cardTextMain }}>{product.name}</div>
                       <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.tagline || product.desc}</div>
+                      {Array.isArray(product.categories) && product.categories.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+                          {product.categories.slice(0, 3).map((cat: string) => (
+                            <span key={cat} style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999, background: `color-mix(in srgb, ${configPalette.accentPurple} 14%, transparent)`, color: configPalette.accentPurple, border: `1px solid color-mix(in srgb, ${configPalette.accentPurple} 30%, transparent)` }}>
+                              {cat}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 999, background: product.isUpcoming ? `color-mix(in srgb, ${configPalette.accentBlue} 16%, transparent)` : `color-mix(in srgb, ${configPalette.cardTextMain} 10%, transparent)`, display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: product.isUpcoming ? configPalette.accentBlue : configPalette.cardTextMain, fontWeight: 700, border: product.isUpcoming ? `1px solid color-mix(in srgb, ${configPalette.accentBlue} 30%, transparent)` : `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 22%, transparent)` }}>
                         <span style={{ width: 8, height: 8, borderRadius: 999, background: product.isUpcoming ? configPalette.accentBlue : (product.soldOut ? '#fbbf24' : configPalette.accentBlue), boxShadow: '0 0 0 3px rgba(255,255,255,0.08)', animation: 'goyunirPulse 1s ease-in-out infinite' }} />
                         {product.isUpcoming ? `Release opens: ${formatCountdown(product)}` : formatCountdown(product)}

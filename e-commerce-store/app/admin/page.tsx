@@ -41,61 +41,28 @@ function typeLabel(type: string | undefined) {
   return map[type || ''] || type || 'Unknown';
 }
 
-/** Mask an email for streamer mode: keep the first 2 chars of the local part
- *  plus the full domain so the value still LOOKS real on stream — e.g.
- *  `jane.doe@gmail.com` → `ja•••@gmail.com`. Deterministic (same input always
- *  produces the same output) so SSR and client render can never disagree. */
-function maskEmail(email: string | undefined | null): string {
-  const value = String(email || '').trim();
-  if (!value) return '';
-  const at = value.indexOf('@');
-  if (at <= 0) return '••••';
-  const local = value.slice(0, at);
-  const domain = value.slice(at + 1);
-  const localHead = local.slice(0, Math.min(2, local.length));
-  return `${localHead}•••@${domain}`;
+// Streamer-mode masks are FIXED-LENGTH bullet strings (never derived from the
+// real value) so a livestream can't leak even the CHARACTER LENGTH of an email,
+// address or card number. Deterministic by construction — SSR and the client
+// can never disagree.
+const MASK_EMAIL = '••••••••@••••••••';
+const MASK_ADDRESS = '••••••••••••••••••';
+const MASK_CARD = '•••• •••• •••• ••••';
+
+/** Mask an email for streamer mode: a fixed bullet string — the real value's
+ *  length/domain are never visible on stream. */
+function maskEmail(_email: string | undefined | null): string {
+  return String(_email || '').trim() ? MASK_EMAIL : '';
 }
 
-/** Mask a shipping address: keep the street number + first letter of every
- *  word, replace the middle — realistic-looking but safe to share on a
- *  livestream. `1234 Rosewood Ave, Los Angeles, CA 90210` →
- *  `1234 R•••d Ave, L•• Angeles, CA 902••`. */
-function maskAddress(address: string | undefined | null): string {
-  const value = String(address || '').trim();
-  if (!value) return '';
-  const maskSegment = (segment: string): string => {
-    const s = String(segment || '').trim();
-    if (!s) return s;
-    // ZIP/postal codes: keep the first 3 digits only.
-    if (/^\d+$/.test(s)) {
-      return s.length <= 3 ? s : `${s.slice(0, 3)}••`;
-    }
-    const words = s.split(/\s+/);
-    return words
-      .map((word) => {
-        if (word.length <= 3) return word;
-        // "1234" street number stays intact; words keep first + last letter.
-        if (/^\d+$/.test(word)) return word;
-        return `${word.slice(0, 1)}${'•'.repeat(Math.min(3, Math.max(2, word.length - 2)))}${word.slice(-1)}`;
-      })
-      .join(' ');
-  };
-  return value
-    .split(',')
-    .map((part) => maskSegment(part))
-    .join(', ');
+/** Mask a shipping address: a fixed bullet string (no length leak). */
+function maskAddress(_address: string | undefined | null): string {
+  return String(_address || '').trim() ? MASK_ADDRESS : '';
 }
 
-/** Mask a card number: keep the first 4 and last 4 digits, bullets in the
- *  middle — `4242 4242 4242 4242` → `4242 •••• •••• 4242`. */
-function maskCard(value: string | undefined | null): string {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (digits.length < 8) return String(value || '') || '';
-  const head = digits.slice(0, 4);
-  const tail = digits.slice(-4);
-  const middleLen = Math.max(2, digits.length - 8);
-  const groups = Math.max(2, Math.ceil(middleLen / 4));
-  return `${head} ${Array(groups).fill('••••').join(' ')} ${tail}`;
+/** Mask a card number: a fixed 16-digit bullet pattern. */
+function maskCard(_value: string | undefined | null): string {
+  return String(_value || '').replace(/\D/g, '') ? MASK_CARD : '';
 }
 
 /** One helper for every PII field rendered in the portal. Streamer mode routes
@@ -206,6 +173,38 @@ const COPY_FIELD_LABELS: Record<string, string> = {
   supportEmail: 'Support email (footer link)',
   shippingReturnPolicyText: 'Shipping & returns line',
   corporateEntityCopyright: 'Copyright line',
+};
+
+/** Context-aware placeholders for the same fields — what the customer-facing
+ *  value will look like, so the buyer knows the shape before typing. */
+const COPY_FIELD_PLACEHOLDERS: Record<string, string> = {
+  title: 'e.g. Join The Allocation Draw',
+  subtitle: 'e.g. Enter to win — card is saved, charged only if selected',
+  buttonLabel: 'e.g. Secure Entry Allocation Ticket',
+  emailPlaceholder: 'e.g. email@domain.com',
+  addressPlaceholder: 'e.g. 123 Rosewood Ave, Los Angeles, CA 90210',
+  cardPlaceholder: 'e.g. Card number',
+  finePrint: 'e.g. By entering you agree to the terms.',
+  instagramLink: 'https://instagram.com/yourbrand',
+  tiktokLink: 'https://tiktok.com/@yourbrand',
+  supportEmail: 'support@yourbrand.com',
+  shippingReturnPolicyText: 'e.g. Shipping & Returns Policy Apply.',
+  corporateEntityCopyright: 'e.g. ALL RIGHTS RESERVED.',
+};
+
+/** Friendly labels / placeholders / hints for the Branding & Share fields so no
+ *  raw camelCase ever leaks into the admin UI. */
+const SHARE_FIELD_META: Record<string, { label: string; placeholder: string; hint?: string }> = {
+  shareTitle: { label: 'Share title', placeholder: 'e.g. Winter Drop — Live Now', hint: 'Shown big on the card. Empty falls back to the brand name.' },
+  shareDescription: { label: 'Share description', placeholder: 'e.g. Private releases, handled cleanly.', hint: 'The card subtitle — keep it under ~140 chars.' },
+  shareTagline: { label: 'Share tagline', placeholder: 'e.g. EST. 2026', hint: 'Small line under the brand name on the card.' },
+  shareUrl: { label: 'Share URL', placeholder: 'https://yourstore.com', hint: 'The domain shown on the card + the copied share link. Empty falls back to your deployed domain.' },
+  shareImageUrl: { label: 'Share image URL', placeholder: 'https://… or /images/…', hint: 'The card background image (1200×630-ish). Empty = solid color + glow.' },
+  shareBackground: { label: 'Share background', placeholder: '#0B0B0F' },
+  shareAccent: { label: 'Share accent', placeholder: '#D4AF37' },
+  shareText: { label: 'Share text color', placeholder: '#F5F2E9' },
+  iconBackground: { label: 'Favicon background', placeholder: '#0B0B0F' },
+  iconText: { label: 'Favicon accent', placeholder: '#D4AF37' },
 };
 
 /** Colored badge for the audit log actor (admin=blue, user=green, system=grey). */
@@ -498,6 +497,17 @@ const DEFAULT_BRANDING_SETTINGS = {
   shareText: '#F5F2E9',
   iconBackground: '#0B0B0F',
   iconText: '#D4AF37',
+  // Share-card composition knobs (Settings → Branding & Share → Card style).
+  shareLogoVisible: true,
+  shareTaglineVisible: true,
+  shareSiteVisible: true,
+  shareTitleSize: 74,
+  shareDescriptionSize: 30,
+  shareLayout: 'classic',
+  shareFontFamily: 'system',
+  shareGlowIntensity: 40,
+  shareCornerRadius: 0,
+  shareImageOverlay: 60,
 };
 
 const DEFAULT_REWARDS_SETTINGS = {
@@ -546,11 +556,23 @@ const DEFAULT_LEGAL_SETTINGS = {
 
 const DEFAULT_CATALOG_SETTINGS = {
   sectionOrder: ['upcoming', 'archive', 'live'],
+  // Admin-managed product categories (Settings → Catalog). Buyers can add,
+  // rename and delete these freely; products are tagged with any subset.
+  categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
 };
 
 const DEFAULT_BEHAVIOR_SETTINGS = {
   scrollToTopOnLoad: true,
 };
+
+const DEFAULT_CHECKOUT_SETTINGS = {
+  // When ON, customer "update address" flows require the complete Mapbox
+  // dropdown address (a partial address can never be saved). The admin portal
+  // can override and save a partial address regardless.
+  requireAddressAutofill: true,
+};
+
+const DEFAULT_REF_PREFIX = 'GU';
 
 // ---------------------------------------------------------------------------
 // CROP EDITOR — the product gallery's "what shoppers will actually see"
@@ -782,15 +804,13 @@ export default function AdminPortal() {
   const [status, setStatus] = useState<any>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [secondsAgo, setSecondsAgo] = useState(0);
-  const [revealAddresses, setRevealAddresses] = useState(false);
-  const [revealBusy, setRevealBusy] = useState(false);
   // STREAMER MODE: default ON. Masks all customer PII (addresses, emails, card
-  // numbers) and locks the password field so the portal is safe to share on a
-  // livestream (draw reveal, winner announcements). The initial value is ALWAYS
-  // true (deterministic — SSR and the first client render agree, so there can
-  // never be a hydration mismatch); a session preference is restored from
-  // sessionStorage AFTER hydration so a streamer who turned it off doesn't get
-  // re-masked on every reload within the same tab.
+  // numbers) with fixed-length bullet masks so even character lengths never
+  // leak. It is PURELY a display mask — it never blocks saving, drawing,
+  // editing or any other action (the admin password stays in memory once
+  // typed). The initial value is ALWAYS true (deterministic — SSR and the
+  // first client render agree, so there can never be a hydration mismatch); a
+  // session preference is restored from sessionStorage AFTER hydration.
   const [streamerMode, setStreamerMode] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -817,14 +837,13 @@ export default function AdminPortal() {
     try { window.sessionStorage.setItem('goyunir-admin-streamer-mode', streamerMode ? 'on' : 'off'); } catch { /* noop */ }
   }, [streamerMode]);
 
-  // Guard for every write/destructive action: while Streamer Mode is ON the
-  // password must not be visible or typed on stream, so nothing can be
-  // persisted. Turning it OFF (then typing the password) unlocks everything.
+  // Guard for write/destructive actions: the admin password must be in memory
+  // (it travels in the request body so every admin route can verify it). While
+  // Streamer Mode is ON the password FIELD is locked (so the real password can
+  // never be typed on a livestream), but a password typed earlier stays in
+  // memory — so ALL actions keep working with customer data masked. Streamer
+  // Mode ONLY masks sensitive data; it never blocks work.
   const requireUnlocked = (): boolean => {
-    if (streamerMode) {
-      showToast('Turn Streamer Mode OFF first — the admin password must not appear on stream');
-      return false;
-    }
     if (!password) {
       showToast('Enter the admin password first');
       return false;
@@ -983,11 +1002,18 @@ export default function AdminPortal() {
   // store:config.catalog.sectionOrder.
   const [catalogSettings, setCatalogSettings] = useState<{
     sectionOrder: string[];
+    categories: string[];
   }>(DEFAULT_CATALOG_SETTINGS);
   // Site behaviour (admin → Settings → Behavior). Whether the storefront forces
   // the page to start at the TOP on load (default ON) instead of letting the
   // browser restore the previous scroll position. Stored under store:config.behavior.
   const [behaviorSettings, setBehaviorSettings] = useState<{ scrollToTopOnLoad: boolean }>(DEFAULT_BEHAVIOR_SETTINGS);
+  // Checkout & orders policy (admin → Settings → Checkout & Orders).
+  const [checkoutSettings, setCheckoutSettings] = useState<{ requireAddressAutofill: boolean }>(DEFAULT_CHECKOUT_SETTINGS);
+  // Reference-code prefix (admin → Settings → Checkout & Orders). Every order /
+  // entry reference starts with this prefix (default `GU-`). Stored under
+  // store:config.refPrefix.
+  const [refPrefix, setRefPrefix] = useState(DEFAULT_REF_PREFIX);
   // Legal & policy content for /terms, /privacy, /shipping — all admin-editable
   // so buyers never need code changes to update policies, company name, or the
   // support address. Stored under store:config.legal.
@@ -1005,6 +1031,26 @@ export default function AdminPortal() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  // Category draft input + handlers (Settings → Catalog → Product categories).
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const addCategory = () => {
+    const raw = categoryDraft.trim();
+    if (!raw) return showToast('Type a category name first');
+    setCatalogSettings((prev) => {
+      const existing = (prev.categories || []).map((c) => c.toLowerCase());
+      if (existing.includes(raw.toLowerCase())) {
+        showToast('That category already exists');
+        return prev;
+      }
+      return { ...prev, categories: [...(prev.categories || []), raw.slice(0, 40)] };
+    });
+    setCategoryDraft('');
+  };
+  const removeCategory = (cat: string) => {
+    if (!confirm(`Delete category "${cat}"? Products already tagged with it keep their tags but the chip stops filtering.`)) return;
+    setCatalogSettings((prev) => ({ ...prev, categories: (prev.categories || []).filter((c) => c !== cat) }));
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -1157,8 +1203,16 @@ export default function AdminPortal() {
           gallery: { ...DEFAULT_GALLERY_SETTINGS, ...(s.gallery || {}) },
           copy: { ...DEFAULT_COPY_SETTINGS, ...(s.copy || {}) },
           legal: { ...DEFAULT_LEGAL_SETTINGS, ...(s.legal || {}) },
-          catalog: { sectionOrder: Array.isArray(s.catalog?.sectionOrder) ? s.catalog.sectionOrder : DEFAULT_CATALOG_SETTINGS.sectionOrder },
+          catalog: {
+            sectionOrder: Array.isArray(s.catalog?.sectionOrder) ? s.catalog.sectionOrder : DEFAULT_CATALOG_SETTINGS.sectionOrder,
+            categories: Array.isArray(s.catalog?.categories) && s.catalog.categories.length > 0 ? s.catalog.categories : DEFAULT_CATALOG_SETTINGS.categories,
+          },
           behavior: { ...DEFAULT_BEHAVIOR_SETTINGS, ...(s.behavior || {}) },
+          checkout: { ...DEFAULT_CHECKOUT_SETTINGS, ...(s.checkout || {}) },
+          refPrefix: (() => {
+            const raw = String(s.refPrefix || '').trim().toUpperCase();
+            return /^[A-Z0-9]{1,4}$/.test(raw) ? raw : DEFAULT_REF_PREFIX;
+          })(),
           orbs: mergeOrbSettings(DEFAULT_ORBS, s.orbs || {}),
         };
         setThemeSettings(next.theme);
@@ -1172,6 +1226,8 @@ export default function AdminPortal() {
         setLegalSettings(next.legal);
         setCatalogSettings(next.catalog);
         setBehaviorSettings(next.behavior);
+        setCheckoutSettings(next.checkout);
+        setRefPrefix(next.refPrefix);
         setOrbSettings(next.orbs);
         if (s.productNotes) setProductNotes(s.productNotes);
         // Baseline for the "Discard changes" button — everything saved as-is.
@@ -1239,6 +1295,7 @@ export default function AdminPortal() {
       maxPerEmail: 1,
       maxPerCart: 1,
       totalInventory: 0,
+      inventoryPerSize: {},
       maxRaffleAllocationLimit: 0,
       isActive: false, // default hidden
       isArchived: false,
@@ -1252,11 +1309,13 @@ export default function AdminPortal() {
       deliveryIncentiveCreditCents: 0,
       deliveryIncentiveMinOrderSubtotalCents: 0,
       deliveryIncentiveExpiresDays: 60,
+      deliveryIncentiveNeverExpires: false,
       deliveryIncentiveCodePrefix: '',
       deliveryIncentiveEligibleProductSlugs: [],
       deliveryIncentiveEligibleSizes: [],
       deliveryIncentiveTriggerSizes: [],
       sortOrder: 0,
+      categories: [],
       notes: [],
       images: [],
       crops: [],
@@ -1295,6 +1354,8 @@ export default function AdminPortal() {
       maxPerEmail: Number(product.maxPerEmail || 1),
       maxPerCart: Number(product.maxPerCart || product.maxPerEmail || 1),
       totalInventory: Number(product.totalInventory || 0),
+      inventoryPerSize: product.inventoryPerSize && typeof product.inventoryPerSize === 'object' ? product.inventoryPerSize : {},
+      categories: Array.isArray(product.categories) ? product.categories : [],
       maxRaffleAllocationLimit: Number(product.maxRaffleAllocationLimit || 0),
       sortOrder: product.sortOrder || 0,
       // Ensure default hidden if new
@@ -1334,7 +1395,7 @@ export default function AdminPortal() {
   // ===== Handle image/video file uploads =====
   const handleImageFiles = async (files: FileList) => {
     if (!requireUnlocked()) {
-      setProductMsg(streamerMode ? '❌ Turn Streamer Mode OFF first to upload images.' : '❌ Enter admin password first.');
+      setProductMsg('❌ Enter the admin password first.');
       return;
     }
     if (!editingProduct) {
@@ -1452,6 +1513,10 @@ export default function AdminPortal() {
         productType: productForm.checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
         maxPerEmail: Math.max(1, Number(productForm.maxPerEmail) || 1),
         maxPerCart: Math.max(1, Number(productForm.maxPerCart) || Number(productForm.maxPerEmail) || 1),
+        // Per-size stock (multi-size products keep a separate inventory per size).
+        inventoryPerSize: productForm.inventoryPerSize && typeof productForm.inventoryPerSize === 'object' ? productForm.inventoryPerSize : {},
+        // Category tags (admin-managed list lives in Settings → Catalog → Categories).
+        categories: Array.isArray(productForm.categories) ? productForm.categories : [],
         // Ensure we send isActive, isArchived, isUpcoming
       };
       // Remove old price50ml/100ml if present (they shouldn't be)
@@ -1849,22 +1914,6 @@ export default function AdminPortal() {
     }
   };
 
-  const toggleReveal = async () => {
-    if (revealAddresses) { setRevealAddresses(false); return; }
-    if (!password) return showToast('Enter the admin password first');
-    setRevealBusy(true);
-    try {
-      const res = await adminFetch('/api/admin/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
-      const data = await res.json();
-      if (!res.ok || !data.ok) return showToast(data.error || 'Invalid password');
-      setRevealAddresses(true);
-    } catch {
-      showToast('Verify failed');
-    } finally {
-      setRevealBusy(false);
-    }
-  };
-
   const triggerDrop = async () => {
     if (!requireUnlocked()) return;
     if (!confirm('This will run the draw and charge selected winners\' saved cards. Continue?')) return;
@@ -2020,10 +2069,7 @@ export default function AdminPortal() {
 
   /** Wipe & Rebuild Redis — requires the password AND typing the confirmation phrase. */
   const runWipe = async () => {
-    if (streamerMode) {
-      showToast('Turn Streamer Mode OFF before wiping — the password must not be visible on stream');
-      return;
-    }
+    if (!requireUnlocked()) return;
     if (!requireUnlocked()) return;
     if (wipeConfirm.trim().toUpperCase() !== 'WIPE') {
       showToast('Type WIPE in the confirmation box to erase Redis');
@@ -2069,12 +2115,6 @@ export default function AdminPortal() {
 
   const saveSettings = async () => {
     if (!password) {
-      // Streamer Mode disables the password field, so a bare "Enter password"
-      // alert reads as "saving is broken". Tell the operator exactly what to do.
-      if (streamerMode) {
-        setSettingsMsg('Turn OFF Streamer Mode first, then enter the admin password to save settings.');
-        return;
-      }
       return showToast('Enter the admin password first');
     }
     setSettingsLoading(true);
@@ -2094,6 +2134,8 @@ export default function AdminPortal() {
           legal: legalSettings,
           catalog: catalogSettings,
           behavior: behaviorSettings,
+          checkout: checkoutSettings,
+          refPrefix,
           productNotes,
           orbs: orbSettings,
         }),
@@ -2115,6 +2157,8 @@ export default function AdminPortal() {
           legal: legalSettings,
           catalog: catalogSettings,
           behavior: behaviorSettings,
+          checkout: checkoutSettings,
+          refPrefix,
           orbs: orbSettings,
         }));
       } else setSettingsMsg(data.error || 'Failed to save settings.');
@@ -2428,8 +2472,7 @@ export default function AdminPortal() {
 
   const totalOwed = promos.reduce((s, p) => s + (p.payoutOwedCents || 0), 0);
 
-  // Streamer mode forces every sensitive display off regardless of reveal state.
-  const sensitiveVisible = !streamerMode && revealAddresses;
+  // Streamer Mode only masks DISPLAYED customer data — it never gates actions.
 
   // True when any settings form differs from the last fetched/saved baseline.
   // Drives the "Discard changes" button in the sticky save bar.
@@ -2638,7 +2681,7 @@ export default function AdminPortal() {
               </span>
             </div>
             <button
-              onClick={() => { setRevealAddresses(false); if (streamerMode) setPassword(''); setStreamerMode((v) => !v); }}
+              onClick={() => { setStreamerMode((v) => !v); }}
               aria-pressed={streamerMode}
               aria-label="Toggle Streamer Mode"
               title={streamerMode ? 'Turn Streamer Mode OFF to unlock the admin password and see real customer data' : 'Turn Streamer Mode ON to mask customer data for a livestream'}
@@ -2654,33 +2697,31 @@ export default function AdminPortal() {
             </button>
           </div>
 
-          {streamerMode ? (
-            <span style={{
-              display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9a9aa3',
-              background: 'rgba(255,255,255,0.03)', border: '1px dashed #33333a', borderRadius: 10,
-              padding: '8px 12px', flex: 1, minWidth: 220,
-            }}>
-              🔒 <span>
-                <strong style={{ color: '#d4d4d8' }}>Admin password locked</strong> — while streaming, emails, shipping
-                addresses and card numbers are masked everywhere and nothing can be saved or triggered.
-                Turn Streamer Mode OFF and type the password to work with real data.
-              </span>
-            </span>
-          ) : (
-            <>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Admin password"
-                autoComplete="current-password"
-                style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px' }} />
-              <button onClick={toggleReveal} disabled={revealBusy}
-                style={{ ...buttonGhost, padding: '10px 14px', background: revealAddresses ? '#1c1c1e' : 'transparent', color: revealAddresses ? '#34d399' : '#ccc' }}>
-                {revealAddresses ? 'Hide addresses' : 'Reveal addresses'}
-              </button>
-            </>
-          )}
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9a9aa3',
+            background: 'rgba(255,255,255,0.03)', border: '1px dashed #33333a', borderRadius: 10,
+            padding: '8px 12px', flex: 1, minWidth: 220,
+          }}>
+            {streamerMode ? (
+              <span>🔒 <strong style={{ color: '#d4d4d8' }}>Streamer Mode</strong> — emails, addresses and card numbers are masked with
+                fixed-length bullets (even character lengths are hidden). Every action keeps working while masked; the password field is
+                locked so the real password can never be typed on a livestream.</span>
+            ) : (
+              <span>🛡️ <strong style={{ color: '#d4d4d8' }}>Real data visible</strong> — customer PII shows in full. Toggle Streamer
+                Mode ON before sharing your screen.</span>
+            )}
+          </span>
+          <input
+            type="password"
+            value={streamerMode ? '••••••••' : password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Admin password"
+            autoComplete="current-password"
+            disabled={streamerMode}
+            title={streamerMode
+              ? 'Locked while Streamer Mode is ON — type it with Streamer Mode OFF, then toggle back on. A password already typed stays active.'
+              : 'Required to save settings and trigger destructive actions'}
+            style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px', opacity: streamerMode ? 0.55 : 1 }} />
         </div>
 
         {/* Apple-style grouped tab bar: Store / Customers / Configuration */}
@@ -2703,6 +2744,7 @@ export default function AdminPortal() {
                         if (t.id === 'settings') fetchSettings();
                         if (t.id === 'setup') fetchEnvStatus();
                         if (t.id === 'products') fetchProducts();
+                        if (t.id === 'products') fetchSettings();
                         if (t.id === 'users') fetchUsers();
                       }}
                       style={{
@@ -2799,15 +2841,10 @@ export default function AdminPortal() {
                     ))
                   )}
                 </select>
-                <button onClick={triggerDrop} disabled={isRunning || streamerMode}
-                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: isRunning || streamerMode ? '#333' : '#edb210', color: isRunning || streamerMode ? '#777' : '#09090b', fontWeight: 700, cursor: isRunning || streamerMode ? 'not-allowed' : 'pointer' }}>
-                  {streamerMode ? '🔒 Locked while Streamer Mode is ON' : (isRunning ? 'Running…' : 'Authorize & Trigger Draw')}
+                <button onClick={triggerDrop} disabled={isRunning}
+                  style={{ width: '100%', padding: 14, borderRadius: 12, border: 'none', background: isRunning ? '#333' : '#edb210', color: isRunning ? '#777' : '#09090b', fontWeight: 700, cursor: isRunning ? 'not-allowed' : 'pointer' }}>
+                  {isRunning ? 'Running…' : 'Authorize & Trigger Draw'}
                 </button>
-                {streamerMode && (
-                  <p style={{ fontSize: 10, color: '#edb210', margin: '8px 0 0', lineHeight: 1.5 }}>
-                    🔒 Triggering a draw charges winners&apos; saved cards — turn Streamer Mode OFF and enter the admin password first.
-                  </p>
-                )}
                 {password && (
                   <button onClick={downloadWinners}
                     style={{ display: 'inline-block', marginTop: 12, fontSize: 12, color: '#60a5fa', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
@@ -3098,7 +3135,7 @@ export default function AdminPortal() {
                       )}
                     </div>
                     <div style={{ color: '#666', marginTop: 4 }}>
-                      📍 {sensitiveVisible ? e.shippingAddress || 'n/a' : pii(e.shippingAddress, 'address', streamerMode) || '•••• hidden'}
+                      📍 {pii(e.shippingAddress, 'address', streamerMode) || '•••• hidden'}
                       {e.cardLast4 && <span style={{ marginLeft: 6 }}>💳 {streamerMode ? maskCard(`•••• •••• •••• ${e.cardLast4}`) : `••${e.cardLast4}`}</span>}
                       {e.type === 'WINNER_CHARGED' && (
                         <span style={{ marginLeft: 6 }}>
@@ -3107,7 +3144,7 @@ export default function AdminPortal() {
                         </span>
                       )}
                     </div>
-                    {!streamerMode && (e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
+                    {(e.type === 'WINNER_CHARGED' || e.type === 'ENTERED') && (
                       <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         {isEditingAddress ? (
                           <>
@@ -3126,7 +3163,7 @@ export default function AdminPortal() {
                         )}
                       </div>
                     )}
-                    {!streamerMode && e.type === 'WINNER_CHARGED' && (
+                    {e.type === 'WINNER_CHARGED' && (
                       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #1c1c1e' }}>
                         {isEditingShipping ? (
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -3265,6 +3302,30 @@ export default function AdminPortal() {
                     <input type="number" placeholder="0" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: 10, color: '#888' }}>Categories (customers filter the catalog by these)</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                      {(catalogSettings.categories || []).map((cat) => {
+                        const selected = Array.isArray(productForm.categories) && productForm.categories.includes(cat);
+                        return (
+                          <button
+                            key={cat}
+                            onClick={() => setProductForm((p: any) => {
+                              const current = Array.isArray(p.categories) ? p.categories : [];
+                              const next = selected ? current.filter((c: string) => c !== cat) : [...current, cat];
+                              return { ...p, categories: next };
+                            })}
+                            style={{ padding: '5px 12px', borderRadius: 999, fontSize: 11, cursor: 'pointer', border: selected ? '1px solid #7dd3fc' : '1px solid #2a2a30', background: selected ? 'rgba(125,211,252,0.14)' : '#15151b', color: selected ? '#7dd3fc' : '#aaa' }}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                      {(catalogSettings.categories || []).length === 0 && (
+                        <span style={{ fontSize: 10, color: '#666' }}>No categories defined — add them under Settings → Catalog → Product categories.</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
                     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
                       <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
@@ -3353,6 +3414,45 @@ export default function AdminPortal() {
                       <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
                     </div>
                   </div>
+
+                  {/* Per-size inventory: when the product has MULTIPLE sizes/colours in
+                      Pricing & Sizes, each one is its own allocation pool. Let the
+                      operator set a separate stock count per size — live inventory is
+                      seeded per size from these numbers (blank = fall back to Total
+                      inventory above). */}
+                  {(productForm.priceCategories || []).length > 1 && (
+                    <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                        Per-size inventory
+                      </div>
+                      <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
+                        Each size/colour is its own allocation pool. Set a stock count per size — the live state for that size is seeded from it. Leave a field blank to fall back to the Total inventory above.
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        {(productForm.priceCategories || []).map((cat: any, idx: number) => (
+                          <div key={`inv-size-${idx}`}>
+                            <label style={{ fontSize: 10, color: '#888' }}>{cat.size || `Size ${idx + 1}`} — units</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={productForm.inventoryPerSize?.[cat.size] ?? ''}
+                              placeholder={String(productForm.totalInventory ?? 0)}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setProductForm((p: any) => {
+                                  const inv = { ...(p.inventoryPerSize || {}) };
+                                  if (v === '' || Number(v) <= 0) delete inv[cat.size];
+                                  else inv[cat.size] = Math.max(0, Number(v));
+                                  return { ...p, inventoryPerSize: inv };
+                                });
+                              }}
+                              style={inputStyle}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </SectionCard>
 
                 {/* ============ DROP SCHEDULE ============ */}
@@ -3499,7 +3599,7 @@ export default function AdminPortal() {
                   description="Use this for sampler-to-full-size conversion. When this product is marked delivered, the buyer receives a one-time code bound to their email, restricted to your selected full-size item(s) and optional order minimum. Generated credits remain usable until they are manually removed."
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, gridColumn: '1 / -1' }}>
                       <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} />
                       <span>Enable delivery credit</span>
                     </label>
@@ -3509,21 +3609,44 @@ export default function AdminPortal() {
                     <label style={{ fontSize: 10, color: '#888' }}>Minimum next order subtotal (cents)
                       <input type="number" min={0} value={productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: Number(e.target.value) }))} style={inputStyle} />
                     </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
-                      <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
-                    </label>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 10, whiteSpace: 'nowrap' }}>
+                        <input type="checkbox" checked={productForm.deliveryIncentiveNeverExpires === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveNeverExpires: e.target.checked }))} />
+                        <span>Never expires</span>
+                      </label>
+                      {productForm.deliveryIncentiveNeverExpires !== true && (
+                        <label style={{ fontSize: 10, color: '#888' }}>Validity window (days)
+                          <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
+                        </label>
+                      )}
+                    </div>
                     <label style={{ fontSize: 10, color: '#888' }}>Code prefix
                       <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
                     </label>
+                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
+                      <strong style={{ color: '#aab6c8' }}>Code prefix</strong> — the generated code looks like <code style={{ color: '#cbd5e1' }}>{String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()}-XXXXXXXX</code>. Letters/numbers only, up to 8 chars; leave blank for the default <code style={{ color: '#cbd5e1' }}>DROP-</code>.
+                    </p>
                     <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Trigger on size(s) CSV
                       <input type="text" value={Array.isArray(productForm.deliveryIncentiveTriggerSizes) ? productForm.deliveryIncentiveTriggerSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveTriggerSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
                     </label>
+                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
+                      <strong style={{ color: '#aab6c8' }}>Trigger on size(s) CSV</strong> — which size(s) of THIS product issue the credit when purchased and marked delivered. Leave blank to trigger on every size.
+                    </p>
                     <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV
                       <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
                     </label>
+                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
+                      <strong style={{ color: '#aab6c8' }}>Eligible product slugs CSV</strong> — the products the generated code can be used on (e.g. <code style={{ color: '#cbd5e1' }}>full-size-perfume, travel-spray</code>). Leave blank to allow the code anywhere.
+                    </p>
                     <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV
                       <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
                     </label>
+                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '-2px 0 0', lineHeight: 1.6 }}>
+                      <strong style={{ color: '#aab6c8' }}>Eligible size(s) CSV</strong> — which sizes the code works on within the eligible products (e.g. <code style={{ color: '#cbd5e1' }}>100ml, 50ml</code>). Leave blank to allow every size of the eligible products.
+                    </p>
+                    <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '2px 0 0', lineHeight: 1.6 }}>
+                      The credit is a one-time code bound to the buyer&apos;s email. <strong style={{ color: '#aab6c8' }}>Never expires</strong> keeps it usable until manually removed; otherwise it lapses after the Validity window.
+                    </p>
                   </div>
                 </SectionCard>
 
@@ -3651,8 +3774,8 @@ export default function AdminPortal() {
                   </div>
                 </SectionCard>
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, opacity: imageUploadBusy ? 0.6 : 1 }}>
+                <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.9)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.3)' }}>
+                  <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
                     {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : 'Save Product'}
                   </button>
                   <button
@@ -3802,7 +3925,6 @@ export default function AdminPortal() {
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button onClick={() => {
-                        if (streamerMode) { showToast('Turn Streamer Mode OFF to edit user details'); return; }
                         setEditingUser(user.id); setUserForm({ email: user.email, password: '', role: user.role, rewards: user.rewards || 0 }); setShowUserForm(true);
                       }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
                       <button onClick={() => deleteUser(user.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
@@ -3861,7 +3983,6 @@ export default function AdminPortal() {
                     <div style={{ fontWeight: 700 }}>{p.code} {!p.active && <span style={{ color: '#f87171' }}>(disabled)</span>}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => {
-                        if (streamerMode) { showToast('Turn Streamer Mode OFF to edit promo details'); return; }
                         setPromoForm({
                         code: p.code, promoterName: p.promoterName, promoterEmail: p.promoterEmail,
                         customerDiscountPercent: String(p.customerDiscountPercent || ''), 
@@ -4160,16 +4281,11 @@ export default function AdminPortal() {
                   <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
                   Rebuild with Seed Defaults after wipe
                 </label>
-                <button onClick={runWipe} disabled={wipeBusy || streamerMode}
-                  style={{ ...buttonPrimary, background: streamerMode ? '#3a3a3f' : '#ef4444', color: streamerMode ? '#777' : '#fff' }}>
-                  {streamerMode ? '🔒 Locked while Streamer Mode is ON' : (wipeBusy ? 'Wiping…' : 'Wipe Redis')}
+                <button onClick={runWipe} disabled={wipeBusy}
+                  style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
+                  {wipeBusy ? 'Wiping…' : 'Wipe Redis'}
                 </button>
               </div>
-              {streamerMode && (
-                <p style={{ fontSize: 10, color: '#edb210', marginTop: 8, lineHeight: 1.5 }}>
-                  🔒 Wiping Redis deletes <em>every key</em> — turn Streamer Mode OFF and enter the admin password to unlock this.
-                </p>
-              )}
               {wipeMsg && <p style={{ fontSize: 11, color: wipeMsg.includes('Failed') || wipeMsg.includes('Type') ? '#f87171' : '#34d399', marginTop: 10 }}>{wipeMsg}</p>}
             </div>
           </div>
@@ -4227,7 +4343,7 @@ export default function AdminPortal() {
                 <p style={{ margin: '6px 0' }}>5. Point your Stripe webhook at <code>https://YOUR_DOMAIN/api/stripe/webhook</code> and set <strong>STRIPE_WEBHOOK_SECRET</strong>.</p>
                 <p style={{ margin: '6px 0' }}>6. Add <strong>NEXT_PUBLIC_MAPBOX_TOKEN</strong> (public pk.* token) and redeploy to turn on full-address autofill at checkout — the dropdown fills street, city, state, ZIP and country.</p>
                 <p style={{ margin: '6px 0' }}>7. Run <strong>/admin → System → Site Self-Test</strong> before a drop. It verifies every env var, product price/Stripe ID, live state, and key-space hygiene.</p>
-                <p style={{ margin: '6px 0' }}>8. This portal opens in <strong>Streamer Mode</strong> (customer data hidden). Turn it off only when you need to work on live data — it is ideal for showing draws/winners on a livestream.</p>
+                <p style={{ margin: '6px 0' }}>8. This portal opens in <strong>Streamer Mode</strong> (customer data masked with fixed-length bullets — even character lengths stay hidden). It only masks display; every save, draw and edit keeps working, so you can run the whole store live on a stream. Toggle it ON before sharing your screen.</p>
               </div>
             </div>
           </div>
@@ -4647,6 +4763,7 @@ export default function AdminPortal() {
                     <input 
                       type="text" 
                       value={value} 
+                      placeholder={COPY_FIELD_PLACEHOLDERS[key] || 'Leave empty to keep the default'}
                       onChange={(e) => setFormSettings({ ...formSettings, [key]: e.target.value })}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
@@ -4661,6 +4778,7 @@ export default function AdminPortal() {
                     <input 
                       type="text" 
                       value={value} 
+                      placeholder={COPY_FIELD_PLACEHOLDERS[key] || 'Leave empty to keep the default'}
                       onChange={(e) => setFooterSettings({ ...footerSettings, [key]: e.target.value })}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
@@ -4751,7 +4869,7 @@ export default function AdminPortal() {
                               if (index === 0) return prev;
                               const next = [...prev.sectionOrder];
                               [next[index - 1], next[index]] = [next[index], next[index - 1]];
-                              return { sectionOrder: next };
+                              return { ...prev, sectionOrder: next };
                             })}
                             disabled={index === 0}
                             style={{ border: 'none', background: '#26262e', color: index === 0 ? '#555' : '#eee', borderRadius: 6, padding: '5px 10px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: 11 }}
@@ -4763,7 +4881,7 @@ export default function AdminPortal() {
                               if (index === prev.sectionOrder.length - 1) return prev;
                               const next = [...prev.sectionOrder];
                               [next[index], next[index + 1]] = [next[index + 1], next[index]];
-                              return { sectionOrder: next };
+                              return { ...prev, sectionOrder: next };
                             })}
                             disabled={index === catalogSettings.sectionOrder.length - 1}
                             style={{ border: 'none', background: '#26262e', color: index === catalogSettings.sectionOrder.length - 1 ? '#555' : '#eee', borderRadius: 6, padding: '5px 10px', cursor: index === catalogSettings.sectionOrder.length - 1 ? 'not-allowed' : 'pointer', fontSize: 11 }}
@@ -4773,6 +4891,99 @@ export default function AdminPortal() {
                         </div>
                       );
                     })}
+                  </div>
+
+                  {/* Categories — the admin-managed product tag list. Createable /
+                      deletable; products are tagged with any subset in the product
+                      form, and the /catalog page shows a category filter. */}
+                  <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 4 }}>
+                      Product categories
+                    </div>
+                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
+                      The categories buyers can tag products with — e.g. Perfume, Clothes, Shoes, Food, Tools, Tires, Pastries, Beanies, Winter, Summer, Men, Unisex, Women. Add or remove freely; customers filter the catalog by them. Products keep their tags even if a category is later deleted (the chip just stops being clickable).
+                    </p>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+                      <input
+                        type="text"
+                        value={categoryDraft}
+                        onChange={(e) => setCategoryDraft(e.target.value)}
+                        placeholder="New category (e.g. Accessories)"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addCategory();
+                          }
+                        }}
+                        style={{ ...inputStyle, flex: 1 }}
+                      />
+                      <button onClick={addCategory} style={{ ...buttonPrimary, padding: '8px 14px', fontSize: 11, margin: 0 }}>Add</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(catalogSettings.categories || []).map((cat) => (
+                        <span key={cat} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.35)', fontSize: 11, color: '#bfdbfe' }}>
+                          {cat}
+                          <button
+                            onClick={() => removeCategory(cat)}
+                            style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }}
+                            title={`Delete "${cat}"`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                      {(!catalogSettings.categories || catalogSettings.categories.length === 0) && (
+                        <span style={{ fontSize: 10, color: '#666' }}>No categories yet — add the first one above.</span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <h4 id="settings-checkout" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
+                <button
+                  onClick={() => setCheckoutOpen((v) => !v)}
+                  style={{ background: 'none', border: 'none', color: '#aaa', fontSize: 11, textTransform: 'uppercase', padding: 0, cursor: 'pointer', fontWeight: 700 }}
+                >
+                  {checkoutOpen ? '▾' : '▸'} Checkout & Orders
+                </button>
+              </h4>
+              {checkoutOpen && (
+                <>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px', lineHeight: 1.5 }}>
+                    Entry/order reference codes and how strictly customer addresses are validated at checkout.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'start' }}>
+                    <label style={{ fontSize: 11 }}>
+                      Reference code prefix
+                      <input
+                        type="text"
+                        value={refPrefix}
+                        maxLength={4}
+                        onChange={(e) => {
+                          const raw = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                          setRefPrefix(raw || 'GU');
+                        }}
+                        placeholder="GU"
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                      />
+                      <span style={{ fontSize: 10, color: '#8b95a7', display: 'block', marginTop: 4, lineHeight: 1.5 }}>
+                        Every entry and order reference starts with this prefix (e.g. <code style={{ color: '#cbd5e1' }}>{refPrefix}-8F3K9Q2A</code>). Letters/numbers, up to 4 chars. Legacy <code style={{ color: '#cbd5e1' }}>GY-</code>/<code style={{ color: '#cbd5e1' }}>GOY-</code> refs are re-labelled to the new prefix automatically.
+                      </span>
+                    </label>
+                    <div>
+                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={checkoutSettings.requireAddressAutofill === true}
+                          onChange={(e) => setCheckoutSettings((prev) => ({ ...prev, requireAddressAutofill: e.target.checked }))}
+                        />
+                        <span>Require full address dropdown at checkout</span>
+                      </label>
+                      <span style={{ fontSize: 10, color: '#8b95a7', display: 'block', lineHeight: 1.5 }}>
+                        When ON, customers must pick the complete address from the Mapbox dropdown (a partial address can never be saved). Turn OFF to accept typed addresses. The admin portal always overrides this and can save any address.
+                      </span>
+                    </div>
                   </div>
                 </>
               )}
@@ -4940,18 +5151,83 @@ export default function AdminPortal() {
                   iconText: brandingSettings.iconText,
                 }).map(([key, value]) => {
                   const isColorField = key.includes('Background') || key.includes('Accent') || key.includes('Text');
+                  const meta = SHARE_FIELD_META[key];
+                  const label = meta?.label || key.replace(/([A-Z])/g, ' $1').trim();
+                  const placeholder = meta?.placeholder || (isColorField ? 'Pick a color' : '');
+                  const hint = meta?.hint || '';
                   return (
                     <label key={key} style={{ fontSize: 11 }}>
-                      {key.replace(/([A-Z])/g, ' $1').trim()}
+                      {label}
                       <input
                         type={isColorField ? 'color' : 'text'}
                         value={isColorField ? toHexColor(value) : String(value || '')}
                         onChange={(e) => setBrandingSettings((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder={placeholder}
                         style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, padding: isColorField ? 4 : 10, height: isColorField ? 40 : undefined }}
                       />
+                      {hint ? <span style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 4, lineHeight: 1.5 }}>{hint}</span> : null}
                     </label>
                   );
                 })}
+              </div>
+
+              {/* Card style — the share-card composition knobs. The preview below
+                  updates live; the actual /og PNG re-renders after Save. */}
+              <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 4 }}>
+                  Share card style
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label style={{ fontSize: 11 }}>
+                    Layout
+                    <select value={brandingSettings.shareLayout || 'classic'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareLayout: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
+                      <option value="classic">Classic — brand row + big title</option>
+                      <option value="split">Split — image left, text right</option>
+                      <option value="minimal">Minimal — centered, no tagline/site</option>
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Typeface
+                    <select value={brandingSettings.shareFontFamily || 'system'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareFontFamily: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
+                      <option value="system">System UI</option>
+                      <option value="serif">Serif (Georgia)</option>
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Title size (px)
+                    <input type="number" min={36} max={92} value={brandingSettings.shareTitleSize ?? 74} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareTitleSize: Math.max(36, Math.min(92, Number(e.target.value) || 74)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Description size (px)
+                    <input type="number" min={18} max={42} value={brandingSettings.shareDescriptionSize ?? 30} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareDescriptionSize: Math.max(18, Math.min(42, Number(e.target.value) || 30)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Glow intensity (0–100)
+                    <input type="range" min={0} max={100} value={brandingSettings.shareGlowIntensity ?? 40} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareGlowIntensity: Number(e.target.value) }))} style={{ display: 'block', width: '100%', marginTop: 4 }} />
+                    <span style={{ fontSize: 10, color: '#666' }}>{brandingSettings.shareGlowIntensity ?? 40}/100 — accent glow behind the text.</span>
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Corner radius (px)
+                    <input type="number" min={0} max={64} value={brandingSettings.shareCornerRadius ?? 0} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareCornerRadius: Math.max(0, Math.min(64, Number(e.target.value) || 0)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
+                  <label style={{ fontSize: 11 }}>
+                    Image darkness (0–100)
+                    <input type="range" min={0} max={100} value={brandingSettings.shareImageOverlay ?? 60} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareImageOverlay: Number(e.target.value) }))} style={{ display: 'block', width: '100%', marginTop: 4 }} />
+                    <span style={{ fontSize: 10, color: '#666' }}>{brandingSettings.shareImageOverlay ?? 60}/100 — darkens the share image for text contrast.</span>
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 14 }}>
+                    {([
+                      ['shareLogoVisible', 'Show logo'],
+                      ['shareTaglineVisible', 'Show tagline'],
+                      ['shareSiteVisible', 'Show site URL'],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input type="checkbox" checked={brandingSettings[key] !== false} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, [key]: e.target.checked }))} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Live preview: the top bar + footer rendered from the CURRENT

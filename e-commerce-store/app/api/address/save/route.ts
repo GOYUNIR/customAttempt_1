@@ -4,10 +4,12 @@ import {
   findAllOpenOrders,
   adminUpdateOrderAddress,
   loadProducts,
+  loadStoreConfigCached,
   ADDRESS_SUBMISSIONS_KEY,
 } from '@/lib/server-config';
 import { formatOrderRef } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { requireAddressAutofill } from '@/lib/storefront-config';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +48,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
     const email = String(body?.email || '').trim().toLowerCase();
-    const address = String(body?.address || '').trim();
+    const addressRaw = String(body?.address || '').trim();
     const variant = String(body?.variant || '').trim();
     const size = String(body?.size || '').trim();
     const orderRef = String(body?.orderRef || '').trim();
@@ -58,13 +60,22 @@ export async function POST(request: Request) {
     if (!EMAIL_RE.test(email)) {
       return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
     }
-    const addrError = validateShippingAddress(address);
-    if (addrError) {
-      return NextResponse.json({ error: addrError }, { status: 400 });
+
+    // Customer-facing address capture requires the FULL Mapbox-dropdown address
+    // by default (store:config.checkout.requireAddressAutofill). When an admin
+    // disables the flag, partial addresses are accepted as-is — still clamped
+    // to 500 chars below. The admin route is the explicit override.
+    const config = await loadStoreConfigCached(redis);
+    if (requireAddressAutofill(config)) {
+      const addrError = validateShippingAddress(addressRaw);
+      if (addrError) {
+        return NextResponse.json({ error: addrError }, { status: 400 });
+      }
+      if (addressRaw.length > MAX_ADDRESS_LENGTH) {
+        return NextResponse.json({ error: 'Shipping address is too long.' }, { status: 400 });
+      }
     }
-    if (address.length > MAX_ADDRESS_LENGTH) {
-      return NextResponse.json({ error: 'Shipping address is too long.' }, { status: 400 });
-    }
+    const address = addressRaw.slice(0, MAX_ADDRESS_LENGTH);
 
     const limited = await rateLimitedResponse('address_save', request, 20, 60);
     if (limited) return limited;

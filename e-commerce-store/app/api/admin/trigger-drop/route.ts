@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, verifyAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey } from '@/lib/server-config';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, verifyAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
+import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
@@ -12,6 +12,38 @@ function siteUrlFromEnv() {
   return getSiteUrl() || fallbackSiteUrl();
 }
 
+/** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
+ * fallback 'GU') so refs built here match what the admin portal shows. */
+async function getRefPrefix(redis: any): Promise<string> {
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    return normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    return 'GU';
+  }
+}
+
+/** Look up whether an email has a store account and its current rewards balance
+ * (same store:users scan the checkout routes use) so winner emails always
+ * reflect the CURRENT account state, never a stale guest snapshot. */
+async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
+  try {
+    if (!email) return { hasAccount: false, rewardsBalance: 0 };
+    const raw = await redis.hgetall(USERS_KEY);
+    if (!raw) return { hasAccount: false, rewardsBalance: 0 };
+    for (const [, v] of Object.entries(raw)) {
+      const u = safeParseRedisItem<any>(v);
+      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
+        return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
+      }
+    }
+    return { hasAccount: false, rewardsBalance: 0 };
+  } catch {
+    return { hasAccount: false, rewardsBalance: 0 };
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
@@ -19,6 +51,8 @@ export async function POST(request: Request) {
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'System offline' }, { status: 500 });
     }
+
+    const refPrefix = await getRefPrefix(redis);
 
     const body = await request.json();
     const targetPool = body.targetPool || 'ALL_POOLS';
@@ -72,7 +106,7 @@ export async function POST(request: Request) {
         if (!entry) continue;
         const customerId = entry.customerId || entry.stripeCustomerId;
         const paymentMethodId = entry.paymentMethodId;
-        const orderRef = formatOrderRef(String(entry.orderRef || '')) || buildOrderRef(entry.email, product.name, size);
+        const orderRef = formatOrderRef(String(entry.orderRef || ''), refPrefix) || buildOrderRef(entry.email, product.name, size, refPrefix);
         // Apply the promo stored on the entry at signup time ("X% off if
         // selected") so admin-triggered draws never charge winners full price.
         const entryDiscount = Math.min(50, Math.max(0, Number(entry.discountPercent) || 0));
@@ -116,6 +150,7 @@ export async function POST(request: Request) {
           // Notify the winner. This is the primary channel for telling
           // customers they won — without it, an admin-triggered draw is silent.
           try {
+            const userRewards = await lookupUserRewards(redis, entry.email);
             await sendWinnerEmail({
               to: entry.email,
               product: product.name,
@@ -127,6 +162,8 @@ export async function POST(request: Request) {
               shippingAddress: entry.shippingAddress || entry.address || undefined,
               orderRef,
               siteUrl: siteUrlFromEnv(),
+              hasAccount: userRewards.hasAccount || undefined,
+              rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
             });
           } catch (emailErr) {
             console.error('[trigger-drop] winner email failed', emailErr);

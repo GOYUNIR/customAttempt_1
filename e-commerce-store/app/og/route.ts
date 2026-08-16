@@ -4,7 +4,7 @@ import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { getSiteUrl } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
 import { resolveBrandImageForSatori } from '@/lib/brand-image';
-import { cardSiteUrlDisplay, safeCssColor } from '@/lib/share-card-config';
+import { cardSiteUrlDisplay, normalizeShareCardOptions, safeCssColor } from '@/lib/share-card-config';
 import ShareCard from '@/components/ShareCard';
 
 /**
@@ -58,6 +58,9 @@ export async function GET() {
     const title = String(branding.shareTitle || brandName);
     const description = String(branding.shareDescription || DEFAULT_DESCRIPTION);
     const tagline = String(branding.shareTagline || '');
+    // Buyer-editable card knobs (layout, font, sizes, glow, radius, overlay,
+    // visibility toggles) ride on the branding object — normalized + clamped.
+    const cardOptions = normalizeShareCardOptions(branding);
     const background = safeCssColor(
       branding.shareBackground || themeColors.primaryBackground,
       '#0B0B0F',
@@ -86,6 +89,7 @@ export async function GET() {
         accent,
         text,
         siteUrl,
+        options: cardOptions,
       }),
       {
         ...size,

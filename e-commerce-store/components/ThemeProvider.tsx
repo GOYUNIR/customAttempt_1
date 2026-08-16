@@ -21,12 +21,14 @@ export interface LiveThemeValue {
   footer?: Record<string, string>;
   /** Legal & policy content for the /terms, /privacy and /shipping pages. */
   legal?: Record<string, string>;
-  /** Catalog presentation settings (section order on /catalog). */
-  catalog?: { sectionOrder?: string[] };
+  /** Catalog presentation settings (section order on /catalog + categories). */
+  catalog?: { sectionOrder?: string[]; categories?: string[] };
   /** Drop scheduling (timezone + cadence) — used to parse product timestamps. */
   dropSchedule?: Record<string, any>;
   /** Site behaviour switches (admin → Settings → Behavior). */
   behavior?: { scrollToTopOnLoad?: boolean };
+  /** Checkout & orders policy (admin → Settings → Checkout & Orders). */
+  checkout?: { requireAddressAutofill?: boolean };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

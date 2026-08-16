@@ -84,7 +84,9 @@ export async function POST(request: Request) {
             if (shouldIssue && !alreadyIssued) {
               const fixedDiscountCents = Math.max(0, Number(product.deliveryIncentiveCreditCents || 0));
               if (fixedDiscountCents > 0) {
-                const promoCode = generatePromoCode(product.deliveryIncentiveCodePrefix || product.slug || 'GOY');
+                const promoCode = generatePromoCode(product.deliveryIncentiveCodePrefix || 'DROP');
+                const neverExpires = product.deliveryIncentiveNeverExpires === true;
+                const expiresDays = Math.max(1, Number(product.deliveryIncentiveExpiresDays || 60));
                 const record = {
                   code: promoCode,
                   promoterName: 'Delivery Credit',
@@ -100,9 +102,11 @@ export async function POST(request: Request) {
                   promoterPayoutPercent: 0,
                   maxUsesPerEmail: 1,
                   maxUsesTotal: 1,
-                  timeLimited: false,
+                  // Validity window: "Never expires" keeps it usable forever;
+                  // otherwise the credit lapses after the configured days.
+                  timeLimited: !neverExpires,
                   startAt: new Date().toISOString(),
-                  endAt: null,
+                  endAt: neverExpires ? null : new Date(Date.now() + expiresDays * 86400000).toISOString(),
                   firstXWinnersDiscount: 0,
                   active: true,
                   uses: 0,

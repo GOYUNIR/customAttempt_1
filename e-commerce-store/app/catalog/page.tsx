@@ -28,6 +28,7 @@ interface CatalogItem {
   isActive?: boolean;
   inventoryRemaining?: number;
   totalInventory?: number;
+  categories?: string[];
 }
 interface ActiveDrop {
   id: string;
@@ -40,6 +41,7 @@ interface ActiveDrop {
   isRaffle?: boolean;
   goLiveAt?: string;
   releaseEndsAt?: string;
+  categories?: string[];
 }
 
 /** Valid /catalog section ids + sanitizer (module-scope so hooks deps stay stable).
@@ -74,6 +76,14 @@ export default function CatalogPage() {
     String(liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
   );
   const [searchQuery, setSearchQuery] = useState('');
+  // Product categories (admin-managed list from Settings → Catalog). Loaded from
+  // the live theme + /api/store + /api/catalog/status; drives the filter chips.
+  const [categories, setCategories] = useState<string[]>(() =>
+    Array.isArray(liveCtx?.catalog?.categories) && liveCtx.catalog.categories.length > 0
+      ? liveCtx.catalog.categories
+      : (GOYUNIR_STORE_SUITE.catalog as any)?.categories || [],
+  );
+  const [selectedCategory, setSelectedCategory] = useState('');
   // Perf: skip rendering + painting of catalog sections until they're near the
   // viewport (content-visibility: auto), and reserve layout height so scroll
   // never jumps. Cast as any — React's CSSProperties doesn't type these yet.
@@ -133,6 +143,9 @@ export default function CatalogPage() {
       if (Array.isArray(data.sectionOrder)) {
         setCatalogOrder(sanitizeSectionOrder(data.sectionOrder));
       }
+      if (Array.isArray(data.categories)) {
+        setCategories(data.categories);
+      }
       if (data.storeTimezone) setStoreTimezone(String(data.storeTimezone));
     } catch {
       setActiveDrops([]);
@@ -186,6 +199,9 @@ export default function CatalogPage() {
       if (data?.config?.catalog?.sectionOrder) {
         setCatalogOrder(sanitizeSectionOrder(data.config.catalog.sectionOrder));
       }
+      if (Array.isArray(data?.config?.catalog?.categories) && data.config.catalog.categories.length > 0) {
+        setCategories(data.config.catalog.categories);
+      }
       if (Array.isArray(data?.allProducts)) {
         setLiveProducts(data.allProducts);
       }
@@ -219,10 +235,16 @@ export default function CatalogPage() {
   }, [navigating]);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  // Category filter: a product matches when ANY of its tags equals the selected
+  // category (items without tags only show under "All categories").
+  const matchesCategory = (cats: string[] | undefined) => {
+    if (!selectedCategory) return true;
+    return (Array.isArray(cats) ? cats : []).some((c) => String(c).toLowerCase() === selectedCategory.toLowerCase());
+  };
   const filteredActiveDrops = activeDrops.filter((drop) => {
-    if (!normalizedQuery) return true;
+    if (!normalizedQuery) return matchesCategory(drop.categories);
     const haystack = `${drop.name} ${drop.tagline} ${drop.desc}`.toLowerCase();
-    return haystack.includes(normalizedQuery);
+    return haystack.includes(normalizedQuery) && matchesCategory(drop.categories);
   });
 
   // ── Catalog consistency ────────────────────────────────────────────────────
@@ -251,14 +273,14 @@ export default function CatalogPage() {
   });
 
   const filteredUpcomingDrops = consistentUpcoming.filter((item) => {
-    if (!normalizedQuery) return true;
+    if (!normalizedQuery) return matchesCategory(item.categories);
     const haystack = `${item.name} ${item.description || ''} ${item.status} ${item.eta || ''}`.toLowerCase();
-    return haystack.includes(normalizedQuery);
+    return haystack.includes(normalizedQuery) && matchesCategory(item.categories);
   });
   const filteredArchiveScents = archiveScents.filter((item) => {
-    if (!normalizedQuery) return true;
+    if (!normalizedQuery) return matchesCategory(item.categories);
     const haystack = `${item.name} ${item.description || ''} ${item.status} ${item.eta || ''}`.toLowerCase();
-    return haystack.includes(normalizedQuery);
+    return haystack.includes(normalizedQuery) && matchesCategory(item.categories);
   });
 
   const renderGrid = (items: CatalogItem[], emptyText: string, section: 'upcoming' | 'archive') => (
@@ -434,6 +456,35 @@ export default function CatalogPage() {
             </button>
           ) : null}
         </motion.div>
+
+        {/* Category filter — the admin-managed product tag list. Tap a chip to
+            show only releases in that category. */}
+        {categories.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+            {['', ...categories].map((cat) => {
+              const active = selectedCategory === cat;
+              const key = cat || '__all__';
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSelectedCategory(active ? '' : cat)}
+                  style={{
+                    padding: '6px 13px',
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: active ? `1px solid ${configPalette.checkoutCtaButton || '#60a5fa'}` : `1px solid ${configPalette.cardBorder}`,
+                    background: active ? (configPalette.checkoutCtaButton ? `color-mix(in srgb, ${configPalette.checkoutCtaButton} 18%, transparent)` : 'rgba(96,165,250,0.18)') : 'transparent',
+                    color: active ? (configPalette.checkoutCtaButton || '#93c5fd') : configPalette.cardTextMuted,
+                  }}
+                >
+                  {cat || 'All categories'}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {statusError && (
           <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: themeRadius(configPalette, 12), border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.08)', fontSize: 12, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between' }}>

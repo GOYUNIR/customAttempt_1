@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createRedisClient, safeParseRedisItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
-import { mergeOrbsConfig } from '@/lib/storefront-config';
+import { mergeOrbsConfig, normalizeCategories } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,6 +113,17 @@ const DEFAULT_CONFIG = {
     upcomingDrops: [],
     archiveScents: [],
   },
+  // Catalog presentation settings (admin → Settings → Catalog). Section order
+  // defaults to live at the BOTTOM; `categories` is the seeded admin-managed
+  // list buyers can add/rename/delete — products are tagged with any subset.
+  catalog: {
+    sectionOrder: ['upcoming', 'archive', 'live'],
+    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  },
+  // Checkout & orders policy (admin → Settings → Checkout & Orders).
+  checkout: {
+    requireAddressAutofill: true,
+  },
   orbs: {
     enabled: true,
     primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
@@ -162,6 +173,15 @@ export async function GET(request: NextRequest) {
       themeColors: { ...DEFAULT_CONFIG.themeColors, ...(config?.themeColors || {}) },
       availableSizes: Array.isArray(config?.availableSizes) && config.availableSizes.length > 0 ? config.availableSizes : DEFAULT_CONFIG.availableSizes,
       homeRedirectSlug: typeof config?.homeRedirectSlug === 'string' && config.homeRedirectSlug.trim() && !['elysian-white','obsidian-void'].includes(config.homeRedirectSlug) ? config.homeRedirectSlug : DEFAULT_CONFIG.homeRedirectSlug,
+      catalog: {
+        sectionOrder: Array.isArray(config?.catalog?.sectionOrder) && config.catalog.sectionOrder.length > 0
+          ? config.catalog.sectionOrder
+          : DEFAULT_CONFIG.catalog.sectionOrder,
+        categories: normalizeCategories(config?.catalog?.categories ?? DEFAULT_CONFIG.catalog.categories),
+      },
+      checkout: {
+        requireAddressAutofill: config?.checkout?.requireAddressAutofill !== false,
+      },
       orbs: mergeOrbsConfig(config?.orbs || DEFAULT_CONFIG.orbs),
     };
 

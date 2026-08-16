@@ -13,7 +13,7 @@ import {
 } from '@/lib/server-config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
-import { resolveNextRaffleAnchorMs } from '@/lib/storefront-config';
+import { resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -31,6 +31,7 @@ export async function GET() {
         upcomingDrops: [],
         archiveScents: [],
         sectionOrder: [],
+        categories: [],
         archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
@@ -71,6 +72,7 @@ async function buildCatalogPayload() {
         upcomingDrops: [],
         archiveScents: [],
         sectionOrder: ['upcoming', 'archive', 'live'],
+        categories: normalizeCategories(GOYUNIR_STORE_SUITE.catalog?.categories),
         archivedProductIds: [],
         soldOutProductIds: [],
         notesByProductId: {},
@@ -92,6 +94,8 @@ async function buildCatalogPayload() {
     const sectionOrder = Array.isArray(rawOrder)
       ? [...new Set([...rawOrder.map(String), 'live', 'upcoming', 'archive'].filter((s) => ['live', 'upcoming', 'archive'].includes(s)))]
       : ['upcoming', 'archive', 'live'];
+    // Admin-managed product categories (Settings → Catalog → Categories).
+    const categories = normalizeCategories(storeConfig.catalog?.categories ?? GOYUNIR_STORE_SUITE.catalog?.categories);
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
     // Global drop-schedule override merged over the static config — used to
@@ -207,6 +211,7 @@ async function buildCatalogPayload() {
         goLiveAt: p.goLiveAt || '',
         releaseEndsAt: p.releaseEndsAt || '',
         nextReleaseEndsAt: p.nextReleaseEndsAt || p.releaseEndsAt || '',
+        categories: Array.isArray(p.categories) ? p.categories.map(String) : [],
       }));
 
     // Never list a product in BOTH live drops and upcoming. Products that
@@ -272,6 +277,7 @@ async function buildCatalogPayload() {
       upcomingDrops,
       archiveScents,
       sectionOrder,
+      categories,
       archivedProductIds,
       soldOutProductIds: sortedProducts.filter((item) => item.soldOut === true).map((item) => item.id),
       notesByProductId: {},
@@ -287,6 +293,7 @@ async function buildCatalogPayload() {
       upcomingDrops: [],
       archiveScents: [],
       sectionOrder: [],
+      categories: [],
       archivedProductIds: [],
       soldOutProductIds: [],
       notesByProductId: {},

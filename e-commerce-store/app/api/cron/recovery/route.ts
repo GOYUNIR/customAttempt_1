@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey, USERS_KEY } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
@@ -55,6 +55,16 @@ export async function GET(request: Request) {
 
     const allProducts = Object.values(await loadProducts(redis));
 
+    // Account-context for recovery emails: a customer who signed up after their
+    // intent was created gets the "manage it in your account" CTA; guests keep
+    // the product-page CTA. Read ONCE per run (hash scan) instead of per entry.
+    const usersRaw = await redis.hgetall(USERS_KEY).catch(() => null);
+    const accountEmails = new Set<string>();
+    for (const [, v] of Object.entries(usersRaw || {})) {
+      const u = safeParseRedisItem<any>(v);
+      if (u?.email) accountEmails.add(String(u.email).toLowerCase());
+    }
+
     for (const product of allProducts as any[]) {
       const priceCategories = Array.isArray(product.priceCategories) ? product.priceCategories : [];
       for (const category of priceCategories) {
@@ -92,6 +102,8 @@ export async function GET(request: Request) {
                 size,
                 siteUrl: `${siteUrl}/${product.slug}`,
                 kind: 'early',
+                hasAccount: accountEmails.has(email),
+                accountUrl: `${siteUrl}/account`,
               });
               if (result.ok || result.skipped) {
                 await redis.hset(RECOVERY_SENT_KEY, { [earlyField]: new Date().toISOString() });
@@ -116,6 +128,8 @@ export async function GET(request: Request) {
                 size,
                 siteUrl: `${siteUrl}/${product.slug}`,
                 kind: 'pre_draw',
+                hasAccount: accountEmails.has(email),
+                accountUrl: `${siteUrl}/account`,
               });
               if (result.ok || result.skipped) {
                 await redis.hset(RECOVERY_SENT_KEY, { [preField]: new Date().toISOString() });

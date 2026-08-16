@@ -8,13 +8,28 @@ import {
   ArchiveRecord,
   loadProducts, // new helper to fetch product from Redis
   resolveStripePriceId,
+  safeParseRedisItem,
+  STORE_CONFIG_KEY,
 } from '@/lib/server-config';
+import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+
+/** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
+ * fallback 'GU') so refs built here match what the admin portal shows. */
+async function getRefPrefix(redis: any): Promise<string> {
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    return normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    return 'GU';
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -41,6 +56,8 @@ export async function POST(request: Request) {
 
     const limited = await rateLimitedResponse('checkout_direct', request, 10, 60);
     if (limited) return limited;
+
+    const refPrefix = await getRefPrefix(redis);
 
     // Fetch the product from Redis – this gives us the live priceCategories.
     const allProducts = await loadProducts(redis);
@@ -120,7 +137,7 @@ export async function POST(request: Request) {
       type: 'WINNER_CHARGED',
       shippingStatus: 'PENDING_FULFILLMENT',
       amountCents: priceCents,
-      orderRef: `DIRECT-${Date.now().toString(36)}`,
+      orderRef: buildOrderRef(email, String(productId), String(size), refPrefix),
       promoCode: promoCode || undefined,
     };
     await archiveEntry(redis, archiveRecord);

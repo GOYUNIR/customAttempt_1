@@ -23,7 +23,7 @@ import {
   ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
 
@@ -133,6 +133,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Offline' }, { status: 500 });
   }
 
+  // Admin-configured order-ref prefix (store:config.refPrefix, fallback 'GU').
+  // Every ref built/normalized below uses it so legacy GY-/GOY- refs are
+  // re-labelled to the NEW prefix and new refs are born with it.
+  let refPrefix = 'GU';
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    refPrefix = normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    refPrefix = 'GU';
+  }
+
   const sig = request.headers.get('stripe-signature');
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   // Unverified parsing is ONLY allowed in local development with an explicit
@@ -179,59 +191,109 @@ export async function POST(request: Request) {
       const email = String(meta.email || session.customer_email || '')
         .trim()
         .toLowerCase();
-      const variant = clampLength(meta.variant, 200).trim();
-      const size = clampLength(meta.size || 'Standard', 50).trim();
       const shippingAddress = clampLength(meta.address, 500).trim();
       const customerId = typeof session.customer === 'string' ? session.customer : '';
       const rawPromo = String(meta.promoCode || meta.ref || '').slice(0, 40);
-      const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
-      const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+      const checkoutType = String(meta.checkoutType || 'single').slice(0, 20);
 
       // Defense-in-depth: never let a malformed session payload write junk into
       // the pools/ledger, even though signature verification is now mandatory.
-      if (!isValidEmail(email) || !variant || !size) {
-        console.warn('[webhook] setup session rejected: invalid email/variant/size', maskEmail(email));
+      if (!isValidEmail(email)) {
+        console.warn('[webhook] setup session rejected: invalid email', maskEmail(email));
         await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
         return NextResponse.json({ received: true, skipped: 'invalid_payload' });
       }
 
-      if (email && variant) {
-        let paymentMethodId = '';
-        let cardLast4 = '';
-        let cardFingerprint = '';
-        try {
-          if (session.setup_intent) {
-            const si = await stripe.setupIntents.retrieve(String(session.setup_intent), {
-              expand: ['payment_method'],
-            });
-            const pm = si.payment_method as any;
-            if (pm) {
-              paymentMethodId = typeof pm === 'string' ? pm : pm.id;
-              if (typeof pm !== 'string') {
-                cardLast4 = pm.card?.last4 || '';
-                cardFingerprint = pm.card?.fingerprint || '';
-              }
+      let paymentMethodId = '';
+      let cardLast4 = '';
+      let cardFingerprint = '';
+      try {
+        if (session.setup_intent) {
+          const si = await stripe.setupIntents.retrieve(String(session.setup_intent), {
+            expand: ['payment_method'],
+          });
+          const pm = si.payment_method as any;
+          if (pm) {
+            paymentMethodId = typeof pm === 'string' ? pm : pm.id;
+            if (typeof pm !== 'string') {
+              cardLast4 = pm.card?.last4 || '';
+              cardFingerprint = pm.card?.fingerprint || '';
             }
           }
-        } catch {}
+        }
+      } catch {}
 
-        // Surface the saved card + address in the Stripe Customer Portal.
-        if (paymentMethodId && customerId) {
-          try {
-            await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-            await stripe.customers.update(customerId, {
-              invoice_settings: { default_payment_method: paymentMethodId },
-              ...(shippingAddress
-                ? {
-                    address: { line1: shippingAddress },
-                    shipping: { name: email, address: { line1: shippingAddress } },
-                  }
-                : {}),
+      // Surface the saved card + address in the Stripe Customer Portal.
+      if (paymentMethodId && customerId) {
+        try {
+          await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+          await stripe.customers.update(customerId, {
+            invoice_settings: { default_payment_method: paymentMethodId },
+            ...(shippingAddress
+              ? {
+                  address: { line1: shippingAddress },
+                  shipping: { name: email, address: { line1: shippingAddress } },
+                }
+              : {}),
+          });
+        } catch (e) {
+          console.error('[webhook] attach payment method failed', e);
+        }
+      }
+
+      // Build the (variant, size, orderRef, maxPerEmail) lines this session
+      // secures. A `raffle_cart` setup session carries cartItems JSON and its
+      // meta.variant is EMPTY — the webhook must expand every cart line here,
+      // otherwise the whole branch is skipped and NO ledger row / confirmation
+      // email is ever written for multi-item cart checkouts.
+      const allProducts = await loadProducts(redis);
+      const lines: Array<{ variant: string; size: string; orderRef: string; productId: string; maxPerEmail: number }> = [];
+      if (checkoutType === 'raffle_cart') {
+        let cartItems: any[] = [];
+        try {
+          const rawCart = String(meta.cartItems || '[]');
+          if (rawCart.length <= 50_000) cartItems = JSON.parse(rawCart);
+        } catch {}
+        if (cartItems.length === 0) {
+          console.warn('[webhook] raffle_cart setup session rejected: empty cartItems', maskEmail(email));
+          await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+          return NextResponse.json({ received: true, skipped: 'invalid_payload' });
+        }
+        let orderRefIndex = 0;
+        for (const item of cartItems) {
+          const variant = clampLength(String(item.variant || allProducts[String(item.productId || '')]?.name || ''), 200).trim();
+          const size = clampLength(String(item.size || 'Standard'), 50).trim();
+          if (!variant || !size) continue;
+          const qty = Math.max(1, Math.floor(Number(item.quantity || 1) || 1));
+          const product = allProducts[String(item.productId || '')] as any;
+          const maxPerEmail = Math.max(1, Number(product?.maxPerEmail || meta.maxPerEmail || 1));
+          const baseRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(item.productId || variant), size, refPrefix);
+          for (let i = 0; i < qty; i += 1) {
+            orderRefIndex += 1;
+            lines.push({
+              variant,
+              size,
+              orderRef: `${baseRef}-${orderRefIndex}`,
+              productId: String(item.productId || ''),
+              maxPerEmail,
             });
-          } catch (e) {
-            console.error('[webhook] attach payment method failed', e);
           }
         }
+      } else {
+        const variant = clampLength(meta.variant, 200).trim();
+        const size = clampLength(meta.size || 'Standard', 50).trim();
+        if (!variant || !size) {
+          console.warn('[webhook] setup session rejected: invalid variant/size', maskEmail(email));
+          await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+          return NextResponse.json({ received: true, skipped: 'invalid_payload' });
+        }
+        const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
+        const orderRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(meta.productId || variant), size, refPrefix);
+        lines.push({ variant, size, orderRef, productId: String(meta.productId || ''), maxPerEmail });
+      }
+
+      for (const line of lines) {
+        const { variant, size, orderRef, productId, maxPerEmail } = line;
 
         const pool = poolKey(variant, size);
         const existingEntries = await redis.lrange(pool, 0, -1);
@@ -248,6 +310,7 @@ export async function POST(request: Request) {
         const hasActiveEntry = activeCountForEmail > 0;
         const blockedByLegacyOneEntryRule = emailBlocked === 1 && maxPerEmail <= 1 && hasActiveEntry;
         const blockedByLimit = activeCountForEmail >= maxPerEmail;
+
         if (!blockedByLegacyOneEntryRule && !blockedByLimit) {
           const { appliedPromo, discountPercent } = await resolvePromo(redis, rawPromo, email);
 
@@ -306,15 +369,14 @@ export async function POST(request: Request) {
           try {
             const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
             if (sent !== 1) {
-              const liveProducts = await loadProducts(redis);
-              const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === meta.productId);
+              const product = Object.values(allProducts).find((p: any) => p.name === variant || p.id === productId);
               const category = (product as any)?.priceCategories?.find((item: any) => item.size === size);
               const listPrice = category?.price;
               const userRewards = await lookupUserRewards(redis, email);
               const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
               const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
               const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
-              await sendEntryConfirmedEmail({
+              const emailResult = await sendEntryConfirmedEmail({
                 to: email,
                 product: variant,
                 size,
@@ -328,7 +390,14 @@ export async function POST(request: Request) {
                 rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
                 purchasePointsPerDollar,
               });
-              await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+              // Only dedupe when the email ACTUALLY went out — a skipped/failed
+              // send (e.g. RESEND_API_KEY missing) must be retried by the
+              // confirm-setup repair path instead of being swallowed forever.
+              if (emailResult?.ok === true) {
+                await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+              } else {
+                console.error('[webhook] entry email failed', maskEmail(email), emailResult?.error || 'send failed');
+              }
             }
           } catch (e) {
             console.error('[webhook] entry email', e);
@@ -347,9 +416,9 @@ export async function POST(request: Request) {
             orderRef,
           } as any);
         }
-
-        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
       }
+
+      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
     }
 
     if (session.mode === 'payment' && session.status === 'complete') {
@@ -361,7 +430,7 @@ export async function POST(request: Request) {
       const shippingAddress = clampLength(meta.address, 500).trim();
       const checkoutType = String(meta.checkoutType || 'single').slice(0, 20);
       const appliedPromo = String(meta.promoCode || meta.ref || '').trim().toUpperCase().slice(0, 40);
-      const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+      const orderRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(meta.productId || variant), size, refPrefix);
 
       // Same defense-in-depth as the setup path: junk payloads never reach the
       // ledger/inventory accounting.

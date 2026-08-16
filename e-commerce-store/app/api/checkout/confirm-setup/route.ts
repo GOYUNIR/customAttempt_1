@@ -21,9 +21,9 @@ import {
 } from '@/lib/server-config';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
-import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
+import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
-import { maskEmail } from '@/lib/validation';
+import { maskEmail, isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -108,6 +108,100 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
   } catch (e) {
     console.error('[confirm-setup] lookup rewards failed', e);
     return { hasAccount: false, rewardsBalance: 0 };
+  }
+}
+
+/** Read the admin-configured order-ref prefix (`store:config.refPrefix`,
+ * fallback 'GU') so refs built here match what the admin portal shows. */
+async function getRefPrefix(redis: any): Promise<string> {
+  try {
+    const rawCfg = await redis.get(STORE_CONFIG_KEY);
+    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    return normalizeRefPrefix(cfg?.refPrefix || 'GU');
+  } catch {
+    return 'GU';
+  }
+}
+
+/** When the Stripe webhook raced ahead and marked a session processed BEFORE
+ * its confirmation email actually went out (e.g. RESEND_API_KEY was missing at
+ * webhook time), the `already === 1` early-return used to skip the email
+ * forever. This repair re-checks every secured line and sends the confirmation
+ * email for any line that is missing from the ENTRY_EMAIL_SENT dedupe set. */
+async function repairMissingEntryEmails(redis: any, request: Request, session: any) {
+  try {
+    const meta = session?.metadata || {};
+    const email = String(meta.email || session.customer_email || '').trim().toLowerCase();
+    if (!isValidEmail(email)) return;
+    const shippingAddress = String(meta.address || '');
+    const checkoutType = String(meta.checkoutType || 'single');
+    const promoCode = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
+    const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
+    const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+    const refPrefix = normalizeRefPrefix(storeConfig?.refPrefix || 'GU');
+    const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
+    const userRewards = await lookupUserRewards(redis, email);
+    const allProducts = await loadProducts(redis);
+
+    const lines: Array<{ variant: string; size: string; orderRef: string; productId: string }> = [];
+    if (checkoutType === 'raffle_cart') {
+      let cartItems: any[] = [];
+      try {
+        cartItems = JSON.parse(String(meta.cartItems || '[]'));
+      } catch {}
+      let orderRefIndex = 0;
+      for (const line of cartItems) {
+        const variant = String(line.variant || allProducts[line.productId]?.name || '').trim();
+        const size = String(line.size || 'Standard').trim();
+        if (!variant || !size) continue;
+        const qty = Math.max(1, Math.floor(Number(line.quantity || 1) || 1));
+        const baseRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(line.productId || variant), size, refPrefix);
+        for (let i = 0; i < qty; i += 1) {
+          orderRefIndex += 1;
+          lines.push({ variant, size, orderRef: `${baseRef}-${orderRefIndex}`, productId: String(line.productId || '') });
+        }
+      }
+    } else {
+      const variant = String(meta.variant || '').trim();
+      const size = String(meta.size || 'Standard').trim();
+      if (!variant || !size) return;
+      const orderRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(meta.productId || variant), size, refPrefix);
+      lines.push({ variant, size, orderRef, productId: String(meta.productId || '') });
+    }
+
+    for (const line of lines) {
+      try {
+        const emailDedupe = `${line.variant}:${line.size}:${email}`;
+        const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+        if (sent === 1) continue;
+        const product = Object.values(allProducts).find((p: any) => p.name === line.variant || p.id === line.productId) as any;
+        const listPrice = product?.priceCategories?.find((c: any) => c.size === line.size)?.price || 0;
+        const emailResult = await sendEntryConfirmedEmail({
+          to: email,
+          product: line.variant,
+          size: line.size,
+          address: shippingAddress,
+          promoCode: promoCode || undefined,
+          discountPercent: Number(meta.discountPercent) > 0 ? Number(meta.discountPercent) : undefined,
+          listPrice: listPrice > 0 ? listPrice : undefined,
+          orderRef: line.orderRef,
+          siteUrl: siteUrlFromRequest(request),
+          hasAccount: userRewards.hasAccount || undefined,
+          rewardsBalance: userRewards.hasAccount ? userRewards.rewardsBalance : undefined,
+          purchasePointsPerDollar,
+        });
+        if ((emailResult as any)?.ok) {
+          await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+        } else {
+          // Never log the customer email or the full send result verbatim.
+          console.error('[confirm-setup] repair entry email failed', maskEmail(email), (emailResult as any)?.error || 'send failed');
+        }
+      } catch (e) {
+        console.error('[confirm-setup] repair entry email error', e);
+      }
+    }
+  } catch (e) {
+    console.error('[confirm-setup] repair missing entry emails failed', e);
   }
 }
 
@@ -287,6 +381,8 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('checkout_confirm_setup', request, 20, 60);
     if (limited) return limited;
 
+    const refPrefix = await getRefPrefix(redis);
+
     const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
     if (already === 1) {
       let existingPromo = null;
@@ -298,6 +394,11 @@ export async function POST(request: Request) {
           existingPromo = meta.promoCode;
           existingDiscount = Number(meta.discountPercent) || 0;
         }
+        // Repair: the webhook may have raced ahead and marked this session
+        // processed BEFORE its confirmation emails were actually sent (e.g.
+        // RESEND_API_KEY missing at webhook time). Re-send any line whose
+        // dedupe flag is missing so the customer ALWAYS gets their email.
+        await repairMissingEntryEmails(redis, request, session);
       } catch {}
       return NextResponse.json({
         success: true,
@@ -398,9 +499,9 @@ export async function POST(request: Request) {
         const maxPerEmail = maxPerEmailFor(String(line.productId || ''));
         for (let i = 0; i < qty; i += 1) {
           orderRefIndex += 1;
-          const lineOrderRef = formatOrderRef(String(meta.orderRef || ''))
-            ? `${formatOrderRef(String(meta.orderRef || ''))}-${orderRefIndex}`
-            : buildOrderRef(email, String(line.productId || variant), size);
+          const lineOrderRef = formatOrderRef(String(meta.orderRef || ''), refPrefix)
+            ? `${formatOrderRef(String(meta.orderRef || ''), refPrefix)}-${orderRefIndex}`
+            : buildOrderRef(email, String(line.productId || variant), size, refPrefix);
           const result = await lockOneEntry({
             redis,
             stripe,
@@ -456,7 +557,7 @@ export async function POST(request: Request) {
     const variant = String(meta.variant || '');
     const size = String(meta.size || 'Standard');
     const entryType = String(meta.entryType || '').toLowerCase();
-    const orderRef = formatOrderRef(String(meta.orderRef || '')) || buildOrderRef(email, String(meta.productId || variant), size);
+    const orderRef = formatOrderRef(String(meta.orderRef || ''), refPrefix) || buildOrderRef(email, String(meta.productId || variant), size, refPrefix);
 
     if (!variant) {
       return NextResponse.json({ error: 'Missing entry information.' }, { status: 400 });

@@ -9,6 +9,8 @@ import {
   resolveClientImageSource,
   revisionHash,
   toHexColor,
+  normalizeShareCardOptions,
+  SHARE_CARD_DEFAULTS,
 } from '../lib/share-card-config.ts';
 
 test('safeCssColor keeps valid colors and falls back on junk', () => {
@@ -35,10 +37,88 @@ test('cardBackgroundStyle is safe with a broken share image and accent', () => {
   assert.match(withImage, /linear-gradient/);
   assert.match(withImage, /url\(https:\/\/example\.com\/a\.png\)/);
   assert.match(withImage, /#000000/);
+  // Default overlay (60) reproduces the pre-options alpha values exactly.
+  assert.match(withImage, /rgba\(0,0,0,0\.56\), rgba\(0,0,0,0\.68\)/);
   const noImage = cardBackgroundStyle('garbage', 'garbage');
   assert.match(noImage, /radial-gradient/);
   // Junk colors fall back — no raw admin text can be injected into CSS.
   assert.ok(!noImage.includes('garbage'));
+});
+
+test('cardBackgroundStyle maps image overlay 0 → transparent and 100 → near-black', () => {
+  const none = cardBackgroundStyle('#000000', '#D4AF37', 'https://example.com/a.png', { shareImageOverlay: 0 });
+  assert.match(none, /linear-gradient\(180deg, rgba\(0,0,0,0\.00\), rgba\(0,0,0,0\.00\)\)/);
+  const heavy = cardBackgroundStyle('#000000', '#D4AF37', 'https://example.com/a.png', { shareImageOverlay: 100 });
+  assert.match(heavy, /rgba\(0,0,0,0\.95\)/);
+  assert.match(heavy, /rgba\(0,0,0,0\.97\)/);
+});
+
+test('cardBackgroundStyle glow intensity maps 0 → no glow and 100 → max alpha', () => {
+  const none = cardBackgroundStyle('#0B0B0F', '#D4AF37', undefined, { shareGlowIntensity: 0 });
+  assert.equal(none, '#0B0B0F');
+  assert.ok(!none.includes('radial-gradient'));
+  const defaultGlow = cardBackgroundStyle('#0B0B0F', '#D4AF37');
+  assert.match(defaultGlow, /rgba\(212, 175, 55, 0\.330\)/);
+  const maxGlow = cardBackgroundStyle('#0B0B0F', '#D4AF37', undefined, { shareGlowIntensity: 100 });
+  assert.match(maxGlow, /rgba\(212, 175, 55, 0\.450\)/);
+});
+
+test('normalizeShareCardOptions applies defaults for missing/unknown fields', () => {
+  const d = normalizeShareCardOptions(undefined);
+  assert.deepEqual(d, SHARE_CARD_DEFAULTS);
+  const empty = normalizeShareCardOptions({});
+  assert.deepEqual(empty, SHARE_CARD_DEFAULTS);
+  // Junk enum values and non-numeric numbers fall back to defaults.
+  const junk = normalizeShareCardOptions({ shareLayout: 'weird', shareFontFamily: 'comic', shareTitleSize: 'big' });
+  assert.equal(junk.shareLayout, 'classic');
+  assert.equal(junk.shareFontFamily, 'system');
+  assert.equal(junk.shareTitleSize, SHARE_CARD_DEFAULTS.shareTitleSize);
+});
+
+test('normalizeShareCardOptions clamps numbers to their documented ranges', () => {
+  const clamped = normalizeShareCardOptions({
+    shareTitleSize: 500,
+    shareDescriptionSize: 2,
+    shareGlowIntensity: -5,
+    shareCornerRadius: 999,
+    shareImageOverlay: 150,
+  });
+  assert.equal(clamped.shareTitleSize, 92);
+  assert.equal(clamped.shareDescriptionSize, 18);
+  assert.equal(clamped.shareGlowIntensity, 0);
+  assert.equal(clamped.shareCornerRadius, 64);
+  assert.equal(clamped.shareImageOverlay, 100);
+  const floored = normalizeShareCardOptions({
+    shareTitleSize: 1,
+    shareDescriptionSize: 100,
+    shareGlowIntensity: 50,
+    shareCornerRadius: -3,
+    shareImageOverlay: 0,
+  });
+  assert.equal(floored.shareTitleSize, 36);
+  assert.equal(floored.shareDescriptionSize, 42);
+  assert.equal(floored.shareGlowIntensity, 50);
+  assert.equal(floored.shareCornerRadius, 0);
+  assert.equal(floored.shareImageOverlay, 0);
+});
+
+test('normalizeShareCardOptions accepts valid values and boolean-ish strings', () => {
+  const opts = normalizeShareCardOptions({
+    shareLayout: 'split',
+    shareFontFamily: 'serif',
+    shareLogoVisible: 'false',
+    shareSiteVisible: 0,
+    shareTaglineVisible: '1',
+  });
+  assert.equal(opts.shareLayout, 'split');
+  assert.equal(opts.shareFontFamily, 'serif');
+  assert.equal(opts.shareLogoVisible, false);
+  assert.equal(opts.shareSiteVisible, false);
+  assert.equal(opts.shareTaglineVisible, true);
+  // Real booleans pass through unchanged.
+  const bools = normalizeShareCardOptions({ shareLogoVisible: true, shareSiteVisible: false });
+  assert.equal(bools.shareLogoVisible, true);
+  assert.equal(bools.shareSiteVisible, false);
 });
 
 test('cardSiteUrlDisplay strips protocol and trailing slashes', () => {

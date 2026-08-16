@@ -59,8 +59,11 @@ In `/admin` → **Settings**:
 
 1. **Branding & Share** — set your brand name, upload your logo, pick the
    header mode, set the share title/description/tagline/URL and the social card
-   colors. This drives the top bar, footer, browser tab icon, social share
-   card, page titles and emails.
+   colors — then open **Share card style** to control the card's layout
+   (classic / split / minimal), typeface, title & description sizes, glow
+   intensity, corner radius, image darkness and which elements (logo, tagline,
+   site URL) appear. This drives the top bar, footer, browser tab icon, social
+   share card, page titles and emails.
 2. **Theme Colors / Design Presets** — pick a preset or build your own palette.
    Every preset speaks Apple's design language (continuous squircles, Liquid
    Glass chrome, soft shadows, airy spacing); the flagship **Apple** preset is
@@ -73,11 +76,17 @@ In `/admin` → **Settings**:
    render from this — no code changes needed when your policies change.
 5. **Catalog (section order on /catalog)** — choose whether `/catalog` shows
    Upcoming → Past Archives → **Currently Available** (the default, with live at
-   the bottom) or any other order.
-6. **Behavior** — "Start at the top when the page opens" (default ON) keeps the
+   the bottom) or any other order. **Product categories** (Perfume, Clothes,
+   Shoes, Food, …) are created/deleted here and become the filter bar on
+   `/catalog`.
+6. **Checkout & Orders** — the entry/order **reference-code prefix** (default
+   `GU-`, letters/numbers up to 4 chars; legacy `GY-`/`GOY-` refs re-label
+   automatically) and whether customers must pick the full Mapbox-dropdown
+   address at checkout (the admin portal always overrides this).
+7. **Behavior** — "Start at the top when the page opens" (default ON) keeps the
    store from reopening mid-page; switch it off to restore the browser's saved
    scroll position.
-7. **Save All Settings.**
+8. **Save All Settings.**
 
 That's it — the whole site now reflects your brand.
 

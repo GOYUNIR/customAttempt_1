@@ -117,8 +117,8 @@ export async function sendEntryConfirmedEmail(opts: {
     : `
           <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
             <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
-            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to redeem your points and track this entry.</p>
-            <a href="${siteBase}/auth/signup" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to redeem</a>
+            <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to track this entry and redeem points — it takes 30 seconds.</p>
+            <a href="${siteBase}/auth/signup?email=${encodeURIComponent(opts.to)}" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to redeem</a>
           </div>
         `;
 
@@ -127,7 +127,7 @@ export async function sendEntryConfirmedEmail(opts: {
       from: from(),
       to: opts.to,
       replyTo: replyTo(),
-      subject: `✅ You're entered — ${opts.product} (${opts.size})`,
+      subject: `✅ You're entered — ${opts.product} (${opts.size}) · Ref ${orderRef}`,
       html: `
         <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
           <div style="text-align:center;margin-bottom:24px;">
@@ -185,6 +185,8 @@ export async function sendWinnerEmail(opts: {
   originalPrice?: string;
   discountPercent?: number;
   listPriceCents?: number;
+  hasAccount?: boolean;
+  rewardsBalance?: number;
 }) {
   const resend = getResend();
   if (!resend) {
@@ -228,6 +230,22 @@ export async function sendWinnerEmail(opts: {
       <a href="${opts.siteUrl.replace(/\/$/, '')}/account" style="display:inline-block;padding:12px 28px;background:#10b981;color:#fff;border-radius:999px;font-weight:600;font-size:14px;text-decoration:none;">Manage My Entry →</a>
     </div>
   ` : '';
+
+  const winnerRewardsBox = opts.hasAccount
+    ? `
+    <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
+      <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
+      <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">${typeof opts.rewardsBalance === 'number' ? `Your account balance is <strong>${opts.rewardsBalance} points</strong>.` : 'Your account is ready to redeem points for store credit.'}</p>
+      <a href="${opts.siteUrl ? opts.siteUrl.replace(/\/$/, '') + '/account' : '#'}" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Manage account</a>
+    </div>
+  `
+    : `
+    <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:12px;padding:14px 16px;margin:16px 0;">
+      <p style="margin:0 0 6px;font-size:13px;color:#4c1d95;font-weight:600;">🎁 Points &amp; rewards</p>
+      <p style="margin:0 0 8px;font-size:13px;color:#6d28d9;">Create a free account to claim your entry and points — it takes 30 seconds.</p>
+      <a href="${opts.siteUrl ? opts.siteUrl.replace(/\/$/, '') + '/auth/signup?email=' + encodeURIComponent(opts.to) : '#'}" style="display:inline-block;padding:9px 18px;background:#6d28d9;color:#fff;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">Create account to claim</a>
+    </div>
+  `;
   
   try {
     const { data, error } = await resend.emails.send({
@@ -274,6 +292,8 @@ export async function sendWinnerEmail(opts: {
           
           <p style="margin:16px 0 8px;font-size:14px;color:#374151;">We'll ship to the address on your entry. Tracking information will follow when the label is created.</p>
           
+          ${winnerRewardsBox}
+          
           ${manageLink}
           
           <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;padding-top:16px;">
@@ -299,6 +319,8 @@ export async function sendEntryRecoveryEmail(opts: {
   size: string;
   siteUrl: string;
   kind: 'early' | 'pre_draw';
+  hasAccount?: boolean;
+  accountUrl?: string;
 }) {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true };
@@ -310,6 +332,10 @@ export async function sendEntryRecoveryEmail(opts: {
     opts.kind === 'pre_draw'
       ? `The draw for <strong>${opts.product}</strong> (${opts.size}) is coming up. You started an entry but didn't finish card setup.`
       : `You started an entry for <strong>${opts.product}</strong> (${opts.size}) but didn't finish securing it.`;
+  // Account-holders get a "manage it in your account" CTA; guests continue on
+  // the product page so the signup CTA lives where the entry form is.
+  const ctaLabel = opts.hasAccount ? 'Manage your entry in your account' : 'Continue on site';
+  const ctaHref = opts.hasAccount && opts.accountUrl ? opts.accountUrl : opts.siteUrl;
   try {
     const { data, error } = await resend.emails.send({
       from: from(),
@@ -323,7 +349,7 @@ export async function sendEntryRecoveryEmail(opts: {
           <p style="margin:0 0 12px">${body}</p>
           <p style="margin:0 0 16px">Card is saved only — charged only if selected. One entry per email.</p>
           <p style="margin:0 0 20px">
-            <a href="${opts.siteUrl}" style="display:inline-block;padding:12px 20px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-size:13px;font-weight:600">Continue on site</a>
+            <a href="${ctaHref}" style="display:inline-block;padding:12px 20px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-size:13px;font-weight:600">${ctaLabel}</a>
           </p>
           <p style="color:#999;font-size:12px;margin:0">If you already finished, ignore this. We send at most a couple of reminders.</p>
           <p style="color:#999;font-size:12px;margin:8px 0 0">Have questions? We're happy to help — reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>

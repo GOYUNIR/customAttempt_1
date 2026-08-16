@@ -7,9 +7,11 @@ import {
   ARCHIVE_LEDGER_KEY,
   archiveEntry,
   loadProducts,
+  loadStoreConfigCached,
 } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { validateShippingAddress } from '@/lib/address-validation';
+import { requireAddressAutofill } from '@/lib/storefront-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 import { appendAudit } from '../../admin/audit/route';
 
@@ -28,15 +30,23 @@ export async function POST(request: Request) {
     const last4 = String(body?.last4 || '').trim();
     const variant = String(body?.variant || '').trim();
     const size = String(body?.size || '').trim();
-    const newAddress = String(body?.newAddress || '').trim();
+    const source = String(body?.source || '').trim();
+    const newAddress = String(body?.newAddress || '').trim().slice(0, 500);
 
     if (!email || !variant || !size || !newAddress) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
-    const addrError = validateShippingAddress(newAddress);
-    if (addrError) {
-      return NextResponse.json({ error: addrError }, { status: 400 });
+    // Customer-facing "update address" flows require the FULL Mapbox-dropdown
+    // address by default (store:config.checkout.requireAddressAutofill). When
+    // an admin disables the flag, partial addresses are accepted as-is (still
+    // clamped to 500 chars above). The admin route is the explicit override.
+    const config = await loadStoreConfigCached(redis);
+    if (requireAddressAutofill(config)) {
+      const addrError = validateShippingAddress(newAddress);
+      if (addrError) {
+        return NextResponse.json({ error: addrError }, { status: 400 });
+      }
     }
 
     const liveProducts = await loadProducts(redis);
@@ -87,6 +97,7 @@ export async function POST(request: Request) {
       ...latest.record,
       shippingAddress: newAddress,
       address: newAddress,
+      source: source || latest.record.source || undefined,
     }));
     await archiveEntry(redis, {
       email,
@@ -96,6 +107,7 @@ export async function POST(request: Request) {
       id: String(latest.record.customerId || latest.record.id || 'n/a'),
       registeredAt: new Date().toISOString(),
       type: 'ADDRESS_UPDATED',
+      source: source || undefined,
     } as any);
     await sendAccountUpdateEmail({
       to: email,

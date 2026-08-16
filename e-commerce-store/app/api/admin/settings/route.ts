@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY , verifyAdminPassword} from '@/lib/server-config';
+import { normalizeCategories } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
-      copy, legal, catalog, behavior
+      copy, legal, catalog, behavior, checkout, refPrefix
     } = body;
     
     // Get current config to merge
@@ -60,7 +61,21 @@ export async function POST(request: Request) {
       orbs: orbs || current.orbs || {},
       copy: copy || current.copy || {},
       legal: legal || current.legal || {},
-      catalog: catalog || current.catalog || { sectionOrder: ['upcoming', 'archive', 'live'] },
+      catalog: {
+        sectionOrder: Array.isArray(catalog?.sectionOrder) && catalog.sectionOrder.length > 0
+          ? catalog.sectionOrder
+          : (current.catalog?.sectionOrder || ['upcoming', 'archive', 'live']),
+        categories: normalizeCategories(catalog?.categories ?? current.catalog?.categories),
+      },
+      checkout: {
+        requireAddressAutofill: checkout?.requireAddressAutofill !== false,
+      },
+      // Configurable order/entry reference prefix (default GU). Letters/numbers,
+      // up to 4 chars — legacy GY-/GOY- refs are normalized to it at read time.
+      refPrefix: (() => {
+        const raw = String(refPrefix ?? current.refPrefix ?? 'GU').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+        return raw || 'GU';
+      })(),
       behavior: {
         scrollToTopOnLoad: behavior?.scrollToTopOnLoad !== false,
       },

@@ -219,17 +219,21 @@ function normalizeWinners(value: unknown, fallback = 1): number {
 
 export async function getOrSeedLiveState(
   redis: Redis,
-  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number; totalInventory?: number },
+  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number; totalInventory?: number; inventoryPerSize?: Record<string, number> },
   size: string,
   winnersPerDraw: number,
 ): Promise<LiveStateRecord> {
   const field = liveStateField(product.id, product.slug, size);
   const raw = await redis.hget(LIVE_STATE_KEY, field);
   const existing = safeParseRedisItem<LiveStateRecord>(raw);
+  // Per-size inventory wins when the operator set it in /admin (2 different
+  // sizes = 2 different pools/stock counts); otherwise fall back to the
+  // product-wide total.
+  const stockForSize = Math.max(0, Number(product.inventoryPerSize?.[size] ?? product.totalInventory) || 0);
   if (existing && typeof existing.inventoryRemaining === 'number') {
     const storedTotal = Math.max(0, Number(existing.totalInventory) || 0);
     const storedRemaining = Math.max(0, Number(existing.inventoryRemaining) || 0);
-    const productStock = Math.max(0, Number(product.totalInventory) || 0);
+    const productStock = stockForSize;
     const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
     const expectedSeed = raffleLimit > 0 ? raffleLimit : productStock;
     const noActivity =
@@ -270,7 +274,7 @@ export async function getOrSeedLiveState(
   // maxRaffleAllocationLimit at 0 (no raffle cap), so fall back to
   // totalInventory whenever the raffle limit is unset or zero.
   const raffleLimit = Math.max(0, Number(product.maxRaffleAllocationLimit) || 0);
-  const stock = Math.max(0, Number(product.totalInventory) || 0);
+  const stock = stockForSize;
   const seedInventory = raffleLimit > 0 ? raffleLimit : stock;
   const seed: LiveStateRecord = {
     productId: field,
@@ -327,7 +331,8 @@ export async function getLiveProductState(redis: Redis, productOrId: any, size: 
     // Prefer the raffle cap when set; otherwise seed from real stock so FCFS
     // products (maxRaffleAllocationLimit = 0) never collapse to the 10-unit default.
     const raffleLimit = Math.max(0, Number(productOrId.maxRaffleAllocationLimit) || 0);
-    const stock = Math.max(0, Number(productOrId.totalInventory) || 0);
+    const perSize = productOrId.inventoryPerSize && typeof productOrId.inventoryPerSize === 'object' ? productOrId.inventoryPerSize : {};
+    const stock = Math.max(0, Number(perSize[size] ?? productOrId.totalInventory) || 0);
     seedInv = (raffleLimit > 0 ? raffleLimit : stock) || 10;
     if (typeof fourth === 'number') winners = normalizeWinners(fourth, 1);
     else if (fourth && typeof fourth === 'object') {
@@ -338,7 +343,7 @@ export async function getLiveProductState(redis: Redis, productOrId: any, size: 
       if (fourth.slug) slug = String(fourth.slug);
     }
   }
-  const state = await getOrSeedLiveState(redis, { id, name, slug, maxRaffleAllocationLimit: seedInv }, size, winners);
+  const state = await getOrSeedLiveState(redis, { id, name, slug, maxRaffleAllocationLimit: seedInv, totalInventory: seedInv, inventoryPerSize: (productOrId && typeof productOrId === 'object' ? productOrId.inventoryPerSize : undefined) }, size, winners);
   if (!isActive) { state.isActive = false; await saveLiveState(redis, state); }
   return state;
 }

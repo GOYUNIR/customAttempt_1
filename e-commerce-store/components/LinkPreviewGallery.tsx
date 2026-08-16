@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import ShareCard from '@/components/ShareCard';
 import {
   cardSiteUrlDisplay,
+  normalizeShareCardOptions,
   previewSiteUrl,
   resolveClientImageSource,
   safeCssColor,
+  type ShareCardOptions,
 } from '@/lib/share-card-config';
 
 /**
@@ -41,6 +43,7 @@ type CardData = {
   description: string;
   domain: string;
   accent: string;
+  tagline: string;
 };
 
 /** Render the live ShareCard at a given display width (transform-scaled). */
@@ -51,6 +54,7 @@ function ScaledCard({
   background,
   accent,
   text,
+  options,
   width,
 }: {
   data: CardData;
@@ -59,6 +63,7 @@ function ScaledCard({
   background: string;
   accent: string;
   text: string;
+  options: ShareCardOptions;
   width: number;
 }) {
   const scale = width / 1200;
@@ -69,12 +74,14 @@ function ScaledCard({
           brandName={data.brandName}
           title={data.title}
           description={data.description}
+          tagline={data.tagline}
           logoUrl={logoUrl}
           shareImageUrl={shareImageUrl}
           background={background}
           accent={accent}
           text={text}
           siteUrl={data.domain}
+          options={options}
           preview
           scale={1}
         />
@@ -115,17 +122,16 @@ export default function LinkPreviewGallery({ branding, themeColors }: GalleryPro
     '#D4AF37',
   );
   const text = safeCssColor(branding.shareText || themeColors.textMain, '#F5F2E9');
+  // The card's knobs (layout, font, sizes, glow, radius, overlay, visibility)
+  // come from the same branding object the /og route reads, normalized identically.
+  const options = normalizeShareCardOptions(branding);
 
-  // Match the server card URL priority (env site URL → current host → admin
-  // Branding → Share URL). When the buyer HAS configured a Share URL we prefer
-  // it in the preview so the card shows the REAL production domain even while
-  // editing on localhost; otherwise the current host is what production will use.
-  const publicEnvUrl = String(
-    (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_URL || process.env.NEXT_PUBLIC_SITE_URL)) || '',
-  ).replace(/\/+$/, '');
-  const displaySite = cardSiteUrlDisplay(publicEnvUrl || branding.shareUrl || host, host || 'example.com');
+  // Domain shown on the card top-right + messenger rows: prefer the configured
+  // Branding → Share URL (so a bare-domain value shows cleanly, e.g.
+  // `goyunir.com` → `goyunir.com`), fall back to the current host.
+  const displaySite = cardSiteUrlDisplay(branding.shareUrl || host, host || 'example.com');
   const copyLink = previewSiteUrl(
-    branding.shareUrl || publicEnvUrl || host,
+    branding.shareUrl,
     origin || `https://${host || 'example.com'}`,
   );
 
@@ -141,8 +147,8 @@ export default function LinkPreviewGallery({ branding, themeColors }: GalleryPro
     }
   };
 
-  const data: CardData = { brandName, title, description, domain: displaySite, accent };
-  const cardProps = { data, logoUrl, shareImageUrl, background, accent, text };
+  const data: CardData = { brandName, title, description, domain: displaySite, accent, tagline };
+  const cardProps = { data, logoUrl, shareImageUrl, background, accent, text, options };
 
   return (
     <div
@@ -217,6 +223,7 @@ export default function LinkPreviewGallery({ branding, themeColors }: GalleryPro
                 accent={accent}
                 text={text}
                 siteUrl={data.domain}
+                options={options}
                 preview
                 scale={1}
               />
@@ -305,6 +312,7 @@ type EmbedProps = {
   background: string;
   accent: string;
   text: string;
+  options: ShareCardOptions;
 };
 
 function PlatformFrame({ label, children }: { label: string; children: ReactNode }) {
@@ -319,7 +327,7 @@ function PlatformFrame({ label, children }: { label: string; children: ReactNode
 }
 
 function WhatsAppEmbed(props: EmbedProps) {
-  const { data } = props;
+  const { data, options } = props;
   return (
     <PlatformFrame label="WhatsApp">
       <div style={{ background: '#0b141a', borderRadius: 14, padding: 8 }}>
@@ -336,7 +344,13 @@ function WhatsAppEmbed(props: EmbedProps) {
         <div style={{ background: '#005c4b', borderRadius: 12, borderTopLeftRadius: 4, overflow: 'hidden' }}>
           <ScaledCard {...props} width={300} />
           <div style={{ padding: '8px 12px 6px' }}>
-            <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: '#7ba78d' }}>{data.domain}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+              <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: '#7ba78d' }}>{data.brandName}</div>
+              {options.shareSiteVisible ? <div style={{ fontSize: 9, color: '#7ba78d' }}>{data.domain}</div> : null}
+            </div>
+            {options.shareTaglineVisible && data.tagline ? (
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#b6c7bf', marginBottom: 2 }}>{data.tagline}</div>
+            ) : null}
             <div style={{ fontSize: 13, fontWeight: 700, color: '#e9edef', margin: '2px 0' }}>{data.title}</div>
             <div style={{ fontSize: 11, color: '#b6c7bf', lineHeight: 1.4, ...clampText(2) }}>{data.description}</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 4 }}>
@@ -351,7 +365,7 @@ function WhatsAppEmbed(props: EmbedProps) {
 }
 
 function IMessageEmbed(props: EmbedProps) {
-  const { data } = props;
+  const { data, options } = props;
   return (
     <PlatformFrame label="iMessage">
       <div style={{ background: '#f2f2f7', borderRadius: 14, padding: 8 }}>
@@ -361,7 +375,13 @@ function IMessageEmbed(props: EmbedProps) {
         <div style={{ background: 'linear-gradient(135deg, #0a84ff, #0077e6)', borderRadius: 18, borderTopLeftRadius: 6, overflow: 'hidden' }}>
           <ScaledCard {...props} width={290} />
           <div style={{ padding: '8px 12px 6px' }}>
-            <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>{data.domain}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+              <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,0.85)' }}>{data.brandName}</div>
+              {options.shareSiteVisible ? <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.75)' }}>{data.domain}</div> : null}
+            </div>
+            {options.shareTaglineVisible && data.tagline ? (
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.92)', marginBottom: 2 }}>{data.tagline}</div>
+            ) : null}
             <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', margin: '2px 0' }}>{data.title}</div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.92)', lineHeight: 1.4, ...clampText(2) }}>{data.description}</div>
             <div style={{ textAlign: 'right', fontSize: 9, color: 'rgba(255,255,255,0.75)', marginTop: 4 }}>10:24</div>
@@ -374,7 +394,7 @@ function IMessageEmbed(props: EmbedProps) {
 
 
 function DiscordEmbed(props: EmbedProps) {
-  const { data } = props;
+  const { data, options } = props;
   return (
     <PlatformFrame label="Discord">
       <div style={{ background: '#313338', borderRadius: 14, padding: 8 }}>
@@ -386,7 +406,9 @@ function DiscordEmbed(props: EmbedProps) {
           <span style={{ fontSize: 10, color: '#949ba4' }}>sent a link</span>
         </div>
         <div style={{ background: '#2b2d31', borderRadius: 4, borderLeft: `4px solid ${data.accent}`, padding: '10px 12px' }}>
-          <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: '#949ba4' }}>{data.domain}</div>
+          {options.shareSiteVisible ? (
+            <div style={{ fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: '#949ba4' }}>{data.domain}</div>
+          ) : null}
           <div style={{ fontSize: 13, fontWeight: 700, color: '#00a8fc', margin: '2px 0' }}>{data.title}</div>
           <div style={{ fontSize: 11, color: '#dbdee1', lineHeight: 1.4, ...clampText(2) }}>{data.description}</div>
         </div>
@@ -399,13 +421,13 @@ function DiscordEmbed(props: EmbedProps) {
 }
 
 function XEmbed(props: EmbedProps) {
-  const { data } = props;
+  const { data, options } = props;
   return (
     <PlatformFrame label="X / Twitter">
       <div style={{ background: '#ffffff', borderRadius: 14, border: '1px solid #e1e8ed', overflow: 'hidden' }}>
         <ScaledCard {...props} width={318} />
         <div style={{ padding: '10px 12px 12px' }}>
-          <div style={{ fontSize: 11, color: '#536471' }}>{data.domain}</div>
+          {options.shareSiteVisible ? <div style={{ fontSize: 11, color: '#536471' }}>{data.domain}</div> : null}
           <div style={{ fontSize: 14, fontWeight: 700, color: '#0f1419', margin: '2px 0' }}>{data.title}</div>
           <div style={{ fontSize: 12, color: '#536471', lineHeight: 1.4, ...clampText(2) }}>{data.description}</div>
         </div>
@@ -415,13 +437,15 @@ function XEmbed(props: EmbedProps) {
 }
 
 function FacebookEmbed(props: EmbedProps) {
-  const { data } = props;
+  const { data, options } = props;
   return (
     <PlatformFrame label="Facebook">
       <div style={{ background: '#ffffff', borderRadius: 10, border: '1px solid #e4e6eb', overflow: 'hidden' }}>
         <ScaledCard {...props} width={318} />
         <div style={{ padding: '10px 12px 12px' }}>
-          <div style={{ fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', color: '#606770' }}>{data.domain}</div>
+          {options.shareSiteVisible ? (
+            <div style={{ fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', color: '#606770' }}>{data.domain}</div>
+          ) : null}
           <div style={{ fontSize: 14, fontWeight: 600, color: '#1c1e21', margin: '2px 0' }}>{data.title}</div>
           <div style={{ fontSize: 12, color: '#65676b', lineHeight: 1.4, ...clampText(2) }}>{data.description}</div>
         </div>

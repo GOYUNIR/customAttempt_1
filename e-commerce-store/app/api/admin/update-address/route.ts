@@ -27,7 +27,9 @@ export async function POST(request: Request) {
     const variant = String(body?.variant || '');
     const size = String(body?.size || '');
     const email = String(body?.email || '').trim().toLowerCase();
-    const newAddress = String(body?.newAddress || '').trim();
+    // Admin override: always accept the address as-is regardless of the
+    // customer-facing requireAddressAutofill flag (still clamped to 500 chars).
+    const newAddress = String(body?.newAddress || '').trim().slice(0, 500);
 
     if (!variant || !size || !email || !newAddress) {
       return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });

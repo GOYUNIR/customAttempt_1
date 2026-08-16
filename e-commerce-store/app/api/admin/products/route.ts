@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
-import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories } from '@/lib/storefront-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
@@ -253,6 +253,24 @@ export async function POST(request: Request) {
     })(),
     maxRaffleAllocationLimit: has('maxRaffleAllocationLimit') ? numberOr(body.maxRaffleAllocationLimit, existing?.maxRaffleAllocationLimit || 0) : (existing?.maxRaffleAllocationLimit || 0),
     totalInventory: has('totalInventory') ? numberOr(body.totalInventory, existing?.totalInventory || 0) : (existing?.totalInventory || 0),
+    // Per-size stock: a map of `size → units`. When present, live inventory for
+    // that size is seeded from this number instead of the product-wide total.
+    inventoryPerSize: (() => {
+      if (has('inventoryPerSize')) {
+        const raw = body.inventoryPerSize && typeof body.inventoryPerSize === 'object' ? body.inventoryPerSize : {};
+        const out: Record<string, number> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          const sizeKey = String(k || '').trim();
+          const num = Math.max(0, Number(v) || 0);
+          if (sizeKey && num > 0) out[sizeKey] = num;
+        }
+        return out;
+      }
+      return existing?.inventoryPerSize || {};
+    })(),
+    // Category tags from the admin-managed list (Settings → Catalog → Categories).
+    // Normalized via the shared helper (trim, dedupe, ≤40 chars, first 60).
+    categories: has('categories') ? normalizeCategories(body.categories) : (existing?.categories || []),
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
     goLiveAt: has('goLiveAt') ? String(body.goLiveAt || '') : (existing?.goLiveAt || ''),
     releaseEndsAt: has('releaseEndsAt') ? String(body.releaseEndsAt || '') : (existing?.releaseEndsAt || ''),
@@ -268,6 +286,8 @@ export async function POST(request: Request) {
     deliveryIncentiveCreditCents: has('deliveryIncentiveCreditCents') ? Math.max(0, numberOr(body.deliveryIncentiveCreditCents, existing?.deliveryIncentiveCreditCents || 0)) : Math.max(0, Number(existing?.deliveryIncentiveCreditCents || 0)),
     deliveryIncentiveMinOrderSubtotalCents: has('deliveryIncentiveMinOrderSubtotalCents') ? Math.max(0, numberOr(body.deliveryIncentiveMinOrderSubtotalCents, existing?.deliveryIncentiveMinOrderSubtotalCents || 0)) : Math.max(0, Number(existing?.deliveryIncentiveMinOrderSubtotalCents || 0)),
     deliveryIncentiveExpiresDays: has('deliveryIncentiveExpiresDays') ? Math.max(1, numberOr(body.deliveryIncentiveExpiresDays, existing?.deliveryIncentiveExpiresDays || 60)) : Math.max(1, Number(existing?.deliveryIncentiveExpiresDays || 60)),
+    // "Never expires" toggle — the generated credit skips the validity window.
+    deliveryIncentiveNeverExpires: has('deliveryIncentiveNeverExpires') ? toBool(body.deliveryIncentiveNeverExpires, existing?.deliveryIncentiveNeverExpires ?? false) : (existing?.deliveryIncentiveNeverExpires ?? false),
     deliveryIncentiveCodePrefix: has('deliveryIncentiveCodePrefix') ? String(body.deliveryIncentiveCodePrefix || '') : (existing?.deliveryIncentiveCodePrefix || ''),
     deliveryIncentiveEligibleProductSlugs: Array.isArray(body.deliveryIncentiveEligibleProductSlugs) ? body.deliveryIncentiveEligibleProductSlugs.map(String) : (existing?.deliveryIncentiveEligibleProductSlugs || []),
     deliveryIncentiveEligibleSizes: Array.isArray(body.deliveryIncentiveEligibleSizes) ? body.deliveryIncentiveEligibleSizes.map(String) : (existing?.deliveryIncentiveEligibleSizes || []),

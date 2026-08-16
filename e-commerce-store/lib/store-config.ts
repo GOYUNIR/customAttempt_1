@@ -129,6 +129,9 @@ export interface StoreConfig {
   catalog?: {
     /** Order of the /catalog sections: 'live' | 'upcoming' | 'archive'. */
     sectionOrder?: string[];
+    /** Admin-managed product categories (Settings → Catalog → Categories).
+     *  Products are tagged with any subset; buyers add/rename/delete freely. */
+    categories?: string[];
   };
   /**
    * Site behaviour switches (admin → Settings → Behavior). Currently controls
@@ -139,6 +142,13 @@ export interface StoreConfig {
   behavior?: {
     /** Start at the top of the page on load (true) or restore the browser's saved scroll (false). */
     scrollToTopOnLoad?: boolean;
+  };
+  /** Checkout & orders policy (admin → Settings → Checkout & Orders). */
+  checkout?: {
+    /** When ON (default), customer "update address" flows require the FULL
+     *  Mapbox-dropdown address — a partial address can never be saved. The
+     *  admin portal can override and save a partial address regardless. */
+    requireAddressAutofill?: boolean;
   };
   orbs: OrbsConfig;
   productCatalog: any[];
@@ -234,8 +244,15 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   },
   // Default /catalog section order: live at the BOTTOM (per the template
   // default) — operators can reorder from /admin → Settings → Catalog.
+  // `categories` is the seeded admin-managed list (Settings → Catalog →
+  // Categories); buyers add/rename/delete freely and tag products with any
+  // subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
+    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  },
+  checkout: {
+    requireAddressAutofill: true,
   },
   orbs: {
     enabled: true,
@@ -282,6 +299,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
       brandFooterData: { ...DEFAULT_CONFIG.brandFooterData, ...config.brandFooterData },
       catalogPreview: { ...DEFAULT_CONFIG.catalogPreview, ...config.catalogPreview },
       catalog: { ...DEFAULT_CONFIG.catalog, ...config.catalog },
+      checkout: { ...DEFAULT_CONFIG.checkout, ...config.checkout },
       orbs: mergeOrbsConfig(config.orbs),
     } as StoreConfig;
   } catch {

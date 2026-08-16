@@ -79,24 +79,144 @@ export function hexToRgba(value: unknown, alpha: number): string {
   return `rgba(255,255,255,${Math.max(0, Math.min(1, alpha)).toFixed(3)})`;
 }
 
+// ---------------------------------------------------------------------------
+// Share-card options (buyer-facing knobs for the link preview)
+// ---------------------------------------------------------------------------
+
+export type ShareCardLayout = 'classic' | 'split' | 'minimal';
+export type ShareCardFontFamily = 'system' | 'serif';
+
+/**
+ * All buyer-editable knobs for the link preview / share card. Stored on the
+ * admin `branding` object (Settings → Branding & Share) and normalized here so
+ * the server route, the live card and the admin previews can never drift.
+ * Every field is optional at the source; defaults below keep existing cards
+ * byte-for-byte identical.
+ */
+export interface ShareCardOptions {
+  /** Show/hide the logo square in the top-left (classic) / brand mark (minimal). */
+  shareLogoVisible: boolean;
+  /** Show/hide the tagline line under the brand name. */
+  shareTaglineVisible: boolean;
+  /** Show/hide the domain in the top-right (classic/split only). */
+  shareSiteVisible: boolean;
+  /** Title font size in px (clamped 36–92). */
+  shareTitleSize: number;
+  /** Description font size in px (clamped 18–42). */
+  shareDescriptionSize: number;
+  /** Card composition: classic | split (image left) | minimal (centered). */
+  shareLayout: ShareCardLayout;
+  /** Card typeface: system | serif. */
+  shareFontFamily: ShareCardFontFamily;
+  /** Accent radial-glow strength, 0 (no glow) – 100 (alpha 0.45). */
+  shareGlowIntensity: number;
+  /** Rounded card corners in px (0–64). */
+  shareCornerRadius: number;
+  /** Darkness of the gradient over a share image, 0 (transparent) – 100 (near-black). */
+  shareImageOverlay: number;
+}
+
+export const SHARE_CARD_DEFAULTS: ShareCardOptions = {
+  shareLogoVisible: true,
+  shareTaglineVisible: true,
+  shareSiteVisible: true,
+  shareTitleSize: 74,
+  shareDescriptionSize: 30,
+  shareLayout: 'classic',
+  shareFontFamily: 'system',
+  shareGlowIntensity: 40,
+  shareCornerRadius: 0,
+  shareImageOverlay: 60,
+};
+
+function toBool(value: unknown, dflt: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true' || value === '1' || value === 1) return true;
+  if (value === 'false' || value === '0' || value === 0) return false;
+  return dflt;
+}
+
+function clampNumber(value: unknown, min: number, max: number, dflt: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return dflt;
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Merge raw (admin-edited, possibly junk) branding fields into a complete,
+ * validated `ShareCardOptions`. Unknown/missing fields fall back to defaults,
+ * numbers are clamped to their documented ranges, and enum fields are checked
+ * against their unions — free text can never leak into the card CSS.
+ */
+export function normalizeShareCardOptions(raw: unknown): ShareCardOptions {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const layout = r.shareLayout;
+  const font = r.shareFontFamily;
+  return {
+    shareLogoVisible: toBool(r.shareLogoVisible, SHARE_CARD_DEFAULTS.shareLogoVisible),
+    shareTaglineVisible: toBool(r.shareTaglineVisible, SHARE_CARD_DEFAULTS.shareTaglineVisible),
+    shareSiteVisible: toBool(r.shareSiteVisible, SHARE_CARD_DEFAULTS.shareSiteVisible),
+    shareTitleSize: clampNumber(r.shareTitleSize, 36, 92, SHARE_CARD_DEFAULTS.shareTitleSize),
+    shareDescriptionSize: clampNumber(r.shareDescriptionSize, 18, 42, SHARE_CARD_DEFAULTS.shareDescriptionSize),
+    shareLayout: layout === 'classic' || layout === 'split' || layout === 'minimal' ? layout : SHARE_CARD_DEFAULTS.shareLayout,
+    shareFontFamily: font === 'system' || font === 'serif' ? font : SHARE_CARD_DEFAULTS.shareFontFamily,
+    shareGlowIntensity: clampNumber(r.shareGlowIntensity, 0, 100, SHARE_CARD_DEFAULTS.shareGlowIntensity),
+    shareCornerRadius: clampNumber(r.shareCornerRadius, 0, 64, SHARE_CARD_DEFAULTS.shareCornerRadius),
+    shareImageOverlay: clampNumber(r.shareImageOverlay, 0, 100, SHARE_CARD_DEFAULTS.shareImageOverlay),
+  };
+}
+
+// Ramp anchors: alpha values at the DEFAULT intensity (glow 40, overlay 60) and
+// the max at intensity 100 — the defaults reproduce the pre-options card exactly.
+const GLOW_BREAKPOINT = 0.4; // glow 40/100 → base alpha
+const GLOW_ACCENT_BASE = 0.33;
+const GLOW_ACCENT_MAX = 0.45;
+const GLOW_PURPLE_BASE = 0.28;
+const GLOW_PURPLE_MAX = 0.38;
+const OVERLAY_BREAKPOINT = 0.6; // overlay 60/100 → base alpha
+const OVERLAY_TOP_BASE = 0.56;
+const OVERLAY_TOP_MAX = 0.95;
+const OVERLAY_BOTTOM_BASE = 0.68;
+const OVERLAY_BOTTOM_MAX = 0.97;
+
+/** Scale an alpha from `base` (at the default breakpoint) to `max` (at 1). */
+function rampAlpha(base: number, max: number, f: number, breakpoint: number): number {
+  if (f <= 0) return 0;
+  if (f >= 1) return max;
+  if (f <= breakpoint) return base * (f / breakpoint);
+  return base + (max - base) * ((f - breakpoint) / (1 - breakpoint));
+}
+
 /**
  * The full multi-layer `background` CSS for the 1200×630 card. This is shared
  * by the server route and the admin preview so the preview is pixel-faithful:
  *   - with a share image: dark gradient over `url(...)`, over the solid bg
- *   - without: two radial accent glows over the solid bg.
+ *     (gradient darkness controlled by `opts.shareImageOverlay`),
+ *   - without: two radial accent glows over the solid bg (strength controlled
+ *     by `opts.shareGlowIntensity`; 0 → plain solid background).
  * Both colors are sanitized first (never inject broken CSS into the renderer).
+ * The `opts` param is optional — the old call signature keeps working and the
+ * defaults reproduce the original alpha values exactly.
  */
 export function cardBackgroundStyle(
   background: unknown,
   accent: unknown,
   shareImageUrl?: string,
+  opts?: Partial<Pick<ShareCardOptions, 'shareGlowIntensity' | 'shareImageOverlay'>>,
 ): string {
   const safeBg = safeCssColor(background, FALLBACK_BG);
   const safeAccent = safeCssColor(accent, FALLBACK_ACCENT);
+  const glowF = clampNumber(opts?.shareGlowIntensity, 0, 100, SHARE_CARD_DEFAULTS.shareGlowIntensity) / 100;
+  const overlayF = clampNumber(opts?.shareImageOverlay, 0, 100, SHARE_CARD_DEFAULTS.shareImageOverlay) / 100;
   if (shareImageUrl) {
-    return `linear-gradient(180deg, rgba(0,0,0,0.56), rgba(0,0,0,0.68)), url(${shareImageUrl}) center/cover, ${safeBg}`;
+    const top = rampAlpha(OVERLAY_TOP_BASE, OVERLAY_TOP_MAX, overlayF, OVERLAY_BREAKPOINT);
+    const bottom = rampAlpha(OVERLAY_BOTTOM_BASE, OVERLAY_BOTTOM_MAX, overlayF, OVERLAY_BREAKPOINT);
+    return `linear-gradient(180deg, rgba(0,0,0,${top.toFixed(2)}), rgba(0,0,0,${bottom.toFixed(2)})), url(${shareImageUrl}) center/cover, ${safeBg}`;
   }
-  return `radial-gradient(circle at 18% 18%, ${hexToRgba(safeAccent, 0.33)}, transparent 32%), radial-gradient(circle at 82% 12%, rgba(168,85,247,0.28), transparent 30%), ${safeBg}`;
+  if (glowF <= 0) return safeBg;
+  const accentAlpha = rampAlpha(GLOW_ACCENT_BASE, GLOW_ACCENT_MAX, glowF, GLOW_BREAKPOINT);
+  const purpleAlpha = rampAlpha(GLOW_PURPLE_BASE, GLOW_PURPLE_MAX, glowF, GLOW_BREAKPOINT);
+  return `radial-gradient(circle at 18% 18%, ${hexToRgba(safeAccent, accentAlpha)}, transparent 32%), radial-gradient(circle at 82% 12%, ${hexToRgba('#A855F7', purpleAlpha)}, transparent 30%), ${safeBg}`;
 }
 
 /** Strip protocol + trailing slashes for the host shown on the card.
