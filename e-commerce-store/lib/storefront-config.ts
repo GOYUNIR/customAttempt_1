@@ -54,6 +54,8 @@ export interface StorefrontProduct {
   accent?: string;
   notes: StorefrontNote[];
   images?: string[];
+  /** Parallel to `images`: per-media crop records (normalized center + size). */
+  crops?: Array<{ x: number; y: number; w: number; h: number }>;
   customDropSchedule?: Partial<DropScheduleConfig>;
   scheduledArchiveAt?: string;
   scheduledUnarchiveAt?: string;
@@ -275,10 +277,10 @@ const defaultSocialProof = {
   baseCount: 0,
   caption: 'Hype is compounding fast—reserve now before inventory closes.',
   autoIncrementEnabled: true,
-  autoIncrementChancePerHeartbeat: 0.15,
-  autoIncrementAmount: 1,
-  autoIncrementMaxPerDay: 4,
-  autoIncrementMinHourGap: 3,
+  autoIncrementChancePerHeartbeat: 0.18,
+  autoIncrementAmount: 2,
+  autoIncrementMaxPerDay: 15,
+  autoIncrementMinHourGap: 1,
   autoIncrementMaxHourGap: 8,
 };
 
@@ -368,6 +370,7 @@ function normalizeProduct(product: Partial<StorefrontProduct> & { id?: string },
       text: normalizeText(note?.text, 'A polished profile note designed for instant recognition.'),
     })),
     images: Array.isArray(product.images) ? product.images : [],
+    crops: Array.isArray(product.crops) ? product.crops : undefined,
     customDropSchedule: product.customDropSchedule,
     scheduledArchiveAt: product.scheduledArchiveAt,
     scheduledUnarchiveAt: product.scheduledUnarchiveAt,

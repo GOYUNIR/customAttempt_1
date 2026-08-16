@@ -108,7 +108,13 @@ async function updateProductImages(redis: any, productId: string, images: string
   const raw = await redis.hget(PRODUCTS_KEY, productId);
   const product = safeParseRedisItem<any>(raw);
   if (product) {
-    product.images = Array.isArray(images) ? images : [];
+    const nextImages = Array.isArray(images) ? images : [];
+    product.images = nextImages;
+    // Keep the parallel crop list aligned with the media list (prune extras,
+    // pad new media with the default full-image crop).
+    if (Array.isArray(product.crops)) {
+      product.crops = nextImages.map((_, i) => product.crops[i] ?? { x: 0.5, y: 0.5, w: 1, h: 1 });
+    }
     product.updatedAt = new Date().toISOString();
     await redis.hset(PRODUCTS_KEY, { [productId]: JSON.stringify(product) });
   }

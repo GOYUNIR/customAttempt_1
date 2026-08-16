@@ -10,6 +10,7 @@ import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, con
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
+import { isVideoMedia, coverStyle, normalizeCrop, DEFAULT_CROP } from '@/lib/media';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -385,6 +386,42 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     }, galleryIntervalMs);
     return () => window.clearInterval(timer);
   }, [autoPlayOn, galleryPaused, galleryIntervalMs, imgCount]);
+
+  // The gallery box is full-width (up to 560px) × 280px. Its exact pixel width
+  // is measured so admin crop settings can be applied 1:1 (the crop region maps
+  // onto this box).
+  const galleryBoxRef = useRef<HTMLDivElement | null>(null);
+  const [galleryBoxWidth, setGalleryBoxWidth] = useState(0);
+  useEffect(() => {
+    const el = galleryBoxRef.current;
+    if (!el) return;
+    const update = () => setGalleryBoxWidth(el.clientWidth || 0);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Natural dimensions of the currently-shown photo (images only) — used to
+  // apply the admin crop 1:1 onto the measured gallery box.
+  const [naturalDims, setNaturalDims] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const list = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
+    const current = list[selectedImageIndex] || list[0] || '';
+    if (!current || isVideoMedia(current)) {
+      setNaturalDims(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setNaturalDims({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+    };
+    img.src = current;
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedImageIndex, product?.images]);
 
   // Swipe / drag navigation for the product gallery. Vertical drags still scroll
   // the page (touchAction 'pan-y'); horizontal drags switch photos with a live
@@ -1068,6 +1105,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const isRaffleProduct = checkoutMode === 'RAFFLE';
   const fallbackImage = getFallbackImage(product);
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
+
+  // Crop support: the crop region maps 1:1 onto the measured gallery box. The
+  // crop is applied ONLY when the operator customized it — the default keeps
+  // the classic centered cover + Ken Burns behaviour.
+  const currentCrop = normalizeCrop(
+    Array.isArray(product?.crops) && product.crops[selectedImageIndex] ? product.crops[selectedImageIndex] : DEFAULT_CROP,
+  );
+  const cropIsCustom = currentCrop.w < 0.999 || currentCrop.h < 0.999 || Math.abs(currentCrop.x - 0.5) > 0.001 || Math.abs(currentCrop.y - 0.5) > 0.001;
+  const currentMediaIsVideo = isVideoMedia(galleryImages[selectedImageIndex] || galleryImages[0]);
   const inventoryRemaining = Number(product.inventoryRemaining ?? product.totalInventory ?? 0);
   const totalInventory = Number(product.totalInventory ?? 0);
   // Sold out when (a) the API reports it, (b) inventory was configured and
@@ -1079,19 +1125,19 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     (totalInventory === 0 && (product.soldOutBehavior || 'stay_visible') === 'stay_visible');
   const activeProductLabel = soldOut ? 'Sold out' : (product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now'));
   const urgencyLabel = soldOut
-    ? 'This release is fully spoken for.'
+    ? String(copySettings.urgencySoldOut || '').trim() || 'This release is fully spoken for.'
     : inventoryRemaining > 0 && inventoryRemaining <= 12
       ? `Only ${inventoryRemaining} allocations left.`
       : inventoryRemaining > 0 && inventoryRemaining <= 30
         ? `${inventoryRemaining} units remain across this release.`
-        : 'Handmade allocation. Low supply by design.';
+        : String(copySettings.urgencyInStock || '').trim() || 'Handmade allocation. Low supply by design.';
   const statusStory = product.isUpcoming
     ? 'Collectors can still queue interest before the release opens publicly.'
     : product.isArchived && isRaffleProduct
       ? 'Archive placement keeps the story visible, and raffle entry can still be reopened for private audiences.'
       : product.isArchived
-        ? 'Archive placement preserves the release as proof of demand and collectability.'
-        : 'Reserved for collectors moving early, before the allocation tightens further.';
+        ? String(copySettings.statusArchived || '').trim() || 'Archive placement preserves the release as proof of demand and collectability.'
+        : String(copySettings.statusLive || '').trim() || 'Reserved for collectors moving early, before the allocation tightens further.';
   const checkoutDisabled = soldOut || !selectedSize || !isConfiguredPrice(price);
   const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
 
@@ -1101,6 +1147,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 16) }}>
           <div
             id="goyunir-gallery-surface"
+            ref={galleryBoxRef}
             onMouseEnter={() => setGalleryPaused(true)}
             onMouseLeave={() => { if (!dragStateRef.current.active) setGalleryPaused(false); }}
             onPointerDown={onGalleryPointerDown}
@@ -1117,15 +1164,44 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 transition: galleryDragging ? 'none' : 'transform 260ms cubic-bezier(.22,1,.36,1)',
               }}
             >
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: -16,
-                  background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover`,
-                  animation: zoomOn ? `goyunirKenburns ${zoomSeconds}s ease-in-out infinite alternate` : 'none',
-                  willChange: 'transform',
-                }}
-              />
+              {currentMediaIsVideo ? (
+                /* Video gallery item — plays inline with controls; videos are
+                   never cropped (the admin crop tool applies to photos only). */
+                <video
+                  src={galleryImages[selectedImageIndex] || galleryImages[0]}
+                  controls
+                  playsInline
+                  loop
+                  muted
+                  preload="metadata"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#0a0a0c' }}
+                />
+              ) : cropIsCustom && naturalDims && galleryBoxWidth > 0 ? (
+                /* Admin crop applied — the crop region maps onto the box EXACTLY
+                   as the admin preview showed it (desktop/mobile). */
+                <img
+                  src={galleryImages[selectedImageIndex] || galleryImages[0]}
+                  alt={product.name}
+                  draggable={false}
+                  style={{
+                    position: 'absolute',
+                    ...coverStyle(naturalDims.w, naturalDims.h, galleryBoxWidth, 280, currentCrop),
+                    maxWidth: 'none',
+                    maxHeight: 'none',
+                    pointerEvents: 'none',
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: -16,
+                    background: `url(${galleryImages[selectedImageIndex] || galleryImages[0]}) center/cover`,
+                    animation: zoomOn ? `goyunirKenburns ${zoomSeconds}s ease-in-out infinite alternate` : 'none',
+                    willChange: 'transform',
+                  }}
+                />
+              )}
             </div>
             {galleryImages.length > 1 && (
               <>
@@ -1173,7 +1249,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {galleryImages.map((image: string, index: number) => (
-                <button key={`${image}-${index}`} onClick={() => setSelectedImageIndex(index)} style={{ width: 54, height: 54, borderRadius: 10, border: selectedImageIndex === index ? `1px solid ${configPalette.accentPurple}` : `1px solid ${configPalette.cardBorder}`, background: `url(${image}) center/cover`, cursor: 'pointer' }} />
+                <button key={`${image}-${index}`} onClick={() => setSelectedImageIndex(index)} style={{ width: 54, height: 54, borderRadius: 10, border: selectedImageIndex === index ? `1px solid ${configPalette.accentPurple}` : `1px solid ${configPalette.cardBorder}`, background: isVideoMedia(image) ? '#0b0b0d' : `url(${image}) center/cover`, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', overflow: 'hidden' }} title={isVideoMedia(image) ? 'Video' : `Photo ${index + 1}`}>
+                  {isVideoMedia(image) ? '▶' : null}
+                </button>
               ))}
             </div>
           </div>

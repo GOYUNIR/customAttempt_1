@@ -99,11 +99,17 @@ export function cardBackgroundStyle(
   return `radial-gradient(circle at 18% 18%, ${hexToRgba(safeAccent, 0.33)}, transparent 32%), radial-gradient(circle at 82% 12%, rgba(168,85,247,0.28), transparent 30%), ${safeBg}`;
 }
 
-/** Strip protocol + trailing slashes for the host shown on the card. */
+/** Strip protocol + trailing slashes for the host shown on the card.
+ * NEVER returns an empty string: scheme-only leftovers (e.g. a malformed
+ * `https://` env paste) and protocol-only values fall back so the card's
+ * top-right domain can never render blank. */
 export function cardSiteUrlDisplay(value: unknown, fallback = 'example.com'): string {
-  const raw = String(value ?? '').trim().replace(/\/+$/, '');
+  let raw = String(value ?? '').trim().replace(/\/+$/, '');
   if (!raw) return fallback;
-  return raw.replace(/^https?:\/\//i, '');
+  raw = raw.replace(/^https?:\/\//i, '');
+  raw = raw.replace(/^\/+/, '').trim();
+  if (!raw || raw === 'http:' || raw === 'https:') return fallback;
+  return raw;
 }
 
 /**

@@ -9,6 +9,7 @@ import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
+import { isImageMedia, isVideoMedia } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
 
 /**
@@ -130,11 +131,21 @@ export default function HomePage() {
       : '';
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('goyunir-visitor-id', visitorId);
+    }
+
+    // "Total raffle entries" refreshes live: fetch the heartbeat on mount and
+    // then poll every 30s so the counter visibly drifts upward through the day
+    // as traffic auto-increments it server-side. Failures are silent.
+    const fetchSocialProof = () => {
+      if (typeof window === 'undefined') return;
       fetch(`/api/analytics/heartbeat?visitorId=${encodeURIComponent(visitorId)}`)
         .then((res) => res.json())
         .then((data) => setSocialProofDisplay(Number(data?.socialProofDisplay || 0)))
         .catch(() => {});
-    }
+    };
+    fetchSocialProof();
+    const socialTimer = window.setInterval(fetchSocialProof, 30_000);
+    return () => window.clearInterval(socialTimer);
   }, []);
 
   if (loading) {
@@ -228,7 +239,22 @@ export default function HomePage() {
               {activeProducts.map((product: any, index: number) => (
                 <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit', display: 'block', borderRadius: themeRadius(configPalette, 22) }}>
                   <div style={{ borderRadius: themeRadius(configPalette, 22), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 14), marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-                    <div style={{ height: 190, background: product.images?.[0] ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${product.images[0]}) center/cover` : '#1a1a1a' }} />
+                    {/* Cover: the first IMAGE in the gallery is used as the card
+                        image. If a product only ships videos, a muted looping
+                        <video> plays instead so the tile still reads as media. */}
+                    {(() => {
+                      const medias: string[] = (product.images || []).filter((src: string) => typeof src === 'string' && src);
+                      const coverImg = medias.find((src) => isImageMedia(src));
+                      const coverVideo = !coverImg ? medias.find((src) => isVideoMedia(src)) : '';
+                      if (coverVideo) {
+                        return (
+                          <div style={{ height: 190, position: 'relative', background: '#1a1a1a', overflow: 'hidden' }}>
+                            <video src={coverVideo} muted loop autoPlay playsInline preload="metadata" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                          </div>
+                        );
+                      }
+                      return <div style={{ height: 190, background: coverImg ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${coverImg}) center/cover` : '#1a1a1a' }} />;
+                    })()}
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <div style={{ fontSize: 11, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px' }}>Featured release</div>

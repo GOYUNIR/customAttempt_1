@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule } from '@/lib/storefront-config';
+import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -405,6 +406,24 @@ function mergeOrbSettings(base: any, incoming: any): any {
   };
 }
 
+// Accepted media formats in the products panel. Images + videos share the
+// gallery; videos are stored as-is (never rasterized) and render in <video>.
+const ACCEPTED_IMAGE_EXTS = ['png', 'jpeg', 'jpg', 'svg', 'webp', 'gif', 'bmp', 'avif'];
+const ACCEPTED_VIDEO_EXTS = ['mp4', 'mov', 'mkv', 'avi', 'webm'];
+const ACCEPTED_MEDIA_TYPES =
+  ACCEPTED_IMAGE_EXTS.map((e) => `image/${e === 'jpg' ? 'jpeg' : e}`).join(', ') +
+  ', ' +
+  ACCEPTED_VIDEO_EXTS.map((e) => `video/${e}`).join(', ');
+
+function isAcceptedMediaFile(file: File): boolean {
+  const name = String(file.name || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+  const type = String(file.type || '').toLowerCase();
+  if (type.startsWith('image/')) return ACCEPTED_IMAGE_EXTS.includes(ext) || type.includes(ext);
+  if (type.startsWith('video/')) return ACCEPTED_VIDEO_EXTS.includes(ext) || type.includes(ext);
+  return ACCEPTED_IMAGE_EXTS.includes(ext) || ACCEPTED_VIDEO_EXTS.includes(ext);
+}
+
 // ===== Helper: convert file to base64 data URL =====
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -415,10 +434,19 @@ function fileToDataURL(file: File): Promise<string> {
   });
 }
 
+/**
+ * Compress a photo for storage. Photos (jpg/png/webp/bmp/avif) are downscaled +
+ * re-encoded to JPEG so a product gallery stays small in Redis. Vector/animated
+ * formats (svg, gif) and ALL videos keep their original bytes — canvas would
+ * destroy SVG transparency / GIF animation and videos can't be rasterized.
+ */
 async function compressImageFile(file: File, maxSize = 1440, quality = 0.82): Promise<File> {
   if (typeof window === 'undefined') return file;
+  const type = String(file.type || '').toLowerCase();
+  if (type.startsWith('video/')) return file;
+  if (type === 'image/svg+xml' || type === 'image/gif') return file;
   // Accept files even when the browser reports an empty/odd MIME type (some
-  // .jpeg exports do) — the file picker is already restricted to image/*.
+  // .jpeg exports do) — the file picker is already restricted to media/*.
   if (file.type && !file.type.startsWith('image/')) return file;
   const imageUrl = URL.createObjectURL(file);
   try {
@@ -500,6 +528,12 @@ const DEFAULT_COPY_SETTINGS = {
   supportEmail: '',
   priorityDropsTitle: '',
   priorityDropsSubtitle: '',
+  // Product-page urgency/status story (the box under the release header).
+  // Leave empty to keep the built-in copy.
+  urgencyInStock: '',
+  urgencySoldOut: '',
+  statusLive: '',
+  statusArchived: '',
 };
 
 const DEFAULT_LEGAL_SETTINGS = {
@@ -517,6 +551,228 @@ const DEFAULT_CATALOG_SETTINGS = {
 const DEFAULT_BEHAVIOR_SETTINGS = {
   scrollToTopOnLoad: true,
 };
+
+// ---------------------------------------------------------------------------
+// CROP EDITOR — the product gallery's "what shoppers will actually see"
+// ---------------------------------------------------------------------------
+// Each uploaded photo has an optional crop (normalized center + size). The
+// editor shows TWO live previews of exactly what the product page renders:
+//   • Desktop — the gallery box is ~560×280 (2:1) on a desktop browser.
+//   • Mobile  — ~328×280 (1.17:1) on a phone.
+// Drag inside either preview to pan, use the slider to zoom, and the aspect
+// ratio each box uses is labeled — so the buyer sets the crop by SEEING the
+// result on both devices, not by guessing CSS values.
+
+const DESKTOP_PREVIEW = { w: 320, h: 160 };
+const MOBILE_PREVIEW = { w: 200, h: 171 };
+
+type CropEditorProps = {
+  src: string;
+  crop: unknown;
+  onCrop: (c: MediaCrop) => void;
+};
+
+function CropEditor({ src, crop, onCrop }: CropEditorProps) {
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; startCrop: MediaCrop; boxW: number; boxH: number } | null>(null);
+
+  const c = normalizeCrop(crop);
+
+  // Load natural dimensions once (data URLs + remote URLs both work).
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setNatural({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+    };
+    img.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  // Keep the slider in sync with the stored crop (e.g. when switching images).
+  useEffect(() => {
+    setZoom(Math.max(0, Math.min(100, Math.round(((1 - c.w) / 0.8) * 100))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src]);
+
+  const clampCenter = useCallback((next: MediaCrop): MediaCrop => {
+    const size = Math.max(0.2, next.w);
+    return {
+      ...next,
+      x: Math.max(size / 2, Math.min(1 - size / 2, next.x)),
+      y: Math.max(size / 2, Math.min(1 - size / 2, next.y)),
+    };
+  }, []);
+
+  const setZoomed = useCallback(
+    (z: number) => {
+      const zz = Math.max(0, Math.min(100, Number(z) || 0));
+      const size = Math.max(0.2, 1 - (zz / 100) * 0.8);
+      setZoom(zz);
+      onCrop(clampCenter({ ...c, w: size, h: size }));
+    },
+    [c, onCrop, clampCenter],
+  );
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, boxW: number, boxH: number) => {
+      if (!natural) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      dragRef.current = { startX: e.clientX, startY: e.clientY, startCrop: c, boxW, boxH };
+      setDragging(true);
+    },
+    [natural, c],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // The crop region maps 1:1 onto the preview box, so a pointer delta of
+      // one box-width moves the crop center by one crop-width (drag left/right
+      // to look around — the image follows the finger).
+      const dx = ((e.clientX - d.startX) / d.boxW) * d.startCrop.w;
+      const dy = ((e.clientY - d.startY) / d.boxH) * d.startCrop.h;
+      onCrop(
+        clampCenter({
+          ...d.startCrop,
+          x: d.startCrop.x - dx,
+          y: d.startCrop.y - dy,
+        }),
+      );
+    },
+    [onCrop, clampCenter],
+  );
+
+  const onPointerEnd = useCallback(() => {
+    dragRef.current = null;
+    setDragging(false);
+  }, []);
+
+  const renderPreview = (boxW: number, boxH: number, label: string, ratioLabel: string) => {
+    const style = natural ? coverStyle(natural.w, natural.h, boxW, boxH, c) : null;
+    return (
+      <div style={{ flex: '0 0 auto' }}>
+        <div style={{ fontSize: 10, color: '#8b95a7', marginBottom: 4 }}>
+          {label} <span style={{ color: '#5d6570' }}>· aspect {ratioLabel}</span>
+        </div>
+        <div
+          onPointerDown={(e) => onPointerDown(e, boxW, boxH)}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          style={{
+            width: boxW,
+            height: boxH,
+            borderRadius: 10,
+            overflow: 'hidden',
+            position: 'relative',
+            background: '#0a0a0c',
+            border: dragging ? '1px solid #7dd3fc' : '1px solid #26262e',
+            cursor: natural ? 'grab' : 'wait',
+            touchAction: 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+          title="Drag to adjust which part of the photo shows"
+        >
+          {natural && style ? (
+            <img
+              src={src}
+              alt="crop preview"
+              draggable={false}
+              style={{
+                position: 'absolute',
+                width: style.width,
+                height: style.height,
+                left: style.left,
+                top: style.top,
+                maxWidth: 'none',
+                maxHeight: 'none',
+                pointerEvents: 'none',
+              }}
+            />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 10, color: '#666' }}>Loading…</div>
+          )}
+          {natural && (
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)' }} />
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ margin: '8px 0', padding: 12, borderRadius: 12, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#dbe3ee' }}>✂️ Crop — live preview</span>
+        <span style={{ fontSize: 10, color: '#8b95a7' }}>
+          Shows exactly how this photo is cropped on the product page. Drag to pan, zoom below.
+        </span>
+        <button
+          onClick={() => onCrop({ ...DEFAULT_CROP })}
+          style={{ ...buttonGhost, marginLeft: 'auto', padding: '4px 10px', fontSize: 10 }}
+        >
+          Reset crop
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
+        {renderPreview(DESKTOP_PREVIEW.w, DESKTOP_PREVIEW.h, 'Computer', aspectRatioLabel(DESKTOP_PREVIEW.w, DESKTOP_PREVIEW.h))}
+        {renderPreview(MOBILE_PREVIEW.w, MOBILE_PREVIEW.h, 'Mobile', aspectRatioLabel(MOBILE_PREVIEW.w, MOBILE_PREVIEW.h))}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: '#a1a1aa' }}>
+        <span style={{ whiteSpace: 'nowrap' }}>Zoom</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={zoom}
+          onChange={(e) => setZoomed(Number(e.target.value))}
+          style={{ flex: 1, accentColor: '#7dd3fc' }}
+        />
+        <span style={{ whiteSpace: 'nowrap', color: '#8b95a7', minWidth: 52, textAlign: 'right' }}>
+          {zoom === 0 ? 'Full photo' : `${Math.round((1 - (zoom / 100) * 0.8) * 100)}%`}
+        </span>
+      </label>
+      <div style={{ fontSize: 10, color: '#5d6570', marginTop: 8, lineHeight: 1.5 }}>
+        The crop is saved with the product and applies to the product-page gallery, home cards and catalog tiles.
+      </div>
+    </div>
+  );
+}
+// ---------------------------------------------------------------------------
+// Live preview helpers — mirror SiteChrome's header/footer color math so the
+// admin "Live preview — top bar & footer" panel shows the REAL rendered result.
+// ---------------------------------------------------------------------------
+
+/** Pick readable header text (near-black on light bg, near-white on dark). */
+function previewHeaderText(bg: string, explicit?: string): string {
+  if (explicit && String(explicit).trim()) return String(explicit).trim();
+  const hex = String(bg || '').trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return '#f5f5f7';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  if ([r, g, b].some((v) => Number.isNaN(v))) return '#f5f5f7';
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.58 ? '#0a0a0c' : '#f5f5f7';
+}
+
+/** Mix a chrome color to the configured transparency (same as SiteChrome). */
+function previewChromeBackground(color: string, alphaPct: number, fallback: string, minPct = 40): string {
+  const c = String(color || '').trim();
+  if (!c) return fallback;
+  const raw = Number(alphaPct);
+  const safe = Math.max(minPct, Math.min(100, Number.isFinite(raw) ? raw : 94));
+  return safe >= 100 ? c : `color-mix(in srgb, ${c} ${safe}%, transparent)`;
+}
 
 export default function AdminPortal() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -684,6 +940,13 @@ export default function AdminPortal() {
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
   const [productActionLoading, setProductActionLoading] = useState(false);
+  // True while files are being uploaded/compressed in the product gallery. The
+  // Save Product button is disabled during this window so a buyer can never
+  // save the product with a half-finished image list.
+  const [imageUploadBusy, setImageUploadBusy] = useState(false);
+  const [imageUploadLabel, setImageUploadLabel] = useState('');
+  // Which gallery media's crop editor is expanded (null = none).
+  const [cropEditorIdx, setCropEditorIdx] = useState<number | null>(null);
   // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -992,6 +1255,7 @@ export default function AdminPortal() {
       sortOrder: 0,
       notes: [],
       images: [],
+      crops: [],
       priceCategories: [
         { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
       ]
@@ -1018,6 +1282,9 @@ export default function AdminPortal() {
       priceCategories: categories,
       notes: product.notes || [],
       images: product.images || [],
+      crops: Array.isArray(product.crops) && product.crops.length === (product.images || []).length
+        ? product.crops
+        : (product.images || []).map(() => DEFAULT_CROP),
       isUpcoming: product.isUpcoming || false,
       checkoutMode: String(product.checkoutMode || '').toUpperCase() === 'FCFS' || product.isRaffle === false ? 'FCFS' : 'RAFFLE',
       productType: product.productType || (product.isRaffle === false ? 'fcfs' : 'raffle'),
@@ -1060,7 +1327,7 @@ export default function AdminPortal() {
     });
   };
 
-  // ===== Handle image file uploads =====
+  // ===== Handle image/video file uploads =====
   const handleImageFiles = async (files: FileList) => {
     if (!requireUnlocked()) {
       setProductMsg(streamerMode ? '❌ Turn Streamer Mode OFF first to upload images.' : '❌ Enter admin password first.');
@@ -1071,41 +1338,64 @@ export default function AdminPortal() {
       return;
     }
     const fileArray = Array.from(files);
+    const unsupported = fileArray.filter((f) => !isAcceptedMediaFile(f));
+    if (unsupported.length > 0) {
+      setProductMsg(`❌ Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}. Use PNG, JPEG, JPG, SVG, WEBP, GIF, BMP or video (MP4, MOV, MKV, AVI, WEBM).`);
+      return;
+    }
     let uploaded = 0;
     let failed = 0;
-    for (const file of fileArray) {
-      const compressed = await compressImageFile(file);
-      const previewUrl = await fileToDataURL(compressed);
-      setProductForm((prev: any) => ({
-        ...prev,
-        images: [...(prev.images || []), previewUrl],
-      }));
-      const uploadData = new FormData();
-      uploadData.append('productId', editingProduct);
-      uploadData.append('password', password);
-      uploadData.append('file', compressed);
-      const res = await adminFetch('/api/admin/upload', { method: 'POST', body: uploadData });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        failed += 1;
-        setProductMsg(`⚠ Upload to store failed for ${file.name}: ${data.error || 'unknown error'}. The image stays in this form — press Save Product to store it directly.`);
-        // NOTE: we intentionally do NOT remove the preview. The data URL stays
-        // in productForm.images so clicking "Save Product" persists it to Redis
-        // even if the separate upload endpoint was blocked (e.g. size limits).
-        continue;
+    setImageUploadBusy(true);
+    try {
+      for (let i = 0; i < fileArray.length; i += 1) {
+        const file = fileArray[i];
+        setImageUploadLabel(`Uploading ${file.name} (${i + 1}/${fileArray.length})…`);
+        const compressed = await compressImageFile(file);
+        const previewUrl = await fileToDataURL(compressed);
+        // Keep the crop list aligned with the media list — a new item always
+        // starts at the default (full-image) crop.
+        setProductForm((prev: any) => {
+          const nextImages = [...(prev.images || []), previewUrl];
+          const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP)), DEFAULT_CROP];
+          return { ...prev, images: nextImages, crops: nextCrops };
+        });
+        const uploadData = new FormData();
+        uploadData.append('productId', editingProduct);
+        uploadData.append('password', password);
+        uploadData.append('file', compressed);
+        const res = await adminFetch('/api/admin/upload', { method: 'POST', body: uploadData });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          failed += 1;
+          setProductMsg(`⚠ Upload to store failed for ${file.name}: ${data.error || 'unknown error'}. The media stays in this form — press Save Product to store it directly.`);
+          // NOTE: we intentionally do NOT remove the preview. The data URL stays
+          // in productForm.images so clicking "Save Product" persists it to Redis
+          // even if the separate upload endpoint was blocked (e.g. size limits).
+          continue;
+        }
+        uploaded += 1;
       }
-      uploaded += 1;
+      await fetchProducts();
+      if (failed === 0 && uploaded > 0) {
+        setProductMsg(`✅ Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}.`);
+      }
+      showToast(`Uploaded ${uploaded} file${uploaded === 1 ? '' : 's'}${failed ? ` · ${failed} kept locally` : ''}`);
+    } finally {
+      setImageUploadBusy(false);
+      setImageUploadLabel('');
     }
-    await fetchProducts();
-    if (failed === 0) {
-      setProductMsg(`✅ Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}.`);
-    }
-    showToast(`Uploaded ${uploaded} image${uploaded === 1 ? '' : 's'}${failed ? ` · ${failed} kept locally` : ''}`);
   };
 
-  // ===== Save product (UPDATED to send priceCategories) =====
+  // ===== Save product (UPDATED to send priceCategories + crops) =====
   const saveProduct = async () => {
     if (!requireUnlocked()) return;
+    // Never save a product while files are still uploading — the form would
+    // persist a half-finished media list and lose the queued files.
+    if (imageUploadBusy) {
+      setProductMsg(`⏳ Still ${imageUploadLabel || 'uploading files'} — wait for the upload to finish before saving.`);
+      showToast('Wait for uploads to finish before saving');
+      return;
+    }
 
     // ── Mistake-proof validation (friendly inline messages, never a bare alert) ──
     const name = String(productForm.name || '').trim();
@@ -1151,6 +1441,7 @@ export default function AdminPortal() {
         priceCategories,
         notes: productForm.notes || [],
         images: productForm.images || [],
+        crops: Array.isArray(productForm.crops) ? productForm.crops : (productForm.images || []).map(() => DEFAULT_CROP),
         sortOrder: Number(productForm.sortOrder) || 0,
         checkoutMode: productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE',
         isRaffle: productForm.checkoutMode !== 'FCFS',
@@ -1322,20 +1613,23 @@ export default function AdminPortal() {
     setNoteForm(productForm.notes[idx]);
   };
 
-  // For image URL input (still supported)
+  // For image URL input (still supported). URL media always starts at the
+  // default crop (full image) and keeps the crops list aligned by index.
   const addImageUrl = () => {
     if (!imageInput.trim()) return;
-    setProductForm((prev: any) => ({
-      ...prev,
-      images: [...prev.images, imageInput.trim()]
-    }));
+    setProductForm((prev: any) => {
+      const nextImages = [...(prev.images || []), imageInput.trim()];
+      const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : (prev.images || []).map(() => DEFAULT_CROP)), DEFAULT_CROP];
+      return { ...prev, images: nextImages, crops: nextCrops };
+    });
     setImageInput('');
   };
 
   const removeImage = (idx: number) => {
     setProductForm((prev: any) => ({
       ...prev,
-      images: prev.images.filter((_: any, i: number) => i !== idx)
+      images: prev.images.filter((_: any, i: number) => i !== idx),
+      crops: (Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP)).filter((_: any, i: number) => i !== idx),
     }));
   };
 
@@ -2192,9 +2486,23 @@ export default function AdminPortal() {
             placeholder="6-digit code"
             style={{ display: 'block', width: '100%', boxSizing: 'border-box', padding: 12, borderRadius: 8, background: '#09090b', border: '1px solid #27272a', color: '#fff', fontSize: 16, letterSpacing: 6, textAlign: 'center', marginBottom: 12 }}
           />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#a1a1aa', marginBottom: 14, cursor: 'pointer' }}>
-            <input type="checkbox" checked={verifyRemember} onChange={(e) => setVerifyRemember(e.target.checked)} style={{ accentColor: '#fff' }} />
-            Remember this device for 30 days (otherwise this browser re-verifies every 24 hours)
+          {/* The label wraps the checkbox so the whole row is tappable. Some
+              mobile browsers don't toggle a label-wrapped controlled checkbox
+              reliably (the tap lands on the text, not the input), so we also
+              force the toggle on label click when the tap missed the input. */}
+          <label
+            htmlFor="admin-verify-remember"
+            onClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.tagName !== 'INPUT') {
+                e.preventDefault();
+                setVerifyRemember((prev) => !prev);
+              }
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#a1a1aa', marginBottom: 14, cursor: 'pointer', WebkitTapHighlightColor: 'transparent', userSelect: 'none', touchAction: 'manipulation' }}
+          >
+            <input id="admin-verify-remember" type="checkbox" checked={verifyRemember} onChange={(e) => setVerifyRemember(e.target.checked)} style={{ accentColor: '#fff', width: 16, height: 16, flexShrink: 0 }} />
+            <span>Remember this device for 30 days (otherwise this browser re-verifies every 24 hours)</span>
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={confirmAdminVerifyCode} disabled={verifyBusy || verifyCode.length !== 6} style={{ ...buttonPrimary, flex: 1, background: verifyBusy || verifyCode.length !== 6 ? '#555' : '#fff' }}>
@@ -3087,8 +3395,14 @@ export default function AdminPortal() {
                           </label>
                         </>
                       )}
-                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.5 }}>
-                        First draw happens at the countdown end above; every later draw happens on this cadence while allocation remains. Unselected entries carry over into the next raffle.
+                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.6 }}>
+                        <strong style={{ color: '#aab6c8' }}>How this works:</strong> the schedule only starts <strong style={{ color: '#aab6c8' }}>AFTER the countdown above ends</strong>. The first raffle round runs on the
+                        &quot;Countdown ends at&quot; time — when that timer hits zero the draw fires, and this cadence takes over, rolling the countdown forward to the next round. Later draws happen on this
+                        cadence while allocation remains, and unselected entries carry over into the next raffle.
+                      </p>
+                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '2px 0 0', lineHeight: 1.6 }}>
+                        <strong style={{ color: '#aab6c8' }}>Want the raffle to start right at release?</strong> Clear the &quot;Countdown ends at&quot; field above (leave it empty). The first round then starts when
+                        the release goes live (or per the global schedule), and this cadence takes over after that round&apos;s draw.
                       </p>
                     </div>
                   )}
@@ -3177,51 +3491,105 @@ export default function AdminPortal() {
                 {/* ============ GALLERY & IMAGES ============ */}
                 <SectionCard
                   title="Gallery & Images"
-                  description="Product photos are swipeable on the product page (360° rotation feel). Upload files or paste image URLs — the first image is the cover."
+                  description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
                 >
                   <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
                     <input
                       type="file"
                       multiple
-                      accept="image/*"
+                      accept={`${ACCEPTED_MEDIA_TYPES},image/*,video/*,.png,.jpeg,.jpg,.svg,.webp,.gif,.bmp,.avif,.mp4,.mov,.mkv,.avi,.webm`}
                       onChange={(e) => {
                         if (e.target.files && e.target.files.length > 0) {
                           handleImageFiles(e.target.files);
                         }
+                        // Allow re-selecting the same file after an upload.
+                        e.target.value = '';
                       }}
+                      disabled={imageUploadBusy}
                       style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
                     />
                     <input
                       type="text"
-                      placeholder="Or paste image URL"
+                      placeholder="Or paste image / video URL"
                       value={imageInput}
                       onChange={(e) => setImageInput(e.target.value)}
                       style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
                     />
                     <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
                   </div>
+                  <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 8, lineHeight: 1.6 }}>
+                    <strong style={{ color: '#9ca3af' }}>Images:</strong> PNG · JPEG · JPG · SVG · WEBP · GIF · BMP (photos auto-compress)
+                    &nbsp;·&nbsp; <strong style={{ color: '#9ca3af' }}>Videos:</strong> MP4 · MOV · MKV · AVI · WEBM
+                  </div>
+                  {imageUploadBusy && (
+                    <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.1)', border: '1px solid rgba(125,211,252,0.35)', fontSize: 11, color: '#7dd3fc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 999, border: '2px solid rgba(125,211,252,0.3)', borderTopColor: '#7dd3fc', animation: 'goyunirSpin 0.7s linear infinite', display: 'inline-block' }} />
+                      {imageUploadLabel || 'Uploading files…'}
+                    </div>
+                  )}
                   {(!productForm.images || productForm.images.length === 0) && (
                     <div style={{ fontSize: 10, color: '#666', marginBottom: 8, border: '1px dashed #2e2e35', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                      No images yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
+                      No media yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {(productForm.images || []).map((img: string, idx: number) => (
-                      <div key={idx} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
-                        <img src={img} alt={`img-${idx+1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>#{idx+1}</span>
-                        <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
-                      </div>
-                    ))}
+                    {(productForm.images || []).map((img: string, idx: number) => {
+                      const isVideo = isVideoMedia(img);
+                      const cropForIdx = Array.isArray(productForm.crops) ? productForm.crops[idx] : undefined;
+                      const cropped = !isVideo && !!cropForIdx && normalizeCrop(cropForIdx).w < 0.999;
+                      return (
+                        <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
+                          {isVideo ? (
+                            <video src={img} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                          ) : (
+                            <img src={img} alt={`media-${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          )}
+                          <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>
+                            {isVideo ? `▶${idx + 1}` : `#${idx + 1}`}
+                          </span>
+                          {cropped && (
+                            <span style={{ fontSize: 8, color: '#7dd3fc', position: 'absolute', top: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>✂</span>
+                          )}
+                          <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
+                        </div>
+                      );
+                    })}
                   </div>
+                  <div style={{ marginTop: 6 }}>
+                    {(productForm.images || []).map((img: string, idx: number) => {
+                      if (isVideoMedia(img)) return null;
+                      return (
+                        <button
+                          key={`cropbtn-${idx}`}
+                          onClick={() => setCropEditorIdx(cropEditorIdx === idx ? null : idx)}
+                          style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, marginRight: 4, marginBottom: 4, borderColor: cropEditorIdx === idx ? '#7dd3fc' : '#27272a', color: cropEditorIdx === idx ? '#7dd3fc' : '#aaa' }}
+                        >
+                          {cropEditorIdx === idx ? '▾ Close crop' : '✂ Crop'} · {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {cropEditorIdx !== null && productForm.images[cropEditorIdx] && !isVideoMedia(productForm.images[cropEditorIdx]) && (
+                    <CropEditor
+                      src={productForm.images[cropEditorIdx]}
+                      crop={Array.isArray(productForm.crops) ? productForm.crops[cropEditorIdx] : DEFAULT_CROP}
+                      onCrop={(c) =>
+                        setProductForm((prev: any) => {
+                          const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP))];
+                          nextCrops[cropEditorIdx] = c;
+                          return { ...prev, crops: nextCrops };
+                        })
+                      }
+                    />
+                  )}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 Uploaded images are stored as data URLs (base64) – for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
+                    <span>💡 Uploaded media is stored as data URLs (base64) — for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
                   </div>
                 </SectionCard>
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button onClick={saveProduct} disabled={productActionLoading} style={buttonPrimary}>
-                    {productActionLoading ? 'Saving…' : 'Save Product'}
+                  <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, opacity: imageUploadBusy ? 0.6 : 1 }}>
+                    {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : 'Save Product'}
                   </button>
                   <button
                     onClick={() => {
@@ -3234,7 +3602,11 @@ export default function AdminPortal() {
                     Cancel
                   </button>
                   <span style={{ fontSize: 10, color: '#666' }}>
-                    {productFormDirty ? '● You have unsaved changes in this product.' : 'No unsaved changes.'}
+                    {imageUploadBusy
+                      ? '⏳ Upload in progress — save is locked until files finish.'
+                      : productFormDirty
+                        ? '● You have unsaved changes in this product.'
+                        : 'No unsaved changes.'}
                   </span>
                 </div>
               </div>
@@ -4254,10 +4626,14 @@ export default function AdminPortal() {
                       ['supportEmail', 'Support email (footer link)'],
                       ['priorityDropsTitle', 'Home "Priority drops" section title'],
                       ['priorityDropsSubtitle', 'Home drops subtitle (default "Explore our creations")'],
+                      ['urgencyInStock', 'Product page — normal-stock urgency line (default "Handmade allocation. Low supply by design.")'],
+                      ['urgencySoldOut', 'Product page — sold-out urgency line (default "This release is fully spoken for.")'],
+                      ['statusLive', 'Product page — status story for live releases (default "Reserved for collectors moving early, before the allocation tightens further.")'],
+                      ['statusArchived', 'Product page — status story for archived releases (default "Archive placement preserves the release as proof of demand and collectability.")'],
                     ] as [string, string][]).map(([key, label]) => {
                       // Prose fields are textareas so line breaks can be typed;
                       // the storefront renders them with white-space: pre-line.
-                      const isMultiLine = key === 'heroTitle' || key === 'heroSubtitle' || key === 'priorityDropsSubtitle' || key === 'footerTagline';
+                      const isMultiLine = key === 'heroTitle' || key === 'heroSubtitle' || key === 'priorityDropsSubtitle' || key === 'footerTagline' || key === 'urgencyInStock' || key === 'urgencySoldOut' || key === 'statusLive' || key === 'statusArchived';
                       return (
                         <label key={key} style={{ fontSize: 11 }}>
                           {label}
@@ -4520,49 +4896,71 @@ export default function AdminPortal() {
                 <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', padding: '10px 14px 0' }}>
                   ● Live preview — top bar & footer
                 </div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8, margin: 10, padding: '10px 14px', borderRadius: 12,
-                  background: themeSettings.headerBackground || themeSettings.cardBackground || '#141417',
-                }}>
-                  {brandingSettings.logoUrl ? (
-                    <img
-                      src={brandingSettings.logoUrl}
-                      alt="logo"
-                      style={{ width: Math.min(48, Math.max(16, Number(brandingSettings.logoWidth) || 28)), height: Math.min(48, Math.max(16, Number(brandingSettings.logoHeight) || 28)), objectFit: 'contain' }}
-                    />
-                  ) : (
-                    <span style={{ fontSize: 16, color: themeSettings.headerText || themeSettings.cardTextMain || '#fff' }}>◆</span>
-                  )}
-                  {brandingSettings.headerMode !== 'logo' && (
-                    <span style={{
-                      fontSize: Math.min(22, Math.max(10, Number(brandingSettings.brandFontSize) || 14)),
-                      fontFamily: brandingSettings.brandFontFamily || undefined,
-                      fontWeight: 700,
-                      color: themeSettings.headerText || themeSettings.cardTextMain || '#fff',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {brandingSettings.brandName || 'Your Brand'}
-                    </span>
-                  )}
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: themeSettings.headerText || themeSettings.cardTextMuted || '#aaa', whiteSpace: 'nowrap' }}>
-                    {brandingSettings.headerActionMode === 'cart' ? '🛒 Cart' : '🛍️ Bag'}
-                  </span>
-                </div>
-                <div style={{ padding: '0 10px 10px' }}>
-                  <div style={{ padding: '12px 14px', borderRadius: 12, background: '#0b0b0d', fontSize: 10, color: '#8b8b94', textAlign: 'center', lineHeight: 1.6 }}>
-                    {String(footerSettings.shippingReturnPolicyText || 'Shipping & Returns Policy Apply.')}
-                    <div style={{ marginTop: 6, color: '#6b6b74' }}>
-                      {[footerSettings.instagramLink, footerSettings.tiktokLink].filter((url) => String(url || '').trim()).length === 0
-                        ? 'no social links yet'
-                        : ['Instagram', 'TikTok'].filter((_, i) => String([footerSettings.instagramLink, footerSettings.tiktokLink][i] || '').trim()).map((label) => (
-                            <span key={label} style={{ margin: '0 6px' }}>{label}</span>
+                {(() => {
+                  const headerBase = String(themeSettings.headerBackground || themeSettings.cardBackground || '#ffffff').trim();
+                  const chromeAlpha = Math.max(0, Math.min(100, Number(themeSettings.chromeTransparency ?? 94) || 94));
+                  const headerBg = previewChromeBackground(headerBase, chromeAlpha, 'rgba(8,8,10,0.94)');
+                  const headerText = previewHeaderText(headerBase, themeSettings.headerText);
+                  const headerMode = String(brandingSettings.headerMode || 'both').toLowerCase();
+                  const showBrandText = headerMode !== 'logo';
+                  const showBrandLogo = headerMode !== 'text';
+                  const logoW = Number(brandingSettings.logoWidth) > 0 ? Number(brandingSettings.logoWidth) : headerMode === 'logo' ? 44 : 28;
+                  const logoH = Number(brandingSettings.logoHeight) > 0 ? Number(brandingSettings.logoHeight) : headerMode === 'logo' ? 44 : 28;
+                  const action = String(brandingSettings.headerActionMode || 'cart').toLowerCase() === 'bag' ? 'Bag' : 'Cart';
+                  const brandFont = String(brandingSettings.brandFontFamily || '').trim() || undefined;
+                  const darkText = headerText === '#0a0a0c';
+                  return (
+                    <>
+                    {/* Top bar — glass chrome, MORE pill, centered brand, account + bag/cart (same as SiteChrome) */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 10, padding: '12px 16px 14px', borderRadius: 12, background: headerBg, border: '1px solid rgba(255,255,255,0.08)', backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0) 38%)', position: 'relative', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, justifyContent: 'flex-start' }}>
+                        <span style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${darkText ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>🔍 MORE</span>
+                      </div>
+                      <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '38%', overflow: 'hidden' }}>
+                        {showBrandLogo && brandingSettings.logoUrl ? (
+                          <img src={brandingSettings.logoUrl} alt="logo" style={{ width: logoW, height: logoH, borderRadius: brandingSettings.logoTransparent ? 0 : 6, objectFit: brandingSettings.logoTransparent ? 'contain' : 'cover', display: 'block' }} />
+                        ) : null}
+                        {showBrandText ? (
+                          <span style={{ fontFamily: brandFont, fontSize: `${Math.max(10, Math.min(40, Number(brandingSettings.brandFontSize) || 14))}px`, fontWeight: 800, letterSpacing: '3.5px', textTransform: 'uppercase', color: headerText, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {brandingSettings.brandName || 'Your Brand'}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, justifyContent: 'flex-end' }}>
+                        <span style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${darkText ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, fontSize: 13 }}>👤</span>
+                        <span style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${darkText ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, fontSize: 13 }}>{action === 'Bag' ? '🛍️' : '🛒'}</span>
+                      </div>
+                    </div>
+                    {/* Footer — same links/socials/tagline/copyright as the storefront */}
+                    <div style={{ padding: '0 10px 10px' }}>
+                      <div style={{ padding: '18px 14px 24px', borderRadius: 12, background: previewChromeBackground(String(themeSettings.primaryBackground || '#0e0e10'), Math.max(0, Math.min(100, Number(themeSettings.chromeTransparency ?? 94) || 94)), 'rgba(8,8,10,0.96)'), border: '1px solid rgba(255,255,255,0.06)', fontSize: 10, color: '#8b8b94', textAlign: 'center', lineHeight: 1.8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
+                          {['Terms', 'Privacy', 'Shipping', 'Manage My Entry'].map((l) => (
+                            <span key={l} style={{ color: '#9a9aa3' }}>{l}</span>
                           ))}
+                        </div>
+                        <div style={{ marginTop: 6, display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
+                          {!String(footerSettings.instagramLink || '').trim() && !String(footerSettings.tiktokLink || '').trim() && !String(copySettings.supportEmail || footerSettings.supportEmail || '').trim() ? (
+                            <span style={{ color: '#6b6b74' }}>no social links yet</span>
+                          ) : (
+                            <>
+                              {String(footerSettings.instagramLink || '').trim() ? <span style={{ color: '#9a9aa3' }}>Instagram</span> : null}
+                              {String(footerSettings.tiktokLink || '').trim() ? <span style={{ color: '#9a9aa3' }}>TikTok</span> : null}
+                              {String(copySettings.supportEmail || footerSettings.supportEmail || '').trim() ? <span style={{ color: '#9a9aa3' }}>{String(copySettings.supportEmail || footerSettings.supportEmail || '')}</span> : null}
+                            </>
+                          )}
+                        </div>
+                        {String(copySettings.footerTagline || '').trim() ? (
+                          <div style={{ marginTop: 6, color: '#9a9aa3', maxWidth: 420, marginLeft: 'auto', marginRight: 'auto', whiteSpace: 'pre-line' }}>{String(copySettings.footerTagline).trim()}</div>
+                        ) : null}
+                        <div style={{ marginTop: 6, color: '#6b6b74' }}>
+                          © {new Date().getFullYear()} {String(footerSettings.corporateEntityCopyright || brandingSettings.brandName || brandingSettings.shareTitle || 'ALL RIGHTS RESERVED.')}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ marginTop: 6, color: '#5d5d66' }}>
-                      {String(footerSettings.supportEmail || 'support@example.com')} · © {String(footerSettings.corporateEntityCopyright || 'ALL RIGHTS RESERVED.')}
-                    </div>
-                  </div>
-                </div>
+                    </>
+                  );
+                })()}
               </div>
 
               <LinkPreviewGallery branding={brandingSettings} themeColors={themeSettings} />

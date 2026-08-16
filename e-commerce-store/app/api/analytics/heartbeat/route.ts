@@ -3,6 +3,7 @@ import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { isRateLimited } from '@/lib/rate-limit';
+import { maybeAutoIncrementSocialProof } from '@/lib/social-proof';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,16 @@ export async function GET(request: Request) {
         const now = Date.now();
         await redis.zadd(trafficKey, { score: now, member: visitorId });
         if (now % 3 === 0) await redis.zremrangebyscore(trafficKey, 0, now - 60 * 1000);
+      }
+
+      // "Total raffle entries" inflates through the day WITH the traffic: each
+      // heartbeat rolls the same capped dice the cron used to, so real visitors
+      // nudge the counter upward on their own (rate-limited per IP + hard daily
+      // caps inside the shared engine keep it honest). No cron required.
+      try {
+        await maybeAutoIncrementSocialProof(redis, socialCfg);
+      } catch (err) {
+        console.error('[heartbeat] social auto-increment failed', err instanceof Error ? err.message : String(err));
       }
 
       // The entry/subscription tally is recomputed on every page load today;

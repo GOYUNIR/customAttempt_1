@@ -40,6 +40,8 @@ type PublicStoreProduct = {
   isUpcoming: boolean;
   notes: { label: string; name: string; text: string }[];
   images: string[];
+  /** Per-media crop records (parallel to `images`) for the gallery framing. */
+  crops?: Array<{ x: number; y: number; w: number; h: number }>;
   priceCategories: PublicPriceCategory[];
   totalInventory?: number;
   inventoryRemaining?: number;
@@ -98,6 +100,9 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     isUpcoming: raw?.isUpcoming === true || raw?.isUpcoming === 'true',
     notes: Array.isArray(raw?.notes) ? raw.notes : [],
     images: Array.isArray(raw?.images) ? raw.images.filter(Boolean) : [],
+    // Per-media crop records (parallel to images). Kept so the product-page
+    // gallery can apply the exact framing the operator chose in admin.
+    crops: Array.isArray(raw?.crops) ? raw.crops : undefined,
     priceCategories: categories.map((category: any) => ({
       size: String(category?.size || 'Standard'),
       price: Math.max(0, Number(category?.price || 0)),

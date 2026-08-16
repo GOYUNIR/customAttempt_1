@@ -116,13 +116,14 @@ export default function LinkPreviewGallery({ branding, themeColors }: GalleryPro
   );
   const text = safeCssColor(branding.shareText || themeColors.textMain, '#F5F2E9');
 
-  // Match the server card URL priority: env site URL → current host → admin
-  // Branding → Share URL. Public env vars are inlined client-side; server-only
-  // aliases are approximated by the current host.
+  // Match the server card URL priority (env site URL → current host → admin
+  // Branding → Share URL). When the buyer HAS configured a Share URL we prefer
+  // it in the preview so the card shows the REAL production domain even while
+  // editing on localhost; otherwise the current host is what production will use.
   const publicEnvUrl = String(
     (typeof process !== 'undefined' && (process.env.NEXT_PUBLIC_URL || process.env.NEXT_PUBLIC_SITE_URL)) || '',
   ).replace(/\/+$/, '');
-  const displaySite = cardSiteUrlDisplay(publicEnvUrl || host || branding.shareUrl, host || 'example.com');
+  const displaySite = cardSiteUrlDisplay(publicEnvUrl || branding.shareUrl || host, host || 'example.com');
   const copyLink = previewSiteUrl(
     branding.shareUrl || publicEnvUrl || host,
     origin || `https://${host || 'example.com'}`,

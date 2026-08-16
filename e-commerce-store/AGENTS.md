@@ -192,11 +192,16 @@ Full CRUD for products, images, settings, draws, entries, promos, users, and
 the ledger. Settings tabs include:
 
 - **Products** — add/edit/duplicate/publish/archive, price categories, Stripe
-  IDs, inventory, winner tiers, images, sort order.
+  IDs, inventory, winner tiers, images **+ videos** (PNG/JPEG/JPG/SVG/WEBP/GIF/BMP +
+  MP4/MOV/MKV/AVI/WEBM), per-photo **crop tool with live desktop/mobile previews**
+  (crops stored per-media in the product's `crops` array, parallel to `images`),
+  sort order.
 - **Settings → Theme Colors / Design Presets** — colors, fonts, radius,
   transparency, one-click presets (`lib/theme-presets.ts`).
 - **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
-- **Settings → Hero Content / Entry Form / Footer / Storefront copy** — copy overrides.
+- **Settings → Hero Content / Entry Form / Footer / Storefront copy** — copy overrides
+  (including the product-page urgency/status lines: `urgencyInStock`,
+  `urgencySoldOut`, `statusLive`, `statusArchived`).
   Hero + prose fields are **textareas** (type Enter for a real line break; the
   storefront renders them with `white-space: pre-line`).
 - **Settings → Behavior** — **Start at the top when the page opens** (default ON):
@@ -489,6 +494,19 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-15 — Finalization & polish pass (all reported issues):**
+  - **📈 "Total raffle entries not inflating thru the day" — FIXED.** The auto-increment only ran on the authenticated cron route (`/api/analytics/social-tick`), and Vercel Hobby allows max ONE cron run per day — so the boost never ticked during the day. New shared engine `lib/social-proof.ts` (`maybeAutoIncrementSocialProof`) is now called by BOTH the cron route AND the PUBLIC `/api/analytics/heartbeat` (rate-limited 120/min/IP) the home page calls on every load — so real visitor traffic nudges the counter upward through the day, with hard daily caps/gap windows that a script can't blow past. Defaults bumped (chance 0.15→0.18, amount 1→2, max/day 4→15, min-gap 3h→1h) in all five config paths (static + seed + `/api/store/config`), and the home page now POLLS the heartbeat every 30s so the displayed count refreshes live. The cron `social-tick` route is unchanged in behavior (same shared engine).
+  - **📱 2FA "Remember this device for 30 days" checkbox — FIXED for mobile.** The label-wrapped controlled checkbox could be flaky on iOS/Android (tap lands on the text, not the input). The row now has `htmlFor`/`id`, and the label's `onClick` forces the toggle (preventDefault + setState) when the tap misses the input — so it always checks/unchecks when pressed.
+  - **🖼 Product media formats — EXPANDED.** The products panel now accepts **PNG · JPEG · JPG · SVG · WEBP · GIF · BMP** (photos auto-compress) AND **videos: MP4 · MOV · MKV · AVI · WEBM** (stored as-is). `compressImageFile` keeps SVG/GIF/video bytes original (canvas would destroy transparency/animation; videos can't rasterize). `/api/admin/upload` validates MIME/extension (415 on unsupported), keeps 6MB image / 18MB video caps, and stores `data:video/…` URLs. The format list is shown right under the file input.
+  - **🎬 Videos to the site.** Product galleries, home cards and catalog tiles render `<video>` for video items (muted looping cover on cards; inline controls on the product page + catalog modal). Admin thumbnails show a ▶ badge.
+  - **⏳ Save locked while uploading.** New `imageUploadBusy` state disables "Save Product" (label flips to "Uploading…" with a spinner + per-file progress) and `saveProduct` refuses to run mid-upload — a product can never be saved with a half-finished media list.
+  - **✂️ Post-crop preview (computer + mobile) with adjustable crop + aspect labels.** New `lib/media.ts` (isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel) + `CropEditor` in the products panel: for every photo you can drag to pan, zoom with a slider, and see TWO live previews labeled with the aspect ratio each device uses — **Computer · 2:1 (560×280)** and **Mobile · 1.17:1 (328×280)** — exactly what the product page renders. Crops are stored per-media in a parallel `product.crops` array (wired through `/api/admin/products`, `/api/store` sanitizer, `lib/storefront-config.ts`) and applied 1:1 on the product-page gallery via `coverStyle`; default crop = classic centered cover + Ken Burns, so existing products are unaffected.
+  - **✏️ 'Handmade allocation. Low supply by design.' / 'Reserved for collectors moving early…' now admin-editable.** New Storefront copy overrides in Settings → Storefront copy: `urgencyInStock`, `urgencySoldOut`, `statusLive`, `statusArchived` (leave empty = built-in). Wired into the product page.
+  - **🗓 'Repeat this raffle on a schedule while inventory remains' explained.** The admin product form now says the cadence only starts AFTER the "Countdown ends at" timer hits zero (first draw fires on that timer, then the cadence rolls forward), and tells the operator to clear "Countdown ends at" to start the raffle at release.
+  - **🃏 Link preview / share card.** `cardSiteUrlDisplay` hardened (can NEVER return '' / a scheme-only `https:` leftover). The admin preview now prefers the configured Branding → Share URL so the top-right domain shows the REAL production domain even on localhost. Cleaned the buyer's live `store:config.branding` (shareImageUrl/shareTitle/shareTagline were literally `goyunir.com` — not an image). `CARD_REVISION` bumped 5→6 so WhatsApp/iMessage/Discord re-fetch.
+  - **🎨 'Live preview — top bar & footer' rebuilt to match the real SiteChrome** — glass chrome background (chromeTransparency + color-mix), readable auto-picked header text, MORE pill, centered logo+name per headerMode, account + Bag/Cart icons, and the real footer (Terms/Privacy/Shipping/Manage My Entry, social links, tagline, copyright).
+  - Tests: `tests/media.test.ts` added (9 cases); `npm test` 36/36, `tsc --noEmit` clean, `eslint` clean on every touched file. Docs: this changelog + namespace notes. No new Redis keys (crops live inside the product object; the boost/tick state reuses `analytics:ticks`).
 
 - **2026-08-15 — CRITICAL: "I entered after the countdown restarted and got charged early" is fixed forever + custom per-raffle intervals (lead engine work):**
   - **💥 Cycle-aware draws.** The draw engine (`lib/auto-draw.ts` → `evaluatePoolDue`) now treats the persisted `releaseEndsAt` as the cycle boundary and draws ONLY entries whose `registeredAt` is before it (`splitEntriesByCycleEnd` in `lib/drop-timestamps.ts`). Root cause of the bug: when a cycle ended with an empty pool (or a missed draw), the product's persisted `releaseEndsAt` stayed in the PAST while the storefront showed a read-time "new countdown" — the next trigger drew EVERYTHING in the pool, including a customer who had just entered for the NEW round, and charged them. Now: post-cycle entrants are carried over untouched (they can never be charged before the timer they saw hits zero), and a stale recurring cycle with no eligible entries simply rolls `releaseEndsAt` forward WITHOUT drawing. This also fixes the "empty pool at cycle end → first entrant instantly charged" case. New `entries:pool` writes already carry `registeredAt`; legacy entries without one stay eligible so they're never stranded.

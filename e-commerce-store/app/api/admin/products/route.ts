@@ -243,6 +243,14 @@ export async function POST(request: Request) {
     sortOrder: has('sortOrder') ? numberOr(body.sortOrder, existing?.sortOrder || 0) : (existing?.sortOrder || 0),
     notes: Array.isArray(body.notes) ? body.notes : (existing?.notes || []),
     images: Array.isArray(body.images) ? body.images : (existing?.images || []),
+    // Per-media crop records (parallel to `images`). Stored so the storefront
+    // gallery can show the exact framed region the operator chose in admin.
+    crops: (() => {
+      const images = Array.isArray(body.images) ? body.images : (existing?.images || []);
+      if (Array.isArray(body.crops)) return body.crops;
+      if (Array.isArray(existing?.crops)) return existing.crops;
+      return images.map(() => ({ x: 0.5, y: 0.5, w: 1, h: 1 }));
+    })(),
     maxRaffleAllocationLimit: has('maxRaffleAllocationLimit') ? numberOr(body.maxRaffleAllocationLimit, existing?.maxRaffleAllocationLimit || 0) : (existing?.maxRaffleAllocationLimit || 0),
     totalInventory: has('totalInventory') ? numberOr(body.totalInventory, existing?.totalInventory || 0) : (existing?.totalInventory || 0),
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),

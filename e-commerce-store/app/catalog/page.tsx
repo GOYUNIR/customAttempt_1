@@ -10,6 +10,7 @@ import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, themeRadiusNumber, cardSheen, cardShadowStyle } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
+import { isVideoMedia } from '@/lib/media';
 
 interface CatalogItem {
   name: string;
@@ -332,14 +333,19 @@ export default function CatalogPage() {
               style={{
                 width: '100%',
                 aspectRatio: '1/1',
-                background: item.image ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
+                background: item.image && !isVideoMedia(item.image) ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#777',
                 fontSize: '10px',
+                overflow: 'hidden',
+                position: 'relative',
               }}
             >
+              {item.image && isVideoMedia(item.image) ? (
+                <video src={item.image} muted loop autoPlay playsInline preload="metadata" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+              ) : null}
               {!item.image && 'NO IMAGE'}
             </div>
             <div style={{ padding: '10px 12px' }}>
@@ -575,10 +581,16 @@ export default function CatalogPage() {
                   width: '100%',
                   aspectRatio: '4/3',
                   borderRadius: themeRadius(configPalette, 16),
-                  background: selectedItem.image ? `url(${selectedItem.image}) center/cover` : '#1a1a1a',
+                  background: selectedItem.image && !isVideoMedia(selectedItem.image) ? `url(${selectedItem.image}) center/cover` : '#1a1a1a',
                   marginBottom: '16px',
+                  overflow: 'hidden',
+                  position: 'relative',
                 }}
-              />
+              >
+                {selectedItem.image && isVideoMedia(selectedItem.image) ? (
+                  <video src={selectedItem.image} controls playsInline style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : null}
+              </div>
               <h3 style={{ fontSize: '18px', fontFamily: 'serif', margin: '0 0 4px 0', color: configPalette.cardTextMain }}>{selectedItem.name}</h3>
               <div style={{ fontSize: '11px', color: configPalette.cardTextMuted, marginBottom: '12px' }}>
                 {selectedItem.status}

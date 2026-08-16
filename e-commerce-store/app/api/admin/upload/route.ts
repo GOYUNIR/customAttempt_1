@@ -1,7 +1,28 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient , verifyAdminPassword, PRODUCTS_KEY} from '@/lib/server-config';
+import { createRedisClient, verifyAdminPassword, PRODUCTS_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
+
+// The products panel accepts images AND videos. Photos are compressed client-
+// side (jpg/png/webp/bmp/avif → JPEG); vector/animated (svg/gif) and ALL videos
+// are stored with their original bytes, so the server keeps per-type caps.
+const ACCEPTED_IMAGE_EXTS = new Set(['png', 'jpeg', 'jpg', 'svg', 'webp', 'gif', 'bmp', 'avif']);
+const ACCEPTED_VIDEO_EXTS = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm']);
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6MB — photos are auto-compressed
+const MAX_VIDEO_BYTES = 18 * 1024 * 1024; // 18MB — videos are stored as-is
+
+function mediaKind(file: File): 'image' | 'video' | null {
+  const name = String(file.name || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+  const type = String(file.type || '').toLowerCase();
+  if (type.startsWith('image/') || ACCEPTED_IMAGE_EXTS.has(ext)) {
+    return ACCEPTED_IMAGE_EXTS.has(ext) ? 'image' : type.startsWith('image/') ? 'image' : null;
+  }
+  if (type.startsWith('video/') || ACCEPTED_VIDEO_EXTS.has(ext)) {
+    return ACCEPTED_VIDEO_EXTS.has(ext) ? 'video' : type.startsWith('video/') ? 'video' : null;
+  }
+  return null;
+}
 
 export async function POST(request: Request) {
   try {
@@ -23,14 +44,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing productId or file' }, { status: 400 });
     }
 
-    if (file.size > 6 * 1024 * 1024) {
-      return NextResponse.json({ error: 'Image is too large. Keep uploads under 6MB (the admin form compresses images automatically).' }, { status: 413 });
+    const kind = mediaKind(file);
+    if (!kind) {
+      return NextResponse.json({
+        error: 'Unsupported file type. Use PNG, JPEG, JPG, SVG, WEBP, GIF, BMP or video (MP4, MOV, MKV, AVI, WEBM).',
+      }, { status: 415 });
     }
 
-    // Read the file as base64 data URL
+    const cap = kind === 'video' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+    if (file.size > cap) {
+      const mb = Math.round(cap / 1024 / 1024);
+      return NextResponse.json({
+        error: kind === 'video' ? `Video is too large. Keep uploads under ${mb}MB.` : `Image is too large. Keep uploads under ${mb}MB (the admin form compresses photos automatically).`,
+      }, { status: 413 });
+    }
+
+    // Read the file as base64 data URL — the same storage format the product
+    // page gallery renders (data: URLs for both images and videos).
     const buffer = await file.arrayBuffer();
     const base64 = Buffer.from(buffer).toString('base64');
-    const mimeType = (file.type || 'image/jpeg').toLowerCase();
+    const mimeType = (file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg')).toLowerCase();
     const dataUrl = `data:${mimeType};base64,${base64}`;
 
     // Get the current product from Redis
@@ -58,6 +91,10 @@ export async function POST(request: Request) {
     const alreadyPresent = product.images.some((image: unknown) => typeof image === 'string' && image === dataUrl);
     if (!alreadyPresent) {
       product.images.push(dataUrl);
+      // Keep the parallel crop list aligned with the media list.
+      if (Array.isArray(product.crops)) {
+        product.crops.push({ x: 0.5, y: 0.5, w: 1, h: 1 });
+      }
     }
     product.updatedAt = new Date().toISOString();
 
@@ -67,11 +104,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: 'Image uploaded successfully',
+      message: 'File uploaded successfully',
       imageCount: product.images.length,
     });
   } catch (err: any) {
     console.error('[upload/route] Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: 'Upload failed. Please try again.' }, { status: 500 });
   }
 }

@@ -89,7 +89,9 @@ Everything happens in `/admin`:
 
 - **Products** — add / edit / duplicate / publish / archive products, set sizes
   (`priceCategories`), prices, Stripe Price IDs, inventory, winner tiers,
-  images, and sort order. New products are **hidden** until you publish them.
+  images **and videos** (PNG · JPEG · JPG · SVG · WEBP · GIF · BMP + MP4 · MOV ·
+  MKV · AVI · WEBM), per-photo **crop with live desktop/mobile previews**, and
+  sort order. New products are **hidden** until you publish them.
 - **Catalog** — move items between Upcoming / Archive previews.
 - **Draws** — trigger a draw manually, view draw history, search the permanent
   entry ledger.
