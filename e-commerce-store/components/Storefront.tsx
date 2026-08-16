@@ -16,6 +16,12 @@ import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
+// How long before a still-due draw trigger re-arms. Mirrors the lib/client-auto-draw
+// re-arm window so a tab left open past the zero-moment gets another nudge + page
+// refresh if the pool somehow stayed open — but a re-fetch that returns the SAME due
+// anchor can never re-trigger sooner than this (that loop was what reset the visitor's
+// selected size every ~1.5s).
+const DRAW_TRIGGER_REARM_MS = 4 * 60 * 1000;
 
 /**
  * Address quality gate for checkout. The validator requires a COMPLETE
@@ -199,6 +205,16 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     zoomDurationSeconds: 14,
   });
 
+  // Remembers which product is currently loaded so re-fetches of the SAME product
+  // (e.g. the countdown-zero refresh) never reset the visitor's selected size or
+  // flip the gallery back to photo 1. Only a real product switch resets those.
+  const productIdRef = useRef<string>('');
+  // Guards the draw-trigger block (notify + re-fetch) so it fires at most once per
+  // product + cycle boundary, re-arming after DRAW_TRIGGER_REARM_MS. Persists across
+  // effect re-runs — the old local `notified` flag reset on every re-run, which let a
+  // re-fetch that returned the same due anchor loop forever.
+  const dueHandledRef = useRef<{ productId: string; anchor: number; at: number }>({ productId: '', anchor: NaN, at: 0 });
+
   // Live Mapbox autofill hint (drives the small status line under the shipping
   // field). Updated whenever lib/mapbox-autofill.ts refreshes its status, plus a
   // safety poll: the SDK's attach loop can finish after the last status event,
@@ -312,8 +328,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           setRaffleDueAt(Number.isFinite(dueMs) && dueMs > 0 ? dueMs : null);
         }
         const cats = data.product.priceCategories || [];
-        if (cats.length > 0) setSelectedSize(cats[0].size);
-        setSelectedImageIndex(0);
+        // Preserve the visitor's size selection across re-fetches. A re-fetch
+        // fires right after a countdown-zero draw trigger, and blindly resetting
+        // `selectedSize` to the first category made the size chips appear to
+        // "switch by themselves" the instant the visitor picked a different size.
+        // Only choose a default when the current selection is empty or no longer
+        // valid for THIS product.
+        const nextProductId = String(data.product.id || '');
+        const isSameProduct = productIdRef.current === nextProductId;
+        productIdRef.current = nextProductId;
+        setSelectedSize((prev) => {
+          if (prev && cats.some((cat: any) => cat.size === prev)) return prev;
+          return cats.length > 0 ? cats[0].size : prev;
+        });
+        // Only reset the gallery when the visitor actually switched products —
+        // never on a same-product re-fetch (which would also flicker the photo
+        // back to image 1 every time the countdown re-syncs).
+        if (!isSameProduct) setSelectedImageIndex(0);
       } else {
         setError('Product not found');
       }
@@ -844,7 +875,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       setCountdownLabel('');
       return;
     }
-    let notified = false;
     let refreshTimer: number | null = null;
     const update = () => {
       const now = Date.now();
@@ -854,20 +884,30 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       // this fire-and-forget ping can never double-charge even if several
       // tabs / visitors hit zero at the same second. `notifyDropDue` retries
       // on failure, so a flaky connection can't silently miss the drop.
-      if (raffleDueAt !== null && raffleDueAt <= now && !notified) {
-        notified = true;
-        notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
-        // Re-anchor after the draw trigger: an "opens in" countdown (upcoming
-        // product) that just hit zero means the drop OPENED — re-fetch so the
-        // timer flips to counting down to releaseEndsAt. A LIVE product whose
-        // releaseEndsAt just passed (or was already passed on load) gets the
-        // same re-fetch so the page reflects the draw result (and any new
-        // recurring-raffle timer) instead of freezing on "Raffle closed"
-        // while the server works.
-        if (product?.slug) {
-          refreshTimer = window.setTimeout(() => {
-            fetchProduct(String(product.slug), true).catch(() => {});
-          }, 1500);
+      //
+      // A persistent ref (anchor + 4-min re-arm window) guards this block: a
+      // re-fetch that returns the SAME due anchor can't re-trigger it. The old
+      // per-effect `notified` flag reset on every re-run, so the very re-fetch
+      // this block schedules made the effect re-run → re-notify → re-fetch in
+      // an endless ~1.5s loop — and every re-fetch reset the visitor's size.
+      if (raffleDueAt !== null && raffleDueAt <= now) {
+        const handled = dueHandledRef.current;
+        const triggerKey = String(product?.id || '');
+        if (handled.productId !== triggerKey || handled.anchor !== raffleDueAt || now - handled.at > DRAW_TRIGGER_REARM_MS) {
+          dueHandledRef.current = { productId: triggerKey, anchor: raffleDueAt, at: now };
+          notifyDropDue({ productId: String(product?.id || ''), productName: String(product?.name || ''), slug: String(product?.slug || '') });
+          // Re-anchor after the draw trigger: an "opens in" countdown (upcoming
+          // product) that just hit zero means the drop OPENED — re-fetch so the
+          // timer flips to counting down to releaseEndsAt. A LIVE product whose
+          // releaseEndsAt just passed (or was already passed on load) gets the
+          // same re-fetch so the page reflects the draw result (and any new
+          // recurring-raffle timer) instead of freezing on "Raffle closed"
+          // while the server works.
+          if (product?.slug) {
+            refreshTimer = window.setTimeout(() => {
+              fetchProduct(String(product.slug), true).catch(() => {});
+            }, 1500);
+          }
         }
       }
 
@@ -1380,7 +1420,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 const accent = configPalette.checkoutCtaButton || '#635bff';
                 const chipSelected = selectedSize === cat.size;
                 return (
-                  <button key={cat.size} onClick={() => setSelectedSize(cat.size)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <button key={cat.size} type="button" onClick={() => setSelectedSize(cat.size)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
                     <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                       {chipMode === 'FCFS' ? 'buy' : 'raffle'}

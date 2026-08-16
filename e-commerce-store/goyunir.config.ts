@@ -188,6 +188,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       priceCategories: [
         { size: 'Standard', price: 95, stripeId: '', winnerTiers: '3,2,2' }
       ],
+      crops: [{ x: 0.5, y: 0.5, w: 1, h: 1 }, { x: 0.5, y: 0.34, w: 0.86, h: 0.86 }, { x: 0.5, y: 0.5, w: 1, h: 1 }],
+      categories: ['Perfume', 'Unisex'],
+      customDropSchedule: { mode: 'custom', customIntervalHours: 12, timezone: 'America/Los_Angeles' },
       notes: [
         { label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' },
       ],
@@ -208,8 +211,10 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
       tagline: 'RAFFLE / LIVE',
       desc: 'High-intent raffle queue with limited winners.',
       priceCategories: [
-        { size: 'Standard', price: 110, stripeId: '', winnerTiers: '2,2,1' }
+        { size: 'Standard', price: 110, stripeId: '', winnerTiers: '2,2,1' },
+        { size: 'Collector', price: 175, stripeId: '', winnerTiers: '1,1' },
       ],
+      categories: ['Perfume', 'Men'],
       notes: [
         { label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' },
       ],
@@ -240,14 +245,15 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
           fullSize: 'Full Bottle',
           creditCents: 1500,
           minOrderSubtotalCents: 9000,
-          neverExpires: false,
-          expiresDays: 60,
+          neverExpires: true,
+          expiresDays: null,
           codePrefix: 'NOIR',
           eligibleProductSlugs: ['noir-citrus-instant-drop'],
           eligibleSizes: ['Full Bottle'],
-          note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade.',
+          note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade. This credit never expires.',
         },
       ],
+      categories: ['Perfume', 'Unisex'],
       notes: [
         { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },
       ],

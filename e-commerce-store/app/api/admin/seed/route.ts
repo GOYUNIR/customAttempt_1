@@ -25,6 +25,17 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Manufactured scarcity, email capture, and careful winner selection on a marquee product.' },
     ],
     priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
+    // Per-media crop records (parallel to images) — showcases the admin crop
+    // tool output: photo 1 is the default full-frame, photo 2 is an operator
+    // crop (tighter, higher framing), photo 3 defaults.
+    crops: [{ x: 0.5, y: 0.5, w: 1, h: 1 }, { x: 0.5, y: 0.34, w: 0.86, h: 0.86 }, { x: 0.5, y: 0.5, w: 1, h: 1 }],
+    // Category tags drive the /catalog filter bar + chips on home cards and the
+    // product page (admin-managed list in Settings → Catalog → Product categories).
+    categories: ['Perfume', 'Unisex'],
+    // Per-product recurring raffle schedule: after the first countdown ends and
+    // the draw fires, the engine ROLLS the timer forward by this cadence
+    // (here: a new raffle round every 12 hours) instead of closing the pool.
+    customDropSchedule: { mode: 'custom', customIntervalHours: 12, timezone: 'America/Los_Angeles' },
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 120, totalInventory: 120, winnerTiers: [3, 2, 2], releaseEndsAt: isoIn(2 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -37,7 +48,11 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Lower instant revenue than FCFS and a higher chance customers feel “waitlisted” if the pool overfills.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'VIP / early-access releases where exclusivity is the whole point.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }, { size: 'Collector', price: 175, stripeId: defaultStripePriceId(), winnerTiers: '1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
+    // Multi-size RAFFLE demo: two sizes, each with its own winner-tier CSV
+    // (Standard 2→2→1, Collector 1→1). Entry allocation is capped by
+    // maxRaffleAllocationLimit; per-size stock is showcased on the FCFS demo (p4).
+    categories: ['Perfume', 'Men'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -52,7 +67,8 @@ const DEFAULT_PRODUCTS = [
     ],
     priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0', checkoutMode: 'FCFS' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '2,2', checkoutMode: 'RAFFLE' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'],
-    samplerSizes: [{ size: 'Sampler Set', label: 'Trial', fullSize: 'Full Bottle', creditCents: 1500, minOrderSubtotalCents: 9000, neverExpires: false, expiresDays: 60, codePrefix: 'NOIR', eligibleProductSlugs: ['noir-citrus-instant-drop'], eligibleSizes: ['Full Bottle'], note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade.' }],
+    samplerSizes: [{ size: 'Sampler Set', label: 'Trial', fullSize: 'Full Bottle', creditCents: 1500, minOrderSubtotalCents: 9000, neverExpires: true, expiresDays: null, codePrefix: 'NOIR', eligibleProductSlugs: ['noir-citrus-instant-drop'], eligibleSizes: ['Full Bottle'], note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade. This credit never expires.' }],
+    categories: ['Perfume', 'Unisex'],
     createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -66,6 +82,11 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Polished launches where the goal is speed and order value, not manufactured scarcity.' },
     ],
     priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
+    // Per-size inventory showcase: 3 sizes, 3 different stock levels. Live
+    // states seed each size's own inventory and the admin Inventory & Limits
+    // panel shows the per-size editor.
+    inventoryPerSize: { 'Fabric Card': 40, 'Travel Spray': 60, 'Full Bottle': 40 },
+    categories: ['Perfume', 'Women'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -79,7 +100,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Teaser launches, influencer announcements, and anything that benefits from a fixed opening time.' },
     ],
     priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p6', name: 'Solar Drift — Upcoming FCFS', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'Upcoming direct-buy release that opens in under an hour — a quick countdown demo.',
@@ -92,7 +113,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Time-boxed launches where precision timing is the hook.' },
     ],
     priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, categories: ['Perfume', 'Summer'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p7', name: 'Monolith Air — Upcoming', slug: 'monolith-air-upcoming', prefix: 'obsidian-void', tagline: 'UPCOMING / RAFFLE', desc: 'Low-allocation upcoming raffle with a visible countdown before activation.',
@@ -105,7 +126,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Statement pieces and collector drops where scarcity IS the product.' },
     ],
     priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, categories: ['Perfume', 'Men'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p8', name: 'Atlas Bloom — Archive', slug: 'atlas-bloom-archive', prefix: 'baseItem2', tagline: 'ARCHIVE', desc: 'Completed direct drop that stays on the record as proof of demand.',
@@ -118,7 +139,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'A living archive that makes “everything sells out” look like the norm.' },
     ],
     priceCategories: [{ size: 'Standard', price: 118, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], categories: ['Perfume', 'Women'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p9', name: 'Cinder Wave — Archive', slug: 'cinder-wave-archive', prefix: 'baseItem1', tagline: 'ARCHIVE', desc: 'Historic raffle archive entry that keeps old winner records presentable.',
@@ -131,7 +152,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Proving a track record before the next launch opens.' },
     ],
     priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p10', name: 'Mirage Salt — Hidden Draft', slug: 'mirage-salt-hidden-draft', prefix: 'baseItem2', tagline: 'DRAFT', desc: 'Hidden draft to simulate a non-published product staged for a future release.',
@@ -144,7 +165,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Pre-launch staging, client review, and seasonal planning.' },
     ],
     priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], categories: ['Perfume', 'Winter'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p11', name: 'Night Petal — Live Draw', slug: 'night-petal-live-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'Secondary live raffle that runs in parallel with the hero draw.',
@@ -157,7 +178,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Companion pieces, regional variants, or a second tier running beside the flagship.' },
     ],
     priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], categories: ['Perfume', 'Women'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p12', name: 'Quartz Ember — Live FCFS', slug: 'quartz-ember-live-fcfs', prefix: 'obsidian-void', tagline: 'FCFS / LIVE', desc: 'Additional direct-buy listing to stress-test cart and checkout UX.',
@@ -170,7 +191,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Cart stress testing, bundles, and higher-volume direct SKUs.' },
     ],
     priceCategories: [{ size: 'Standard', price: 152, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
-    maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Perfume', 'Men'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p13', name: 'Halo Moss — Sold Out Proof', slug: 'halo-moss-sold-out-proof', prefix: 'baseItem1', tagline: 'FCFS / SOLD OUT', desc: 'A live-listed, fully sold-out drop kept visible as social proof.',
@@ -183,7 +204,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Keeping a catalog looking successful between drops.' },
     ],
     priceCategories: [{ size: 'Standard', price: 88, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p14', name: 'Gilded Hour — Member Bundle', slug: 'gilded-hour-member-bundle', prefix: 'baseItem2', tagline: 'MIXED / LIVE', desc: 'A three-size drop that mixes formats: the Discovery Kit sells instantly while the Full Bottle and Grand Size run raffles — with a delivery incentive that upsells the kit into the hero size.',
@@ -198,6 +219,7 @@ const DEFAULT_PRODUCTS = [
     priceCategories: [{ size: 'Discovery Kit', price: 42, stripeId: defaultStripePriceId(), winnerTiers: '0', checkoutMode: 'FCFS' }, { size: 'Full Bottle', price: 168, stripeId: defaultStripePriceId(), winnerTiers: '2,2', checkoutMode: 'RAFFLE' }, { size: 'Grand Size', price: 240, stripeId: defaultStripePriceId(), winnerTiers: '1,1', checkoutMode: 'RAFFLE' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 4, maxPerCart: 4, maxRaffleAllocationLimit: 0, totalInventory: 220, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 30, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 2000, deliveryIncentiveMinOrderSubtotalCents: 12000, deliveryIncentiveExpiresDays: 45, deliveryIncentiveCodePrefix: 'GILDE', deliveryIncentiveTriggerSizes: ['Discovery Kit'], deliveryIncentiveEligibleProductSlugs: ['gilded-hour-member-bundle'], deliveryIncentiveEligibleSizes: ['Full Bottle', 'Grand Size'],
     samplerSizes: [{ size: 'Discovery Kit', label: 'Discovery', fullSize: 'Full Bottle', creditCents: 2000, minOrderSubtotalCents: 12000, neverExpires: false, expiresDays: 45, codePrefix: 'GILDE', eligibleProductSlugs: ['gilded-hour-member-bundle'], eligibleSizes: ['Full Bottle', 'Grand Size'], note: 'Three minis so you can live with the scent for a week before committing to the full bottle.' }],
+    categories: ['Perfume', 'Unisex', 'Winter'],
     createdAt: NOW, updatedAt: NOW,
   },
 ];
@@ -370,10 +392,50 @@ const DEFAULT_CONFIG = {
       momentum: 40,
     },
   },
+  // Store behavior (admin → Settings → Behavior). Default ON: the storefront
+  // forces scrollTo(0,0) on every load so the browser never reopens mid-page.
+  behavior: {
+    scrollToTopOnLoad: true,
+  },
+  // Order-reference code prefix (admin → Settings → Checkout & Orders → Reference
+  // code prefix). Order refs are rendered as `GU-XXXX…` (normalizeRefPrefix caps
+  // uppercase A-Z0-9, ≤4 chars).
+  refPrefix: 'GU',
   legal: DEFAULT_LEGAL,
 };
 
+/**
+ * Structural guard for the seed catalog — a broken seed is a bug. Validates the
+ * invariants the storefront relies on so a bad edit can never seed a broken
+ * storefront: `crops` must parallel `images`, samplers must reference real
+ * price categories, and `inventoryPerSize` keys must match `priceCategories`.
+ */
+function validateSeedProducts(products: any[]) {
+  for (const product of products) {
+    const sizeNames = (product.priceCategories || []).map((c: any) => String(c?.size || 'Standard'));
+    const images = Array.isArray(product.images) ? product.images : [];
+    if (Array.isArray(product.crops) && product.crops.length !== images.length) {
+      throw new Error(`[seed] ${product.id} (${product.name}): crops (${product.crops.length}) must parallel images (${images.length})`);
+    }
+    if (Array.isArray(product.samplerSizes)) {
+      for (const s of product.samplerSizes) {
+        if (!sizeNames.includes(String(s?.size || ''))) {
+          throw new Error(`[seed] ${product.id} (${product.name}): sampler size "${s?.size}" is not a price category`);
+        }
+      }
+    }
+    if (product.inventoryPerSize && typeof product.inventoryPerSize === 'object') {
+      for (const size of Object.keys(product.inventoryPerSize)) {
+        if (!sizeNames.includes(size)) {
+          throw new Error(`[seed] ${product.id} (${product.name}): inventoryPerSize key "${size}" is not a price category`);
+        }
+      }
+    }
+  }
+}
+
 export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liveSeeded: number; verifyCount: number }> {
+  validateSeedProducts(DEFAULT_PRODUCTS);
   const existing = await redis.hgetall(PRODUCTS_KEY);
   if (existing && Object.keys(existing).length > 0) {
     return { seeded: 0, liveSeeded: 0, verifyCount: Object.keys(existing).length };
@@ -400,13 +462,19 @@ export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liv
       : [{ size: 'Standard' }];
     for (const cat of categories) {
       try {
-        // Seed the live state with the product's first-tier winner count (e.g.
-        // winnerTiers [3,2,2] → 3 winners on draw 1). Passing it here means the
-        // admin's Trigger Drop and the auto-draw engine agree with the product's
+        // Seed the live state with the SIZE's own first-tier winner count (e.g.
+        // priceCategories[].winnerTiers '3,2,2' → 3 winners on draw 1, falling
+        // back to the product-level winnerTiers[0]). Passing it here means the
+        // admin's Trigger Drop and the auto-draw engine agree with each size's
         // advertised tiers instead of a default of 1.
-        const firstTier = Array.isArray(product.winnerTiers) && product.winnerTiers.length > 0
-          ? Math.max(1, Number(product.winnerTiers[0]) || 1)
-          : 1;
+        const firstTier = (() => {
+          const sizeCsv = String((cat as any)?.winnerTiers || '');
+          const firstFromSize = Number(sizeCsv.split(',')[0]?.trim());
+          if (Number.isFinite(firstFromSize) && firstFromSize > 0) return Math.max(1, Math.floor(firstFromSize));
+          return Array.isArray(product.winnerTiers) && product.winnerTiers.length > 0
+            ? Math.max(1, Number(product.winnerTiers[0]) || 1)
+            : 1;
+        })();
         await getLiveProductState(redis, product, String(cat.size || 'Standard'), firstTier);
         liveSeeded++;
       } catch (err: any) {
