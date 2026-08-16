@@ -81,8 +81,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     autoIncrementEnabled: true,
     autoIncrementChancePerHeartbeat: 0.18,
     autoIncrementAmount: 2,
-    autoIncrementMaxPerDay: 15,
-    autoIncrementMinHourGap: 1,
+    autoIncrementMaxPerDay: 4,
+    autoIncrementMinPerDay: 3,
+    autoIncrementMinHourGap: 2,
     autoIncrementMaxHourGap: 8,
   },
 

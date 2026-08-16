@@ -3170,8 +3170,12 @@ export default function AdminPortal() {
                     <input type="number" value={socialForm.autoIncrementMaxPerDay ?? 4} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxPerDay: Number(e.target.value) }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
+                  <label style={{ fontSize: 11 }}>Min ticks/day
+                    <input type="number" value={socialForm.autoIncrementMinPerDay ?? 3} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinPerDay: Number(e.target.value) }))}
+                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
+                  </label>
                   <label style={{ fontSize: 11 }}>Min hours between ticks
-                    <input type="number" value={socialForm.autoIncrementMinHourGap ?? 3} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
+                    <input type="number" value={socialForm.autoIncrementMinHourGap ?? 2} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMinHourGap: Number(e.target.value) }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                   <label style={{ fontSize: 11 }}>Max hours between ticks
@@ -3179,6 +3183,10 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                 </div>
+                <p style={{ fontSize: 10, color: '#8b8b95', margin: '0 0 10px' }}>
+                  Default cadence: <strong>3–4 ticks/day</strong> spaced <strong>2–8 hours</strong> apart — the
+                  guaranteed minimum is spread across the day so the counter drifts naturally instead of inflating.
+                </p>
                 <button onClick={saveSocial} style={buttonPrimary}>Save Social Proof</button>
 
                 <h4 style={{ fontSize: 11, color: '#aaa', margin: '20px 0 8px', textTransform: 'uppercase' }}>Abandoned Entry Recovery</h4>

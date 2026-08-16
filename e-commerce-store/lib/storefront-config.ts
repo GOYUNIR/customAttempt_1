@@ -175,8 +175,10 @@ export interface StorefrontConfig {
     autoIncrementEnabled: boolean;
     autoIncrementChancePerHeartbeat: number;
     autoIncrementAmount: number;
-    // "x times a day, x hour threshold" controls for the /api/analytics/social-tick cron:
+    // "x times a day, x hour gap" controls for the social-proof auto-tick
+    // engine (used by /api/analytics/heartbeat + /api/analytics/social-tick):
     autoIncrementMaxPerDay: number;   // hard cap on how many times/day it can tick up
+    autoIncrementMinPerDay: number;   // guaranteed minimum ticks/day (spread across the day)
     autoIncrementMinHourGap: number;  // minimum hours between ticks
     autoIncrementMaxHourGap: number;  // force a tick when stale beyond this threshold
   };
@@ -292,8 +294,9 @@ const defaultSocialProof = {
   autoIncrementEnabled: true,
   autoIncrementChancePerHeartbeat: 0.18,
   autoIncrementAmount: 2,
-  autoIncrementMaxPerDay: 15,
-  autoIncrementMinHourGap: 1,
+  autoIncrementMaxPerDay: 4,
+  autoIncrementMinPerDay: 3,
+  autoIncrementMinHourGap: 2,
   autoIncrementMaxHourGap: 8,
 };
 

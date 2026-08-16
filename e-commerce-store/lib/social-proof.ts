@@ -5,6 +5,7 @@ import {
   TICKS_TODAY_FIELD,
   SOCIAL_PROOF_BOOST_KEY,
 } from '@/lib/server-config';
+import { shouldIncrementSocialProof } from './social-proof-core';
 
 /**
  * The social-proof auto-increment engine. Shared by BOTH triggers so the
@@ -16,12 +17,14 @@ import {
  *   2. `/api/analytics/heartbeat` — the PUBLIC route the home page calls on
  *      every load (rate-limited 120/min/IP). Each heartbeat rolls the same
  *      dice the cron used, so real visitor traffic makes the "total raffle
- *      entries" counter tick upward through the day — with hard daily caps so
- *      it can never run away or be scripted into a fake explosion.
+ *      entries" counter tick upward through the day — with a hard daily cap,
+ *      a guaranteed daily minimum, and a 2–8h spacing window so it drifts
+ *      naturally instead of inflating on a script's schedule.
  *
- * All state lives in the single `analytics:ticks` hash (fields `last` /
- * `today` / `day`) so the Redis key space stays tidy. Reads are cheap and the
- * heartbeat path already rate-limits abuse.
+ * Cadence defaults (all admin-overridable via /admin → Draws → Automation →
+ * Social Proof Counter): minimum 3 ticks/day, hard cap 4 ticks/day, ticks
+ * spaced 2–8 hours apart. All state lives in the single `analytics:ticks`
+ * hash (fields `last` / `today` / `day`) so the Redis key space stays tidy.
  */
 export async function maybeAutoIncrementSocialProof(
   redis: any,
@@ -36,33 +39,30 @@ export async function maybeAutoIncrementSocialProof(
     redis.hget(ANALYTICS_TICKS_KEY, TICKS_TODAY_FIELD).catch(() => null),
     redis.hget(ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD).catch(() => null),
   ]);
+  const newDay = dayStamp !== today;
   // New day → reset the daily tick counter (the boost itself is cumulative).
-  if (dayStamp !== today) {
+  if (newDay) {
     await redis.hset(ANALYTICS_TICKS_KEY, {
       [TICKS_DAY_FIELD]: today,
       [TICKS_TODAY_FIELD]: '0',
     });
   }
 
-  const ticksToday = Number(todayRaw ?? 0);
-  const maxPerDay = Math.max(1, Number(cfg.autoIncrementMaxPerDay ?? 15));
-  if (ticksToday >= maxPerDay) {
-    return { skipped: true, reason: 'daily cap reached', ticksToday };
-  }
-
   const now = Date.now();
-  const last = Number(lastRaw ?? 0);
-  const minGapMs = Math.max(0, Number(cfg.autoIncrementMinHourGap ?? 1)) * 60 * 60 * 1000;
-  const maxGapMs = Math.max(minGapMs, Number(cfg.autoIncrementMaxHourGap ?? 8) * 60 * 60 * 1000);
-  if (last && now - last < minGapMs) {
-    return { skipped: true, reason: 'too soon', nextEligibleInMs: minGapMs - (now - last) };
-  }
-
-  // When the counter has been quiet for a long time it is FORCED to tick so a
-  // low-traffic store still drifts upward; otherwise it rolls a chance dice.
-  const forceDueToMaxGap = last > 0 && now - last >= maxGapMs;
-  if (!forceDueToMaxGap && Math.random() > Number(cfg.autoIncrementChancePerHeartbeat ?? 0.18)) {
-    return { skipped: true, reason: 'chance roll missed' };
+  // On a fresh day the pre-reset `todayRaw` is YESTERDAY's count — the daily
+  // counter restarts at 0 (this fixes a stale-cap skip on the first hit).
+  const ticksToday = newDay ? 0 : Number(todayRaw ?? 0);
+  const decision = shouldIncrementSocialProof(cfg, {
+    now,
+    last: Number(lastRaw ?? 0),
+    ticksToday,
+    dayStamp: today,
+  });
+  if (!decision.ok) {
+    const out: Record<string, unknown> = { skipped: true, reason: decision.reason };
+    if (decision.nextEligibleInMs != null) out.nextEligibleInMs = decision.nextEligibleInMs;
+    if (decision.reason === 'daily cap reached') out.ticksToday = ticksToday;
+    return out;
   }
 
   const amount = Number(cfg.autoIncrementAmount ?? 2) * (1 + Math.floor(Math.random() * 3));
