@@ -608,6 +608,10 @@ const DEFAULT_COPY_SETTINGS = {
   urgencySoldOut: '',
   statusLive: '',
   statusArchived: '',
+  // Mixed-format ribbon shown on product pages that mix raffle + instant-buy
+  // sizes. Template tokens: {raffle} = raffle size count, {fcfs} = instant-buy
+  // size count. Leave empty to keep the built-in sentence.
+  mixedFormatRibbon: '',
 };
 
 const DEFAULT_LEGAL_SETTINGS = {
@@ -1004,6 +1008,12 @@ export default function AdminPortal() {
     customDropSchedule: null,
     soldOutBehavior: 'stay_visible',
     soldOutArchiveDelayHours: 24,
+    // Per-product customer-facing copy overrides (empty = inherit global copy).
+    urgencyInStock: '',
+    urgencySoldOut: '',
+    statusLive: '',
+    statusArchived: '',
+    mixedFormatRibbon: '',
     deliveryIncentiveEnabled: false,
     deliveryIncentiveCreditCents: 0,
     deliveryIncentiveMinOrderSubtotalCents: 0,
@@ -1378,6 +1388,10 @@ export default function AdminPortal() {
       urgencySoldOut: '',
       statusLive: '',
       statusArchived: '',
+      // Mixed-format ribbon: template with {raffle}/{fcfs} count tokens, shown on
+      // the product page when sizes mix raffle + instant-buy. Blank = inherit the
+      // global Settings → Storefront copy (which falls back to the built-in line).
+      mixedFormatRibbon: '',
       soldOutBehavior: 'stay_visible',
       soldOutArchiveDelayHours: 24,
       deliveryIncentiveEnabled: false,
@@ -1537,28 +1551,44 @@ export default function AdminPortal() {
       // any "credits toward" target at the new name if it referenced this size.
       if (field === 'size') {
         const nextSize = String(value || '').trim();
-        const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
-        if (previousSize && nextSize && samplers.some((s: any) => String(s?.size || '').trim().toLowerCase() === previousSize.toLowerCase())) {
-          return {
-            ...prev,
-            priceCategories: updated,
-            samplerSizes: samplers.map((s: any) =>
-              String(s?.size || '').trim().toLowerCase() === previousSize.toLowerCase()
-                ? { ...s, size: nextSize, fullSize: String(s?.fullSize || '').trim().toLowerCase() === previousSize.toLowerCase() ? nextSize : s?.fullSize }
-                : s,
-            ),
-          };
-        }
-        // Re-key any per-size raffle config attached to the renamed size so the
-        // "customize each raffle differently" settings never orphan.
-        const sizeConfigs = { ...(prev.sizeConfigs || {}) };
         const prevKey = previousSize.toLowerCase();
-        if (sizeConfigs[prevKey]) {
-          const cfg = sizeConfigs[prevKey];
-          delete sizeConfigs[prevKey];
-          if (nextSize) sizeConfigs[nextSize.toLowerCase()] = cfg;
-          return { ...prev, priceCategories: updated, sizeConfigs };
+        const nextKey = nextSize.toLowerCase();
+        let sizeConfigs: any = null;
+        let samplerSizes: any = null;
+        let inventoryPerSize: any = null;
+        // Keep EVERY per-size record attached when a size is renamed: the sampler
+        // marker + its "credits toward" pointer, any per-size raffle config, and
+        // the per-size stock. Renaming "Standard" → "Full Bottle" must never orphan
+        // its raffle timer, inventory or trial-SKU setup.
+        if (previousSize && nextSize && prevKey !== nextKey) {
+          const cfg = (prev.sizeConfigs || {})[prevKey];
+          if (cfg) {
+            sizeConfigs = { ...(prev.sizeConfigs || {}) };
+            delete sizeConfigs[prevKey];
+            sizeConfigs[nextKey] = cfg;
+          }
+          const inv = (prev.inventoryPerSize || {})[previousSize];
+          if (inv !== undefined) {
+            inventoryPerSize = { ...(prev.inventoryPerSize || {}) };
+            delete inventoryPerSize[previousSize];
+            inventoryPerSize[nextSize] = inv;
+          }
+          const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+          if (samplers.some((s: any) => String(s?.size || '').trim().toLowerCase() === prevKey)) {
+            samplerSizes = samplers.map((s: any) =>
+              String(s?.size || '').trim().toLowerCase() === prevKey
+                ? { ...s, size: nextSize, fullSize: String(s?.fullSize || '').trim().toLowerCase() === prevKey ? nextSize : s?.fullSize }
+                : s,
+            );
+          }
         }
+        return {
+          ...prev,
+          priceCategories: updated,
+          sizeConfigs: sizeConfigs || prev.sizeConfigs || {},
+          samplerSizes: samplerSizes || prev.samplerSizes || [],
+          inventoryPerSize: inventoryPerSize || prev.inventoryPerSize || {},
+        };
       }
       return { ...prev, priceCategories: updated };
     });
@@ -3520,9 +3550,26 @@ export default function AdminPortal() {
                     </Pill>
                     {productForm.isArchived && <Pill color="#f59e0b" background="rgba(245,158,11,0.14)">Archived</Pill>}
                     {productForm.isUpcoming && <Pill color="#60a5fa" background="rgba(96,165,250,0.14)">Upcoming</Pill>}
-                    <Pill color={productForm.checkoutMode === 'FCFS' ? '#93c5fd' : '#fbbf24'} background={productForm.checkoutMode === 'FCFS' ? 'rgba(59,130,246,0.14)' : 'rgba(245,158,11,0.14)'}>
-                      {productForm.checkoutMode === 'FCFS' ? 'FCFS · instant buy' : 'RAFFLE'}
-                    </Pill>
+                    {(() => {
+                      // Effective per-size modes: per-size override wins, else the
+                      // product-level mode. This drives the MIXED pill so a product
+                      // with one raffle size + one instant-buy size reads correctly.
+                      const cats = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
+                      const productMode = productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+                      const modes: string[] = cats.map((c: any): string => {
+                        const m = String(c?.checkoutMode || '').toUpperCase();
+                        return m === 'RAFFLE' || m === 'FCFS' ? m : productMode;
+                      });
+                      const hasR = modes.includes('RAFFLE');
+                      const hasF = modes.includes('FCFS');
+                      const mixed = hasR && hasF;
+                      if (mixed) {
+                        return <Pill color="#c084fc" background="rgba(168,85,247,0.16)">MIXED · 🎟 {modes.filter((m) => m === 'RAFFLE').length} raffle + ⚡ {modes.filter((m) => m === 'FCFS').length} instant-buy</Pill>;
+                      }
+                      return <Pill color={hasF ? '#93c5fd' : '#fbbf24'} background={hasF ? 'rgba(59,130,246,0.14)' : 'rgba(245,158,11,0.14)'}>
+                        {hasF ? 'FCFS · instant buy' : 'RAFFLE'}
+                      </Pill>;
+                    })()}
                     {(() => {
                       const hasSamplers = Array.isArray(productForm.samplerSizes) && productForm.samplerSizes.length > 0;
                       return hasSamplers ? <Pill color="#34d399" background="rgba(52,211,153,0.14)">🧪 trial SKU</Pill> : null;
@@ -3554,8 +3601,10 @@ export default function AdminPortal() {
                   </div>
                 </div>
 
-                {/* Quick-jump nav so the long product form is navigable. */}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                {/* Quick-jump nav so the long product form is navigable. Sticky at
+                    top: 92 (below the fixed storefront header) so the section pills
+                    stay reachable no matter how deep into the form you scroll. */}
+                <div style={{ position: 'sticky', top: 92, zIndex: 10, display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12, padding: '6px 8px', borderRadius: 999, background: 'rgba(13,13,17,0.94)', border: '1px solid #232329', boxShadow: '0 6px 18px rgba(0,0,0,0.25)' }}>
                   {PRODUCT_FORM_SECTIONS.map(([id, label]) => (
                     <button
                       key={id}
@@ -3850,16 +3899,25 @@ export default function AdminPortal() {
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
                       </div>
-                      {/* Row 2 — draw / format controls */}
+                      {/* Row 2 — draw / format controls. The "Winners / draw"
+                          input is only meaningful for raffle sizes — an FCFS
+                          (instant-buy) size is never drawn, so it shows a clear
+                          note instead of a confusing winners field. */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
-                      <input
-                        type="text"
-                        placeholder="Winners / draw (e.g. 3,2,2)"
-                        title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
-                        value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
-                        onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                        style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }}
-                      />
+                      {effectiveMode === 'RAFFLE' ? (
+                        <input
+                          type="text"
+                          placeholder="Winners / draw (e.g. 3,2,2)"
+                          title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
+                          value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
+                          onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
+                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 10, color: '#93c5fd', fontWeight: 700, letterSpacing: '0.4px' }}>
+                          ⚡ Sells instantly at checkout — never drawn
+                        </span>
+                      )}
                       <select
                         title="Checkout mode for THIS size. Leave on Auto to follow the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
                         value={cat.checkoutMode || ''}
@@ -3887,10 +3945,31 @@ export default function AdminPortal() {
                           >
                             {isSamplerCat ? '🧪 Sample' : 'Sample'}
                           </button>
-                          <span style={{ fontSize: 9.5, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : effectiveMode === 'FCFS' ? '#60a5fa' : '#8b95a7', fontWeight: 700, letterSpacing: '0.5px' }}>
+                          <span style={{ fontSize: 9.5, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa', fontWeight: 700, letterSpacing: '0.5px' }}>
                             {effectiveMode === 'RAFFLE' ? '🎟 RAFFLE' : '⚡ FCFS'}
                           </span>
                           <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                      </div>
+                      {/* Per-size summary — what THIS size actually does, so a mixed
+                          product (one raffle + one instant-buy) reads clearly. */}
+                      <div style={{ marginTop: 5, fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
+                        {effectiveMode === 'RAFFLE' ? (
+                          <>
+                            <span style={{ color: '#fbbf24', fontWeight: 700 }}>🎟 Raffle size</span>
+                            {' · '}
+                            {(() => {
+                              const tiers = Array.isArray(cat.winnerTiers) ? cat.winnerTiers : String(cat.winnerTiers ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+                              const firstTier = Number(tiers?.[0]) > 0 ? Number(tiers[0]) : null;
+                              return firstTier ? <>draws <strong style={{ color: '#d4d4d8' }}>{firstTier}</strong> winner{firstTier === 1 ? '' : 's'} on draw 1</> : <>winner count set below</>;
+                            })()}
+                            {sizeHasOwnConfig ? ' · owns its timer' : ' · inherits product timer'}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: '#93c5fd', fontWeight: 700 }}>⚡ Instant-buy size</span>
+                            {' · charges at checkout · never enters a raffle pool'}
+                          </>
+                        )}
                       </div>
                       {/* Row 3 — per-size raffle settings: when this size runs a raffle,
                           it can draw on its OWN countdown end + its OWN recurring
@@ -4043,6 +4122,11 @@ export default function AdminPortal() {
                           )}
                         </div>
                       )}
+                      {effectiveMode === 'FCFS' && (
+                        <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
+                          ⚡ This size sells instantly — it never draws and has no countdown or raffle schedule. Its price charges right at checkout (perfect for sampler/instant-buy sizes sitting next to a raffle size).
+                        </div>
+                      )}
                       </div>
                     );
                   })}
@@ -4099,8 +4183,18 @@ export default function AdminPortal() {
                       />
                     </label>
                   </div>
+                  <label style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 8 }}>
+                    Mixed-format ribbon (only shows when sizes mix raffle + instant-buy). Template tokens: <code>{'{raffle}'}</code> = raffle size count, <code>{'{fcfs}'}</code> = instant-buy count.
+                    <textarea
+                      rows={2}
+                      placeholder="This release mixes formats — {raffle} raffle size(s) and {fcfs} instant-buy size(s). Pick a size above to see its option."
+                      value={productForm.mixedFormatRibbon || ''}
+                      onChange={(e) => setProductForm((p: any) => ({ ...p, mixedFormatRibbon: e.target.value }))}
+                      style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                    />
+                  </label>
                   <div style={{ fontSize: 10, color: '#8b95a7', marginTop: 6, lineHeight: 1.5 }}>
-                    Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These four lines are the
+                    Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These five lines are the
                     same ones editable site-wide in Settings → Storefront copy; a value here wins for THIS product only.
                   </div>
                 </SectionCard>
@@ -4475,7 +4569,7 @@ export default function AdminPortal() {
 
 
 
-                <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.9)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.3)' }}>
+                <div style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.92)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.35)' }}>
                   <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
                     {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : 'Save Product'}
                   </button>
@@ -5622,10 +5716,11 @@ export default function AdminPortal() {
                       ['urgencySoldOut', 'Product page — sold-out urgency line (default "This release is fully spoken for.")'],
                       ['statusLive', 'Product page — status story for live releases (default "Reserved for collectors moving early, before the allocation tightens further.")'],
                       ['statusArchived', 'Product page — status story for archived releases (default "Archive placement preserves the release as proof of demand and collectability.")'],
+                      ['mixedFormatRibbon', 'Product page — mixed-format ribbon (only when sizes mix raffle + instant-buy). Template with {raffle} and {fcfs} = size counts; default "This release mixes formats — {raffle} raffle size(s) and {fcfs} instant-buy size(s). Pick a size above to see its option."'],
                     ] as [string, string][]).map(([key, label]) => {
                       // Prose fields are textareas so line breaks can be typed;
                       // the storefront renders them with white-space: pre-line.
-                      const isMultiLine = key === 'heroTitle' || key === 'heroSubtitle' || key === 'priorityDropsSubtitle' || key === 'footerTagline' || key === 'urgencyInStock' || key === 'urgencySoldOut' || key === 'statusLive' || key === 'statusArchived';
+                      const isMultiLine = key === 'heroTitle' || key === 'heroSubtitle' || key === 'priorityDropsSubtitle' || key === 'footerTagline' || key === 'urgencyInStock' || key === 'urgencySoldOut' || key === 'statusLive' || key === 'statusArchived' || key === 'mixedFormatRibbon';
                       return (
                         <label key={key} style={{ fontSize: 11 }}>
                           {label}

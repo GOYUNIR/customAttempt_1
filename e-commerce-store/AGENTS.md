@@ -213,10 +213,13 @@ the ledger. Settings tabs include:
   IDs, inventory, winner tiers, images **+ videos** (PNG/JPEG/JPG/SVG/WEBP/GIF/BMP +
   MP4/MOV/MKV/AVI/WEBM), per-photo **crop tool with live desktop/mobile previews**
   (crops stored per-media in the product's `crops` array, parallel to `images`),
-  sort order. **Customer-facing copy** — every product can override the four
-  urgency/status lines (`urgencyInStock`, `urgencySoldOut`, `statusLive`,
-  `statusArchived`) that appear on its page (blank = inherit the global
-  Settings → Storefront copy → built-in default). **Per-size raffle settings**
+  sort order. **Customer-facing copy** — every product can override the five
+  customer-facing lines that appear on its page: the urgency/status lines
+  (`urgencyInStock`, `urgencySoldOut`, `statusLive`, `statusArchived`) AND the
+  **mixed-format ribbon** (`mixedFormatRibbon`, a template shown only when sizes
+  mix raffle + instant-buy; `{raffle}`/`{fcfs}` tokens become the size counts).
+  Blank = inherit the global Settings → Storefront copy → built-in default.
+  **Per-size raffle settings**
   — when multiple sizes run a raffle each size card in Pricing & Sizes carries
   its OWN countdown end (`sizeConfigs[<size>].releaseEndsAt`) and its OWN
   recurring cadence (`sizeConfigs[<size>].customDropSchedule`), so "both raffle"
@@ -231,13 +234,18 @@ the ledger. Settings tabs include:
   checkout mode** (Auto / RAFFLE / FCFS), so one product can mix formats — e.g.
   a sampler sells instantly while the full size runs a raffle
   (`lib/checkout-mode.ts` is the single resolver used by the storefront,
-  checkout routes and draw engine; FCFS sizes are never drawn).
+  checkout routes and draw engine; FCFS sizes are never drawn). The editor
+  surfaces this clearly: FCFS sizes show "sells instantly — never drawn" notes
+  (no winners field, no raffle timer), each size card carries a live
+  RAFFLE/instant-buy summary line, the at-a-glance strip shows a MIXED pill, and
+  renaming a size re-keys its per-size stock, raffle config and sampler records.
 - **Settings → Theme Colors / Design Presets** — colors, fonts, radius,
   transparency, one-click presets (`lib/theme-presets.ts`).
 - **Settings → Orb Glow** — enable/disable, per-orb color/opacity/size, motion.
 - **Settings → Hero Content / Entry Form / Footer / Storefront copy** — copy overrides
   (including the product-page urgency/status lines: `urgencyInStock`,
-  `urgencySoldOut`, `statusLive`, `statusArchived`).
+  `urgencySoldOut`, `statusLive`, `statusArchived`, and the mixed-format ribbon
+  template `mixedFormatRibbon` with `{raffle}`/`{fcfs}` count tokens).
   Hero + prose fields are **textareas** (type Enter for a real line break; the
   storefront renders them with `white-space: pre-line`).
 - **Settings → Behavior** — **Start at the top when the page opens** (default ON):
@@ -555,6 +563,13 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-18 — Product-editor UX finalization ("finalize and polish everything") — sticky save bar + mixed-format clarity + editable ribbon + rename safety:**
+  - **📌 Product save bar now FOLLOWS the scroll exactly like Save All Settings.** The old bar sat at the END of the long product form with `sticky; top: 92` — so it was effectively invisible until you scrolled all the way down. It is now **`position: sticky; bottom: 12`**: it floats pinned to the bottom of the viewport the whole time the form is on screen and settles into place at the end. The **quick-jump nav is now genuinely sticky** too (`top: 92`, floating pill bar) — the section pills stay reachable no matter how deep you are in the form.
+  - **🎟 Mixed products read correctly everywhere ("one raffle + one fcfs" finally makes sense).** (a) The **at-a-glance summary strip** now computes the EFFECTIVE per-size modes and shows a **MIXED · 🎟 N raffle + ⚡ M instant-buy** pill instead of a plain product-level RAFFLE pill. (b) Each size card gained a live **per-size summary line** — "🎟 Raffle size · draws 3 winners on draw 1 · inherits product timer" for raffle sizes and "⚡ Instant-buy size · charges at checkout · never enters a raffle pool" for FCFS. (c) The **"Winners / draw" input is hidden for FCFS sizes** (it was meaningless/confusing) and replaced with a clear "⚡ Sells instantly at checkout — never drawn" note; FCFS size cards also show an explanatory blue panel so the operator knows why there's no raffle timer. (d) The per-size raffle-settings panel remains visible ONLY for raffle sizes.
+  - **✍️ The mixed-format ribbon is now editable** — "This release mixes formats — 1 raffle size and 1 instant-buy size…" is no longer hardcoded. New **`mixedFormatRibbon`** template setting in **Settings → Storefront copy** (global, with `{raffle}`/`{fcfs}` tokens that become the size counts) AND **per-product** in the product form's **Customer-facing copy** section. Resolution: per-product → global → built-in sentence (the built-in keeps the old colored strong-tag styling).
+  - **🔧 Size-rename safety.** Renaming a size in Pricing & Sizes now re-keys **per-size inventory (`inventoryPerSize`), the per-size raffle config (`sizeConfigs`) AND sampler records** in ONE pass (previously a rename could orphan per-size stock, and a sampler rename early-returned before the raffle config was re-keyed).
+  - Verified: `npm test` 87/87, `tsc --noEmit` clean, `npm run lint` clean, `npm run build` compiles every route + middleware. No Redis keys were added or changed (`mixedFormatRibbon` lives on the product object + `store:config.copy`).
 
 - **2026-08-18 — Streamer masking expanded + product editor overhaul + seeded category defaults + richer settings previews + overview dashboard (admin-polish-pass):**
   - **🛡 Streamer Mode hides MORE.** The fixed-length mask system now covers **tracking numbers, promo codes, order refs, phone numbers and names** (new masks + `pii()` kinds), not just email/address/card. Wired into the ledger rows (Ref / promo / 📦 tracking), draw-history winners (promo), the trigger-drop result summary (promo), and a new `redactDetail()` helper redacts free-form **audit-log** lines (emails, phones, and any code-like 6+ char token mixing letters + digits → fixed masks). Over-masking is safe; under-masking leaks.

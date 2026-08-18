@@ -313,6 +313,9 @@ export async function POST(request: Request) {
     urgencySoldOut: has('urgencySoldOut') ? String(body.urgencySoldOut || '') : (existing?.urgencySoldOut || ''),
     statusLive: has('statusLive') ? String(body.statusLive || '') : (existing?.statusLive || ''),
     statusArchived: has('statusArchived') ? String(body.statusArchived || '') : (existing?.statusArchived || ''),
+    // Mixed-format ribbon template ({raffle}/{fcfs} tokens). Empty = inherit the
+    // global Settings → Storefront copy (which falls back to the built-in line).
+    mixedFormatRibbon: has('mixedFormatRibbon') ? String(body.mixedFormatRibbon || '') : (existing?.mixedFormatRibbon || ''),
     soldOutBehavior: has('soldOutBehavior') ? String(body.soldOutBehavior || '') : (existing?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: has('soldOutArchiveDelayHours') ? Math.max(0, numberOr(body.soldOutArchiveDelayHours, existing?.soldOutArchiveDelayHours || 0)) : Math.max(0, Number(existing?.soldOutArchiveDelayHours || 0)),
     soldOutAt: has('soldOutAt') ? String(body.soldOutAt || '') : (existing?.soldOutAt || ''),

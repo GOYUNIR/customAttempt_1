@@ -117,7 +117,10 @@ Everything happens in `/admin`:
   status lines ("Handmade allocation. Low supply by design." /
   "Reserved for collectors moving early…" etc.) that override the site-wide
   Settings → Storefront copy per product. Leave them blank to inherit the
-  global defaults.
+  global defaults. Products that **mix formats** (raffle + instant-buy sizes)
+  also get an editable **mixed-format ribbon** — set once site-wide in
+  Settings → Storefront copy (`{raffle}`/`{fcfs}` tokens become the size
+  counts) or per product in the Customer-facing copy section.
 - **Catalog** — move items between Upcoming / Archive previews.
 - **Draws** — trigger a draw manually, view draw history, search the permanent
   entry ledger.

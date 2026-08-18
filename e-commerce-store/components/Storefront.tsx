@@ -1425,10 +1425,25 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             {hasMixedModes && (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.5, color: configPalette.cardTextMuted, padding: '10px 12px', borderRadius: themeRadius(configPalette, 14), background: `color-mix(in srgb, #a855f7 7%, ${configPalette.cardBackground})`, border: cardIsLight ? '1px solid rgba(126,34,206,0.25)' : '1px solid rgba(168,85,247,0.30)' }}>
                 <span style={{ fontSize: 13, lineHeight: 1 }}>🎟</span>
-                <span>
-                  This release mixes formats — <strong style={{ color: cardIsLight ? '#92400e' : '#fbbf24' }}>{mixedRaffleCount} raffle size{mixedRaffleCount === 1 ? '' : 's'}</strong> and{' '}
-                  <strong style={{ color: cardIsLight ? '#1e40af' : '#93c5fd' }}>{mixedFcfsCount} instant-buy size{mixedFcfsCount === 1 ? '' : 's'}</strong>. Pick a size above to see its option.
-                </span>
+                {(() => {
+                  // Copy resolution is per-product → global (Settings → Storefront
+                  // copy) → built-in sentence. A template may use {raffle}/{fcfs}
+                  // tokens which become the raffle and instant-buy size counts.
+                  const template = String(product.mixedFormatRibbon || copySettings.mixedFormatRibbon || '').trim();
+                  if (template) {
+                    return (
+                      <span style={{ whiteSpace: 'pre-line' }}>
+                        {template.replace(/\{raffle\}/g, String(mixedRaffleCount)).replace(/\{fcfs\}/g, String(mixedFcfsCount))}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span>
+                      This release mixes formats — <strong style={{ color: cardIsLight ? '#92400e' : '#fbbf24' }}>{mixedRaffleCount} raffle size{mixedRaffleCount === 1 ? '' : 's'}</strong> and{' '}
+                      <strong style={{ color: cardIsLight ? '#1e40af' : '#93c5fd' }}>{mixedFcfsCount} instant-buy size{mixedFcfsCount === 1 ? '' : 's'}</strong>. Pick a size above to see its option.
+                    </span>
+                  );
+                })()}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

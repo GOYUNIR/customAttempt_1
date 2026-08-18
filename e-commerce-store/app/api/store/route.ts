@@ -82,6 +82,9 @@ type PublicStoreProduct = {
   urgencySoldOut?: string;
   statusLive?: string;
   statusArchived?: string;
+  /** Mixed-format ribbon template ({raffle}/{fcfs} count tokens). Empty =
+   *  inherit the global Settings → Storefront copy (then the built-in line). */
+  mixedFormatRibbon?: string;
   soldOutBehavior?: string;
   soldOutArchiveDelayHours?: number;
   soldOutAt?: string;
@@ -173,6 +176,9 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     urgencySoldOut: typeof raw?.urgencySoldOut === 'string' ? raw.urgencySoldOut : '',
     statusLive: typeof raw?.statusLive === 'string' ? raw.statusLive : '',
     statusArchived: typeof raw?.statusArchived === 'string' ? raw.statusArchived : '',
+    // Mixed-format ribbon template ({raffle}/{fcfs} count tokens). Empty =
+    // inherit the global Settings → Storefront copy (then the built-in line).
+    mixedFormatRibbon: typeof raw?.mixedFormatRibbon === 'string' ? raw.mixedFormatRibbon : '',
     // Per-size raffle configs — sanitized so a malformed/deleted-size entry can
     // never leak into the public payload or confuse the storefront countdown.
     sizeConfigs: normalizeSizeConfigs(raw?.sizeConfigs, Array.isArray(raw?.priceCategories) ? raw.priceCategories : []),
