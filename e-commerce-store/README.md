@@ -249,10 +249,12 @@ See `lib/address-validation.ts`.
   you must enter before the portal unlocks. Check "remember this device" to
   skip the code for 30 days on that browser. Wrong codes lock out for 15 minutes
   after 5 tries, so a leaked password alone can't get into `/admin`.
-- **Streamer Mode** (default ON): masks customer emails, shipping addresses and
-  card numbers, and the password field shows a fixed mask (never the real
-  length) so you can safely share the portal on a livestream (draw reveals,
-  winner announcements). Turn it off only when you need to work on live data.
+- **Streamer Mode** (default ON): masks customer emails, shipping addresses,
+  card numbers, tracking numbers, promo codes, order refs, phone numbers and
+  names (fixed-length bullet masks — even the character lengths never leak), and
+  the password field shows a fixed mask (never the real length) so you can
+  safely share the portal on a livestream (draw reveals, winner announcements).
+  Turn it off only when you need to work on live data.
 - **SetUp tab**: environment-variable status dashboard (✓ set / ✗ missing, never
   the values) plus a production launch checklist.
 - **System → Wipe & Rebuild Redis**: destructive full wipe with **two-step

@@ -43,11 +43,16 @@ function typeLabel(type: string | undefined) {
 
 // Streamer-mode masks are FIXED-LENGTH bullet strings (never derived from the
 // real value) so a livestream can't leak even the CHARACTER LENGTH of an email,
-// address or card number. Deterministic by construction — SSR and the client
-// can never disagree.
+// address, card number, tracking number, promo code, name, phone or order ref.
+// Deterministic by construction — SSR and the client can never disagree.
 const MASK_EMAIL = '••••••••@••••••••';
 const MASK_ADDRESS = '••••••••••••••••••';
 const MASK_CARD = '•••• •••• •••• ••••';
+const MASK_TRACKING = '••••••••••••';
+const MASK_PROMO = '••••••••••••';
+const MASK_NAME = '••••••••••••';
+const MASK_PHONE = '••• ••• ••••';
+const MASK_REF = '••-••••••••';
 
 /** Mask an email for streamer mode: a fixed bullet string — the real value's
  *  length/domain are never visible on stream. */
@@ -65,13 +70,45 @@ function maskCard(_value: string | undefined | null): string {
   return String(_value || '').replace(/\D/g, '') ? MASK_CARD : '';
 }
 
-/** One helper for every PII field rendered in the portal. Streamer mode routes
- *  every customer value through here so masking can never be forgotten. */
-function pii(value: string | undefined | null, kind: 'email' | 'address' | 'card', streamer: boolean): string {
+/** Any other sensitive value (tracking number, promo code, name, phone, order
+ *  ref): a fixed bullet string when the field is non-empty. */
+function maskGeneric(_value: string | undefined | null, mask: string): string {
+  return String(_value || '').trim() ? mask : '';
+}
+
+/** One helper for every PII/sensitive field rendered in the portal. Streamer
+ *  mode routes every customer value through here so masking can never be
+ *  forgotten — each field kind gets its own fixed-length mask. */
+function pii(
+  value: string | undefined | null,
+  kind: 'email' | 'address' | 'card' | 'tracking' | 'promo' | 'name' | 'phone' | 'ref',
+  streamer: boolean,
+): string {
   if (!streamer) return String(value || '');
-  if (kind === 'email') return maskEmail(value);
-  if (kind === 'address') return maskAddress(value);
-  return maskCard(value);
+  switch (kind) {
+    case 'email': return maskEmail(value);
+    case 'address': return maskAddress(value);
+    case 'card': return maskCard(value);
+    case 'tracking': return maskGeneric(value, MASK_TRACKING);
+    case 'promo': return maskGeneric(value, MASK_PROMO);
+    case 'name': return maskGeneric(value, MASK_NAME);
+    case 'phone': return maskGeneric(value, MASK_PHONE);
+    case 'ref': return maskGeneric(value, MASK_REF);
+    default: return maskGeneric(value, MASK_NAME);
+  }
+}
+
+/** Redact free-form detail strings (audit log lines) for streamer mode: emails,
+ *  phone numbers, and code-like tokens (tracking numbers, order refs, promo
+ *  codes — any 6+ char token mixing letters + digits) become fixed masks.
+ *  Over-masking is safe; under-masking leaks. */
+function redactDetail(detail: string | undefined | null, streamer: boolean): string {
+  const value = String(detail || '');
+  if (!streamer || !value.trim()) return value;
+  return value
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, MASK_EMAIL)
+    .replace(/\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/g, MASK_PHONE)
+    .replace(/\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*[0-9])[A-Za-z0-9-]{6,}\b/g, MASK_TRACKING);
 }
 
 /** Pick readable text (black/white) on top of an arbitrary CSS color — used by
@@ -89,14 +126,15 @@ function readableOn(bg: string | undefined | null): string {
 /** Section wrapper used across the admin — consistent card header + helper
  *  copy so every group (product form, settings) reads like a clean settings
  *  page instead of a wall of inputs. */
-function SectionCard({ title, description, children, action }: {
+function SectionCard({ title, description, children, action, id }: {
   title: string;
   description?: string;
   children: React.ReactNode;
   action?: React.ReactNode;
+  id?: string;
 }) {
   return (
-    <div style={{ background: '#0d0d11', border: '1px solid #232329', borderRadius: 14, padding: 14, marginBottom: 12 }}>
+    <div id={id} style={{ background: '#0d0d11', border: '1px solid #232329', borderRadius: 14, padding: 14, marginBottom: 12, scrollMarginTop: 96 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: description || action ? 8 : 0 }}>
         <h5 style={{ fontSize: 11, color: '#e4e4e7', margin: 0, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase' }}>
           {title}
@@ -139,6 +177,21 @@ function Pill({ children, color = '#a1a1aa', background = 'rgba(161,161,170,0.12
     </span>
   );
 }
+
+/** Quick-jump targets for the product editor form (id → pill label). Each id
+ *  is set on the matching SectionCard so the operator can hop straight to the
+ *  section they need instead of scrolling the whole form. */
+const PRODUCT_FORM_SECTIONS: [string, string][] = [
+  ['pf-basics', 'Basics'],
+  ['pf-media', 'Media'],
+  ['pf-sizes', 'Pricing & sizes'],
+  ['pf-trial', 'Trial sizes'],
+  ['pf-inventory', 'Inventory'],
+  ['pf-schedule', 'Drop schedule'],
+  ['pf-soldout', 'Sold-out'],
+  ['pf-copy', 'Copy'],
+  ['pf-notes', 'Notes'],
+];
 
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
  *  settings page navigable without hunting through the whole form. */
@@ -569,7 +622,7 @@ const DEFAULT_CATALOG_SETTINGS = {
   sectionOrder: ['upcoming', 'archive', 'live'],
   // Admin-managed product categories (Settings → Catalog). Buyers can add,
   // rename and delete these freely; products are tagged with any subset.
-  categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
 };
 
 const DEFAULT_BEHAVIOR_SETTINGS = {
@@ -1414,6 +1467,37 @@ export default function AdminPortal() {
     setShowProductForm(true);
   };
 
+  /** Open the product editor pre-filled with a COPY of an existing release. The
+   *  copy gets a fresh name/slug, starts hidden, and saving it creates a NEW
+   *  product (the original is untouched) — a fast start for a variant launch. */
+  const duplicateProduct = (product: any) => {
+    const copyName = `${String(product.name || 'Product').trim()} (copy)`;
+    const copySlug = `${String(product.slug || slugifyName(String(product.name || ''))).replace(/[^a-z0-9-]+/g, '-')}-copy`;
+    const form = {
+      ...product,
+      id: undefined,
+      name: copyName,
+      slug: copySlug,
+      _slugAuto: false,
+      isActive: false,
+      sortOrder: (Number(product.sortOrder) || 0) + 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      notes: Array.isArray(product.notes) ? product.notes : [],
+      images: Array.isArray(product.images) ? product.images : [],
+      crops: Array.isArray(product.crops) && product.crops.length === (product.images || []).length
+        ? product.crops
+        : (product.images || []).map(() => DEFAULT_CROP),
+      categories: Array.isArray(product.categories) ? product.categories : [],
+      inventoryPerSize: product.inventoryPerSize && typeof product.inventoryPerSize === 'object' ? product.inventoryPerSize : {},
+    };
+    setEditingProduct(null);
+    setProductForm(form);
+    setProductFormSnapshot(JSON.stringify(form));
+    setShowProductForm(true);
+    showToast('Duplicate created — tweak it, then Save Product');
+  };
+
   // ===== Handle dynamic price categories =====
   const addPriceCategory = () => {
     setProductForm((prev: any) => ({
@@ -2105,7 +2189,7 @@ export default function AdminPortal() {
           ds.executionTime ? `Time: ${ds.executionTime}` : '',
           revenue > 0 ? `Revenue: $${revenue.toFixed(2)}` : '',
           ...charged.slice(0, 8).map((w: any) =>
-            `${pii(w.email, 'email', streamerMode)} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${w.promoCode}` : ''}`
+            `${pii(w.email, 'email', streamerMode)} · ${w.product || ''} ${w.size || ''} · $${((w.amountCents || 0) / 100).toFixed(2)}${w.promoCode ? ` · promo ${pii(w.promoCode, 'promo', streamerMode)}` : ''}`
           ),
           ...winners.filter((w: any) => w.status && w.status !== 'SUCCESS_CHARGED' && w.status !== 'charged').slice(0, 5).map((w: any) =>
             `${pii(w.email, 'email', streamerMode)}: ${w.status}`
@@ -2631,6 +2715,10 @@ export default function AdminPortal() {
   const maxBar = Math.max(totalInt, totalSub, totalSales, totalInv, 1);
   const maxSubPool = Math.max(...pools.map((x: any) => x.subCount || 0), 1);
   const conv = totalInt + totalSub > 0 ? Math.round((totalSub / (totalInt + totalSub)) * 100) : 0;
+  // Lifetime charged revenue across the (most recent) ledger — useful headline number.
+  const allLedger = Array.isArray(status?.fallbackEntries) ? status?.fallbackEntries : [];
+  const totalRevenueCents = allLedger.reduce((s: number, e: any) => s + (e.type === 'WINNER_CHARGED' ? (Number(e.amountCents) || 0) : 0), 0);
+  const productCount = Array.isArray(allProducts) ? allProducts.length : 0;
 
   const allEntries = searchResults !== null ? searchResults : status?.fallbackEntries || [];
   const rawFilteredEntries = Array.isArray(allEntries) ? allEntries : [];
@@ -2939,18 +3027,30 @@ export default function AdminPortal() {
         {/* ============ OVERVIEW (unchanged) ============ */}
         {tab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10 }}>
-              {[
-                { l: 'STARTED', v: totalInt, c: '#edb210' },
-                { l: 'ENTERED', v: totalSub, c: '#34d399' },
-                { l: 'CHARGED', v: totalSales, c: '#60a5fa' },
-                { l: 'INVENTORY LEFT', v: totalInv, c: '#fff' },
-              ].map((k) => (
-                <div key={k.l} style={cardStyle}>
-                  <div style={{ fontSize: 10, color: k.c, fontWeight: 700, letterSpacing: '0.5px' }}>{k.l}</div>
-                  <div style={{ fontSize: 26, fontFamily: 'monospace', fontWeight: 700 }}>{k.v}</div>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Store Overview</h2>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button onClick={() => { resetProductForm(); setShowProductForm(true); setEditingProduct(null); setTab('products'); }} style={{ ...buttonPrimary, padding: '6px 12px', fontSize: 10 }}>+ Add Product</button>
+                  <button onClick={() => { setTab('drops'); setDrawsSub('run'); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 10 }}>🎲 Run a Draw</button>
+                  <button onClick={() => setTab('settings')} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 10 }}>⚙️ Settings</button>
                 </div>
-              ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 10 }}>
+                {[
+                  { l: 'STARTED', v: totalInt, c: '#edb210' },
+                  { l: 'ENTERED', v: totalSub, c: '#34d399' },
+                  { l: 'CHARGED', v: totalSales, c: '#60a5fa' },
+                  { l: 'INVENTORY LEFT', v: totalInv, c: '#fff' },
+                  { l: 'PRODUCTS', v: productCount, c: '#c084fc' },
+                  { l: 'REVENUE', v: `$${(totalRevenueCents / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`, c: '#fbbf24' },
+                ].map((k) => (
+                  <div key={k.l} style={cardStyle}>
+                    <div style={{ fontSize: 10, color: k.c, fontWeight: 700, letterSpacing: '0.5px' }}>{k.l}</div>
+                    <div style={{ fontSize: 24, fontFamily: 'monospace', fontWeight: 700 }}>{k.v}</div>
+                  </div>
+                ))}
+              </div>
             </div>
             <div style={cardStyle}>
               <div style={{ fontSize: 12, marginBottom: 8, color: '#ccc' }}>Started → Entered conversion: <strong style={{ color: '#fff' }}>{conv}%</strong></div>
@@ -3067,7 +3167,7 @@ export default function AdminPortal() {
                                   ) : (
                                     <span style={{ color: '#f87171' }}> ✗ {w.status}</span>
                                   )}
-                                  {w.promoCode && <span style={{ color: '#edb210', marginLeft: 4 }}>· {w.promoCode}</span>}
+                                  {w.promoCode && <span style={{ color: '#edb210', marginLeft: 4 }}>· {pii(w.promoCode, 'promo', streamerMode)}</span>}
                                 </div>
                               ))}
                             </div>
@@ -3302,10 +3402,10 @@ export default function AdminPortal() {
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
                     <div style={{ fontWeight: 600 }}>{pii(e.email, 'email', streamerMode)}</div>
-                    <div style={{ color: '#666', fontSize: 10 }}>Ref: {orderRef}</div>
+                    <div style={{ color: '#666', fontSize: 10 }}>Ref: {pii(orderRef, 'ref', streamerMode)}</div>
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
-                      {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {e.promoCode}</span>}
+                      {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {pii(e.promoCode, 'promo', streamerMode)}</span>}
                       {(e.amountCents || e.listPrice) && (
                         <span style={{ color: '#34d399', marginLeft: 6 }}>· ${displayPrice}</span>
                       )}
@@ -3316,7 +3416,7 @@ export default function AdminPortal() {
                       {e.type === 'WINNER_CHARGED' && (
                         <span style={{ marginLeft: 6 }}>
                           · {e.shippingStatus ? e.shippingStatus.replace(/_/g, ' ').toLowerCase() : 'pending fulfillment'}
-                          {e.trackingNumber ? ` · 📦 ${e.trackingNumber}` : ''}
+                          {e.trackingNumber ? ` · 📦 ${pii(e.trackingNumber, 'tracking', streamerMode)}` : ''}
                         </span>
                       )}
                     </div>
@@ -3410,8 +3510,66 @@ export default function AdminPortal() {
                   <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>✕ Close</button>
                 </div>
 
+                {/* At-a-glance summary: live status + shape of this product while
+                    the operator works, so they never lose the plot in a long form. */}
+                <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: '#0d0d11', border: '1px solid #232329' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: '#8b8b94', marginRight: 2 }}>Status</span>
+                    <Pill color={productForm.isActive ? '#34d399' : '#a1a1aa'} background={productForm.isActive ? 'rgba(52,211,153,0.14)' : 'rgba(161,161,170,0.12)'}>
+                      {productForm.isActive ? 'Active (visible)' : 'Hidden'}
+                    </Pill>
+                    {productForm.isArchived && <Pill color="#f59e0b" background="rgba(245,158,11,0.14)">Archived</Pill>}
+                    {productForm.isUpcoming && <Pill color="#60a5fa" background="rgba(96,165,250,0.14)">Upcoming</Pill>}
+                    <Pill color={productForm.checkoutMode === 'FCFS' ? '#93c5fd' : '#fbbf24'} background={productForm.checkoutMode === 'FCFS' ? 'rgba(59,130,246,0.14)' : 'rgba(245,158,11,0.14)'}>
+                      {productForm.checkoutMode === 'FCFS' ? 'FCFS · instant buy' : 'RAFFLE'}
+                    </Pill>
+                    {(() => {
+                      const hasSamplers = Array.isArray(productForm.samplerSizes) && productForm.samplerSizes.length > 0;
+                      return hasSamplers ? <Pill color="#34d399" background="rgba(52,211,153,0.14)">🧪 trial SKU</Pill> : null;
+                    })()}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: '#8b8b94' }}>
+                    {(() => {
+                      const sizeCount = (productForm.priceCategories || []).length;
+                      const prices = (productForm.priceCategories || [])
+                        .map((c: any) => Number(c?.price) || 0)
+                        .filter((p: number) => p > 0 && p !== UNCONFIGURED_PRICE_SENTINEL);
+                      const minP = prices.length ? Math.min(...prices) : 0;
+                      const maxP = prices.length ? Math.max(...prices) : 0;
+                      const per = productForm.inventoryPerSize || {};
+                      const perSum = Object.keys(per).reduce((s, k) => s + (Number(per[k]) > 0 ? Number(per[k]) : 0), 0);
+                      const invTotal = perSum > 0 ? perSum : (Number(productForm.totalInventory) || 0);
+                      const catCount = Array.isArray(productForm.categories) ? productForm.categories.length : 0;
+                      return (
+                        <>
+                          <span><strong style={{ color: '#d4d4d8' }}>{sizeCount}</strong> size{sizeCount === 1 ? '' : 's'}</span>
+                          <span>Prices <strong style={{ color: '#d4d4d8' }}>${minP}–${maxP}</strong></span>
+                          <span>Inventory <strong style={{ color: '#d4d4d8' }}>{invTotal}</strong></span>
+                          <span><strong style={{ color: '#d4d4d8' }}>{catCount}</strong> categor{catCount === 1 ? 'y' : 'ies'}</span>
+                          {productForm.goLiveAt && <span>Goes live <strong style={{ color: '#d4d4d8' }}>{productForm.goLiveAt}</strong></span>}
+                          {productForm.releaseEndsAt && <span>Ends <strong style={{ color: '#d4d4d8' }}>{productForm.releaseEndsAt}</strong></span>}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Quick-jump nav so the long product form is navigable. */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {PRODUCT_FORM_SECTIONS.map(([id, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      style={{ ...buttonGhost, padding: '4px 10px', fontSize: 9.5, borderRadius: 999 }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
                 {/* ============ BASICS ============ */}
                 <SectionCard
+                  id="pf-basics"
                   title="Basics"
                   description="What the product is called, its URL, and how it appears on the storefront. Products start hidden — flip “Active (visible)” on when you are ready to publish."
                 >
@@ -3548,8 +3706,109 @@ export default function AdminPortal() {
                   </div>
                 </SectionCard>
 
+                {/* ============ MEDIA & GALLERY ============ */}
+                <SectionCard
+                  id="pf-media"
+                  title="Gallery & Images"
+                  description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
+                >
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <input
+                      type="file"
+                      multiple
+                      accept={`${ACCEPTED_MEDIA_TYPES},image/*,video/*,.png,.jpeg,.jpg,.svg,.webp,.gif,.bmp,.avif,.mp4,.mov,.mkv,.avi,.webm`}
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files.length > 0) {
+                          handleImageFiles(e.target.files);
+                        }
+                        // Allow re-selecting the same file after an upload.
+                        e.target.value = '';
+                      }}
+                      disabled={imageUploadBusy}
+                      style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Or paste image / video URL"
+                      value={imageInput}
+                      onChange={(e) => setImageInput(e.target.value)}
+                      style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
+                    />
+                    <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 8, lineHeight: 1.6 }}>
+                    <strong style={{ color: '#9ca3af' }}>Images:</strong> PNG · JPEG · JPG · SVG · WEBP · GIF · BMP (photos auto-compress)
+                    &nbsp;·&nbsp; <strong style={{ color: '#9ca3af' }}>Videos:</strong> MP4 · MOV · MKV · AVI · WEBM
+                  </div>
+                  {imageUploadBusy && (
+                    <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.1)', border: '1px solid rgba(125,211,252,0.35)', fontSize: 11, color: '#7dd3fc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 999, border: '2px solid rgba(125,211,252,0.3)', borderTopColor: '#7dd3fc', animation: 'goyunirSpin 0.7s linear infinite', display: 'inline-block' }} />
+                      {imageUploadLabel || 'Uploading files…'}
+                    </div>
+                  )}
+                  {(!productForm.images || productForm.images.length === 0) && (
+                    <div style={{ fontSize: 10, color: '#666', marginBottom: 8, border: '1px dashed #2e2e35', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      No media yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(productForm.images || []).map((img: string, idx: number) => {
+                      const isVideo = isVideoMedia(img);
+                      const cropForIdx = Array.isArray(productForm.crops) ? productForm.crops[idx] : undefined;
+                      const cropped = !isVideo && !!cropForIdx && normalizeCrop(cropForIdx).w < 0.999;
+                      return (
+                        <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
+                          {isVideo ? (
+                            <video src={img} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                          ) : (
+                            <img src={img} alt={`media-${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          )}
+                          <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>
+                            {isVideo ? `▶${idx + 1}` : `#${idx + 1}`}
+                          </span>
+                          {cropped && (
+                            <span style={{ fontSize: 8, color: '#7dd3fc', position: 'absolute', top: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>✂</span>
+                          )}
+                          <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 6 }}>
+                    {(productForm.images || []).map((img: string, idx: number) => {
+                      if (isVideoMedia(img)) return null;
+                      return (
+                        <button
+                          key={`cropbtn-${idx}`}
+                          onClick={() => setCropEditorIdx(cropEditorIdx === idx ? null : idx)}
+                          style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, marginRight: 4, marginBottom: 4, borderColor: cropEditorIdx === idx ? '#7dd3fc' : '#27272a', color: cropEditorIdx === idx ? '#7dd3fc' : '#aaa' }}
+                        >
+                          {cropEditorIdx === idx ? '▾ Close crop' : '✂ Crop'} · {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {cropEditorIdx !== null && productForm.images[cropEditorIdx] && !isVideoMedia(productForm.images[cropEditorIdx]) && (
+                    <CropEditor
+                      src={productForm.images[cropEditorIdx]}
+                      crop={Array.isArray(productForm.crops) ? productForm.crops[cropEditorIdx] : DEFAULT_CROP}
+                      onCrop={(c) =>
+                        setProductForm((prev: any) => {
+                          const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP))];
+                          nextCrops[cropEditorIdx] = c;
+                          return { ...prev, crops: nextCrops };
+                        })
+                      }
+                    />
+                  )}
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+                    <span>💡 Uploaded media is stored as data URLs (base64) — for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
+                  </div>
+                </SectionCard>
+
                 {/* ============ PRICING & SIZES ============ */}
                 <SectionCard
+                  id="pf-sizes"
                   title="Pricing & Sizes"
                   description="Define each size/variant the customer can buy. Price and Stripe ID are required. “Winners / draw” controls how many winners a raffle picks per draw — a CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
@@ -3794,6 +4053,7 @@ export default function AdminPortal() {
 
                 {/* ============ CUSTOMER-FACING COPY ============ */}
                 <SectionCard
+                  id="pf-copy"
                   title="Customer-facing copy"
                   description="The exact lines customers read on this product's page. Every field is optional — leave it blank to inherit the global Settings → Storefront copy (which falls back to the built-in default), or write per-product copy here for a product-specific voice."
                 >
@@ -3847,6 +4107,7 @@ export default function AdminPortal() {
 
                 {/* ============ INVENTORY & LIMITS ============ */}
                 <SectionCard
+                  id="pf-inventory"
                   title="Inventory & Limits"
                   description="How many units exist and how many one customer can take. Total inventory drives the “sold out” state — 0 units shows the release as sold out while “stay visible” keeps it on the page as proof of demand."
                 >
@@ -3911,6 +4172,7 @@ export default function AdminPortal() {
 
                 {/* ============ DROP SCHEDULE ============ */}
                 <SectionCard
+                  id="pf-schedule"
                   title="Drop Schedule"
                   description="When the release goes live and when the countdown ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle restarts)."
                 >
@@ -4029,6 +4291,7 @@ export default function AdminPortal() {
 
                 {/* ============ SOLD-OUT BEHAVIOR ============ */}
                 <SectionCard
+                  id="pf-soldout"
                   title="Sold-out behavior"
                   description="What happens to the product page when every unit is allocated. “Stay visible” keeps momentum as social proof; archiving moves the release to Past Archives."
                 >
@@ -4049,6 +4312,7 @@ export default function AdminPortal() {
                 </SectionCard>
                 {/* ============ TRIAL SIZES & SAMPLE CREDITS ============ */}
                 <SectionCard
+                  id="pf-trial"
                   title="Trial sizes &amp; sample credits"
                   description="Mark a size as a sampler (trial SKU) in Pricing &amp; Sizes, then fine-tune how each sampler converts. When a sampler order is marked delivered, the buyer gets a one-time credit code bound to their email — so the full size costs &ldquo;the difference&rdquo;. This is the big-brand try-first pattern: every trial SKU tells its own story, never one generic line."
                 >
@@ -4185,6 +4449,7 @@ export default function AdminPortal() {
 
                 {/* ============ NOTES ============ */}
                 <SectionCard
+                  id="pf-notes"
                   title="Notes"
                   description="Scrollable story cards on the product page (“Why this drop matters”, “How it works”, …). Label is the small eyebrow, name the heading, text the body."
                 >
@@ -4208,104 +4473,7 @@ export default function AdminPortal() {
                   </div>
                 </SectionCard>
 
-                {/* ============ GALLERY & IMAGES ============ */}
-                <SectionCard
-                  title="Gallery & Images"
-                  description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
-                >
-                  <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <input
-                      type="file"
-                      multiple
-                      accept={`${ACCEPTED_MEDIA_TYPES},image/*,video/*,.png,.jpeg,.jpg,.svg,.webp,.gif,.bmp,.avif,.mp4,.mov,.mkv,.avi,.webm`}
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          handleImageFiles(e.target.files);
-                        }
-                        // Allow re-selecting the same file after an upload.
-                        e.target.value = '';
-                      }}
-                      disabled={imageUploadBusy}
-                      style={{ ...inputStyle, padding: 6, fontSize: 11, flex: 1 }}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Or paste image / video URL"
-                      value={imageInput}
-                      onChange={(e) => setImageInput(e.target.value)}
-                      style={{ ...inputStyle, flex: 1, padding: 6, fontSize: 11 }}
-                    />
-                    <button onClick={addImageUrl} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Add URL</button>
-                  </div>
-                  <div style={{ fontSize: 10, color: '#6b7280', marginBottom: 8, lineHeight: 1.6 }}>
-                    <strong style={{ color: '#9ca3af' }}>Images:</strong> PNG · JPEG · JPG · SVG · WEBP · GIF · BMP (photos auto-compress)
-                    &nbsp;·&nbsp; <strong style={{ color: '#9ca3af' }}>Videos:</strong> MP4 · MOV · MKV · AVI · WEBM
-                  </div>
-                  {imageUploadBusy && (
-                    <div style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.1)', border: '1px solid rgba(125,211,252,0.35)', fontSize: 11, color: '#7dd3fc', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 12, height: 12, borderRadius: 999, border: '2px solid rgba(125,211,252,0.3)', borderTopColor: '#7dd3fc', animation: 'goyunirSpin 0.7s linear infinite', display: 'inline-block' }} />
-                      {imageUploadLabel || 'Uploading files…'}
-                    </div>
-                  )}
-                  {(!productForm.images || productForm.images.length === 0) && (
-                    <div style={{ fontSize: 10, color: '#666', marginBottom: 8, border: '1px dashed #2e2e35', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                      No media yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {(productForm.images || []).map((img: string, idx: number) => {
-                      const isVideo = isVideoMedia(img);
-                      const cropForIdx = Array.isArray(productForm.crops) ? productForm.crops[idx] : undefined;
-                      const cropped = !isVideo && !!cropForIdx && normalizeCrop(cropForIdx).w < 0.999;
-                      return (
-                        <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
-                          {isVideo ? (
-                            <video src={img} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
-                          ) : (
-                            <img src={img} alt={`media-${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          )}
-                          <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>
-                            {isVideo ? `▶${idx + 1}` : `#${idx + 1}`}
-                          </span>
-                          {cropped && (
-                            <span style={{ fontSize: 8, color: '#7dd3fc', position: 'absolute', top: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>✂</span>
-                          )}
-                          <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ marginTop: 6 }}>
-                    {(productForm.images || []).map((img: string, idx: number) => {
-                      if (isVideoMedia(img)) return null;
-                      return (
-                        <button
-                          key={`cropbtn-${idx}`}
-                          onClick={() => setCropEditorIdx(cropEditorIdx === idx ? null : idx)}
-                          style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, marginRight: 4, marginBottom: 4, borderColor: cropEditorIdx === idx ? '#7dd3fc' : '#27272a', color: cropEditorIdx === idx ? '#7dd3fc' : '#aaa' }}
-                        >
-                          {cropEditorIdx === idx ? '▾ Close crop' : '✂ Crop'} · {idx + 1}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {cropEditorIdx !== null && productForm.images[cropEditorIdx] && !isVideoMedia(productForm.images[cropEditorIdx]) && (
-                    <CropEditor
-                      src={productForm.images[cropEditorIdx]}
-                      crop={Array.isArray(productForm.crops) ? productForm.crops[cropEditorIdx] : DEFAULT_CROP}
-                      onCrop={(c) =>
-                        setProductForm((prev: any) => {
-                          const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP))];
-                          nextCrops[cropEditorIdx] = c;
-                          return { ...prev, crops: nextCrops };
-                        })
-                      }
-                    />
-                  )}
-                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 Uploaded media is stored as data URLs (base64) — for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
-                  </div>
-                </SectionCard>
+
 
                 <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.9)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.3)' }}>
                   <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
@@ -4388,6 +4556,25 @@ export default function AdminPortal() {
                             Sizes: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
                           </div>
                         )}
+                        {Array.isArray(product.categories) && product.categories.length > 0 && (
+                          <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {product.categories.map((c: string) => (
+                              <span key={c} style={{ fontSize: 8.5, color: '#7dd3fc', background: 'rgba(125,211,252,0.12)', borderRadius: 999, padding: '1px 8px' }}>{c}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 9, color: '#7c8596', marginTop: 4 }}>
+                          Inventory: {(() => {
+                            const per = product.inventoryPerSize && typeof product.inventoryPerSize === 'object' ? product.inventoryPerSize : {};
+                            const perSum = Object.keys(per).reduce((s, k) => s + (Number(per[k]) > 0 ? Number(per[k]) : 0), 0);
+                            const total = perSum > 0 ? perSum : (Number(product.totalInventory) || 0);
+                            return total;
+                          })()}{(() => {
+                            const per = product.inventoryPerSize && typeof product.inventoryPerSize === 'object' ? product.inventoryPerSize : {};
+                            const keys = Object.keys(per).filter((k) => Number(per[k]) > 0);
+                            return keys.length > 0 ? ` · ${keys.map((k) => `${k}: ${per[k]}`).join(' · ')}` : '';
+                          })()}
+                        </div>
                         {(product.goLiveAt || product.releaseEndsAt) && (
                           <div style={{ fontSize: 9, color: '#7c8596', marginTop: 4 }}>
                             {product.goLiveAt ? `Live at ${product.goLiveAt}` : ''}{product.goLiveAt && product.releaseEndsAt ? ' · ' : ''}{product.releaseEndsAt ? `Ends ${product.releaseEndsAt}` : ''}
@@ -4406,6 +4593,7 @@ export default function AdminPortal() {
                         <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
                           {isUpcoming ? 'Remove Upcoming' : 'Upcoming'}
                         </button>
+                        <button onClick={() => duplicateProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>⧉ Duplicate</button>
                         <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>
                     </div>
@@ -4800,7 +4988,7 @@ export default function AdminPortal() {
                       </span>
                       <span style={{ fontSize: 11, fontWeight: 600, color: '#e4e4e7' }}>{a.action}</span>
                     </div>
-                    {a.detail ? <div style={{ fontSize: 10, color: '#888', marginTop: 2, lineHeight: 1.5 }}>{a.detail}</div> : null}
+                    {a.detail ? <div style={{ fontSize: 10, color: '#888', marginTop: 2, lineHeight: 1.5 }}>{redactDetail(a.detail, streamerMode)}</div> : null}
                   </div>
                 ))}
               </div>
@@ -5003,39 +5191,63 @@ export default function AdminPortal() {
                 ))}
               </div>
 
-              {/* Live preview: a mini storefront card rendered from the CURRENT
-                  color + radius state — updates the instant any color changes. */}
-              <div style={{
-                margin: '4px 0 14px', padding: 14, borderRadius: 12,
-                background: themeSettings.primaryBackground || '#f2f2f7', border: '1px solid rgba(255,255,255,0.08)',
-              }}>
-                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: themeSettings.textMuted || '#888', marginBottom: 8 }}>
-                  ● Live preview — how cards look with these colors
-                </div>
-                <div style={{
-                  background: themeSettings.cardBackground || '#ffffff',
-                  border: `1px solid ${themeSettings.cardBorder || 'rgba(0,0,0,0.12)'}`,
-                  borderRadius: Math.max(6, Number(themeSettings.borderRadius) || 18),
-                  padding: 14,
-                  boxShadow: `0 ${Math.round((Number(themeSettings.cardShadow) || 12) / 3)}px ${Math.max(10, (Number(themeSettings.cardShadow) || 12) * 2)}px rgba(0,0,0,0.12)`,
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: themeSettings.cardTextMain || '#111' }}>Sample product</div>
-                  <div style={{ fontSize: 10, color: themeSettings.cardTextMuted || '#666', marginTop: 2 }}>Muted supporting text on the card</div>
-                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{
-                      background: themeSettings.checkoutCtaButton || '#111',
-                      color: readableOn(themeSettings.checkoutCtaButton),
-                      fontWeight: 700, fontSize: 11, padding: '7px 14px', borderRadius: 999,
-                    }}>
-                      Add to bag
-                    </span>
-                    <span style={{ fontSize: 10, color: themeSettings.accentBlue || '#3b82f6' }}>A link in accent blue</span>
+              {/* Live preview: a mini storefront rendered from the CURRENT theme
+                  state — top bar, hero line, and a card row all update instantly
+                  as colors/radius/transparency change. */}
+              {(() => {
+                const pageBg = themeSettings.primaryBackground || '#f2f2f7';
+                const cardBg = themeSettings.cardBackground || '#ffffff';
+                const cardBorder = themeSettings.cardBorder || 'rgba(0,0,0,0.12)';
+                const radius = Math.max(4, Number(themeSettings.borderRadius) || 18);
+                const shadow = Number(themeSettings.cardShadow) || 12;
+                const headerBase = String(themeSettings.headerBackground || themeSettings.cardBackground || '#ffffff').trim();
+                const chromeAlpha = Math.max(0, Math.min(100, Number(themeSettings.chromeTransparency ?? 62) || 62));
+                const headerBg = previewChromeBackground(headerBase, chromeAlpha, 'rgba(248,248,252,0.86)');
+                const headerText = previewHeaderText(headerBase, themeSettings.headerText);
+                const accent = themeSettings.accentBlue || '#0071e3';
+                const textMain = themeSettings.textMain || '#1d1d1f';
+                const textMuted = themeSettings.textMuted || '#52525a';
+                const cardText = themeSettings.cardTextMain || '#1d1d1f';
+                const cardMuted = themeSettings.cardTextMuted || '#52525a';
+                const cta = themeSettings.checkoutCtaButton || '#0071e3';
+                return (
+                  <div style={{ margin: '4px 0 14px', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#8b8b94', padding: '10px 14px 0' }}>
+                      ● Live preview — how the storefront looks with these settings
+                    </div>
+                    <div style={{ background: pageBg, padding: 12, marginTop: 8 }}>
+                      {/* mini top bar (same chrome math as the real header) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: Math.max(4, Math.round(radius * 0.6)), background: headerBg, border: '1px solid rgba(255,255,255,0.10)', boxShadow: '0 6px 18px rgba(0,0,0,0.08)' }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: headerText, letterSpacing: '1px' }}>YOUR BRAND</span>
+                        <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: headerText, opacity: 0.85 }}>ACCOUNT</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: headerText, opacity: 0.85 }}>BAG</span>
+                      </div>
+                      {/* mini hero */}
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 8, letterSpacing: 2, textTransform: 'uppercase', color: accent, fontWeight: 700 }}>CALIFORNIA USA</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4, color: textMain, lineHeight: 1.2 }}>by our hands. to your hands.</div>
+                        <div style={{ fontSize: 9, color: textMuted, marginTop: 4, lineHeight: 1.5 }}>homemade &amp; designed, with real ingredients, with real hands.</div>
+                      </div>
+                      {/* mini card row */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+                        {[0, 1].map((i) => (
+                          <div key={i} style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: radius, padding: 10, boxShadow: `0 ${Math.round(shadow / 3)}px ${Math.max(10, shadow * 2)}px rgba(0,0,0,0.10)` }}>
+                            <div style={{ height: 36, borderRadius: Math.max(4, Math.round(radius * 0.5)), background: 'linear-gradient(135deg, rgba(0,113,227,0.25), rgba(191,90,242,0.25))', marginBottom: 8 }} />
+                            <div style={{ fontSize: 10, fontWeight: 700, color: cardText }}>Elysian White</div>
+                            <div style={{ fontSize: 8, color: cardMuted, marginTop: 2 }}>$95 · RAFFLE</div>
+                            <div style={{ marginTop: 6 }}>
+                              <span style={{ background: cta, color: readableOn(cta), fontSize: 8, fontWeight: 700, padding: '4px 10px', borderRadius: 999 }}>Enter</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 8, color: textMuted, marginTop: 10, lineHeight: 1.6 }}>
+                        Radius {radius}px · Page {pageBg} · Card {cardBg} · Chrome {chromeAlpha}% transparent · Shadow {shadow}/100
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div style={{ fontSize: 9, color: themeSettings.textMuted || '#888', marginTop: 8 }}>
-                  Radius {Number(themeSettings.borderRadius) || 18}px · Page {themeSettings.primaryBackground || '#f2f2f7'} · Card {themeSettings.cardBackground || '#ffffff'}
-                </div>
-              </div>
+                );
+              })()}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 8px' }}>
                 <h4 style={{ fontSize: 11, color: '#aaa', margin: 0, textTransform: 'uppercase' }}>Top bar</h4>
@@ -5264,33 +5476,50 @@ export default function AdminPortal() {
                 })}
               </div>
 
-              {/* Live preview: the home hero block rendered from the CURRENT
-                  copy — line breaks (pre-line) included. */}
-              <div style={{ margin: '4px 0 14px', padding: 18, borderRadius: 14, background: '#0d0d11', border: '1px solid #2a2a30' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#888', marginBottom: 10 }}>
-                  ● Live hero preview
-                </div>
-                <div style={{ fontSize: 10, letterSpacing: 2.5, textTransform: 'uppercase', color: themeSettings.accentBlue || '#60a5fa', fontWeight: 700 }}>
-                  {(heroSettings.eyebrow || 'CALIFORNIA USA').toUpperCase()}
-                </div>
-                <div style={{ fontSize: 19, fontWeight: 700, marginTop: 8, whiteSpace: 'pre-line', color: themeSettings.textMain || '#fff', fontFamily: 'Georgia, Times New Roman, serif', lineHeight: 1.25 }}>
-                  {heroSettings.headline || 'by our hands. to your hands.'}
-                </div>
-                <div style={{ fontSize: 11, color: themeSettings.textMuted || '#aaa', marginTop: 8, whiteSpace: 'pre-line', lineHeight: 1.6 }}>
-                  {heroSettings.body || 'homemade & designed, with real ingredients, with real hands. for real people.'}
-                </div>
-                <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{
-                    background: themeSettings.checkoutCtaButton || '#fff', color: readableOn(themeSettings.checkoutCtaButton),
-                    padding: '9px 18px', borderRadius: 999, fontSize: 11, fontWeight: 700,
-                  }}>
-                    {heroSettings.ctaLabel || 'Browse drops'}
-                  </span>
-                  <span style={{ fontSize: 11, color: themeSettings.textMuted || '#aaa', textDecoration: 'underline', textUnderlineOffset: 3 }}>
-                    {heroSettings.storyHeadline || 'Our Story'}
-                  </span>
-                </div>
-              </div>
+              {/* Live preview: the home hero block rendered from the CURRENT copy
+                  + theme — line breaks (pre-line) included, brand name + accent
+                  colors live. */}
+              {(() => {
+                const pageBg = themeSettings.primaryBackground || '#f2f2f7';
+                const textMain = themeSettings.textMain || '#1d1d1f';
+                const textMuted = themeSettings.textMuted || '#52525a';
+                const accent = themeSettings.accentBlue || '#0071e3';
+                const cta = themeSettings.checkoutCtaButton || '#0071e3';
+                const brand = String(brandingSettings.brandName || '').trim() || 'YOUR BRAND';
+                const brandFont = String(brandingSettings.brandFontFamily || '').trim() || undefined;
+                return (
+                  <div style={{ margin: '4px 0 14px', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#8b8b94', padding: '10px 14px 0' }}>
+                      ● Live hero preview — home page top block
+                    </div>
+                    <div style={{ background: pageBg, padding: 20, marginTop: 8 }}>
+                      <div style={{ fontSize: 9, letterSpacing: 2.5, textTransform: 'uppercase', color: accent, fontWeight: 700 }}>
+                        {(heroSettings.eyebrow || 'CALIFORNIA USA').toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 700, marginTop: 8, whiteSpace: 'pre-line', color: textMain, fontFamily: brandFont || 'Georgia, Times New Roman, serif', lineHeight: 1.2 }}>
+                        {heroSettings.headline || 'by our hands. to your hands.'}
+                      </div>
+                      <div style={{ fontSize: 12, color: textMuted, marginTop: 10, whiteSpace: 'pre-line', lineHeight: 1.6, maxWidth: 460 }}>
+                        {heroSettings.body || 'homemade & designed, with real ingredients, with real hands. for real people.'}
+                      </div>
+                      <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{
+                          background: cta, color: readableOn(cta),
+                          padding: '10px 20px', borderRadius: 999, fontSize: 12, fontWeight: 700,
+                        }}>
+                          {heroSettings.ctaLabel || 'Browse drops'}
+                        </span>
+                        <span style={{ fontSize: 12, color: textMuted, textDecoration: 'underline', textUnderlineOffset: 3 }}>
+                          {heroSettings.storyHeadline || 'Our Story'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 8, color: textMuted, opacity: 0.8, marginTop: 12 }}>
+                        Brand name on this page: “{brand}” · rendered on page background {pageBg}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
@@ -5315,6 +5544,41 @@ export default function AdminPortal() {
                   </label>
                 ))}
               </div>
+
+              {/* Live preview: the entry form the customer sees on a product page,
+                  built from the CURRENT form copy + theme. */}
+              {(() => {
+                const cardBg = themeSettings.cardBackground || '#ffffff';
+                const cardText = themeSettings.cardTextMain || '#1d1d1f';
+                const cardMuted = themeSettings.cardTextMuted || '#52525a';
+                const radius = Math.max(4, Number(themeSettings.borderRadius) || 18);
+                const cta = themeSettings.checkoutCtaButton || '#0071e3';
+                const title = String(formSettings.titleHeader || '').trim() || 'Join The Allocation Draw';
+                const emailPh = String(formSettings.emailPlaceholder || '').trim() || 'name@domain.com';
+                const addressPh = String(formSettings.addressPlaceholder || '').trim() || '123 Luxury Dr, New York, NY';
+                const button = String(formSettings.submitButtonText || '').trim() || '🏆 Secure Entry Allocation Ticket';
+                const fine = 'By entering you agree to the terms.';
+                return (
+                  <div style={{ margin: '4px 0 14px', borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#8b8b94', padding: '10px 14px 0' }}>
+                      ● Live preview — the entry form customers see
+                    </div>
+                    <div style={{ padding: 16, marginTop: 8 }}>
+                      <div style={{ background: cardBg, border: '1px solid rgba(0,0,0,0.12)', borderRadius: radius, padding: 16, boxShadow: '0 12px 30px rgba(0,0,0,0.12)', maxWidth: 420 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: cardText }}>{title}</div>
+                        <div style={{ fontSize: 9, color: cardMuted, marginTop: 10 }}>{String(formSettings.emailLabel || '').trim() || 'Contact Email Address'}</div>
+                        <div style={{ marginTop: 3, padding: '8px 10px', borderRadius: 8, background: '#f5f5f7', border: '1px solid rgba(0,0,0,0.14)', color: '#8e8e93', fontSize: 11 }}>{emailPh}</div>
+                        <div style={{ fontSize: 9, color: cardMuted, marginTop: 10 }}>{String(formSettings.addressLabel || '').trim() || 'Full Shipping Destination'}</div>
+                        <div style={{ marginTop: 3, padding: '8px 10px', borderRadius: 8, background: '#f5f5f7', border: '1px solid rgba(0,0,0,0.14)', color: '#8e8e93', fontSize: 11 }}>{addressPh}</div>
+                        <div style={{ marginTop: 12 }}>
+                          <span style={{ background: cta, color: readableOn(cta), display: 'inline-block', padding: '10px 16px', borderRadius: 999, fontSize: 11, fontWeight: 700 }}>{button}</span>
+                        </div>
+                        {fine && <div style={{ fontSize: 8, color: cardMuted, marginTop: 10, lineHeight: 1.5 }}>{fine}</div>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <h4 id="settings-footer" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Footer</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

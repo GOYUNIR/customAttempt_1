@@ -31,7 +31,7 @@ const DEFAULT_PRODUCTS = [
     crops: [{ x: 0.5, y: 0.5, w: 1, h: 1 }, { x: 0.5, y: 0.34, w: 0.86, h: 0.86 }, { x: 0.5, y: 0.5, w: 1, h: 1 }],
     // Category tags drive the /catalog filter bar + chips on home cards and the
     // product page (admin-managed list in Settings → Catalog → Product categories).
-    categories: ['Perfume', 'Unisex'],
+    categories: ['New Arrivals', 'Perfume', 'Unisex', 'Limited Edition'],
     // Per-product recurring raffle schedule: after the first countdown ends and
     // the draw fires, the engine ROLLS the timer forward by this cadence
     // (here: a new raffle round every 12 hours) instead of closing the pool.
@@ -52,7 +52,7 @@ const DEFAULT_PRODUCTS = [
     // Multi-size RAFFLE demo: two sizes, each with its own winner-tier CSV
     // (Standard 2→2→1, Collector 1→1). Entry allocation is capped by
     // maxRaffleAllocationLimit; per-size stock is showcased on the FCFS demo (p4).
-    categories: ['Perfume', 'Men'],
+    categories: ['Perfume', 'Men', 'Limited Edition'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
     // Per-size raffle configs — "customize each raffle differently": the
     // Collector size draws on its OWN timer (5 days) and rolls forward on its
@@ -79,7 +79,7 @@ const DEFAULT_PRODUCTS = [
     priceCategories: [{ size: 'Sampler Set', price: 19, stripeId: defaultStripePriceId(), winnerTiers: '0', checkoutMode: 'FCFS' }, { size: 'Full Bottle', price: 145, stripeId: defaultStripePriceId(), winnerTiers: '2,2', checkoutMode: 'RAFFLE' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 160, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 1500, deliveryIncentiveMinOrderSubtotalCents: 9000, deliveryIncentiveExpiresDays: 60, deliveryIncentiveCodePrefix: 'NOIR', deliveryIncentiveTriggerSizes: ['Sampler Set'], deliveryIncentiveEligibleProductSlugs: ['noir-citrus-instant-drop'], deliveryIncentiveEligibleSizes: ['Full Bottle'],
     samplerSizes: [{ size: 'Sampler Set', label: 'Trial', fullSize: 'Full Bottle', creditCents: 1500, minOrderSubtotalCents: 9000, neverExpires: true, expiresDays: null, codePrefix: 'NOIR', eligibleProductSlugs: ['noir-citrus-instant-drop'], eligibleSizes: ['Full Bottle'], note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade. This credit never expires.' }],
-    categories: ['Perfume', 'Unisex'],
+    categories: ['Perfume', 'Unisex', 'Best Sellers'],
     createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -97,7 +97,7 @@ const DEFAULT_PRODUCTS = [
     // states seed each size's own inventory and the admin Inventory & Limits
     // panel shows the per-size editor.
     inventoryPerSize: { 'Fabric Card': 40, 'Travel Spray': 60, 'Full Bottle': 40 },
-    categories: ['Perfume', 'Women'],
+    categories: ['Perfume', 'Women', 'Best Sellers'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
@@ -111,7 +111,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Teaser launches, influencer announcements, and anything that benefits from a fixed opening time.' },
     ],
     priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, categories: ['New Arrivals', 'Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p6', name: 'Solar Drift — Upcoming FCFS', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'Upcoming direct-buy release that opens in under an hour — a quick countdown demo.',
@@ -124,7 +124,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Time-boxed launches where precision timing is the hook.' },
     ],
     priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, categories: ['Perfume', 'Summer'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, categories: ['Perfume', 'Women', 'Seasonal'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p7', name: 'Monolith Air — Upcoming', slug: 'monolith-air-upcoming', prefix: 'obsidian-void', tagline: 'UPCOMING / RAFFLE', desc: 'Low-allocation upcoming raffle with a visible countdown before activation.',
@@ -137,7 +137,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Statement pieces and collector drops where scarcity IS the product.' },
     ],
     priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, categories: ['Perfume', 'Men'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, categories: ['Perfume', 'Men', 'Signature'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p8', name: 'Atlas Bloom — Archive', slug: 'atlas-bloom-archive', prefix: 'baseItem2', tagline: 'ARCHIVE', desc: 'Completed direct drop that stays on the record as proof of demand.',
@@ -163,7 +163,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Proving a track record before the next launch opens.' },
     ],
     priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], categories: ['Perfume', 'Unisex', 'Best Sellers'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p10', name: 'Mirage Salt — Hidden Draft', slug: 'mirage-salt-hidden-draft', prefix: 'baseItem2', tagline: 'DRAFT', desc: 'Hidden draft to simulate a non-published product staged for a future release.',
@@ -176,7 +176,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Pre-launch staging, client review, and seasonal planning.' },
     ],
     priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], categories: ['Perfume', 'Winter'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], categories: ['Perfume', 'Men', 'Seasonal'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p11', name: 'Night Petal — Live Draw', slug: 'night-petal-live-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'Secondary live raffle that runs in parallel with the hero draw.',
@@ -189,7 +189,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Companion pieces, regional variants, or a second tier running beside the flagship.' },
     ],
     priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], categories: ['Perfume', 'Women'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], categories: ['Perfume', 'Women', 'Limited Edition'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p12', name: 'Quartz Ember — Live FCFS', slug: 'quartz-ember-live-fcfs', prefix: 'obsidian-void', tagline: 'FCFS / LIVE', desc: 'Additional direct-buy listing to stress-test cart and checkout UX.',
@@ -230,7 +230,7 @@ const DEFAULT_PRODUCTS = [
     priceCategories: [{ size: 'Discovery Kit', price: 42, stripeId: defaultStripePriceId(), winnerTiers: '0', checkoutMode: 'FCFS' }, { size: 'Full Bottle', price: 168, stripeId: defaultStripePriceId(), winnerTiers: '2,2', checkoutMode: 'RAFFLE' }, { size: 'Grand Size', price: 240, stripeId: defaultStripePriceId(), winnerTiers: '1,1', checkoutMode: 'RAFFLE' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     maxPerEmail: 4, maxPerCart: 4, maxRaffleAllocationLimit: 0, totalInventory: 220, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 30, deliveryIncentiveEnabled: true, deliveryIncentiveCreditCents: 2000, deliveryIncentiveMinOrderSubtotalCents: 12000, deliveryIncentiveExpiresDays: 45, deliveryIncentiveCodePrefix: 'GILDE', deliveryIncentiveTriggerSizes: ['Discovery Kit'], deliveryIncentiveEligibleProductSlugs: ['gilded-hour-member-bundle'], deliveryIncentiveEligibleSizes: ['Full Bottle', 'Grand Size'],
     samplerSizes: [{ size: 'Discovery Kit', label: 'Discovery', fullSize: 'Full Bottle', creditCents: 2000, minOrderSubtotalCents: 12000, neverExpires: false, expiresDays: 45, codePrefix: 'GILDE', eligibleProductSlugs: ['gilded-hour-member-bundle'], eligibleSizes: ['Full Bottle', 'Grand Size'], note: 'Three minis so you can live with the scent for a week before committing to the full bottle.' }],
-    categories: ['Perfume', 'Unisex', 'Winter'],
+    categories: ['Perfume', 'Unisex', 'Seasonal', 'Signature'],
     createdAt: NOW, updatedAt: NOW,
   },
 ];
@@ -271,16 +271,30 @@ const DEFAULT_CONFIG = {
     logoTransparent: false,
     brandName: '',
     brandFontFamily: '',
+    brandFontSize: 14,
     headerMode: 'both',
     headerActionMode: 'cart',
     shareImageUrl: '',
     shareTitle: '',
     shareDescription: 'Handcrafted fragrance allocations — private raffle drops, first-access alerts, and clean checkout for high-intent collectors.',
+    shareTagline: '',
+    shareUrl: '',
     shareBackground: '#0B0B0F',
     shareAccent: '#D4AF37',
     shareText: '#F5F2E9',
     iconBackground: '#0B0B0F',
     iconText: '#D4AF37',
+    // Share-card composition knobs (Settings → Branding & Share → Card style).
+    shareLogoVisible: true,
+    shareTaglineVisible: true,
+    shareSiteVisible: true,
+    shareTitleSize: 74,
+    shareDescriptionSize: 30,
+    shareLayout: 'classic',
+    shareFontFamily: 'system',
+    shareGlowIntensity: 40,
+    shareCornerRadius: 0,
+    shareImageOverlay: 60,
   },
   // Rewards & points: earn on purchases, redeem for store credit.
   rewards: {
@@ -381,7 +395,7 @@ const DEFAULT_CONFIG = {
   // list buyers can add/rename/delete — products are tagged with any subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
-    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+    categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
   },
   // Checkout & orders policy (admin → Settings → Checkout & Orders). When ON
   // (default) customer "update address" flows require the full Mapbox-dropdown

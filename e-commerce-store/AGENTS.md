@@ -278,9 +278,13 @@ the ledger. Settings tabs include:
   autofilled) — no extra tap. A "Paste code from clipboard" button covers the
   desktop copy-paste path.
 - **Streamer Mode** — default ON on load. Masks every customer email, shipping
-  address and card number and disables the password field (fixed bullet mask —
-  the real password length is never visible) so the portal is safe to share on
-  a livestream. Everything destructive still requires turning it OFF first,
+  address, card number, tracking number, promo code, order ref, phone number and
+  name (fixed-length bullet masks — the real value's character length is never
+  visible on stream) and disables the password field (fixed bullet mask — the
+  real password length is never visible) so the portal is safe to share on a
+  livestream. Free-form audit-log lines are redacted with the same masks
+  (`redactDetail`: emails, phone numbers, and any code-like 6+ char token mixing
+  letters + digits). Everything destructive still requires turning it OFF first,
   then entering the admin password.
 - **Admin security hygiene** — all `/admin` + `/api/admin` requests require
   HTTP Basic Auth in `proxy.ts` (no more password-in-query bypasses), admin
@@ -551,6 +555,15 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-18 — Streamer masking expanded + product editor overhaul + seeded category defaults + richer settings previews + overview dashboard (admin-polish-pass):**
+  - **🛡 Streamer Mode hides MORE.** The fixed-length mask system now covers **tracking numbers, promo codes, order refs, phone numbers and names** (new masks + `pii()` kinds), not just email/address/card. Wired into the ledger rows (Ref / promo / 📦 tracking), draw-history winners (promo), the trigger-drop result summary (promo), and a new `redactDetail()` helper redacts free-form **audit-log** lines (emails, phones, and any code-like 6+ char token mixing letters + digits → fixed masks). Over-masking is safe; under-masking leaks.
+  - **🧭 Product editor reorganized ("more sense + more power").** New **at-a-glance summary strip** (live Status / RAFFLE / FCFS / 🧪 trial pills + size count, price range, inventory, category count, go-live/end times) and a **sticky quick-jump nav** (`Basics · Media · Pricing & sizes · Trial sizes · Inventory · Drop schedule · Sold-out · Copy · Notes`) that scrolls to each section — `SectionCard` now takes an `id` + scroll-margin. **Gallery & Images moved up** to right after Basics (photos-first editing), so Pricing & Sizes → Trial sizes → Inventory → Drop schedule → Sold-out → Copy → Notes flow logically top-to-bottom. The **product list** gained a **⧉ Duplicate** button (`duplicateProduct()` opens a new hidden copy with a fresh name/slug) and shows **category chips + per-size inventory** on every row.
+  - **🏷 Product categories — real seeded defaults.** The junk placeholder list (`Clothes · Shoes · Food · Tools · Tires · Pastries · Beanies …`) is replaced everywhere with `['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex']` — updated in `goyunir.config.ts`, `lib/store-config.ts`, `lib/storefront-config.ts`, `app/api/store/config/route.ts`, `app/api/admin/seed/route.ts` and the admin `DEFAULT_CATALOG_SETTINGS`. All 14 seed products + the 3 static config products were re-tagged to the new list (`Winter`/`Summer` → `Seasonal`, raffles get `Limited Edition`, samplers get `Best Sellers`, flagships get `New Arrivals`/`Signature`).
+  - **🧪 "Anything non-blank is seeded."** The seed's `DEFAULT_CONFIG.branding` now carries the **full** share-card composition block (`shareTagline`, `shareUrl`, `brandFontSize`, `shareLayout`, `shareFontFamily`, `shareTitleSize`, `shareDescriptionSize`, `shareGlowIntensity`, `shareCornerRadius`, `shareImageOverlay`, `shareLogoVisible`, `shareTaglineVisible`, `shareSiteVisible`) so a freshly seeded store's Redis config is complete and matches what the admin editor shows — no missing non-blank defaults.
+  - **🖼 Settings previews rebuilt.** Theme Colors now previews a **mini storefront** (page background + glass top bar with real chrome math + hero line + 2-card grid + CTA + radius/chrome/shadow legend) instead of a single card. The **Hero Content preview** renders on the themed page background with the configured brand name/font + accent + CTA. New **Registration Form preview** shows the entry card (title, email/address fields with placeholders, submit CTA, fine print) live from the form copy.
+  - **📊 Overview dashboard upgraded.** New "Store Overview" card with quick actions (`+ Add Product`, `🎲 Run a Draw`, `⚙️ Settings`) and expanded stat grid: STARTED · ENTERED · CHARGED · INVENTORY LEFT · **PRODUCTS** · **REVENUE** (computed from the ledger's WINNER_CHARGED rows).
+  - Verified: `npm test` 87/87, `tsc --noEmit` clean, `npm run lint` clean, `npm run build` compiles every route + middleware. No Redis keys were added or changed (categories + branding live in `store:config`).
 
 - **2026-08-18 — Per-product urgency copy + per-size raffle engine ("customize each raffle differently") + admin product-form overhaul + hard auth on every admin route:**
   - **✍️ The product page's urgency/status lines are now editable ON the product admin page.** New **Customer-facing copy** section in the product form: `urgencyInStock`, `urgencySoldOut`, `statusLive`, `statusArchived` (all optional). Resolution order is per-product → global Settings → Storefront copy → built-in default (`components/Storefront.tsx`). Persisted through `/api/admin/products` (whitelisted, empty string = inherit) and passed through `/api/store` `sanitizeProduct`.

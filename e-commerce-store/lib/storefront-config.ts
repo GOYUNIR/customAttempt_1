@@ -314,7 +314,7 @@ const defaultCatalogSettings: NonNullable<StorefrontConfig['catalog']> = {
   // default) — operators can reorder from /admin → Settings → Catalog.
   sectionOrder: ['upcoming', 'archive', 'live'],
   // Seeded admin-managed categories (Settings → Catalog → Categories).
-  categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+  categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
 };
 
 /** Default checkout & orders policy (admin → Settings → Checkout & Orders). */

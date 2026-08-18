@@ -142,7 +142,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   // list buyers can add/rename/delete — products are tagged with any subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
-    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+    categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
   },
 
   // Checkout & orders policy (admin → Settings → Checkout & Orders). When ON
@@ -190,7 +190,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         { size: 'Standard', price: 95, stripeId: '', winnerTiers: '3,2,2' }
       ],
       crops: [{ x: 0.5, y: 0.5, w: 1, h: 1 }, { x: 0.5, y: 0.34, w: 0.86, h: 0.86 }, { x: 0.5, y: 0.5, w: 1, h: 1 }],
-      categories: ['Perfume', 'Unisex'],
+      categories: ['New Arrivals', 'Perfume', 'Unisex', 'Limited Edition'],
       customDropSchedule: { mode: 'custom', customIntervalHours: 12, timezone: 'America/Los_Angeles' },
       notes: [
         { label: 'MODE', name: 'Live raffle', text: 'Best for manufactured scarcity, waitlist growth, and careful winner selection.' },
@@ -215,7 +215,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
         { size: 'Standard', price: 110, stripeId: '', winnerTiers: '2,2,1' },
         { size: 'Collector', price: 175, stripeId: '', winnerTiers: '1,1' },
       ],
-      categories: ['Perfume', 'Men'],
+      categories: ['Perfume', 'Men', 'Limited Edition'],
       notes: [
         { label: 'MODE', name: 'Priority raffle', text: 'Useful when a client wants social buzz without opening unlimited direct checkout.' },
       ],
@@ -254,7 +254,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
           note: 'The 19ml trial is the same juice in a smaller bottle — fall in love with it first, then upgrade. This credit never expires.',
         },
       ],
-      categories: ['Perfume', 'Unisex'],
+      categories: ['Perfume', 'Unisex', 'Best Sellers'],
       notes: [
         { label: 'MODE', name: 'Live FCFS', text: 'Best for immediate conversion from social clicks and high-speed product demand.' },
       ],

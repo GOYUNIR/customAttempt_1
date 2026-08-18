@@ -253,7 +253,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   // subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
-    categories: ['Perfume', 'Clothes', 'Shoes', 'Food', 'Tools', 'Tires', 'Pastries', 'Beanies', 'Winter', 'Summer', 'Men', 'Unisex', 'Women'],
+    categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
   },
   checkout: {
     requireAddressAutofill: true,
