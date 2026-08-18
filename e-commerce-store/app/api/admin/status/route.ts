@@ -11,6 +11,7 @@ import {
   loadProducts,
   ANALYTICS_ONLINE_KEY,
   getAdminPassword,
+  adminRequestAuthorized,
 } from '@/lib/server-config';
 
 function parseWinnerTier(value: unknown): number {
@@ -35,7 +36,13 @@ function parseWinnerTier(value: unknown): number {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const password = url.searchParams.get('password') || '';
+  if (!adminRequestAuthorized(request, password)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
+
   try {
     const hasStripeKey = Boolean(process.env.STRIPE_SECRET_KEY);
     const hasRedisUrl = Boolean(process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL);

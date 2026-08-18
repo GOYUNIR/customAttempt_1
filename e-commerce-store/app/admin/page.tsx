@@ -1317,6 +1317,14 @@ export default function AdminPortal() {
       goLiveAt: '',
       releaseEndsAt: '',
       customDropSchedule: null,
+      // Per-size raffle configs — "customize each raffle differently". Keyed by
+      // normalized size label; each entry can carry its own releaseEndsAt + schedule.
+      sizeConfigs: {},
+      // Per-product customer-facing copy overrides (empty = inherit global copy).
+      urgencyInStock: '',
+      urgencySoldOut: '',
+      statusLive: '',
+      statusArchived: '',
       soldOutBehavior: 'stay_visible',
       soldOutArchiveDelayHours: 24,
       deliveryIncentiveEnabled: false,
@@ -1425,10 +1433,13 @@ export default function AdminPortal() {
       const nextSamplers = removedKey
         ? samplers.filter((s: any) => String(s?.size || '').trim().toLowerCase() !== removedKey)
         : samplers;
+      const sizeConfigs = { ...(prev.sizeConfigs || {}) };
+      if (removedKey && sizeConfigs[removedKey]) delete sizeConfigs[removedKey];
       return {
         ...prev,
         priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index),
         samplerSizes: nextSamplers,
+        sizeConfigs,
       };
     });
   };
@@ -1454,8 +1465,37 @@ export default function AdminPortal() {
             ),
           };
         }
+        // Re-key any per-size raffle config attached to the renamed size so the
+        // "customize each raffle differently" settings never orphan.
+        const sizeConfigs = { ...(prev.sizeConfigs || {}) };
+        const prevKey = previousSize.toLowerCase();
+        if (sizeConfigs[prevKey]) {
+          const cfg = sizeConfigs[prevKey];
+          delete sizeConfigs[prevKey];
+          if (nextSize) sizeConfigs[nextSize.toLowerCase()] = cfg;
+          return { ...prev, priceCategories: updated, sizeConfigs };
+        }
       }
       return { ...prev, priceCategories: updated };
+    });
+  };
+
+  // Update one field on a size's per-size raffle config (matched by the size's
+  // exact label). An empty releaseEndsAt removes the override so the size falls
+  // back to the product-level countdown; an empty schedule clears the per-size
+  // cadence. Never stores a config for a size that isn't in Pricing & Sizes.
+  const updateSizeConfig = (size: string, patch: any) => {
+    setProductForm((prev: any) => {
+      const sizeKey = String(size || '').trim().toLowerCase();
+      if (!sizeKey) return prev;
+      const valid = (prev.priceCategories || []).some((c: any) => String(c?.size || '').trim().toLowerCase() === sizeKey);
+      if (!valid) return prev;
+      const current = (prev.sizeConfigs || {})[sizeKey] || {};
+      const next = { ...current, ...patch };
+      const sizeConfigs = { ...(prev.sizeConfigs || {}) };
+      if (Object.keys(next).length > 0 && (next.releaseEndsAt || next.customDropSchedule)) sizeConfigs[sizeKey] = next;
+      else delete sizeConfigs[sizeKey];
+      return { ...prev, sizeConfigs };
     });
   };
 
@@ -3514,8 +3554,21 @@ export default function AdminPortal() {
                   description="Define each size/variant the customer can buy. Price and Stripe ID are required. “Winners / draw” controls how many winners a raffle picks per draw — a CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
                 >
-                  {productForm.priceCategories.map((cat: any, idx: number) => (
-                    <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', background: '#060606', padding: 8, borderRadius: 6 }}>
+                  {productForm.priceCategories.map((cat: any, idx: number) => {
+                    const sizeKey = String(cat.size || '').trim().toLowerCase();
+                    const sizeCfg = (productForm.sizeConfigs || {})[sizeKey] || {};
+                    const effectiveMode = String(cat.checkoutMode || '').toUpperCase() === 'FCFS'
+                      ? 'FCFS'
+                      : String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE'
+                        ? 'RAFFLE'
+                        : (productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE');
+                    const isSamplerCat = Array.isArray(productForm.samplerSizes)
+                      && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey);
+                    const sizeHasOwnConfig = Boolean(sizeCfg.releaseEndsAt) || Boolean(sizeCfg.customDropSchedule);
+                    return (
+                      <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                        {/* Row 1 — identity + price */}
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                       <input
                         type="text"
                         placeholder="Size (e.g. Standard)"
@@ -3537,12 +3590,16 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
+                      </div>
+                      {/* Row 2 — draw / format controls */}
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
                       <input
                         type="text"
                         placeholder="Winners / draw (e.g. 3,2,2)"
+                        title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
                         value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
                         onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 11 }}
+                        style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }}
                       />
                       <select
                         title="Checkout mode for THIS size. Leave on Auto to follow the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
@@ -3554,10 +3611,6 @@ export default function AdminPortal() {
                         <option value="RAFFLE">🎟 RAFFLE</option>
                         <option value="FCFS">⚡ FCFS</option>
                       </select>
-                      {(() => {
-                        const isSamplerCat = Array.isArray(productForm.samplerSizes)
-                          && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase());
-                        return (
                           <button
                             onClick={() => toggleSampler(idx)}
                             title={isSamplerCat
@@ -3575,13 +3628,220 @@ export default function AdminPortal() {
                           >
                             {isSamplerCat ? '🧪 Sample' : 'Sample'}
                           </button>
-                        );
-                      })()}
-                      <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
-                    </div>
-                  ))}
+                          <span style={{ fontSize: 9.5, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : effectiveMode === 'FCFS' ? '#60a5fa' : '#8b95a7', fontWeight: 700, letterSpacing: '0.5px' }}>
+                            {effectiveMode === 'RAFFLE' ? '🎟 RAFFLE' : '⚡ FCFS'}
+                          </span>
+                          <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
+                      </div>
+                      {/* Row 3 — per-size raffle settings: when this size runs a raffle,
+                          it can draw on its OWN countdown end + its OWN recurring
+                          schedule ("customize each raffle differently"). Blank =
+                          inherit the product-level Drop Schedule. */}
+                      {effectiveMode === 'RAFFLE' && (
+                        <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#08080a', border: sizeHasOwnConfig ? '1px solid rgba(245,158,11,0.35)' : '1px dashed #2a2a31' }}>
+                          <div style={{ fontSize: 9.5, fontWeight: 700, color: sizeHasOwnConfig ? '#fbbf24' : '#8b95a7', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                            🎟 Per-size raffle settings {sizeHasOwnConfig ? '— overrides product' : '— inherits product schedule'}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            <div>
+                              <label style={{ fontSize: 10, color: '#888' }}>Own countdown ends at (blank = the product&apos;s)</label>
+                              <input
+                                type="datetime-local"
+                                value={sizeCfg.releaseEndsAt || ''}
+                                onChange={(e) => updateSizeConfig(cat.size, { releaseEndsAt: e.target.value })}
+                                style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={!!sizeCfg.customDropSchedule}
+                                  onChange={(e) => updateSizeConfig(cat.size, {
+                                    customDropSchedule: e.target.checked
+                                      ? {
+                                          mode: 'daily',
+                                          timezone: productForm.customDropSchedule?.timezone || scheduleForm.timezone || 'America/Los_Angeles',
+                                          targetEndDateTime: '',
+                                          drawDayOfWeek: 6,
+                                          drawDayOfMonth: 1,
+                                          drawHour: 21,
+                                          drawMinute: 0,
+                                          drawSecond: 0,
+                                          customIntervalHours: 24,
+                                        }
+                                      : null,
+                                  })}
+                                />
+                                <span>Own recurring schedule</span>
+                              </label>
+                            </div>
+                          </div>
+                          {sizeCfg.customDropSchedule && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                              <label style={{ fontSize: 11 }}>Cadence
+                                <select
+                                  value={sizeCfg.customDropSchedule.mode || 'daily'}
+                                  onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), mode: e.target.value } })}
+                                  style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                >
+                                  <option value="hourly">Hourly</option>
+                                  <option value="daily">Daily</option>
+                                  <option value="weekly">Weekly</option>
+                                  <option value="biweekly">Biweekly</option>
+                                  <option value="monthly">Monthly</option>
+                                  <option value="yearly">Yearly</option>
+                                  <option value="custom">Custom (every N hours)</option>
+                                </select>
+                              </label>
+                              {sizeCfg.customDropSchedule.mode === 'custom' && (
+                                <label style={{ fontSize: 11 }}>Every N hours
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={720}
+                                    value={sizeCfg.customDropSchedule.customIntervalHours ?? 24}
+                                    onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), customIntervalHours: Number(e.target.value) } })}
+                                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                  />
+                                </label>
+                              )}
+                              {(sizeCfg.customDropSchedule.mode === 'daily' || sizeCfg.customDropSchedule.mode === 'weekly' || sizeCfg.customDropSchedule.mode === 'monthly') && (
+                                <>
+                                  <label style={{ fontSize: 11 }}>Hour (0-23)
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={23}
+                                      value={sizeCfg.customDropSchedule.drawHour ?? 21}
+                                      onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), drawHour: Number(e.target.value) } })}
+                                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                    />
+                                  </label>
+                                  <label style={{ fontSize: 11 }}>Minute (0-59)
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={59}
+                                      value={sizeCfg.customDropSchedule.drawMinute ?? 0}
+                                      onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), drawMinute: Number(e.target.value) } })}
+                                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                    />
+                                  </label>
+                                </>
+                              )}
+                              {sizeCfg.customDropSchedule.mode === 'weekly' && (
+                                <label style={{ fontSize: 11 }}>Day of week (0=Sun..6=Sat)
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={6}
+                                    value={sizeCfg.customDropSchedule.drawDayOfWeek ?? 6}
+                                    onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), drawDayOfWeek: Number(e.target.value) } })}
+                                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                  />
+                                </label>
+                              )}
+                              {sizeCfg.customDropSchedule.mode === 'monthly' && (
+                                <label style={{ fontSize: 11 }}>Day of month (1-31)
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={sizeCfg.customDropSchedule.drawDayOfMonth ?? 1}
+                                    onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), drawDayOfMonth: Number(e.target.value) } })}
+                                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                  />
+                                </label>
+                              )}
+                              {sizeCfg.customDropSchedule.mode === 'hourly' && (
+                                <label style={{ fontSize: 11 }}>Minute (0-59)
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={59}
+                                    value={sizeCfg.customDropSchedule.drawMinute ?? 0}
+                                    onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), drawMinute: Number(e.target.value) } })}
+                                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                  />
+                                </label>
+                              )}
+                              {sizeCfg.customDropSchedule.mode === 'fixed' && (
+                                <label style={{ fontSize: 11 }}>One-shot draw at
+                                  <input
+                                    type="datetime-local"
+                                    value={sizeCfg.customDropSchedule.targetEndDateTime || ''}
+                                    onChange={(e) => updateSizeConfig(cat.size, { customDropSchedule: { ...(sizeCfg.customDropSchedule || {}), targetEndDateTime: e.target.value } })}
+                                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                                  />
+                                </label>
+                              )}
+                              <p style={{ gridColumn: '1 / -1', fontSize: 9.5, color: '#8b95a7', margin: '2px 0 0', lineHeight: 1.5 }}>
+                                This size draws on its OWN timer. Leave <strong>Own countdown ends at</strong> blank to inherit the product&apos;s countdown, and
+                                leave the schedule off to inherit the product&apos;s cadence (then the global cadence). Every raffle size can run independently.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      </div>
+                    );
+                  })}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
                     <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below.</span>
+                  </div>
+                </SectionCard>
+
+                {/* ============ CUSTOMER-FACING COPY ============ */}
+                <SectionCard
+                  title="Customer-facing copy"
+                  description="The exact lines customers read on this product's page. Every field is optional — leave it blank to inherit the global Settings → Storefront copy (which falls back to the built-in default), or write per-product copy here for a product-specific voice."
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <label style={{ fontSize: 10, color: '#888' }}>
+                      In-stock urgency line (default: “Handmade allocation. Low supply by design.”)
+                      <textarea
+                        rows={2}
+                        placeholder="Handmade allocation. Low supply by design."
+                        value={productForm.urgencyInStock || ''}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, urgencyInStock: e.target.value }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>
+                      Sold-out urgency line (default: “This release is fully spoken for.”)
+                      <textarea
+                        rows={2}
+                        placeholder="This release is fully spoken for."
+                        value={productForm.urgencySoldOut || ''}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, urgencySoldOut: e.target.value }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>
+                      Live status story (default: “Reserved for collectors moving early, before the allocation tightens further.”)
+                      <textarea
+                        rows={2}
+                        placeholder="Reserved for collectors moving early, before the allocation tightens further."
+                        value={productForm.statusLive || ''}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, statusLive: e.target.value }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                      />
+                    </label>
+                    <label style={{ fontSize: 10, color: '#888' }}>
+                      Archived status story (default: “Archive placement preserves the release as proof of demand and collectability.”)
+                      <textarea
+                        rows={2}
+                        placeholder="Archive placement preserves the release as proof of demand and collectability."
+                        value={productForm.statusArchived || ''}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, statusArchived: e.target.value }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                      />
+                    </label>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#8b95a7', marginTop: 6, lineHeight: 1.5 }}>
+                    Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These four lines are the
+                    same ones editable site-wide in Settings → Storefront copy; a value here wins for THIS product only.
                   </div>
                 </SectionCard>
 

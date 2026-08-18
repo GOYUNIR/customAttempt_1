@@ -39,6 +39,50 @@ function getProductPriceCategory(product: any, size: string) {
 }
 
 /**
+ * Resolve the countdown anchors for ONE product+size pair. Per-size raffle
+ * configs ("customize each raffle differently") mean the selected size decides
+ * the timer the visitor sees AND the trigger anchor the draw engine is nudged
+ * with:
+ *   - `drawAnchor` → DISPLAY anchor (the "new raffle" timer when the size's raw
+ *     cycle end has passed but inventory remains and the schedule recurs).
+ *   - `dueAnchor`  → TRIGGER anchor (the raw per-size cycle end — may be in the
+ *     past on load so the draw still fires for an ended-but-un-drawn pool).
+ * Returns `{ drawAnchor, dueAnchor }` strings (empty when the product is
+ * archived or has no usable anchor).
+ */
+function resolveProductAnchors(data: any, size: string): { drawAnchor?: string; dueAnchor?: string } {
+  const productData = data?.product;
+  if (!productData) return {};
+  if (productData.isArchived) return {};
+  const storeTz = String(data?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+  const sizeKey = String(size || '').trim().toLowerCase();
+  // Per-size raw cycle end wins over the product-level one; per-size display
+  // anchor wins over the product-level "new raffle" timer.
+  const sizeCfg = (productData?.sizeConfigs || {})[sizeKey] || {};
+  const releaseEndsAt = String(sizeCfg?.releaseEndsAt || productData.releaseEndsAt || '');
+  const sizeNext = (productData?.sizeNextReleaseEndsAt || {}) as Record<string, string>;
+  const nextReleaseEndsAt = String(sizeNext[sizeKey] || productData.nextReleaseEndsAt || '');
+  const releaseMs = releaseEndsAt ? dropTimestampToMsOrNaN(releaseEndsAt, storeTz) : NaN;
+  const nextReleaseMs = nextReleaseEndsAt ? dropTimestampToMsOrNaN(nextReleaseEndsAt, storeTz) : NaN;
+
+  if (productData.isUpcoming) {
+    const anchor = productData.goLiveAt || releaseEndsAt;
+    return { drawAnchor: anchor, dueAnchor: anchor };
+  }
+  if (nextReleaseEndsAt && Number.isFinite(nextReleaseMs)) {
+    return { drawAnchor: nextReleaseEndsAt, dueAnchor: releaseEndsAt || nextReleaseEndsAt };
+  }
+  if (releaseEndsAt && Number.isFinite(releaseMs)) {
+    return { drawAnchor: releaseEndsAt, dueAnchor: releaseEndsAt };
+  }
+  const fallback = data?.config?.dropSchedule?.targetEndDateTime
+    || data?.config?.dropSchedule?.countdownEndsAt
+    || releaseEndsAt
+    || undefined;
+  return { drawAnchor: fallback, dueAnchor: fallback };
+}
+
+/**
  * Small inline spinner used inside buttons while an async action is running.
  * Because every tap now also gets the global press-down animation, a button
  * that is mid-request shows BOTH the pressed (disabled) state AND this
@@ -209,6 +253,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // (e.g. the countdown-zero refresh) never reset the visitor's selected size or
   // flip the gallery back to photo 1. Only a real product switch resets those.
   const productIdRef = useRef<string>('');
+  // Per-size raffle configs mean the countdown depends on the SELECTED size. The
+  // anchor is recomputed by an effect on [product, selectedSize]; these refs
+  // bridge the fetch (which knows the store timezone from the payload) to that
+  // effect without another network round-trip.
+  const storeTimezoneRef = useRef<string>(String(GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'));
+  const selectedSizeRef = useRef<string>('');
   // Guards the draw-trigger block (notify + re-fetch) so it fires at most once per
   // product + cycle boundary, re-arming after DRAW_TRIGGER_REARM_MS. Persists across
   // effect re-runs — the old local `notified` flag reset on every re-run, which let a
@@ -278,55 +328,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
       if (data.product) {
         setProduct(data.product);
-        if (data.product.isArchived) {
-          setRaffleEndsAt(null);
-          setRaffleDueAt(null);
-        } else {
-          const releaseEndsAt = data.product.releaseEndsAt;
-          const nextReleaseEndsAt = data.product.nextReleaseEndsAt || '';
-          // Drop times are naive wall-clock strings set in the STORE's
-          // timezone. Parse them as such so the countdown means the same
-          // instant to every browser (and to the server's draw engine).
-          const storeTz = String(data?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
-          const releaseMs = releaseEndsAt ? dropTimestampToMsOrNaN(releaseEndsAt, storeTz) : NaN;
-          const nextReleaseMs = nextReleaseEndsAt ? dropTimestampToMsOrNaN(nextReleaseEndsAt, storeTz) : NaN;
-          // A live (non-upcoming) drop counts down to its own releaseEndsAt —
-          // even when that moment has already passed, because the countdown
-          // effect below pings the draw engine the instant it renders. We
-          // NEVER re-anchor a passed release to the next GLOBAL drop here:
-          // that produced a week-long bogus countdown ("Raffle ends in 6d…")
-          // while the pool sat due and un-drawn. If no release end exists at
-          // all, fall back to the configured drop-schedule anchor.
-          //
-          // The /api/store lifecycle now ALSO returns `nextReleaseEndsAt`: the
-          // next scheduled draw moment for a RECURRING raffle whose previous
-          // timer ended with inventory remaining. When present, that is the
-          // DISPLAY anchor (the "new raffle" timer) while the raw
-          // releaseEndsAt stays the TRIGGER anchor so the draw still fires.
-          let drawAnchor: string | undefined;
-          let dueAnchor: string | undefined;
-          if (data.product.isUpcoming) {
-            drawAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
-            dueAnchor = data.product.goLiveAt || data.product.releaseEndsAt;
-          } else if (nextReleaseEndsAt && Number.isFinite(nextReleaseMs)) {
-            drawAnchor = nextReleaseEndsAt;
-            dueAnchor = releaseEndsAt || nextReleaseEndsAt;
-          } else if (releaseEndsAt && Number.isFinite(releaseMs)) {
-            drawAnchor = releaseEndsAt;
-            dueAnchor = releaseEndsAt;
-          } else {
-            drawAnchor =
-              data?.config?.dropSchedule?.targetEndDateTime ||
-              data?.config?.dropSchedule?.countdownEndsAt ||
-              data.product.releaseEndsAt ||
-              undefined;
-            dueAnchor = drawAnchor;
-          }
-          const anchorMs = drawAnchor ? dropTimestampToMsOrNaN(drawAnchor, storeTz) : NaN;
-          const dueMs = dueAnchor ? dropTimestampToMsOrNaN(dueAnchor, storeTz) : NaN;
-          setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
-          setRaffleDueAt(Number.isFinite(dueMs) && dueMs > 0 ? dueMs : null);
-        }
+        // The countdown anchors are resolved per product+size (see the effect on
+        // [product, selectedSize] below); here we only carry over the store
+        // timezone so that effect parses naive wall-clock strings correctly.
+        storeTimezoneRef.current = String(data?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
         const cats = data.product.priceCategories || [];
         // Preserve the visitor's size selection across re-fetches. A re-fetch
         // fires right after a countdown-zero draw trigger, and blindly resetting
@@ -392,6 +397,31 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     if (cats.length > 0 && !cats.some((cat: any) => cat.size === selectedSize)) {
       setSelectedSize(cats[0].size);
     }
+  }, [product, selectedSize]);
+
+  // ── Per-size countdown anchors ─────────────────────────────────────────────
+  // The displayed countdown AND the draw-trigger anchor depend on the SELECTED
+  // size (each raffle size can have its own releaseEndsAt + schedule). Recompute
+  // whenever the product or the selection changes. Archived products have no
+  // countdown. Per-size override wins over product-level; the "new raffle"
+  // timer (nextReleaseEndsAt) is only a display anchor while the raw cycle end
+  // stays the trigger anchor so the draw engine is nudged exactly when the
+  // timer the visitor saw hits zero.
+  useEffect(() => {
+    if (!product) return;
+    const size = selectedSize || String((product.priceCategories || [])[0]?.size || '');
+    selectedSizeRef.current = size;
+    if (product.isArchived) {
+      setRaffleEndsAt(null);
+      setRaffleDueAt(null);
+      return;
+    }
+    const anchors = resolveProductAnchors({ product, config: { dropSchedule: { timezone: storeTimezoneRef.current } } }, size);
+    const storeTz = storeTimezoneRef.current;
+    const anchorMs = anchors.drawAnchor ? dropTimestampToMsOrNaN(anchors.drawAnchor, storeTz) : NaN;
+    const dueMs = anchors.dueAnchor ? dropTimestampToMsOrNaN(anchors.dueAnchor, storeTz) : NaN;
+    setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
+    setRaffleDueAt(Number.isFinite(dueMs) && dueMs > 0 ? dueMs : null);
   }, [product, selectedSize]);
 
   // Attach Mapbox address autofill once the product (and its address input) is
@@ -1175,20 +1205,24 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     (totalInventory > 0 && inventoryRemaining <= 0) ||
     (totalInventory === 0 && (product.soldOutBehavior || 'stay_visible') === 'stay_visible');
   const activeProductLabel = soldOut ? 'Sold out' : (product.isArchived ? 'Archived' : (product.isUpcoming ? 'Upcoming' : 'Live now'));
+  // Copy resolution is per-product → global → built-in. The product admin page
+  // ("Customer-facing copy") can override each line per product; leaving a field
+  // empty inherits the global Settings → Storefront copy, which in turn falls
+  // back to the built-in default.
   const urgencyLabel = soldOut
-    ? String(copySettings.urgencySoldOut || '').trim() || 'This release is fully spoken for.'
+    ? String(product.urgencySoldOut || copySettings.urgencySoldOut || '').trim() || 'This release is fully spoken for.'
     : inventoryRemaining > 0 && inventoryRemaining <= 12
       ? `Only ${inventoryRemaining} allocations left.`
       : inventoryRemaining > 0 && inventoryRemaining <= 30
         ? `${inventoryRemaining} units remain across this release.`
-        : String(copySettings.urgencyInStock || '').trim() || 'Handmade allocation. Low supply by design.';
+        : String(product.urgencyInStock || copySettings.urgencyInStock || '').trim() || 'Handmade allocation. Low supply by design.';
   const statusStory = product.isUpcoming
     ? 'Collectors can still queue interest before the release opens publicly.'
     : product.isArchived && isRaffleProduct
       ? 'Archive placement keeps the story visible, and raffle entry can still be reopened for private audiences.'
       : product.isArchived
-        ? String(copySettings.statusArchived || '').trim() || 'Archive placement preserves the release as proof of demand and collectability.'
-        : String(copySettings.statusLive || '').trim() || 'Reserved for collectors moving early, before the allocation tightens further.';
+        ? String(product.statusArchived || copySettings.statusArchived || '').trim() || 'Archive placement preserves the release as proof of demand and collectability.'
+        : String(product.statusLive || copySettings.statusLive || '').trim() || 'Reserved for collectors moving early, before the allocation tightens further.';
   const checkoutDisabled = soldOut || !selectedSize || !isConfiguredPrice(price);
   const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
 

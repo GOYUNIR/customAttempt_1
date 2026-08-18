@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { adminRequestAuthorized } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,7 +8,9 @@ export const dynamic = 'force-dynamic';
  *
  * Returns ONLY presence + metadata for each variable (never values) so the
  * admin can verify an installation at a glance without leaking secrets.
- * Protected by the admin Basic-Auth proxy (proxy.ts).
+ * Defense-in-depth: requires admin authorization IN the route (on top of the
+ * proxy.ts Basic-Auth + device-cookie gates) so a misconfiguration that ever
+ * exposes this handler can never be read unauthenticated.
  */
 type EnvStatusItem = {
   key: string;
@@ -23,7 +26,13 @@ type EnvStatusItem = {
 const has = (...names: string[]): boolean =>
   names.some((name) => Boolean(process.env[name] && String(process.env[name]).trim()));
 
-export async function GET() {
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const password = url.searchParams.get('password') || '';
+  if (!adminRequestAuthorized(request, password)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
+
   const items: EnvStatusItem[] = [
     {
       key: 'Redis',

@@ -54,6 +54,17 @@ const DEFAULT_PRODUCTS = [
     // maxRaffleAllocationLimit; per-size stock is showcased on the FCFS demo (p4).
     categories: ['Perfume', 'Men'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
+    // Per-size raffle configs — "customize each raffle differently": the
+    // Collector size draws on its OWN timer (5 days) and rolls forward on its
+    // OWN daily 19:00 schedule, while Standard inherits the product-level
+    // countdown. Both sizes run raffles, each on their own cycle.
+    sizeConfigs: {
+      standard: {},
+      collector: {
+        releaseEndsAt: isoIn(5 * DAY_MS),
+        customDropSchedule: { mode: 'daily', timezone: 'America/Los_Angeles', targetEndDateTime: '', drawDayOfWeek: 6, drawDayOfMonth: 1, drawHour: 19, drawMinute: 0, drawSecond: 0, customIntervalHours: 24 },
+      },
+    },
   },
   {
     id: 'p3', name: 'Noir Citrus — Instant Drop', slug: 'noir-citrus-instant-drop', prefix: 'baseItem1', tagline: 'MIXED / LIVE', desc: 'A single release, two ways to buy: the Sampler Set sells instantly (FCFS) while the Full Bottle runs a raffle — the flagship mixed-format demo.',
@@ -430,6 +441,14 @@ function validateSeedProducts(products: any[]) {
       for (const size of Object.keys(product.inventoryPerSize)) {
         if (!sizeNames.includes(size)) {
           throw new Error(`[seed] ${product.id} (${product.name}): inventoryPerSize key "${size}" is not a price category`);
+        }
+      }
+    }
+    if (product.sizeConfigs && typeof product.sizeConfigs === 'object') {
+      const sizeKeys = sizeNames.map((s: string) => s.toLowerCase());
+      for (const key of Object.keys(product.sizeConfigs)) {
+        if (!sizeKeys.includes(String(key || '').toLowerCase())) {
+          throw new Error(`[seed] ${product.id} (${product.name}): sizeConfigs key "${key}" is not a price category`);
         }
       }
     }

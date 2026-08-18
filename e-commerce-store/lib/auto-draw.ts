@@ -58,6 +58,11 @@ import {
   shouldRunDraw,
   getNextRecurringAnchorMs,
   getSizeCheckoutMode,
+  resolveSizeReleaseEndsAt,
+  getSizeReleaseEndsAt,
+  getSizeCustomSchedule,
+  sizeConfigKey,
+  sizeConfigsOf,
 } from '@/lib/storefront-config';
 import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
@@ -191,13 +196,17 @@ async function evaluatePoolDue(opts: {
     return { due: true, cycleEndMs: null, nextAnchorMs: null, cadence: false };
   }
 
+  // The product's countdown end (per-size override wins over product-level) is
+  // the current cycle boundary, and the schedule is per-size too — two raffle
+  // sizes on one product can draw on completely different timers/cadences.
   const effectiveSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
     ...(opts.globalSchedule || {}),
     ...(opts.product?.customDropSchedule || {}),
+    ...(getSizeCustomSchedule(opts.product, opts.size) || {}),
   };
   const timezone = String(effectiveSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
-  const endMs = toMs(opts.product?.releaseEndsAt, timezone);
+  const endMs = toMs(resolveSizeReleaseEndsAt(opts.product, opts.size), timezone);
   const lastAuto = Number((await opts.redis.hget(LAST_AUTO_DRAW_HASH_KEY, lastAutoDrawField(opts.product.name, opts.size))) || 0);
 
   if (endMs !== null) {
@@ -316,10 +325,15 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   const drewPools: string[] = [];
   let grandRevenueChargesCount = 0;
   // Products whose countdown should roll forward after ALL their pools have
-  // been evaluated this run (a multi-size product's pools share the same
-  // releaseEndsAt — advancing it mid-loop would wrongly mark later size pools
-  // "not due" in the same run).
-  const productsToAdvance = new Map<string, any>();
+  // been evaluated this run. Per-size records:
+  //   - `perSize`  → sizes with their OWN raffle config (own releaseEndsAt /
+  //                  own schedule) — each gets its OWN next anchor written into
+  //                  `sizeConfigs[<size>].releaseEndsAt`.
+  //   - `productLevel` → true when at least one drawn size inherits the
+  //                  product-level timing — the product's releaseEndsAt rolls
+  //                  forward once (multi-size products share it, so advancing
+  //                  mid-loop would wrongly mark later size pools "not due").
+  const productsToAdvance = new Map<string, { product: any; perSize: Set<string>; productLevel: boolean }>();
 
   for (const poolKey of allPoolKeys) {
     try {
@@ -634,16 +648,25 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         });
 
         // ── Recurring-raffle roll-forward (deferred) ─────────────────────────
-        // If inventory remains (and the product is not archived), the product's
-        // countdown rolls forward to its NEXT scheduled draw moment AFTER all of
-        // its pools have been evaluated (see productsToAdvance below). The
-        // storefront then shows a NEW countdown to that moment instead of
-        // freezing on "Raffle closed"/"Until sold out", and the pool becomes due
-        // again exactly when that timer hits zero. One-shot drops (no future
-        // anchor) keep the past releaseEndsAt and are marked done by the
-        // `lastAuto` guard in evaluatePoolDue.
+        // If inventory remains (and the product is not archived), the countdown
+        // rolls forward to the NEXT scheduled draw moment AFTER all of its pools
+        // have been evaluated (see productsToAdvance below). A size with its OWN
+        // raffle config (own releaseEndsAt / own schedule) is rolled per-size;
+        // a size that inherits the product timing marks the product for a single
+        // product-level advance. The storefront then shows a NEW countdown to
+        // that moment instead of freezing on "Raffle closed"/"Until sold out",
+        // and the pool becomes due again exactly when that timer hits zero.
+        // One-shot drops (no future anchor) keep the past releaseEndsAt and are
+        // marked done by the `lastAuto` guard in evaluatePoolDue.
         if (live.inventoryRemaining > 0 && !product.isArchived) {
-          productsToAdvance.set(String(product.id), product);
+          const record = productsToAdvance.get(String(product.id)) || { product, perSize: new Set<string>(), productLevel: false };
+          // A size with its OWN raffle config (own countdown end or own
+          // schedule) is rolled per-size; an inheriting size marks the product
+          // for the single product-level advance.
+          const hasOwnConfig = Boolean(getSizeReleaseEndsAt(product, productSize)) || Boolean(getSizeCustomSchedule(product, productSize));
+          if (hasOwnConfig) record.perSize.add(productSize);
+          else record.productLevel = true;
+          productsToAdvance.set(String(product.id), record);
         }
 
         if (live.inventoryRemaining <= 0) {
@@ -666,25 +689,58 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
 
   // ── Deferred recurring-raffle roll-forward ────────────────────────────────
   // Persist each drawn product's new releaseEndsAt (the next scheduled draw
-  // moment) now that every pool has been evaluated. A failed roll-forward must
-  // never fail the run itself.
+  // moment) now that every pool has been evaluated. Per-size configs roll each
+  // configured size to ITS OWN next anchor; the product-level releaseEndsAt
+  // rolls once for sizes that inherit it. A failed roll-forward must never fail
+  // the run itself.
   if (!dryRun && productsToAdvance.size > 0) {
-    for (const [, product] of productsToAdvance) {
+    for (const [, record] of productsToAdvance) {
+      const product = record.product;
       try {
-        const productSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
-        const productTz = String(productSchedule?.timezone || storeTimezone || 'America/Los_Angeles');
-        const currentEndMs = toMs(product.releaseEndsAt, productTz);
-        // Advance from the LATER of (cycle end, now) so the new timer is ALWAYS
-        // in the future — a run that catches a stale cycle late (missed draws,
-        // empty-pool advance) skips straight past any intermediate anchors
-        // instead of chasing them one at a time.
-        const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? Math.max(currentEndMs, now) : now;
-        const nextAnchorMs = getNextRecurringAnchorMs(productSchedule as any, baseForAdvance);
-        if (nextAnchorMs !== null) {
-          const nextRelease = formatStoreWallClock(nextAnchorMs, productTz);
-          if (nextRelease && nextRelease !== product.releaseEndsAt) {
-            product.releaseEndsAt = nextRelease;
-            await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+        // ── Per-size roll-forward (sizes with their own raffle config) ──
+        for (const size of record.perSize) {
+          const sizeSchedule = {
+            ...GOYUNIR_STORE_SUITE.dropSchedule,
+            ...(globalSchedule || {}),
+            ...(product.customDropSchedule || {}),
+            ...(getSizeCustomSchedule(product, size) || {}),
+          };
+          const sizeTz = String(sizeSchedule?.timezone || storeTimezone || 'America/Los_Angeles');
+          const currentEndMs = toMs(resolveSizeReleaseEndsAt(product, size), sizeTz);
+          const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? Math.max(currentEndMs, now) : now;
+          const nextAnchorMs = getNextRecurringAnchorMs(sizeSchedule as any, baseForAdvance);
+          if (nextAnchorMs !== null) {
+            const nextRelease = formatStoreWallClock(nextAnchorMs, sizeTz);
+            if (nextRelease) {
+              const existingCfg = sizeConfigsOf(product)[sizeConfigKey(size)] || {};
+              if (existingCfg.releaseEndsAt !== nextRelease) {
+                product.sizeConfigs = {
+                  ...sizeConfigsOf(product),
+                  [sizeConfigKey(size)]: { ...existingCfg, releaseEndsAt: nextRelease },
+                };
+                await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+              }
+            }
+          }
+        }
+
+        // ── Product-level roll-forward (sizes that inherit the product timer) ──
+        if (record.productLevel) {
+          const productSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
+          const productTz = String(productSchedule?.timezone || storeTimezone || 'America/Los_Angeles');
+          const currentEndMs = toMs(product.releaseEndsAt, productTz);
+          // Advance from the LATER of (cycle end, now) so the new timer is ALWAYS
+          // in the future — a run that catches a stale cycle late (missed draws,
+          // empty-pool advance) skips straight past any intermediate anchors
+          // instead of chasing them one at a time.
+          const baseForAdvance = currentEndMs !== null && currentEndMs > 0 ? Math.max(currentEndMs, now) : now;
+          const nextAnchorMs = getNextRecurringAnchorMs(productSchedule as any, baseForAdvance);
+          if (nextAnchorMs !== null) {
+            const nextRelease = formatStoreWallClock(nextAnchorMs, productTz);
+            if (nextRelease && nextRelease !== product.releaseEndsAt) {
+              product.releaseEndsAt = nextRelease;
+              await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+            }
           }
         }
       } catch {

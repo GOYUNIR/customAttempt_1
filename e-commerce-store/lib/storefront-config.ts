@@ -1010,3 +1010,47 @@ export function resolveNextRaffleAnchorMs(
   const base = explicitMs !== null && explicitMs > 0 ? explicitMs : now;
   return getNextRecurringAnchorMs(schedule, base);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-size raffle configuration — "customize each raffle differently."
+// Implementation lives in lib/size-configs.ts (self-contained so the node
+// --test runner can load it); this re-export keeps every `@/lib/storefront-config`
+// import working while `resolveSizeNextAnchorMs` below composes the pure helpers
+// with the recurring-anchor math that lives in this module.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type { SizeRaffleConfig } from './size-configs';
+export {
+  sizeConfigKey,
+  sizeConfigsOf,
+  getSizeReleaseEndsAt,
+  getSizeCustomSchedule,
+  resolveSizeReleaseEndsAt,
+  resolveSizeSchedule,
+  normalizeSizeConfigs,
+} from './size-configs';
+// Local bindings for the anchor composition below (the `export ... from` above
+// re-exports without binding locally).
+import { resolveSizeReleaseEndsAt, resolveSizeSchedule } from './size-configs';
+
+/**
+ * The countdown anchor ONE size should show RIGHT NOW — per-size equivalent of
+ * `resolveNextRaffleAnchorMs`. While the size's own end is still in the future
+ * that IS the anchor; once it passes (inventory remains + a recurring schedule)
+ * the anchor becomes the size's next scheduled draw moment; sold-out/one-shot
+ * ended sizes return `null` (no future raffle for that size).
+ */
+export function resolveSizeNextAnchorMs(
+  product: any,
+  size: string,
+  globalSchedule: Partial<DropScheduleConfig> | Record<string, any>,
+  now: number = Date.now(),
+): number | null {
+  const schedule = resolveSizeSchedule(product, size, globalSchedule);
+  const explicit = resolveSizeReleaseEndsAt(product, size);
+  const explicitMs = explicit ? dropTimestampToMs(explicit, schedule.timezone) : null;
+  if (explicitMs !== null && explicitMs > now) return explicitMs;
+  if (product?.soldOut === true || product?.isArchived === true) return null;
+  const base = explicitMs !== null && explicitMs > 0 ? explicitMs : now;
+  return getNextRecurringAnchorMs(schedule, base);
+}

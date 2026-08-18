@@ -14,7 +14,7 @@ import {
 import { withTtlCache } from '@/lib/ttl-cache';
 import { publicMediaRef } from '@/lib/media';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
-import { resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
+import { resolveNextRaffleAnchorMs, normalizeCategories, resolveSizeNextAnchorMs } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -165,12 +165,30 @@ async function buildCatalogPayload() {
 
       // Effective countdown anchor — the next scheduled draw for recurring
       // raffles whose timer ended with inventory remaining (the "new raffle"
-      // timer the tiles should show instead of "Until sold out").
+      // timer the tiles should show instead of "Until sold out"). Per-size
+      // raffle configs make this per-size: the tile shows the EARLIEST anchor
+      // across all raffle sizes so cards never disagree with the product page.
       let nextReleaseEndsAt = String(product.releaseEndsAt || '');
       try {
-        const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
-        const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct, effectiveSchedule as any, now);
-        if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, storeTimezone);
+        const sizeAnchors: number[] = [];
+        const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
+        for (const cat of cats) {
+          const size = String(cat?.size || '').trim();
+          if (!size) continue;
+          try {
+            const anchorMs = resolveSizeNextAnchorMs(lifecycleProduct, size, globalSchedule as any, now);
+            if (anchorMs !== null) sizeAnchors.push(anchorMs);
+          } catch {
+            /* per-size glitch → skip that size */
+          }
+        }
+        if (sizeAnchors.length > 0) {
+          nextReleaseEndsAt = formatStoreWallClock(Math.min(...sizeAnchors), storeTimezone);
+        } else {
+          const effectiveSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(globalSchedule || {}), ...(product.customDropSchedule || {}) };
+          const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct, effectiveSchedule as any, now);
+          if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, storeTimezone);
+        }
       } catch {}
 
       return { ...lifecycleProduct, nextReleaseEndsAt };

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
-import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -295,6 +295,24 @@ export async function POST(request: Request) {
           ? body.customDropSchedule
           : (existing?.customDropSchedule || null))
       : (existing?.customDropSchedule || null),
+    // Per-size raffle configs — "customize each raffle differently". Keyed by
+    // normalized size label; a config can carry its own `releaseEndsAt` and/or
+    // its own `customDropSchedule`. Normalized so a config for a deleted/renamed
+    // size can never survive a save.
+    sizeConfigs: (() => {
+      const cats = Array.isArray(body.priceCategories)
+        ? body.priceCategories
+        : (Array.isArray(existing?.priceCategories) ? existing.priceCategories : []);
+      if (has('sizeConfigs')) return normalizeSizeConfigs(body.sizeConfigs, cats);
+      if (existing?.sizeConfigs) return normalizeSizeConfigs(existing.sizeConfigs, cats);
+      return {};
+    })(),
+    // Per-product customer-facing copy overrides (empty string = inherit the
+    // global Settings → Storefront copy, which falls back to the built-in).
+    urgencyInStock: has('urgencyInStock') ? String(body.urgencyInStock || '') : (existing?.urgencyInStock || ''),
+    urgencySoldOut: has('urgencySoldOut') ? String(body.urgencySoldOut || '') : (existing?.urgencySoldOut || ''),
+    statusLive: has('statusLive') ? String(body.statusLive || '') : (existing?.statusLive || ''),
+    statusArchived: has('statusArchived') ? String(body.statusArchived || '') : (existing?.statusArchived || ''),
     soldOutBehavior: has('soldOutBehavior') ? String(body.soldOutBehavior || '') : (existing?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: has('soldOutArchiveDelayHours') ? Math.max(0, numberOr(body.soldOutArchiveDelayHours, existing?.soldOutArchiveDelayHours || 0)) : Math.max(0, Number(existing?.soldOutArchiveDelayHours || 0)),
     soldOutAt: has('soldOutAt') ? String(body.soldOutAt || '') : (existing?.soldOutAt || ''),

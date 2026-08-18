@@ -213,7 +213,17 @@ the ledger. Settings tabs include:
   IDs, inventory, winner tiers, images **+ videos** (PNG/JPEG/JPG/SVG/WEBP/GIF/BMP +
   MP4/MOV/MKV/AVI/WEBM), per-photo **crop tool with live desktop/mobile previews**
   (crops stored per-media in the product's `crops` array, parallel to `images`),
-  sort order. Every size in Pricing & Sizes can be marked as a **sampler (trial
+  sort order. **Customer-facing copy** — every product can override the four
+  urgency/status lines (`urgencyInStock`, `urgencySoldOut`, `statusLive`,
+  `statusArchived`) that appear on its page (blank = inherit the global
+  Settings → Storefront copy → built-in default). **Per-size raffle settings**
+  — when multiple sizes run a raffle each size card in Pricing & Sizes carries
+  its OWN countdown end (`sizeConfigs[<size>].releaseEndsAt`) and its OWN
+  recurring cadence (`sizeConfigs[<size>].customDropSchedule`), so "both raffle"
+  sizes can draw on completely different cycles (see `lib/size-configs.ts`, the
+  single resolver used by the draw engine, /api/store, /api/catalog/status and
+  the product-page countdown). Every size in Pricing & Sizes can be marked as a
+  **sampler (trial
   SKU)**; the **Trial sizes & sample credits** panel then configures each sampler
   individually (badge label, "credits toward" full-size target, credit $, min
   order, expiry, code prefix, eligibility, customer-facing note) with
@@ -377,8 +387,10 @@ input like `123 realstreet` can never be saved.
   inventory remaining (and the product is not archived), the engine computes the
   next scheduled draw moment (`getNextRecurringAnchorMs` in
   `lib/storefront-config.ts`, merging static config → `store:config.dropSchedule`
-  → `ops:overrides#schedule` → per-product `customDropSchedule`) and PERSISTS it as
-  the product's new `releaseEndsAt` (naive store-time wall clock via
+  → `ops:overrides#schedule` → per-product `customDropSchedule` → **per-size
+  `sizeConfigs[<size>].customDropSchedule`**) and PERSISTS it as
+  the product's new `releaseEndsAt` (or as `sizeConfigs[<size>].releaseEndsAt`
+  for sizes with their own config — naive store-time wall clock via
   `formatStoreWallClock` in `lib/drop-timestamps.ts`). The roll-forward advances
   from the LATER of (cycle end, now) so the new timer is always in the future
   (no chasing missed anchors one-by-one). The storefront then shows a countdown
@@ -539,6 +551,14 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+
+- **2026-08-18 — Per-product urgency copy + per-size raffle engine ("customize each raffle differently") + admin product-form overhaul + hard auth on every admin route:**
+  - **✍️ The product page's urgency/status lines are now editable ON the product admin page.** New **Customer-facing copy** section in the product form: `urgencyInStock`, `urgencySoldOut`, `statusLive`, `statusArchived` (all optional). Resolution order is per-product → global Settings → Storefront copy → built-in default (`components/Storefront.tsx`). Persisted through `/api/admin/products` (whitelisted, empty string = inherit) and passed through `/api/store` `sanitizeProduct`.
+  - **🎟 Per-size raffle configs — the "2 sizes, both raffle, customize each differently" feature.** Each size card in Pricing & Sizes now has its own **🎟 Per-size raffle settings** panel: own **countdown end** (`sizeConfigs[<size>].releaseEndsAt`) + own **recurring schedule** (`sizeConfigs[<size>].customDropSchedule` — hourly/daily/weekly/biweekly/monthly/yearly/custom N hours), on top of the existing per-size checkout mode, winner tiers, inventory, sampler and Stripe ID. New self-contained **`lib/size-configs.ts`** (`sizeConfigKey` / `sizeConfigsOf` / `getSizeReleaseEndsAt` / `getSizeCustomSchedule` / `resolveSizeReleaseEndsAt` / `resolveSizeSchedule` / `normalizeSizeConfigs` — no `@/` VALUE imports so `node --test` loads it) re-exported from `@/lib/storefront-config`; `resolveSizeNextAnchorMs` composes them with the recurring-anchor math.
+  - **🧭 One resolver, every consumer agrees.** `lib/auto-draw.ts` `evaluatePoolDue` now resolves the per-size cycle boundary + per-size schedule (own `releaseEndsAt`/schedule win over product → global); the deferred roll-forward writes each configured size's next anchor into `sizeConfigs[<size>].releaseEndsAt` while inheriting sizes still roll the product-level timer. `/api/store` `applyLifecycle` computes a per-size display-anchor map (`sizeNextReleaseEndsAt`) and the product-level `nextReleaseEndsAt` becomes the EARLIEST per-size anchor; `/api/catalog/status` tiles use the same earliest-anchor rule. `components/Storefront.tsx` now resolves its countdown + draw-trigger anchors PER SELECTED SIZE (per-size override → product → global) via a `resolveProductAnchors` helper + a `[product, selectedSize]` effect — switching sizes switches the timer, and the engine draws each size's pool on its own cycle.
+  - **🧹 Products settings cleaned up.** Pricing & Sizes rows are now proper per-size cards (identity/price row, draw/format row, per-size raffle row) with a live RAFFLE/FCFS pill per size; a new Customer-facing copy card; size renames re-key sampler + sizeConfig records; removals prune them; `validateSeedProducts` now rejects `sizeConfigs` keys that aren't real price categories.
+  - **🔐 Every `/api/admin` route now requires in-route authorization.** `env-status`, `status` and `verify-status` (the last three with no in-route check) now call `adminRequestAuthorized(request, password)` on top of the proxy.ts Basic-Auth + device-cookie gates — a misconfiguration that ever exposes a handler can never be read unauthenticated.
+  - **🧪 Seeds:** Obsidian Void (p2) now demos per-size raffle configs (Standard inherits the product timer; Collector draws on its own 5-day countdown + own daily 19:00 cadence). New `tests/size-configs.test.ts` (7 cases). `npm test` 87/87, `tsc --noEmit` clean, `npm run lint` 0/0 on every touched file, `npm run build` compiles every route + middleware. No new Redis keys (`sizeConfigs` + copy fields live on the product object in `store:products`).
 
 - **2026-08-16 — Fast Origin Transfer drain FIXED (10GB Hobby quota burned 2.5GB in 30 min) — robots.txt + edge caching + payload shrink:**
   - **📉 Root cause found and measured against the live site.** `/api/store` served **~3.0MB per request** (product galleries + the brand logo are stored in Redis as base64 `data:` URLs, and products were duplicated across `allProducts` + each section array) and `/api/catalog/status` ~600KB — while BOTH routes returned NO `Cache-Control`, so Vercel streamed the full body from the origin on EVERY request (`private, no-cache`). The `/og` card re-rendered on EVERY request too (`max-age=0, must-revalidate`, no ETag). 2.5GB ÷ 3MB ≈ **one `/api/store` fetch every ~2s** — a crawler/bot/monitor can easily sustain that with no human traffic. (Client-side loop audit found no runaway fetch loops: the countdown draw-trigger re-fetch loop was already fixed via `dueHandledRef`; the home-page heartbeat polls every 30s but returns 25 bytes.)

@@ -12,7 +12,7 @@ import {
   OVERRIDE_SOCIAL_PROOF_FIELD,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories } from '@/lib/storefront-config';
+import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories, normalizeSizeConfigs, resolveSizeNextAnchorMs, sizeConfigKey, resolveSizeReleaseEndsAt } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
@@ -64,6 +64,24 @@ type PublicStoreProduct = {
    * instead of "Until sold out". Empty for sold-out / one-shot-ended products.
    */
   nextReleaseEndsAt?: string;
+  /**
+   * Per-size countdown anchors — keyed by normalized size label, same shape as
+   * `releaseEndsAt` but resolved for EACH size independently (per-size raffle
+   * configs). The product page uses the entry for the SELECTED size.
+   */
+  sizeNextReleaseEndsAt?: Record<string, string>;
+  /**
+   * Per-size raffle configs (own countdown end / own recurring schedule per
+   * size). Passed through sanitized so the product page can show the right
+   * timer per size without a second round-trip.
+   */
+  sizeConfigs?: Record<string, { releaseEndsAt?: string; customDropSchedule?: Record<string, any> }>;
+  /** Per-product customer-facing copy overrides (empty = inherit the global
+   *  Settings → Storefront copy, which in turn falls back to the built-in). */
+  urgencyInStock?: string;
+  urgencySoldOut?: string;
+  statusLive?: string;
+  statusArchived?: string;
   soldOutBehavior?: string;
   soldOutArchiveDelayHours?: number;
   soldOutAt?: string;
@@ -149,6 +167,15 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     soldOutBehavior: String(raw?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: Math.max(0, Number(raw?.soldOutArchiveDelayHours || 0)),
     soldOutAt: String(raw?.soldOutAt || ''),
+    // Per-product customer-facing copy overrides (empty = inherit the global
+    // Settings → Storefront copy, which in turn falls back to the built-in).
+    urgencyInStock: typeof raw?.urgencyInStock === 'string' ? raw.urgencyInStock : '',
+    urgencySoldOut: typeof raw?.urgencySoldOut === 'string' ? raw.urgencySoldOut : '',
+    statusLive: typeof raw?.statusLive === 'string' ? raw.statusLive : '',
+    statusArchived: typeof raw?.statusArchived === 'string' ? raw.statusArchived : '',
+    // Per-size raffle configs — sanitized so a malformed/deleted-size entry can
+    // never leak into the public payload or confuse the storefront countdown.
+    sizeConfigs: normalizeSizeConfigs(raw?.sizeConfigs, Array.isArray(raw?.priceCategories) ? raw.priceCategories : []),
     deliveryIncentiveEnabled: raw?.deliveryIncentiveEnabled === true,
     deliveryIncentiveTriggerSizes: Array.isArray(raw?.deliveryIncentiveTriggerSizes) ? raw.deliveryIncentiveTriggerSizes.map(String) : [],
     deliveryIncentiveCreditCents: Math.max(0, Number(raw?.deliveryIncentiveCreditCents || 0)),
@@ -263,20 +290,54 @@ function applyLifecycle(
     // the NEXT scheduled draw moment — the "new raffle" timer the storefront
     // should show instead of "Until sold out". Sold-out / one-shot-ended
     // products keep the (past) raw value so the UI can label them closed.
+    //
+    // Per-size raffle configs make this per-size: each size resolves ITS OWN
+    // anchor (own releaseEndsAt + own schedule win over product → global). The
+    // product-level anchor is the EARLIEST per-size anchor so home/catalog
+    // cards show the soonest upcoming draw across all raffle sizes.
     let nextReleaseEndsAt = String(item.releaseEndsAt || '');
+    const sizeNextReleaseEndsAt: Record<string, string> = {};
     try {
-      const effectiveSchedule = {
-        ...GOYUNIR_STORE_SUITE.dropSchedule,
-        ...(globalSchedule || {}),
-        ...((item as any).customDropSchedule || {}),
-      };
-      const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct as any, effectiveSchedule as any, now);
-      if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, timezone);
+      const sizeAnchors: Array<{ key: string; ms: number }> = [];
+      const cats = Array.isArray(item.priceCategories) ? item.priceCategories : [];
+      for (const cat of cats) {
+        const size = String(cat?.size || '').trim();
+        if (!size) continue;
+        const key = sizeConfigKey(size);
+        let anchorMs: number | null = null;
+        try {
+          anchorMs = resolveSizeNextAnchorMs(item, size, globalSchedule || {}, now);
+        } catch {
+          anchorMs = null;
+        }
+        const rawEnd = resolveSizeReleaseEndsAt(item, size);
+        if (anchorMs !== null) {
+          const formatted = formatStoreWallClock(anchorMs, timezone);
+          if (formatted) {
+            sizeNextReleaseEndsAt[key] = formatted;
+            sizeAnchors.push({ key, ms: anchorMs });
+          }
+        } else if (rawEnd) {
+          sizeNextReleaseEndsAt[key] = rawEnd;
+        }
+      }
+      if (sizeAnchors.length > 0) {
+        const earliest = sizeAnchors.reduce((a, b) => (b.ms < a.ms ? b : a));
+        nextReleaseEndsAt = sizeNextReleaseEndsAt[earliest.key] || nextReleaseEndsAt;
+      } else {
+        const effectiveSchedule = {
+          ...GOYUNIR_STORE_SUITE.dropSchedule,
+          ...(globalSchedule || {}),
+          ...((item as any).customDropSchedule || {}),
+        };
+        const nextAnchorMs = resolveNextRaffleAnchorMs(lifecycleProduct as any, effectiveSchedule as any, now);
+        if (nextAnchorMs !== null) nextReleaseEndsAt = formatStoreWallClock(nextAnchorMs, timezone);
+      }
     } catch {
       /* a schedule glitch must never break the store payload */
     }
 
-    return { ...lifecycleProduct, nextReleaseEndsAt };
+    return { ...lifecycleProduct, nextReleaseEndsAt, sizeNextReleaseEndsAt };
   });
 }
 

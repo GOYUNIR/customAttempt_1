@@ -106,6 +106,18 @@ Everything happens in `/admin`:
   raffle. FCFS sizes charge immediately and are never drawn; RAFFLE sizes run
   the draw. Size chips, the product-page CTA and the cart all reflect each
   size's mode automatically.
+- **Per-size raffle settings** — when two sizes both run raffles you can make
+  them *completely different*: each size card in Pricing & Sizes has its own
+  **countdown end** and its own **recurring schedule** (hourly/daily/weekly/
+  biweekly/monthly/yearly/custom "every N hours"), plus its own winner tiers.
+  The product page shows the timer for the size you've selected, and the draw
+  engine draws each size's pool on its own cycle — a 12-hour collector raffle
+  and a daily standard raffle can run side by side on the same product.
+- **Customer-facing copy** — every product has its own optional urgency and
+  status lines ("Handmade allocation. Low supply by design." /
+  "Reserved for collectors moving early…" etc.) that override the site-wide
+  Settings → Storefront copy per product. Leave them blank to inherit the
+  global defaults.
 - **Catalog** — move items between Upcoming / Archive previews.
 - **Draws** — trigger a draw manually, view draw history, search the permanent
   entry ledger.
@@ -151,14 +163,16 @@ Everything happens in `/admin`:
    anyone. Non-winners and unfinished checkouts are never deleted — everything
    is logged in the searchable ledger in `/admin`.
 5. **If inventory remains, the raffle can repeat on a schedule.** The draw
-   engine rolls the product's countdown forward to the next scheduled draw
-   moment — **hourly, daily, weekly, biweekly, monthly, yearly, or a custom
+   engine rolls the countdown forward to the next scheduled draw moment —
+   **hourly, daily, weekly, biweekly, monthly, yearly, or a custom
    "every N hours" interval** (per-product under
-   `/admin → Products → Edit → Raffle schedule (recurring)`, or the global
+   `/admin → Products → Edit → Raffle schedule (recurring)`, per-size inside
+   each size card in Pricing & Sizes, or the global
    cadence in `/admin → Draws → Automation`) — the storefront shows the NEW
    timer (never a stale "Until sold out"), and unselected entries carry over
-   into the next round. One-shot drops (a fixed date with no next occurrence)
-   draw once and are done.
+   into the next round. **Each size's raffle can run on its own cycle** (own
+   countdown end + own cadence) even on the same product. One-shot drops (a
+   fixed date with no next occurrence) draw once and are done.
 
 > Set `CRON_SECRET` in Vercel so the scheduled safety-net cron
 > (`/api/checkout/cron-draw`) is authorized. The client-side countdown trigger
