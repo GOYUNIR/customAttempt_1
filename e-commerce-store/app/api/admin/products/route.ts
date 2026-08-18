@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
+import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
@@ -316,6 +317,12 @@ export async function POST(request: Request) {
     // Mixed-format ribbon template ({raffle}/{fcfs} tokens). Empty = inherit the
     // global Settings → Storefront copy (which falls back to the built-in line).
     mixedFormatRibbon: has('mixedFormatRibbon') ? String(body.mixedFormatRibbon || '') : (existing?.mixedFormatRibbon || ''),
+    // Per-product show/hide toggles for the customer-facing blocks (default ALL
+    // on — an absent value on an old product means "show").
+    showUrgencyLine: has('showUrgencyLine') ? toBool(body.showUrgencyLine, true) : (existing?.showUrgencyLine ?? true),
+    showStatusLine: has('showStatusLine') ? toBool(body.showStatusLine, true) : (existing?.showStatusLine ?? true),
+    showNotesSection: has('showNotesSection') ? toBool(body.showNotesSection, true) : (existing?.showNotesSection ?? true),
+    showMixedRibbon: has('showMixedRibbon') ? toBool(body.showMixedRibbon, true) : (existing?.showMixedRibbon ?? true),
     soldOutBehavior: has('soldOutBehavior') ? String(body.soldOutBehavior || '') : (existing?.soldOutBehavior || 'stay_visible'),
     soldOutArchiveDelayHours: has('soldOutArchiveDelayHours') ? Math.max(0, numberOr(body.soldOutArchiveDelayHours, existing?.soldOutArchiveDelayHours || 0)) : Math.max(0, Number(existing?.soldOutArchiveDelayHours || 0)),
     soldOutAt: has('soldOutAt') ? String(body.soldOutAt || '') : (existing?.soldOutAt || ''),
@@ -354,6 +361,25 @@ export async function POST(request: Request) {
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
+  // ── Smart-math gate: the SAME pure engine the admin editor previews. An
+  // exploitable/broken product ('error' severity) can NEVER reach production —
+  // the save is refused with a 400 listing every blocking issue so the
+  // operator knows exactly what to fix.
+  let rewardsCtx: { rewards?: { purchasePointsPerDollar?: number; pointsPerDollar?: number } } = {};
+  try {
+    const rawConfig = await redis.get(STORE_CONFIG_KEY);
+    const cfg = typeof rawConfig === 'string' ? JSON.parse(rawConfig) : (rawConfig || {});
+    rewardsCtx = { rewards: cfg?.rewards || undefined };
+  } catch { /* rewards context is best-effort */ }
+  const sanity = sortSanityIssues(checkProductSanity(product, rewardsCtx));
+  const blockers = sanity.filter((i) => i.severity === 'error');
+  if (blockers.length > 0) {
+    return NextResponse.json({
+      error: blockers[0].message,
+      blocking: blockers.map((b) => b.message),
+    }, { status: 400 });
+  }
 
   await saveProduct(redis, product, {
     previousSlug: existing?.slug,

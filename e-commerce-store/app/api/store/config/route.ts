@@ -90,6 +90,11 @@ const DEFAULT_CONFIG = {
     ctaLabel: 'Browse drops',
     storyHeadline: 'Our Story',
     storyBody: 'take control.',
+    showEyebrow: true,
+    showHeadline: true,
+    showBody: true,
+    showCta: true,
+    showStory: true,
   },
   socialProof: {
     label: 'Limited drop access',
@@ -102,6 +107,8 @@ const DEFAULT_CONFIG = {
     autoIncrementMinPerDay: 3,
     autoIncrementMinHourGap: 2,
     autoIncrementMaxHourGap: 8,
+    showSection: true,
+    showCaption: true,
   },
   brandFooterData: {
     instagramLink: '',
@@ -109,6 +116,7 @@ const DEFAULT_CONFIG = {
     supportEmail: '',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
     corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
+    showTagline: true,
   },
   catalogPreview: {
     upcomingDrops: [],

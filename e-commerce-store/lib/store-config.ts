@@ -103,6 +103,12 @@ export interface StoreConfig {
     ctaLabel: string;
     storyHeadline: string;
     storyBody: string;
+    /** Per-element show/hide toggles (default ALL on). */
+    showEyebrow?: boolean;
+    showHeadline?: boolean;
+    showBody?: boolean;
+    showCta?: boolean;
+    showStory?: boolean;
   };
   socialProof: {
     label: string;
@@ -115,6 +121,10 @@ export interface StoreConfig {
     autoIncrementMinPerDay: number;
     autoIncrementMinHourGap: number;
     autoIncrementMaxHourGap: number;
+    /** Show the whole counter (default true). */
+    showSection?: boolean;
+    /** Show the caption line (default true). */
+    showCaption?: boolean;
   };
   brandFooterData: {
     instagramLink: string;
@@ -122,6 +132,8 @@ export interface StoreConfig {
     supportEmail: string;
     shippingReturnPolicyText: string;
     corporateEntityCopyright: string;
+    /** Show the footer tagline (default true). */
+    showTagline?: boolean;
   };
   catalogPreview: {
     upcomingDrops: any[];
@@ -222,6 +234,11 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     ctaLabel: 'Browse drops',
     storyHeadline: 'Our Story',
     storyBody: 'take control.',
+    showEyebrow: true,
+    showHeadline: true,
+    showBody: true,
+    showCta: true,
+    showStory: true,
   },
   socialProof: {
     label: 'Limited drop access',
@@ -234,6 +251,8 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     autoIncrementMinPerDay: 3,
     autoIncrementMinHourGap: 2,
     autoIncrementMaxHourGap: 8,
+    showSection: true,
+    showCaption: true,
   },
   brandFooterData: {
     instagramLink: '',
@@ -241,6 +260,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     supportEmail: '',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
     corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
+    showTagline: true,
   },
   catalogPreview: {
     upcomingDrops: [],

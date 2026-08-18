@@ -248,6 +248,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     zoom: true,
     zoomDurationSeconds: 14,
   });
+  // Rewards economy (admin → Settings → Rewards & Points): used to show the
+  // "You'll earn X points" incentive on the product page + cart. Absent →
+  // rewards are not advertised.
+  const [rewardsCfg, setRewardsCfg] = useState<{ purchasePointsPerDollar?: number } | null>(null);
 
   // Remembers which product is currently loaded so re-fetches of the SAME product
   // (e.g. the countdown-zero refresh) never reset the visitor's selected size or
@@ -326,6 +330,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
+      if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
       if (data.product) {
         setProduct(data.product);
         // The countdown anchors are resolved per product+size (see the effect on
@@ -366,6 +371,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (data?.config?.themeColors) setConfigPalette({ ...GOYUNIR_STORE_SUITE.themeColors, ...data.config.themeColors });
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
+      if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
       const sorted = Array.isArray(data.activeProducts)
         ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
@@ -1171,6 +1177,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const priceCat = getProductPriceCategory(product, selectedSize);
   const price = priceCat?.price || 0;
+  // Rewards incentive: "You'll earn X points" for the selected size. Only
+  // advertised when the earn rate is configured AND the price is a real
+  // configured amount (never the placeholder sentinel).
+  const earnRate = Math.max(0, Number(rewardsCfg?.purchasePointsPerDollar) || 0);
+  const pointsEarned = earnRate > 0 && isConfiguredPrice(price) ? Math.floor(price * earnRate) : 0;
   // Mixed-format releases: each size can be a raffle OR a direct-sale (FCFS)
   // item — e.g. a sampler sells instantly while the full bottle runs a raffle.
   // The selected size decides the CTA, the countdown and the cart line mode.
@@ -1417,12 +1428,24 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 ))}
               </div>
             )}
-            <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6 }}>{product.desc}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : configPalette.cardBorder}` }}>
-              <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain }}>{urgencyLabel}</div>
-              <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5 }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
-            </div>
-            {hasMixedModes && (
+            <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{product.desc}</p>
+            {(product.showUrgencyLine !== false || product.showStatusLine !== false) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : configPalette.cardBorder}` }}>
+                {product.showUrgencyLine !== false && (
+                  <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain, whiteSpace: 'pre-line' }}>{urgencyLabel}</div>
+                )}
+                {product.showStatusLine !== false && (
+                  <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5, whiteSpace: 'pre-line' }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
+                )}
+              </div>
+            )}
+            {pointsEarned > 0 && !soldOut && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: configPalette.cardTextMuted, padding: '8px 12px', borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.accentBlue} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${configPalette.accentBlue} 26%, transparent)` }}>
+                <span style={{ fontSize: 13 }}>⭐</span>
+                <span>Earn <strong style={{ color: configPalette.accentBlue }}>{pointsEarned.toLocaleString()} points</strong> on this size — redeem for store credit at checkout.</span>
+              </div>
+            )}
+            {hasMixedModes && product.showMixedRibbon !== false && (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.5, color: configPalette.cardTextMuted, padding: '10px 12px', borderRadius: themeRadius(configPalette, 14), background: `color-mix(in srgb, #a855f7 7%, ${configPalette.cardBackground})`, border: cardIsLight ? '1px solid rgba(126,34,206,0.25)' : '1px solid rgba(168,85,247,0.30)' }}>
                 <span style={{ fontSize: 13, lineHeight: 1 }}>🎟</span>
                 {(() => {
@@ -1604,6 +1627,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
 
+        {product.showNotesSection !== false && (product.notes || []).length > 0 && (
         <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1611,11 +1635,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, padding: 14, border: `1px solid ${configPalette.cardBorder}` }}>
                 <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
-                <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55 }}>{note.text}</div>
+                <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55, whiteSpace: 'pre-line' }}>{note.text}</div>
               </div>
             ))}
           </div>
         </section>
+        )}
 
         {showCart && cart.length > 0 && (
           <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>

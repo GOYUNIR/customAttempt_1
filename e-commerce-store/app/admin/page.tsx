@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
@@ -9,6 +9,7 @@ import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule } from '@/lib/storefront-config';
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
+import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -184,12 +185,11 @@ function Pill({ children, color = '#a1a1aa', background = 'rgba(161,161,170,0.12
 const PRODUCT_FORM_SECTIONS: [string, string][] = [
   ['pf-basics', 'Basics'],
   ['pf-media', 'Media'],
-  ['pf-sizes', 'Pricing & sizes'],
-  ['pf-trial', 'Trial sizes'],
-  ['pf-inventory', 'Inventory'],
+  ['pf-sizes', 'Pricing, sizes & inventory'],
+  ['pf-copy', 'Copy'],
   ['pf-schedule', 'Drop schedule'],
   ['pf-soldout', 'Sold-out'],
-  ['pf-copy', 'Copy'],
+  ['pf-trial', 'Trial sizes'],
   ['pf-notes', 'Notes'],
 ];
 
@@ -1014,6 +1014,12 @@ export default function AdminPortal() {
     statusLive: '',
     statusArchived: '',
     mixedFormatRibbon: '',
+    // Customer-facing show/hide toggles (default ALL on) — the product page
+    // renders these blocks only while the corresponding toggle is enabled.
+    showUrgencyLine: true,
+    showStatusLine: true,
+    showNotesSection: true,
+    showMixedRibbon: true,
     deliveryIncentiveEnabled: false,
     deliveryIncentiveCreditCents: 0,
     deliveryIncentiveMinOrderSubtotalCents: 0,
@@ -1392,6 +1398,11 @@ export default function AdminPortal() {
       // the product page when sizes mix raffle + instant-buy. Blank = inherit the
       // global Settings → Storefront copy (which falls back to the built-in line).
       mixedFormatRibbon: '',
+      // Customer-facing show/hide toggles (default ALL on).
+      showUrgencyLine: true,
+      showStatusLine: true,
+      showNotesSection: true,
+      showMixedRibbon: true,
       soldOutBehavior: 'stay_visible',
       soldOutArchiveDelayHours: 24,
       deliveryIncentiveEnabled: false,
@@ -1734,6 +1745,22 @@ export default function AdminPortal() {
   };
 
   // ===== Save product (UPDATED to send priceCategories + crops) =====
+  // ── Live "smart math" health check ────────────────────────────────────────
+  // Runs the SAME pure engine the server uses at save time, live on every
+  // keystroke, so the operator sees exploitable/broken math the moment it is
+  // typed (never after a failed save). `productIssues` drives the "Math &
+  // health check" panel at the top of the form AND the Overview health card.
+  const productIssues: SanityIssue[] = useMemo(
+    () => sortSanityIssues(checkProductSanity(productForm, { rewards: rewardsSettings })),
+    [productForm, rewardsSettings],
+  );
+  const blockingCount = productIssues.filter((i) => i.severity === 'error').length;
+  const warningCount = productIssues.filter((i) => i.severity === 'warning').length;
+  const rewardsIssues: SanityIssue[] = useMemo(
+    () => sortSanityIssues(checkRewardsSanity(rewardsSettings)),
+    [rewardsSettings],
+  );
+
   const saveProduct = async () => {
     if (!requireUnlocked()) return;
     // Never save a product while files are still uploading — the form would
@@ -1773,6 +1800,17 @@ export default function AdminPortal() {
     if (priceCategories.length === 0) {
       setProductMsg('❌ Add at least one size with a price (e.g. 50ml / 100ml).');
       showToast('At least one size + price is required');
+      return;
+    }
+    // ── Smart-math gate: never save EXPLOITABLE math. The server enforces the
+    // same rule on POST; this client-side copy gives instant feedback so the
+    // operator fixes it BEFORE a round-trip.
+    const sanity = sortSanityIssues(checkProductSanity({ ...productForm, priceCategories }, { rewards: rewardsSettings }));
+    const blockers = sanity.filter((i) => i.severity === 'error');
+    if (blockers.length > 0) {
+      const first = blockers[0];
+      setProductMsg(`❌ Can't save — ${first.message}${first.detail ? ` ${first.detail}` : ''} (${blockers.length} blocking issue${blockers.length === 1 ? '' : 's'})`);
+      showToast(`Blocked: ${first.message}`);
       return;
     }
     setProductMsg('');
@@ -3082,6 +3120,60 @@ export default function AdminPortal() {
                 ))}
               </div>
             </div>
+            {/* ── Catalog health: the portal understands the catalog and flags
+                exploitable/broken math before it ever reaches customers. */}
+            {(() => {
+              const healthy: any[] = [];
+              const warn: any[] = [];
+              const block: any[] = [];
+              for (const p of allProducts) {
+                const issues = sortSanityIssues(checkProductSanity(p, { rewards: rewardsSettings }));
+                const errs = issues.filter((i) => i.severity === 'error');
+                const warns = issues.filter((i) => i.severity === 'warning');
+                if (errs.length > 0) block.push({ p, count: errs.length, first: errs[0] });
+                else if (warns.length > 0) warn.push({ p, count: warns.length, first: warns[0] });
+                else healthy.push(p);
+              }
+              const totalIssues = block.length + warn.length;
+              return (
+                <div style={{ ...cardStyle, borderColor: block.length > 0 ? 'rgba(239,68,68,0.45)' : warn.length > 0 ? 'rgba(245,158,11,0.35)' : 'rgba(34,197,94,0.25)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.5px' }}>🧮 Catalog Health</h2>
+                    {totalIssues === 0 ? (
+                      <span style={{ fontSize: 10, fontWeight: 800, padding: '4px 10px', borderRadius: 999, background: 'rgba(34,197,94,0.14)', color: '#4ade80', letterSpacing: '0.5px' }}>ALL CLEAR · {healthy.length} PRODUCT{healthy.length === 1 ? '' : 'S'}</span>
+                    ) : (
+                      <span style={{ fontSize: 10, fontWeight: 800, padding: '4px 10px', borderRadius: 999, background: block.length > 0 ? 'rgba(239,68,68,0.16)' : 'rgba(245,158,11,0.14)', color: block.length > 0 ? '#f87171' : '#fbbf24', letterSpacing: '0.5px' }}>{block.length} BLOCKING · {warn.length} WARNINGS</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5, marginBottom: 8 }}>
+                    Live math checks across every product — sampler credit arbitrage, raffles that over-sell inventory, timers that end before they open, inventory mismatches. Products with a blocking issue can&apos;t be saved.
+                  </div>
+                  {totalIssues === 0 && (
+                    <div style={{ fontSize: 11, color: '#34d399' }}>✓ Every product passes its math checks. Nothing exploitable, nothing contradictory.</div>
+                  )}
+                  {block.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 6 }}>
+                      {block.map(({ p, first }) => (
+                        <button key={`block-${p.id}`} onClick={() => { setEditingProduct(p.id); editProduct(p); setTab('products'); }} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', textAlign: 'left', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '7px 9px', cursor: 'pointer', fontSize: 10.5, color: '#fca5a5', lineHeight: 1.4 }}>
+                          <span style={{ fontSize: 11 }}>✖</span>
+                          <span><strong>{p.name}</strong> — {first.message}{first.detail ? <span style={{ color: '#8b95a7' }}> {first.detail}</span> : null}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {warn.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {warn.map(({ p, first }) => (
+                        <button key={`warn-${p.id}`} onClick={() => { setEditingProduct(p.id); editProduct(p); setTab('products'); }} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', textAlign: 'left', background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.26)', borderRadius: 8, padding: '7px 9px', cursor: 'pointer', fontSize: 10.5, color: '#fde68a', lineHeight: 1.4 }}>
+                          <span style={{ fontSize: 11 }}>⚠</span>
+                          <span><strong>{p.name}</strong> — {first.message}{first.detail ? <span style={{ color: '#8b95a7' }}> {first.detail}</span> : null}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={cardStyle}>
               <div style={{ fontSize: 12, marginBottom: 8, color: '#ccc' }}>Started → Entered conversion: <strong style={{ color: '#fff' }}>{conv}%</strong></div>
               <Bar value={totalInt} max={maxBar} color="#edb210" />
@@ -3335,6 +3427,10 @@ export default function AdminPortal() {
                   <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginTop: 20 }}>
                     <input type="checkbox" checked={socialForm.autoIncrementEnabled !== false} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementEnabled: e.target.checked }))} />
                     Auto-increment hype ticks
+                  </label>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginTop: 20 }}>
+                    <input type="checkbox" checked={socialForm.showSection !== false} onChange={(e) => setSocialForm((f: any) => ({ ...f, showSection: e.target.checked }))} />
+                    Show the counter on the home page
                   </label>
                   <label style={{ fontSize: 11 }}>Max ticks/day
                     <input type="number" value={socialForm.autoIncrementMaxPerDay ?? 4} onChange={(e) => setSocialForm((f: any) => ({ ...f, autoIncrementMaxPerDay: Number(e.target.value) }))}
@@ -3601,6 +3697,46 @@ export default function AdminPortal() {
                   </div>
                 </div>
 
+                {/* ── Math & health check: the admin portal understands what's
+                    going on. Live issues (blocking red / warning amber) update on
+                    every keystroke; a product with ANY blocking issue cannot be
+                    saved (same engine enforced on the server). */}
+                <div style={{ marginBottom: 12, borderRadius: 12, border: blockingCount > 0 ? '1px solid rgba(239,68,68,0.4)' : warningCount > 0 ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(34,197,94,0.3)', background: blockingCount > 0 ? 'rgba(239,68,68,0.06)' : warningCount > 0 ? 'rgba(245,158,11,0.05)' : 'rgba(34,197,94,0.04)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span style={{ fontSize: 13 }}>🧮</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.6px', textTransform: 'uppercase', color: blockingCount > 0 ? '#f87171' : warningCount > 0 ? '#fbbf24' : '#34d399' }}>
+                        Math &amp; health check
+                      </div>
+                      <div style={{ fontSize: 9.5, color: '#8b95a7', marginTop: 1 }}>
+                        {blockingCount > 0
+                          ? `${blockingCount} blocking issue${blockingCount === 1 ? '' : 's'} — this product cannot be saved until fixed.`
+                          : warningCount > 0
+                            ? `${warningCount} warning${warningCount === 1 ? '' : 's'} — review below before going live.`
+                            : 'All math checks pass — nothing exploitable, nothing contradictory.'}
+                      </div>
+                    </div>
+                    {blockingCount > 0 && (
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.16)', color: '#f87171', letterSpacing: '0.5px' }}>SAVE BLOCKED</span>
+                    )}
+                  </div>
+                  {productIssues.length > 0 ? (
+                    <div style={{ padding: '8px 12px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {productIssues.map((issue: SanityIssue, idx: number) => (
+                        <div key={`${issue.code}-${idx}`} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', fontSize: 10.5, lineHeight: 1.45 }}>
+                          <span style={{ color: issue.severity === 'error' ? '#f87171' : issue.severity === 'warning' ? '#fbbf24' : '#60a5fa', fontSize: 11, marginTop: 0 }}>{issue.severity === 'error' ? '✖' : issue.severity === 'warning' ? '⚠' : 'ℹ'}</span>
+                          <div>
+                            <span style={{ color: issue.severity === 'error' ? '#fca5a5' : issue.severity === 'warning' ? '#fde68a' : '#93c5fd', fontWeight: 700 }}>{issue.message}</span>
+                            {issue.detail && <div style={{ color: '#8b95a7' }}>{issue.detail}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '8px 12px', fontSize: 10.5, color: '#34d399' }}>✓ Nothing to flag.</div>
+                  )}
+                </div>
+
                 {/* Quick-jump nav so the long product form is navigable. Sticky at
                     top: 92 (below the fixed storefront header) so the section pills
                     stay reachable no matter how deep into the form you scroll. */}
@@ -3858,8 +3994,8 @@ export default function AdminPortal() {
                 {/* ============ PRICING & SIZES ============ */}
                 <SectionCard
                   id="pf-sizes"
-                  title="Pricing & Sizes"
-                  description="Define each size/variant the customer can buy. Price and Stripe ID are required. “Winners / draw” controls how many winners a raffle picks per draw — a CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on."
+                  title="Pricing, Sizes & Inventory"
+                  description="Define each size/variant the customer can buy — price, Stripe ID, stock for that size, winner tiers and its own raffle timer. “Winners / draw” is a CSV like 3,2,2 = 3 winners on draw 1, 2 on draw 2, etc. Inventory & limits for the whole release live in the panel below the sizes."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
                 >
                   {productForm.priceCategories.map((cat: any, idx: number) => {
@@ -3890,6 +4026,23 @@ export default function AdminPortal() {
                         value={cat.price}
                         onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
                         style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11 }}
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="Units"
+                        title="Stock for THIS size — live inventory seeds from this number (blank = falls back to Total inventory)."
+                        value={productForm.inventoryPerSize?.[cat.size] ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setProductForm((p: any) => {
+                            const inv = { ...(p.inventoryPerSize || {}) };
+                            if (v === '' || Number(v) <= 0) delete inv[cat.size];
+                            else inv[cat.size] = Math.max(0, Number(v));
+                            return { ...p, inventoryPerSize: inv };
+                          });
+                        }}
+                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11 }}
                       />
                       <input
                         type="text"
@@ -4131,7 +4284,50 @@ export default function AdminPortal() {
                     );
                   })}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below.</span>
+                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below. The <strong>Units</strong> field on each size is its own stock; the totals below reconcile them.</span>
+                  </div>
+
+                  {/* ====== Inventory & limits (merged INTO Pricing & Sizes so the
+                       whole sellable shape of the release lives in one place) ====== */}
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                      Inventory &amp; limits
+                    </div>
+                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
+                      Total inventory drives the sold-out state (0 units shows the release as sold out while “stay visible” keeps it on the page as proof of demand). Max per email / cart cap how much ONE customer can take so a single buyer can never wipe a drop.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)
+                        <input type="number" min={0} value={productForm.totalInventory ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                      </label>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)
+                        <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                      </label>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)
+                        <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                      </label>
+                      <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email
+                        <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                      </label>
+                    </div>
+                    {/* Live reconciliation: per-size units vs the total. The math
+                        & health check panel also flags a mismatch — this shows the
+                        numbers side by side so it's obvious what to fix. */}
+                    {(() => {
+                      const cats = (productForm.priceCategories || []).filter((c: any) => String(c?.size || '').trim());
+                      const per = productForm.inventoryPerSize || {};
+                      const sum = cats.reduce((s: number, c: any) => s + (Number(per[c.size]) > 0 ? Number(per[c.size]) : 0), 0);
+                      const total = Math.max(0, Number(productForm.totalInventory) || 0);
+                      if (cats.length <= 1) return null;
+                      const mismatch = total > 0 && sum > 0 && sum !== total;
+                      return (
+                        <div style={{ marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: '7px 9px', borderRadius: 8, background: mismatch ? 'rgba(245,158,11,0.07)' : 'rgba(34,197,94,0.06)', border: mismatch ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(34,197,94,0.22)' }}>
+                          {sum > 0
+                            ? <span style={{ color: mismatch ? '#fde68a' : '#4ade80' }}>Per-size units sum to <strong>{sum}</strong> vs Total inventory <strong>{total}</strong>{mismatch ? ' — they disagree. The storefront keys sold-out off the total while live states seed per size; make them match.' : ' — all good.'}</span>
+                            : <span style={{ color: '#8b95a7' }}>No per-size units set — every size falls back to Total inventory ({total}).</span>}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </SectionCard>
 
@@ -4193,82 +4389,48 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
                     />
                   </label>
+                  {/* Enable/disable each block on the product page — "show or hide
+                      text items for everything". Every toggle defaults ON. */}
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                      Show / hide on the product page
+                    </div>
+                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
+                      Turn any block off and it stops rendering for customers — no code change needed, works instantly on save.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      {([
+                        ['showUrgencyLine', 'Urgency line', 'The “Only X left” / in-stock urgency line under the price.'],
+                        ['showStatusLine', 'Status story', 'The “Reserved for collectors…” status story line.'],
+                        ['showNotesSection', '“Why this drop matters”', 'The whole notes section at the bottom of the product page.'],
+                        ['showMixedRibbon', 'Mixed-format ribbon', 'The purple “mixes formats” ribbon (only ever shown on mixed products).'],
+                      ] as const).map(([key, label, hint]) => (
+                        <label key={key} style={{ fontSize: 10.5, color: '#cbd5e1', display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', padding: '7px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid #232329' }}>
+                          <input
+                            type="checkbox"
+                            checked={productForm[key] !== false}
+                            onChange={(e) => setProductForm((p: any) => ({ ...p, [key]: e.target.checked }))}
+                            style={{ marginTop: 1 }}
+                          />
+                          <span>
+                            <strong style={{ display: 'block' }}>{label}</strong>
+                            <span style={{ fontSize: 9.5, color: '#8b95a7' }}>{hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <div style={{ fontSize: 10, color: '#8b95a7', marginTop: 6, lineHeight: 1.5 }}>
                     Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These five lines are the
                     same ones editable site-wide in Settings → Storefront copy; a value here wins for THIS product only.
                   </div>
                 </SectionCard>
 
-                {/* ============ INVENTORY & LIMITS ============ */}
-                <SectionCard
-                  id="pf-inventory"
-                  title="Inventory & Limits"
-                  description="How many units exist and how many one customer can take. Total inventory drives the “sold out” state — 0 units shows the release as sold out while “stay visible” keeps it on the page as proof of demand."
-                >
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)</label>
-                      <input type="number" min={0} value={productForm.totalInventory ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: Math.max(0, Number(e.target.value) || 0) }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)</label>
-                      <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)</label>
-                      <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={inputStyle} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email</label>
-                      <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={inputStyle} />
-                    </div>
-                  </div>
-
-                  {/* Per-size inventory: when the product has MULTIPLE sizes/colours in
-                      Pricing & Sizes, each one is its own allocation pool. Let the
-                      operator set a separate stock count per size — live inventory is
-                      seeded per size from these numbers (blank = fall back to Total
-                      inventory above). */}
-                  {(productForm.priceCategories || []).length > 1 && (
-                    <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
-                        Per-size inventory
-                      </div>
-                      <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
-                        Each size/colour is its own allocation pool. Set a stock count per size — the live state for that size is seeded from it. Leave a field blank to fall back to the Total inventory above.
-                      </p>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        {(productForm.priceCategories || []).map((cat: any, idx: number) => (
-                          <div key={`inv-size-${idx}`}>
-                            <label style={{ fontSize: 10, color: '#888' }}>{cat.size || `Size ${idx + 1}`} — units</label>
-                            <input
-                              type="number"
-                              min={0}
-                              value={productForm.inventoryPerSize?.[cat.size] ?? ''}
-                              placeholder={String(productForm.totalInventory ?? 0)}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setProductForm((p: any) => {
-                                  const inv = { ...(p.inventoryPerSize || {}) };
-                                  if (v === '' || Number(v) <= 0) delete inv[cat.size];
-                                  else inv[cat.size] = Math.max(0, Number(v));
-                                  return { ...p, inventoryPerSize: inv };
-                                });
-                              }}
-                              style={inputStyle}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </SectionCard>
-
                 {/* ============ DROP SCHEDULE ============ */}
                 <SectionCard
                   id="pf-schedule"
                   title="Drop Schedule"
-                  description="When the release goes live and when the countdown ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle restarts)."
+                  description="When the release opens and when each raffle round ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle rolls to the next round)."
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div>
@@ -4276,10 +4438,37 @@ export default function AdminPortal() {
                       <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at</label>
+                      <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at (draw moment)</label>
                       <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
                     </div>
                   </div>
+                  {/* Live schedule preview — the admin understands what the clock will
+                      do so the operator never has to imagine the cadence. */}
+                  {(() => {
+                    try {
+                      const effective = productForm.customDropSchedule
+                        ? { ...scheduleForm, ...productForm.customDropSchedule }
+                        : scheduleForm;
+                      if (!effective || !effective.mode) return null;
+                      const nextMs = getNextDrawTimestampForSchedule(effective);
+                      const hasRecurring = Boolean(productForm.customDropSchedule);
+                      const tz = effective.timezone || 'store timezone';
+                      const nextLabel = Number.isFinite(nextMs) && nextMs > 0
+                        ? new Date(nextMs).toLocaleString(undefined, { timeZoneName: 'short' })
+                        : '—';
+                      return (
+                        <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 10, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10.5, color: '#93c5fd', lineHeight: 1.6 }}>
+                          🗓 <strong style={{ color: '#bfdbfe' }}>Next scheduled draw:</strong> {nextLabel}{' '}
+                          <span style={{ color: '#8b95a7' }}>
+                            ({effective.mode === 'custom' ? `every ${effective.customIntervalHours || 24} hours` : effective.mode}
+                            {hasRecurring ? ' · this product repeats while inventory remains' : ` · global cadence (${tz})`})
+                          </span>
+                        </div>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
 
                   {/* Per-product raffle schedule: lets a raffle REPEAT on a cadence
                       (hourly/daily/weekly/biweekly/monthly/yearly/custom) while
@@ -5570,6 +5759,28 @@ export default function AdminPortal() {
                 })}
               </div>
 
+              {/* Show / hide each hero element on the home page — text items can
+                  be enabled/disabled per block (default ALL on). */}
+              <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Show / hide hero elements
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {([
+                    ['showEyebrow', 'Eyebrow line'],
+                    ['showHeadline', 'Headline'],
+                    ['showBody', 'Body copy'],
+                    ['showCta', 'Primary button'],
+                    ['showStory', 'Story link'],
+                  ] as const).map(([key, label]) => (
+                    <label key={key} style={{ fontSize: 10.5, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={heroSettings[key] !== false} onChange={(e) => setHeroSettings({ ...heroSettings, [key]: e.target.checked })} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {/* Live preview: the home hero block rendered from the CURRENT copy
                   + theme — line breaks (pre-line) included, brand name + accent
                   colors live. */}
@@ -5676,18 +5887,22 @@ export default function AdminPortal() {
 
               <h4 id="settings-footer" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Footer</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-                {Object.entries(footerSettings).map(([key, value]) => (
+                {Object.entries(footerSettings).filter(([key]) => key !== 'showTagline').map(([key, value]) => (
                   <label key={key} style={{ fontSize: 11 }}>
                     {COPY_FIELD_LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()}
                     <input 
                       type="text" 
-                      value={value} 
+                      value={String(value ?? '')} 
                       placeholder={COPY_FIELD_PLACEHOLDERS[key] || 'Leave empty to keep the default'}
                       onChange={(e) => setFooterSettings({ ...footerSettings, [key]: e.target.value })}
                       style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   </label>
                 ))}
               </div>
+              <label style={{ fontSize: 10.5, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 10 }}>
+                <input type="checkbox" checked={footerSettings.showTagline !== false} onChange={(e) => setFooterSettings({ ...footerSettings, showTagline: e.target.checked })} />
+                <span>Show the footer tagline line</span>
+              </label>
 
               <h4 id="settings-copy" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>
                 <button
@@ -6298,6 +6513,21 @@ export default function AdminPortal() {
                   <input type="number" min={1} value={rewardsSettings.pointsPerDollar} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, pointsPerDollar: Math.max(1, Number(e.target.value) || 100) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
                   <span style={{ fontSize: 10, color: '#666' }}>Default 100 = 100 pts → $1 credit.</span>
                 </label>
+                {/* Smart math alert: the portal understands when the rewards
+                    economy lets customers farm credit (earn ≥ redeem, gift ≥ face). */}
+                {rewardsIssues.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1', marginTop: 8, padding: '9px 11px', borderRadius: 10, border: rewardsIssues.some((i) => i.severity === 'error') ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(245,158,11,0.35)', background: rewardsIssues.some((i) => i.severity === 'error') ? 'rgba(239,68,68,0.07)' : 'rgba(245,158,11,0.06)' }}>
+                    {rewardsIssues.map((issue: SanityIssue, idx: number) => (
+                      <div key={`${issue.code}-${idx}`} style={{ display: 'flex', gap: 7, fontSize: 10.5, lineHeight: 1.5, marginBottom: idx === rewardsIssues.length - 1 ? 0 : 5 }}>
+                        <span style={{ color: issue.severity === 'error' ? '#f87171' : '#fbbf24' }}>{issue.severity === 'error' ? '✖' : '⚠'}</span>
+                        <div>
+                          <span style={{ color: issue.severity === 'error' ? '#fca5a5' : '#fde68a', fontWeight: 700 }}>{issue.message}</span>
+                          {issue.detail && <div style={{ color: '#8b95a7' }}>{issue.detail}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <label style={{ fontSize: 11 }}>
                   Minimum points to redeem
                   <input type="number" min={1} value={rewardsSettings.minRedeemPoints} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, minRedeemPoints: Math.max(1, Number(e.target.value) || 500) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />

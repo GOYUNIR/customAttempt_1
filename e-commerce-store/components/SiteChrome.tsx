@@ -274,7 +274,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   // Footer links/copyright — all editable from /admin → Settings → Footer and
   // served through /api/store → config.brandFooterData. The footer NEVER
   // hardcodes social URLs or a brand name.
-  const [footerSettings, setFooterSettings] = useState<Record<string, string> | null>(liveCtx?.footer || null);
+  const [footerSettings, setFooterSettings] = useState<Record<string, any> | null>(liveCtx?.footer || null);
   // Storefront copy overrides — admin → Settings → Storefront copy. A non-empty
   // value overrides the built-in labels (cart title, footer tagline/support email).
   const [copySettings, setCopySettings] = useState<Record<string, any>>(liveCtx?.copy || {});
@@ -285,6 +285,10 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   const [notice, setNotice] = useState<{ id?: string; type: string; message: string } | null>(null);
   const [showScrollCue, setShowScrollCue] = useState(true);
   const [mapboxHint, setMapboxHint] = useState('');
+  // Live store snapshot (products + rewards economy) — used by the cart drawer
+  // to show per-line trial-credit badges and the "you'll earn X points" line.
+  const [storeProducts, setStoreProducts] = useState<any[]>([]);
+  const [rewardsCfg, setRewardsCfg] = useState<{ purchasePointsPerDollar?: number } | null>(null);
   const targetXRef = useRef(0.5);
   const targetYRef = useRef(0.35);
   const velocityXRef = useRef(0);
@@ -713,9 +717,11 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         if (data?.config?.behavior) setBehavior(data.config.behavior);
         if (data?.config?.brandFooterData) setFooterSettings(data.config.brandFooterData);
         if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
+        if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
         // Prune cart lines whose product/size no longer exists on the backend
         // (wipe/rebuild or archive) so the bag never shows ghost items.
         const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
+        setStoreProducts(products);
         const current = readCart();
         const pruned = pruneStaleCart(current, products);
         if (pruned.length !== current.length) {
@@ -1217,7 +1223,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
               );
             })()}
           </div>
-          {String(copySettings.footerTagline || '').trim() ? (
+          {footerSettings?.showTagline !== false && String(copySettings.footerTagline || '').trim() ? (
             <div style={{ fontSize: 11, lineHeight: 1.6, color: liveTheme.textMuted || '#71717a', maxWidth: 420, margin: '0 auto', whiteSpace: 'pre-line' }}>{String(copySettings.footerTagline).trim()}</div>
           ) : null}
           <div style={{ color: liveTheme.textMuted || '#71717a', fontSize: 10 }}>
@@ -1294,6 +1300,19 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: drawerTextMuted, marginTop: 3 }}>{item.size}</div>
+                        {(() => {
+                          const product = storeProducts.find((p: any) => String(p?.id || '') === String(item.productId || ''));
+                          if (!product || product.deliveryIncentiveEnabled !== true) return null;
+                          const sampler = (product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(item.size || '').trim().toLowerCase());
+                          const credit = Math.max(0, Number(sampler?.creditCents ?? product.deliveryIncentiveCreditCents) || 0);
+                          if (credit <= 0) return null;
+                          const target = String(sampler?.fullSize || '').trim();
+                          return (
+                            <div style={{ fontSize: 10, color: '#4ade80', marginTop: 4, lineHeight: 1.4 }}>
+                              🧪 Includes ${(credit / 100).toFixed(2)} credit after delivery{target ? ` — put it toward the ${target}` : ''}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>${Number(item.price || 0).toFixed(2)}</div>
@@ -1319,6 +1338,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 <span>Total</span>
                 <strong>${total.toFixed(2)}</strong>
               </div>
+              {(() => {
+                const earnRate = Math.max(0, Number(rewardsCfg?.purchasePointsPerDollar) || 0);
+                const pts = earnRate > 0 && total > 0 ? Math.floor(total * earnRate) : 0;
+                return pts > 0 ? (
+                  <div style={{ fontSize: 10.5, color: '#93c5fd', lineHeight: 1.5, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>⭐</span><span>You&apos;ll earn <strong>{pts.toLocaleString()} points</strong> on this {String(actionTitle || 'order').toLowerCase()} — redeem for store credit at checkout.</span>
+                  </div>
+                ) : null;
+              })()}
               {hasItems && (
                 <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
                   <input

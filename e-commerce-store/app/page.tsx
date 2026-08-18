@@ -44,6 +44,9 @@ export default function HomePage() {
   );
   // Hero copy is fully editable from /admin → Settings → Hero Content.
   const [heroContent, setHeroContent] = useState<any>(liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
+  // Social-proof counter settings (admin → Draws → Automation → Social Proof
+  // Counter) — `showSection`/`showCaption` hide the counter or its caption.
+  const [socialProofCfg, setSocialProofCfg] = useState<any>((liveCtx as any)?.socialProof || GOYUNIR_STORE_SUITE.socialProof);
   // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
@@ -101,6 +104,7 @@ export default function HomePage() {
         if (data?.config?.dropSchedule?.timezone) setStoreTimezone(String(data.config.dropSchedule.timezone));
         if (data?.config?.branding) setBranding(data.config.branding);
         if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
+        if (data?.config?.socialProof) setSocialProofCfg(data.config.socialProof);
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
         const sorted = Array.isArray(data.activeProducts)
           ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
@@ -202,31 +206,47 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-          <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8, whiteSpace: 'pre-line' }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
-          <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain, whiteSpace: 'pre-line' }}>{heroTitle}</h1>
-          <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px', whiteSpace: 'pre-line' }}>
-            {heroSubtitle}
-          </p>
+          {heroContent.showEyebrow !== false && (
+            <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8, whiteSpace: 'pre-line' }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
+          )}
+          {heroContent.showHeadline !== false && (
+            <h1 style={{ fontSize: 32, fontFamily: 'Georgia, Times New Roman, serif', margin: '0 0 10px', lineHeight: 1.02, color: configPalette.cardTextMain, whiteSpace: 'pre-line' }}>{heroTitle}</h1>
+          )}
+          {heroContent.showBody !== false && (
+            <p style={{ color: configPalette.cardTextMuted, fontSize: 14, lineHeight: 1.7, margin: '0 0 16px', whiteSpace: 'pre-line' }}>
+              {heroSubtitle}
+            </p>
+          )}
+          {(heroContent.showCta !== false || heroContent.showStory !== false) && (
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            {primaryProduct?.slug ? (
-              <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-                {heroContent.ctaLabel || 'Browse drops'}
-              </button>
-            ) : (
-              activeProducts.length > 0 && (
-                <Link href="/catalog" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
-                  Browse catalog
-                </Link>
+            {heroContent.showCta !== false && (
+              primaryProduct?.slug ? (
+                <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                  {heroContent.ctaLabel || 'Browse drops'}
+                </button>
+              ) : (
+                activeProducts.length > 0 && (
+                  <Link href="/catalog" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                    Browse catalog
+                  </Link>
+                )
               )
             )}
-            <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 32%, transparent)`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
-              {heroContent.storyHeadline || 'Our Story'}
-            </Link>
-            <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
+            {heroContent.showStory !== false && (
+              <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 32%, transparent)`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                {heroContent.storyHeadline || 'Our Story'}
+              </Link>
+            )}
+            {heroContent.showStory !== false && (
+              <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
+            )}
           </div>
-          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.06)'), fontSize: 12, color: configPalette.cardTextMuted }}>
-            Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
-          </div>
+          )}
+          {socialProofCfg.showSection !== false && (
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.06)'), fontSize: 12, color: configPalette.cardTextMuted }}>
+              Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
+            </div>
+          )}
         </section>
 
         {activeProducts.length > 0 && (

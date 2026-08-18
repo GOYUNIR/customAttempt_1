@@ -85,6 +85,11 @@ type PublicStoreProduct = {
   /** Mixed-format ribbon template ({raffle}/{fcfs} count tokens). Empty =
    *  inherit the global Settings → Storefront copy (then the built-in line). */
   mixedFormatRibbon?: string;
+  /** Per-product show/hide toggles (default true — absent means show). */
+  showUrgencyLine?: boolean;
+  showStatusLine?: boolean;
+  showNotesSection?: boolean;
+  showMixedRibbon?: boolean;
   soldOutBehavior?: string;
   soldOutArchiveDelayHours?: number;
   soldOutAt?: string;
@@ -179,6 +184,13 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
     // Mixed-format ribbon template ({raffle}/{fcfs} count tokens). Empty =
     // inherit the global Settings → Storefront copy (then the built-in line).
     mixedFormatRibbon: typeof raw?.mixedFormatRibbon === 'string' ? raw.mixedFormatRibbon : '',
+    // Per-product show/hide toggles for the customer-facing blocks. An absent
+    // value (legacy product) means "show" — the storefront treats `!== false`
+    // as enabled so old records render exactly as before.
+    showUrgencyLine: raw?.showUrgencyLine !== false,
+    showStatusLine: raw?.showStatusLine !== false,
+    showNotesSection: raw?.showNotesSection !== false,
+    showMixedRibbon: raw?.showMixedRibbon !== false,
     // Per-size raffle configs — sanitized so a malformed/deleted-size entry can
     // never leak into the public payload or confuse the storefront countdown.
     sizeConfigs: normalizeSizeConfigs(raw?.sizeConfigs, Array.isArray(raw?.priceCategories) ? raw.priceCategories : []),

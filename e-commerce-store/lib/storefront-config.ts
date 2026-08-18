@@ -167,6 +167,12 @@ export interface StorefrontConfig {
     ctaLabel: string;
     storyHeadline: string;
     storyBody: string;
+    /** Per-element show/hide toggles for the home-page hero (default ALL on). */
+    showEyebrow?: boolean;
+    showHeadline?: boolean;
+    showBody?: boolean;
+    showCta?: boolean;
+    showStory?: boolean;
   };
   socialProof: {
     label: string;
@@ -181,6 +187,10 @@ export interface StorefrontConfig {
     autoIncrementMinPerDay: number;   // guaranteed minimum ticks/day (spread across the day)
     autoIncrementMinHourGap: number;  // minimum hours between ticks
     autoIncrementMaxHourGap: number;  // force a tick when stale beyond this threshold
+    /** Show the whole social-proof counter on the home page (default true). */
+    showSection?: boolean;
+    /** Show the caption line under the count (default true). */
+    showCaption?: boolean;
   };
   brandFooterData: {
     instagramLink: string;
@@ -188,6 +198,8 @@ export interface StorefrontConfig {
     supportEmail: string;
     shippingReturnPolicyText: string;
     corporateEntityCopyright: string;
+    /** Show the footer tagline line (default true). */
+    showTagline?: boolean;
   };
   catalogPreview: {
     upcomingDrops: CatalogPreviewItem[];
@@ -285,6 +297,12 @@ const defaultHeroContent = {
   ctaLabel: 'Browse drops',
   storyHeadline: 'Our Story',
   storyBody: 'take control.',
+  // Every hero element shows by default; admin can hide any of them.
+  showEyebrow: true,
+  showHeadline: true,
+  showBody: true,
+  showCta: true,
+  showStory: true,
 };
 
 const defaultSocialProof = {
@@ -298,6 +316,8 @@ const defaultSocialProof = {
   autoIncrementMinPerDay: 3,
   autoIncrementMinHourGap: 2,
   autoIncrementMaxHourGap: 8,
+  showSection: true,
+  showCaption: true,
 };
 
 const defaultFooter = {
@@ -306,6 +326,7 @@ const defaultFooter = {
   supportEmail: '',
   shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
   corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
+  showTagline: true,
 };
 
 /** Default catalog presentation settings (admin → Settings → Catalog). */

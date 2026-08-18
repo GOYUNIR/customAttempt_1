@@ -15,7 +15,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const isoIn = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString().slice(0, 19);
 const DEFAULT_PRODUCTS = [
   {
-    id: 'p1', name: 'Elysian White — Launch Draw', slug: 'elysian-white-launch-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'The hero launch — a bright amber-white composition with the tightest allocation of the season.',
+    id: 'p1', name: 'Heavyweight Hoodie — Vol. 1', slug: 'heavyweight-hoodie-vol-1', prefix: 'tee-vol1', tagline: 'RAFFLE / LIVE', desc: 'A flagship streetwear drop — 340gsm loopback cotton, garment-dyed in small batches and cut locally. The tightest allocation of the season.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 0,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'Every entry is a pre-commitment: you lock shipping + payment, then a draw picks winners per size tier. Unselected entries are released automatically — nothing is charged silently.' },
@@ -24,14 +24,14 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Conversion is deferred — customers commit first and pay later, so instant revenue is lower than a direct FCFS drop.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Manufactured scarcity, email capture, and careful winner selection on a marquee product.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
+    priceCategories: [{ size: 'Standard', price: 95, stripeId: defaultStripePriceId(), winnerTiers: '3,2,2' }], images: ['/images/tee-vol1/1.jpeg', '/images/tee-vol1/2.jpeg', '/images/tee-vol1/3.jpeg'],
     // Per-media crop records (parallel to images) — showcases the admin crop
     // tool output: photo 1 is the default full-frame, photo 2 is an operator
     // crop (tighter, higher framing), photo 3 defaults.
     crops: [{ x: 0.5, y: 0.5, w: 1, h: 1 }, { x: 0.5, y: 0.34, w: 0.86, h: 0.86 }, { x: 0.5, y: 0.5, w: 1, h: 1 }],
     // Category tags drive the /catalog filter bar + chips on home cards and the
     // product page (admin-managed list in Settings → Catalog → Product categories).
-    categories: ['New Arrivals', 'Perfume', 'Unisex', 'Limited Edition'],
+    categories: ['New Arrivals', 'Apparel', 'Unisex', 'Limited Edition'],
     // Per-product recurring raffle schedule: after the first countdown ends and
     // the draw fires, the engine ROLLS the timer forward by this cadence
     // (here: a new raffle round every 12 hours) instead of closing the pool.
@@ -39,28 +39,28 @@ const DEFAULT_PRODUCTS = [
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 120, totalInventory: 120, winnerTiers: [3, 2, 2], releaseEndsAt: isoIn(2 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p2', name: 'Obsidian Void — Priority Draw', slug: 'obsidian-void-priority-draw', prefix: 'obsidian-void', tagline: 'RAFFLE / LIVE', desc: 'High-intent raffle queue with a deliberately small winner list.',
+    id: 'p2', name: 'Runner NRG — Priority Draw', slug: 'runner-nrg-priority-draw', prefix: 'obsidian-void', tagline: 'RAFFLE / LIVE', desc: 'A low-profile sneaker built for the hype crowd — suede overlays, gum sole, 180 pairs total.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 1,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'A priority draw: fewer winners, higher stakes. Entry locks the customer in, and the draw rewards a small pool of selected collectors.' },
-      { label: 'WHY', name: 'Why this drop matters', text: 'Demonstrates the “tiered winner” mechanic (3 winners → 2 → 1) and shows clients how a two-product launch can split traffic between hero and secondary items.' },
+      { label: 'WHY', name: 'Why this drop matters', text: 'Demonstrates the “tiered winner” mechanic (3 winners → 2 → 1) and shows how a two-size launch can split traffic between hero and secondary runs.' },
       { label: 'PROS', name: 'Pros', text: 'Excellent for social buzz and promoter traffic without opening unlimited direct checkout.' },
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Lower instant revenue than FCFS and a higher chance customers feel “waitlisted” if the pool overfills.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'VIP / early-access releases where exclusivity is the whole point.' },
     ],
-    priceCategories: [{ size: 'Standard', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }, { size: 'Collector', price: 175, stripeId: defaultStripePriceId(), winnerTiers: '1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
+    priceCategories: [{ size: 'US 9', price: 110, stripeId: defaultStripePriceId(), winnerTiers: '2,2,1' }, { size: 'US 10', price: 175, stripeId: defaultStripePriceId(), winnerTiers: '1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
     // Multi-size RAFFLE demo: two sizes, each with its own winner-tier CSV
-    // (Standard 2→2→1, Collector 1→1). Entry allocation is capped by
+    // (US 9 2→2→1, US 10 1→1). Entry allocation is capped by
     // maxRaffleAllocationLimit; per-size stock is showcased on the FCFS demo (p4).
-    categories: ['Perfume', 'Men', 'Limited Edition'],
+    categories: ['Apparel', 'Men', 'Limited Edition'],
     maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 90, totalInventory: 90, winnerTiers: [2, 2, 1], releaseEndsAt: isoIn(3 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, createdAt: NOW, updatedAt: NOW,
     // Per-size raffle configs — "customize each raffle differently": the
     // Collector size draws on its OWN timer (5 days) and rolls forward on its
     // OWN daily 19:00 schedule, while Standard inherits the product-level
     // countdown. Both sizes run raffles, each on their own cycle.
     sizeConfigs: {
-      standard: {},
-      collector: {
+      'us 9': {},
+      'us 10': {
         releaseEndsAt: isoIn(5 * DAY_MS),
         customDropSchedule: { mode: 'daily', timezone: 'America/Los_Angeles', targetEndDateTime: '', drawDayOfWeek: 6, drawDayOfMonth: 1, drawHour: 19, drawMinute: 0, drawSecond: 0, customIntervalHours: 24 },
       },
@@ -83,25 +83,25 @@ const DEFAULT_PRODUCTS = [
     createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p4', name: 'Amber Pulse — Direct Release', slug: 'amber-pulse-direct-release', prefix: 'baseItem2', tagline: 'FCFS / LIVE', desc: 'Cart-compatible direct release with three price points for mixed traffic.',
+    id: 'p4', name: 'Ember Candle — Home Set', slug: 'ember-candle-home-set', prefix: 'baseItem2', tagline: 'FCFS / LIVE', desc: 'Small-batch soy candles in three sizes — a home-and-lifestyle direct drop with three price points.',
     isActive: true, isArchived: false, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 3,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'Three sizes, one checkout. Customers pick any mix into the cart and pay instantly — demos how a multi-SKU FCFS product behaves end to end.' },
-      { label: 'WHY', name: 'Why this drop matters', text: 'Shows a 3-tier pricing ladder (card → travel spray → full bottle) and how an entry price point warms customers into the premium size.' },
+      { label: 'WHY', name: 'Why this drop matters', text: 'Shows a 3-tier pricing ladder (travel tin → mid jar → large jar) and how an entry price point warms customers into the premium size.' },
       { label: 'PROS', name: 'Pros', text: 'Immediate revenue, repeat purchases, and a natural upsell path through bundle-friendly pricing.' },
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Less selective than a draw, and lower-priced SKUs can cannibalize the hero size if priced too close.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Polished launches where the goal is speed and order value, not manufactured scarcity.' },
     ],
-    priceCategories: [{ size: 'Fabric Card', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Travel Spray', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Full Bottle', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
+    priceCategories: [{ size: 'Travel Tin', price: 24, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Mid Jar', price: 62, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Large Jar', price: 130, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
     // Per-size inventory showcase: 3 sizes, 3 different stock levels. Live
-    // states seed each size's own inventory and the admin Inventory & Limits
-    // panel shows the per-size editor.
-    inventoryPerSize: { 'Fabric Card': 40, 'Travel Spray': 60, 'Full Bottle': 40 },
-    categories: ['Perfume', 'Women', 'Best Sellers'],
+    // states seed each size's own inventory and the admin inventory editor
+    // (inside Pricing, Sizes & Inventory) shows the per-size numbers.
+    inventoryPerSize: { 'Travel Tin': 40, 'Mid Jar': 60, 'Large Jar': 40 },
+    categories: ['Candles & Home', 'Women', 'Best Sellers'],
     maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 140, winnerTiers: [0], soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 18, createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p5', name: 'Velvet Resin — Upcoming', slug: 'velvet-resin-upcoming', prefix: 'elysian-white', tagline: 'UPCOMING / QUEUED', desc: 'Queued raffle with a real countdown, simulating the pre-launch anticipation window.',
+    id: 'p5', name: 'Limited Print — Queued Release', slug: 'velvet-resin-upcoming', prefix: 'elysian-white', tagline: 'UPCOMING / RAFFLE', desc: 'A numbered archival art print — 70 copies, signed and queued behind a real pre-launch countdown.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 4,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'Marked “upcoming” with a go-live timestamp. The storefront shows a live countdown and flips the product to open automatically when the clock hits zero.' },
@@ -111,10 +111,10 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Teaser launches, influencer announcements, and anything that benefits from a fixed opening time.' },
     ],
     priceCategories: [{ size: 'Standard', price: 99, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, categories: ['New Arrivals', 'Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 70, totalInventory: 70, winnerTiers: [2, 1, 1], goLiveAt: isoIn(36 * 60 * 60 * 1000), releaseEndsAt: isoIn(5 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 48, categories: ['New Arrivals', 'Signature', 'Limited Edition'], createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p6', name: 'Solar Drift — Upcoming FCFS', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'Upcoming direct-buy release that opens in under an hour — a quick countdown demo.',
+    id: 'p6', name: 'Small-Batch Syrup — Drop', slug: 'solar-drift-upcoming-fcfs', prefix: 'baseItem1', tagline: 'UPCOMING / FCFS', desc: 'A gourmet pantry drop that opens in under an hour — first come, first served at the exact second.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 5,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'An FCFS product scheduled to open soon. When goLiveAt passes, it becomes a normal live buy — no admin action needed.' },
@@ -123,11 +123,11 @@ const DEFAULT_PRODUCTS = [
       { label: 'CONS', name: 'Cons / tradeoffs', text: 'Inventory can disappear very quickly once open, which is the intended tension for FCFS.' },
       { label: 'PURPOSE', name: 'Best used for', text: 'Time-boxed launches where precision timing is the hook.' },
     ],
-    priceCategories: [{ size: 'Discovery Pair', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Collector Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, categories: ['Perfume', 'Women', 'Seasonal'], createdAt: NOW, updatedAt: NOW,
+    priceCategories: [{ size: 'Taster', price: 38, stripeId: defaultStripePriceId(), winnerTiers: '0' }, { size: 'Large Bottle', price: 122, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
+    maxPerEmail: 2, maxPerCart: 2, maxRaffleAllocationLimit: 0, totalInventory: 95, winnerTiers: [0], goLiveAt: isoIn(60 * 60 * 1000), releaseEndsAt: isoIn(4 * DAY_MS), soldOutBehavior: 'archive_after_delay', soldOutArchiveDelayHours: 12, categories: ['Best Sellers', 'Seasonal', 'Men'], createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p7', name: 'Monolith Air — Upcoming', slug: 'monolith-air-upcoming', prefix: 'obsidian-void', tagline: 'UPCOMING / RAFFLE', desc: 'Low-allocation upcoming raffle with a visible countdown before activation.',
+    id: 'p7', name: 'Studio Cable — Limited Drop', slug: 'monolith-air-upcoming', prefix: 'obsidian-void', tagline: 'UPCOMING / RAFFLE', desc: 'A braided, made-to-order tech accessory — 45 units, queued behind a two-day countdown.',
     isActive: true, isArchived: false, isUpcoming: true, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 6,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'A very tight upcoming raffle — only 45 units. It demos low-allocation raffle math and the two-day countdown before entries open.' },
@@ -137,10 +137,10 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Statement pieces and collector drops where scarcity IS the product.' },
     ],
     priceCategories: [{ size: 'Standard', price: 104, stripeId: defaultStripePriceId(), winnerTiers: '1,1,1' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, categories: ['Perfume', 'Men', 'Signature'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 45, totalInventory: 45, winnerTiers: [1, 1, 1], goLiveAt: isoIn(2 * DAY_MS), releaseEndsAt: isoIn(6 * DAY_MS), soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 72, categories: ['Accessories', 'New Arrivals', 'Limited Edition'], createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p8', name: 'Atlas Bloom — Archive', slug: 'atlas-bloom-archive', prefix: 'baseItem2', tagline: 'ARCHIVE', desc: 'Completed direct drop that stays on the record as proof of demand.',
+    id: 'p8', name: 'Heritage Tee — Archive', slug: 'atlas-bloom-archive', prefix: 'baseItem2', tagline: 'ARCHIVE', desc: 'Completed apparel drop that stays on the record as proof of demand.',
     isActive: true, isArchived: true, isUpcoming: false, isRaffle: false, checkoutMode: 'FCFS', productType: 'checkout', sortOrder: 7,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'Archived products keep their full page, description, and history on the catalog’s Past Archives section — nothing is deleted.' },
@@ -150,10 +150,10 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'A living archive that makes “everything sells out” look like the norm.' },
     ],
     priceCategories: [{ size: 'Standard', price: 118, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], categories: ['Perfume', 'Women'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], categories: ['Apparel', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
-    id: 'p9', name: 'Cinder Wave — Archive', slug: 'cinder-wave-archive', prefix: 'baseItem1', tagline: 'ARCHIVE', desc: 'Historic raffle archive entry that keeps old winner records presentable.',
+    id: 'p9', name: 'Court Classic — Archive', slug: 'cinder-wave-archive', prefix: 'baseItem1', tagline: 'ARCHIVE', desc: 'Historic raffle archive entry that keeps old winner records presentable.',
     isActive: true, isArchived: true, isUpcoming: false, isRaffle: true, checkoutMode: 'RAFFLE', productType: 'raffle', sortOrder: 8,
     notes: [
       { label: 'MODE', name: 'How it works', text: 'An archived raffle with two winner tiers preserved in the ledger. Admins can still search it, re-export winners, and reference entry history.' },
@@ -163,7 +163,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Proving a track record before the next launch opens.' },
     ],
     priceCategories: [{ size: 'Standard', price: 102, stripeId: defaultStripePriceId(), winnerTiers: '2,2' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], categories: ['Perfume', 'Unisex', 'Best Sellers'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [2, 2], categories: ['Apparel', 'Unisex', 'Best Sellers'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p10', name: 'Mirage Salt — Hidden Draft', slug: 'mirage-salt-hidden-draft', prefix: 'baseItem2', tagline: 'DRAFT', desc: 'Hidden draft to simulate a non-published product staged for a future release.',
@@ -176,7 +176,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Pre-launch staging, client review, and seasonal planning.' },
     ],
     priceCategories: [{ size: 'Standard', price: 128, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem2/1.jpeg', '/images/baseItem2/2.jpeg', '/images/baseItem2/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], categories: ['Perfume', 'Men', 'Seasonal'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 60, winnerTiers: [0], categories: ['Candles & Home', 'Seasonal'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p11', name: 'Night Petal — Live Draw', slug: 'night-petal-live-draw', prefix: 'elysian-white', tagline: 'RAFFLE / LIVE', desc: 'Secondary live raffle that runs in parallel with the hero draw.',
@@ -189,7 +189,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Companion pieces, regional variants, or a second tier running beside the flagship.' },
     ],
     priceCategories: [{ size: 'Standard', price: 108, stripeId: defaultStripePriceId(), winnerTiers: '2,1,1' }], images: ['/images/elysian-white/1.jpeg', '/images/elysian-white/2.jpeg', '/images/elysian-white/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], categories: ['Perfume', 'Women', 'Limited Edition'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 80, totalInventory: 80, winnerTiers: [2, 1, 1], categories: ['Apparel', 'Women', 'Limited Edition'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p12', name: 'Quartz Ember — Live FCFS', slug: 'quartz-ember-live-fcfs', prefix: 'obsidian-void', tagline: 'FCFS / LIVE', desc: 'Additional direct-buy listing to stress-test cart and checkout UX.',
@@ -202,7 +202,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Cart stress testing, bundles, and higher-volume direct SKUs.' },
     ],
     priceCategories: [{ size: 'Standard', price: 152, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/obsidian-void/1.jpeg', '/images/obsidian-void/2.jpeg', '/images/obsidian-void/3.jpeg'],
-    maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Perfume', 'Men'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 3, maxPerCart: 3, maxRaffleAllocationLimit: 0, totalInventory: 180, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Accessories', 'Men'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p13', name: 'Halo Moss — Sold Out Proof', slug: 'halo-moss-sold-out-proof', prefix: 'baseItem1', tagline: 'FCFS / SOLD OUT', desc: 'A live-listed, fully sold-out drop kept visible as social proof.',
@@ -215,7 +215,7 @@ const DEFAULT_PRODUCTS = [
       { label: 'PURPOSE', name: 'Best used for', text: 'Keeping a catalog looking successful between drops.' },
     ],
     priceCategories: [{ size: 'Standard', price: 88, stripeId: defaultStripePriceId(), winnerTiers: '0' }], images: ['/images/baseItem1/1.jpeg', '/images/baseItem1/2.jpeg', '/images/baseItem1/3.jpeg'],
-    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Perfume', 'Unisex'], createdAt: NOW, updatedAt: NOW,
+    maxPerEmail: 1, maxPerCart: 1, maxRaffleAllocationLimit: 0, totalInventory: 0, winnerTiers: [0], soldOutBehavior: 'stay_visible', soldOutArchiveDelayHours: 24, categories: ['Apparel', 'Unisex'], createdAt: NOW, updatedAt: NOW,
   },
   {
     id: 'p14', name: 'Gilded Hour — Member Bundle', slug: 'gilded-hour-member-bundle', prefix: 'baseItem2', tagline: 'MIXED / LIVE', desc: 'A three-size drop that mixes formats: the Discovery Kit sells instantly while the Full Bottle and Grand Size run raffles — with a delivery incentive that upsells the kit into the hero size.',
@@ -359,6 +359,11 @@ const DEFAULT_CONFIG = {
     ctaLabel: 'Browse drops',
     storyHeadline: 'Our Story',
     storyBody: 'take control.',
+    showEyebrow: true,
+    showHeadline: true,
+    showBody: true,
+    showCta: true,
+    showStory: true,
   },
   socialProof: {
     label: 'Limited drop access',
@@ -371,6 +376,8 @@ const DEFAULT_CONFIG = {
     autoIncrementMinPerDay: 3,
     autoIncrementMinHourGap: 2,
     autoIncrementMaxHourGap: 8,
+    showSection: true,
+    showCaption: true,
   },
   brandFooterData: {
     instagramLink: '',
@@ -378,16 +385,17 @@ const DEFAULT_CONFIG = {
     supportEmail: '',
     shippingReturnPolicyText: 'Shipping & Returns Policy Apply.',
     corporateEntityCopyright: 'ALL RIGHTS RESERVED.',
+    showTagline: true,
   },
   catalogPreview: {
     upcomingDrops: [
-      { name: 'Velvet Resin — Upcoming', status: 'Upcoming', eta: 'Soon', image: '/images/elysian-white/1.jpeg', description: 'Queued release preparing for launch.', slug: 'velvet-resin-upcoming' },
-      { name: 'Solar Drift — Upcoming FCFS', status: 'Upcoming', eta: 'Soon', image: '/images/baseItem1/1.jpeg', description: 'Direct purchase drop entering queue.', slug: 'solar-drift-upcoming-fcfs' },
-      { name: 'Monolith Air — Upcoming', status: 'Upcoming', eta: 'Soon', image: '/images/obsidian-void/1.jpeg', description: 'Low allocation raffle arriving next.', slug: 'monolith-air-upcoming' },
+      { name: 'Limited Print — Queued Release', status: 'Upcoming', eta: 'Soon', image: '/images/elysian-white/1.jpeg', description: 'Queued release preparing for launch.', slug: 'velvet-resin-upcoming' },
+      { name: 'Small-Batch Syrup — Drop', status: 'Upcoming', eta: 'Soon', image: '/images/baseItem1/1.jpeg', description: 'Direct purchase drop entering queue.', slug: 'solar-drift-upcoming-fcfs' },
+      { name: 'Studio Cable — Limited Drop', status: 'Upcoming', eta: 'Soon', image: '/images/obsidian-void/1.jpeg', description: 'Low allocation raffle arriving next.', slug: 'monolith-air-upcoming' },
     ],
     archiveScents: [
-      { name: 'Atlas Bloom — Archive', status: 'Archived', image: '/images/baseItem2/1.jpeg', description: 'Completed direct drop in the archive lane.', slug: 'atlas-bloom-archive' },
-      { name: 'Cinder Wave — Archive', status: 'Archived', image: '/images/baseItem1/1.jpeg', description: 'Historic raffle archive record.', slug: 'cinder-wave-archive' },
+      { name: 'Heritage Tee — Archive', status: 'Archived', image: '/images/baseItem2/1.jpeg', description: 'Completed direct drop in the archive lane.', slug: 'atlas-bloom-archive' },
+      { name: 'Court Classic — Archive', status: 'Archived', image: '/images/baseItem1/1.jpeg', description: 'Historic raffle archive record.', slug: 'cinder-wave-archive' },
     ],
   },
   // Catalog presentation settings (admin → Settings → Catalog). Section order

@@ -382,7 +382,7 @@ export default function CatalogPage() {
                 {item.goLiveAt ? ` · ${formatCountdown(item.goLiveAt) || item.eta || ''}` : item.eta ? ` · ${item.eta}` : ''}
             </div>
             {item.description && (
-              <div style={{ fontSize: '10px', color: configPalette.cardTextMuted || '#a1a1aa', marginTop: '4px', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '10px', color: configPalette.cardTextMuted || '#a1a1aa', marginTop: '4px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
                 {item.description}
               </div>
             )}
@@ -652,7 +652,7 @@ export default function CatalogPage() {
                 {selectedItem.status}
               </div>
               {selectedItem.description && (
-                <p style={{ fontSize: '13px', lineHeight: '1.6', color: configPalette.cardTextMuted, margin: '0 0 20px 0' }}>
+                <p style={{ fontSize: '13px', lineHeight: '1.6', color: configPalette.cardTextMuted, margin: '0 0 20px 0', whiteSpace: 'pre-line' }}>
                   {selectedItem.description}
                 </p>
               )}
