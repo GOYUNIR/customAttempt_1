@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
+import { maintainDedupeStructures, sweepOrphanedProductState } from '@/lib/redis-maintenance';
 
 export const dynamic = 'force-dynamic';
 
@@ -326,6 +327,23 @@ export async function POST(request: Request) {
         await redis.del(CATALOG_CONFIG_KEY);
         removed.push(`${CATALOG_CONFIG_KEY} (migrated into store:config.catalogPreview)`);
       }
+    } catch {}
+
+    // ── 5) Maintenance sweep: keep the tidy schema BOUNDED, not just named. ──
+    //  a) `entries:processed` / `entries:email_sent` were unbounded SETS in
+    //     older builds — migrate any legacy SET data to the timestamp-scored
+    //     ZSET format and prune members past their retention windows.
+    //  b) Per-product / per-user state (entries:stats, entries:last_auto,
+    //     ops:overrides#product:<id>, ops:live_state, store:carts, pool keys)
+    //     can outlive a deleted product/user — sweep every orphan.
+    try {
+      const prunedDedupe = await maintainDedupeStructures(redis);
+      if (prunedDedupe > 0) removed.push(`dedupe sets (${prunedDedupe} expired members pruned)`);
+    } catch {}
+    try {
+      const sweep = await sweepOrphanedProductState(redis);
+      const totals = sweep.entriesStats + sweep.lastAuto + sweep.overrides + sweep.liveState + sweep.carts + sweep.emptyPools + sweep.orphanPools;
+      if (totals > 0) removed.push(`orphan sweep (${sweep.entriesStats} stats, ${sweep.lastAuto} last-auto, ${sweep.overrides} overrides, ${sweep.liveState} live-states, ${sweep.carts} carts, ${sweep.emptyPools} empty pools, ${sweep.orphanPools} orphan pools)`);
     } catch {}
 
     return NextResponse.json({

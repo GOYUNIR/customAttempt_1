@@ -5299,7 +5299,7 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Tidy Redis Schema</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys. It is lossless (data is renamed, never dropped) and safe to re-run anytime. Runs the same migration a fresh install starts with — see AGENTS.md for the key map.
+                Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys and runs a maintenance sweep (converts the unbounded legacy <code>entries:processed</code> / <code>entries:email_sent</code> sets into bounded timestamp-scored zsets, and prunes per-product state that outlived a deleted product or user). It is lossless (data is renamed, never dropped) and safe to re-run anytime — run it a few times a year to keep the key space small. See AGENTS.md for the key map.
               </p>
               <button onClick={organizeRedis} style={buttonGhost}>Tidy &amp; Migrate Redis Schema</button>
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}

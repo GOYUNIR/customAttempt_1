@@ -11,6 +11,8 @@ import {
   listLiveStates,
   getLiveProductState,
   liveStateField,
+  PROCESSED_SESSIONS_KEY,
+  ENTRY_EMAIL_SENT_KEY,
   type LiveStateRecord,
 } from '@/lib/server-config';
 import { isConfiguredPrice } from '@/lib/storefront-config';
@@ -434,6 +436,26 @@ export async function GET(request: Request) {
       );
     } catch (e: any) {
       push('Redis schema tidy', false, e.message || 'scan failed');
+    }
+
+    // Dedupe structures are BOUNDED ZSETs (not unbounded legacy SETs). Report
+    // their current cardinality + flag legacy set-shaped data that Tidy Redis
+    // Schema (or the next checkout write) will migrate.
+    try {
+      const processedType = String((await redis.type(PROCESSED_SESSIONS_KEY)) || 'none');
+      const emailSentType = String((await redis.type(ENTRY_EMAIL_SENT_KEY)) || 'none');
+      const processedCount = processedType === 'zset' ? Number(await redis.zcard(PROCESSED_SESSIONS_KEY)) || 0 : processedType === 'set' ? ((await redis.smembers(PROCESSED_SESSIONS_KEY)) || []).length : 0;
+      const emailSentCount = emailSentType === 'zset' ? Number(await redis.zcard(ENTRY_EMAIL_SENT_KEY)) || 0 : emailSentType === 'set' ? ((await redis.smembers(ENTRY_EMAIL_SENT_KEY)) || []).length : 0;
+      const legacyShape = processedType === 'set' || emailSentType === 'set';
+      push(
+        'Dedupe sets bounded (72h / 30d)',
+        !legacyShape,
+        legacyShape
+          ? `legacy SET shape detected (processed=${processedCount}, email_sent=${emailSentCount}) — run Tidy Redis Schema to convert`
+          : `processed=${processedCount} (${processedType}), email_sent=${emailSentCount} (${emailSentType}) — old members auto-prune on every write`
+      );
+    } catch {
+      push('Dedupe sets bounded (72h / 30d)', true, 'read skipped');
     }
   }
 

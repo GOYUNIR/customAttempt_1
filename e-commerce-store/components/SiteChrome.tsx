@@ -720,7 +720,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
         if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
         // Prune cart lines whose product/size no longer exists on the backend
         // (wipe/rebuild or archive) so the bag never shows ghost items.
-        const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
+        const products = Array.isArray(data?.allProducts) ? data.allProducts : [];
         setStoreProducts(products);
         const current = readCart();
         const pruned = pruneStaleCart(current, products);

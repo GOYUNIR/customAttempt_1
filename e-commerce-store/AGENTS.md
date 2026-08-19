@@ -88,7 +88,7 @@ Redis data browser stays filterable and organised at any scale:
 | `store:` | Canonical, admin-edited data (the ONLY data a buyer configures) | `store:products` (hash), `store:config` (string), `store:users` (hash), `store:carts` (hash — signed-in cart mirror, field = user id) |
 | `archive:` | Permanent entry/charge history (append-only) | `archive:ledger` (list) |
 | `promo:` | Promo code records + operational state | `promo:codes` (hash), `promo:used:<code>` (set), `promo:pending:<code>:<email>` (ttl string), `promo:credit:<orderRef>` (string) |
-| `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (sets), `entries:last_auto` (hash, field = `variant:size`) |
+| `entries:` | LIVE entry/intent/waitlist pools, fraud blocks, dedupe | `entries:pool:<variant>:<size>`, `entries:intent:<variant>:<size>`, `entries:waitlist:<variant>:<size>` (lists), `entries:stats` (hash), `entries:block:email:<variant>:<size>` / `entries:block:card:…` (sets), `entries:processed` + `entries:email_sent` (**bounded zsets** — scored by timestamp, pruned on every write: 72h / 30d windows), `entries:last_auto` (hash, field = `variant:size`) |
 | `draws:` | Draw summaries + history | `draws:last` (string), `draws:history` (list) |
 | `ops:` | Operational state + admin live-apply overrides | `ops:live_state` (hash), `ops:catalog_archive` (hash), `ops:recovery_config` (string), `ops:recovery_sent` (hash), `ops:overrides` (hash — fields `schedule`, `social_proof`, `product:<id>`) |
 | `auth:` | Auth tokens + verification challenges | `auth:session:<token>` (ttl string), `auth:reset:<token>` (ttl string), `auth:verify:<email>` (ttl string) |
@@ -118,6 +118,14 @@ Highlights of what changed in the tidy schema (and why it matters at scale):
   `ops:catalog_archive`); promos consolidated under `promo:` (`promo:codes`,
   `promo:used:`, `promo:pending:`, `promo:credit:`).
 - **Analytics/social-proof counters** moved under `analytics:*`.
+- **Dedupe sets are BOUNDED, not permanent.** `entries:processed` (Stripe
+  session ids) and `entries:email_sent` (`variant:size:email` rows) are ZSETs
+  scored by timestamp. Every write prunes members older than the retention
+  window (72h = Stripe's webhook retry window; 30 days for sent emails), so
+  they can never grow unbounded no matter how busy the store gets. A legacy
+  SET-shaped key is self-migrated on the first write (`ensureDedupeZset` in
+  `lib/redis-maintenance.ts`), and `/admin → Developer → Tidy Redis Schema`
+  converts + prunes them on demand.
 
 **Live states** are seeded lazily by `getLiveProductState()`, eagerly by
 `/api/admin/seed` (Seed Defaults), and repaired by the admin **Site Self-Test**.
@@ -130,9 +138,17 @@ never overwrites), then FOLDS the v2 high-churn string keys into their single
 hashes (`ops:override:*` → `ops:overrides`, `store:cart:*` → `store:carts`,
 `entries:last_auto:*` → `entries:last_auto`, `analytics:ticks:*` →
 `analytics:ticks`, `admin:verify_attempts:*`/`admin:send_attempts:*` → the
-`admin:verify:<email>` payload). It is safe to re-run. The admin **Site
-Self-Test** includes a "Redis schema tidy" check that flags any legacy prefixes
-that are still present.
+`admin:verify:<email>` payload), then runs a **maintenance sweep**
+(`lib/redis-maintenance.ts` → `maintainDedupeStructures()` +
+`sweepOrphanedProductState()`): converts legacy SET-shaped dedupe keys to the
+bounded zsets, prunes expired dedupe members, and removes per-product/per-user
+state (`entries:stats`, `entries:last_auto`, `ops:overrides#product:<id>`,
+`ops:live_state`, `store:carts`, empty/orphan pool keys) whose product or user
+no longer exists. It is safe to re-run — run it a few times a year to keep a
+busy store's key space small. The admin **Site Self-Test** includes a "Redis
+schema tidy" check that flags any legacy prefixes that are still present, and a
+"Dedupe sets bounded" check that reports the dedupe cardinalities + flags
+legacy SET-shaped data.
 
 **Legacy keys that no longer exist** (removed via `/admin → Developer → Tidy
 Redis Schema`): `store:active_products`, `store:archived_products`,
@@ -608,6 +624,15 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+
+- **2026-08-19 — "Make it less laggy + organize the Redis" finalization pass (perf-payload + redis-bounded-dedupe + orphan-sweep):**
+  - **🚀 `/api/store` payload cut ~in half and product pages stop downloading the whole catalog.** The endpoint used to serialize EVERY product twice — once in `allProducts` and again in its lifecycle section array (`activeProducts` / `archivedProducts` / `upcomingProducts`). It now returns ONE canonical `allProducts` array (lifecycle flags live on each product), and the four consumers (home, catalog, SiteChrome cart-pruning, Storefront) derive their sections client-side. A `?slug=` request now returns ONLY `config + product` (no `allProducts`, no sections) — product pages, the highest-traffic route, no longer download the entire catalog on every load. The 10s TTL cache + edge headers are unchanged.
+  - **📦 `framer-motion` removed from the public bundle (~50–100KB gzipped).** It was only used by `/catalog` for three one-shot animations (tile hover lift, search-bar fade-up, detail-sheet slide-up). All three are now plain CSS (`app/globals.css` keyframes + classes), the dependency is out of `package.json`, and the built client chunks contain zero framer-motion references. Reduced-motion users already collapsed these to ~0ms via the existing media query.
+  - **🗑 The unbounded dedupe sets are GONE — `entries:processed` and `entries:email_sent` are now bounded, timestamp-scored ZSETs.** Previously every Stripe session id and every `variant:size:email` row was SADD-ed forever, so a busy store's Redis grew without bound. Now: membership = ZSCORE, every write prunes members older than the retention window (**72h** for processed sessions — Stripe's webhook retry window; **30 days** for sent emails). New `lib/redis-maintenance.ts` (`markProcessedSession`/`isProcessedSession`/`markEntryEmailSent`/`isEntryEmailSent`) is wired into `/api/checkout/confirm-setup` + `/api/stripe/webhook`, self-migrates legacy SET-shaped keys on first write, and tolerates both shapes during migration (a race can never double-process). `zscore` added to the `StorageClient` contract + the Workers-KV adapter.
+  - **🧹 Orphaned-state sweep keeps the key space small.** New `sweepOrphanedProductState()` (also in `lib/redis-maintenance.ts`) prunes per-product/per-user records whose product or user no longer exists: `entries:stats` fields, `entries:last_auto` fields, `ops:overrides#product:<id>`, `ops:live_state` rows, `store:carts` for deleted accounts, and empty/orphan pool-intent-waitlist keys. **`deleteProduct` now cleans everything on the spot too** — pools, intent/waitlist pools, fraud blocks, stats fields, last-auto fields, the product override — and it FIXED A REAL BUG: the old `hdel(LIVE_STATE_KEY, id)` matched nothing because live-state fields are `<productId>-<slug>:<size>`, so deleted products' live states lingered forever; the delete now drops every field starting with the id.
+  - **🛠 Tidy Redis Schema + Site Self-Test upgraded.** `organize-redis` now finishes with `maintainDedupeStructures()` + `sweepOrphanedProductState()` (reports what it pruned) and the self-test gained a **"Dedupe sets bounded (72h / 30d)"** check that reports cardinalities and flags legacy SET-shaped data. Admin copy updated to explain the sweep. Run Tidy a few times a year to keep a live store's key space small.
+  - **🖼 Product gallery images got `loading="lazy" decoding="async"`** (non-cropped paths already used background-image + content-visibility). Removed the accumulated scratch `.log`/`_dbg-*`/`tsbuildinfo` files from the repo root.
+  - **🧪 Tests:** new `tests/redis-maintenance.test.ts` (5 cases: bounded mark/expiry pruning, legacy-SET self-migration, processed-session round-trip, full orphan sweep keep/prune matrix, named-key maintenance). `npm test` **129/129**, `tsc --noEmit` clean, `eslint` 0/0 on every touched file, `npm run build` compiles every route + the proxy middleware, and the production server was smoke-tested (`/`, `/catalog`, `/[slug]`, `/api/store`, `/api/store?slug=…` all 200 with the new payload shapes). No new Redis keys — `entries:processed` / `entries:email_sent` keep their names (now ZSETs); the maintenance helpers live in `lib/redis-maintenance.ts`.
 
 - **2026-08-18 — "Deleted products still show in Upcoming/Archives" + "categories won't delete" FIXED (delete-catalog-cleanup):**
   - **🐛 Deleted products kept rendering in Upcoming/Past Archives — root cause found.** `deleteProduct()` in `/api/admin/products` read the product with a raw `typeof rawProduct === 'string'` guard, but Upstash REST Redis (the default provider) auto-deserializes stored JSON, so `hget` returns an ALREADY-PARSED OBJECT. The guard failed → `syncCatalogConfigForProduct()` (which prunes the product from `store:config.catalogPreview.upcomingDrops` / `.archiveScents`) **never ran** → the deleted product's auto-created catalog entries survived and kept rendering on `/catalog`. Same bug class as the 2FA/verification fix. `deleteProduct` now reads through `safeParseRedisItem()` (accepts string OR object), so the cleanup always runs.

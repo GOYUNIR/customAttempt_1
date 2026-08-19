@@ -8,7 +8,6 @@ import {
   cardBlockKey,
   poolStatField,
   POOL_STATS_KEY,
-  PROCESSED_SESSIONS_KEY,
   cleanupMatchingIntent,
   loadProducts,
   STORE_CONFIG_KEY,
@@ -17,8 +16,8 @@ import {
   promoUsedKey,
   poolKey,
   waitlistPoolKey,
-  ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
+import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -172,8 +171,8 @@ async function repairMissingEntryEmails(redis: any, request: Request, session: a
     for (const line of lines) {
       try {
         const emailDedupe = `${line.variant}:${line.size}:${email}`;
-        const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
-        if (sent === 1) continue;
+        const sent = await isEntryEmailSent(redis, emailDedupe);
+        if (sent) continue;
         const product = Object.values(allProducts).find((p: any) => p.name === line.variant || p.id === line.productId) as any;
         const listPrice = product?.priceCategories?.find((c: any) => c.size === line.size)?.price || 0;
         const emailResult = await sendEntryConfirmedEmail({
@@ -191,7 +190,7 @@ async function repairMissingEntryEmails(redis: any, request: Request, session: a
           purchasePointsPerDollar,
         });
         if ((emailResult as any)?.ok) {
-          await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+          await markEntryEmailSent(redis, emailDedupe);
         } else {
           // Never log the customer email or the full send result verbatim.
           console.error('[confirm-setup] repair entry email failed', maskEmail(email), (emailResult as any)?.error || 'send failed');
@@ -319,8 +318,8 @@ async function lockOneEntry(opts: {
   const emailDedupe = `${variant}:${size}:${email}`;
   let emailSent = false;
   try {
-    const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
-    if (sent !== 1) {
+    const sent = await isEntryEmailSent(redis, emailDedupe);
+    if (!sent) {
       const liveProducts = await loadProducts(redis);
       const product = Object.values(liveProducts).find((p: any) => p.name === variant || p.id === productId) as any;
       const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
@@ -344,7 +343,7 @@ async function lockOneEntry(opts: {
       });
       if ((emailResult as any)?.ok) {
         emailSent = true;
-        await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+        await markEntryEmailSent(redis, emailDedupe);
       } else {
         // Never log the customer email or the full send result verbatim.
         console.error('[confirm-setup] entry email failed', maskEmail(email), (emailResult as any)?.error || 'send failed');
@@ -383,8 +382,8 @@ export async function POST(request: Request) {
 
     const refPrefix = await getRefPrefix(redis);
 
-    const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
-    if (already === 1) {
+    const already = await isProcessedSession(redis, sessionId);
+    if (already) {
       let existingPromo = null;
       let existingDiscount = 0;
       try {
@@ -532,7 +531,7 @@ export async function POST(request: Request) {
         }
       }
 
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      await markProcessedSession(redis, sessionId);
 
       let message = '🎉 Your entries are locked in!';
       if (locked.length > 0) message = `🎉 ${locked.length} entr${locked.length === 1 ? 'y' : 'ies'} locked in for the allocation. Good luck!`;
@@ -584,7 +583,7 @@ export async function POST(request: Request) {
     });
 
     if (result.duplicate) {
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      await markProcessedSession(redis, sessionId);
       return NextResponse.json({
         success: true,
         entryCreated: false,
@@ -593,7 +592,7 @@ export async function POST(request: Request) {
       });
     }
 
-    await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+    await markProcessedSession(redis, sessionId);
 
     let successMessage = "🎉 You're in! Your entry is locked for the allocation. Good luck!";
     if (result.appliedPromo) {

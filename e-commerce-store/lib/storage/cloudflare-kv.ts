@@ -439,6 +439,13 @@ export class CloudflareKvStorageClient implements StorageClient {
     const env = await this.read(key);
     return env && env.t === 'zset' && Array.isArray(env.v) ? (env.v as { m: string; s: number }[]).length : 0;
   }
+
+  async zscore(key: string, member: string): Promise<number | null> {
+    const env = await this.read(key);
+    if (!env || env.t !== 'zset' || !Array.isArray(env.v)) return null;
+    const entry = (env.v as { m: string; s: number }[]).find((e) => e.m === member);
+    return entry ? entry.s : null;
+  }
 }
 
 /**

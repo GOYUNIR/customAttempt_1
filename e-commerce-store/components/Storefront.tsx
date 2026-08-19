@@ -372,8 +372,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
       if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
-      const sorted = Array.isArray(data.activeProducts)
-        ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
+      const sorted = Array.isArray(data.allProducts)
+        ? [...data.allProducts]
+            .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
+            .sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
         : [];
       return sorted;
     } catch {
@@ -671,7 +673,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     // wipe/rebuild or archive). Runs against the live /api/store snapshot.
     fetchStoreJson('/api/store')
       .then((data: any) => {
-        const products = Array.isArray(data?.activeProducts) ? data.activeProducts : [];
+        const products = Array.isArray(data?.allProducts) ? data.allProducts : [];
         const pruned = pruneStaleCart(stored, products);
         if (pruned.length !== stored.length) {
           setCart(pruned);
@@ -1353,6 +1355,8 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                   src={galleryImages[selectedImageIndex] || galleryImages[0]}
                   alt={product.name}
                   draggable={false}
+                  loading="lazy"
+                  decoding="async"
                   style={{
                     position: 'absolute',
                     ...coverStyle(naturalDims.w, naturalDims.h, galleryBoxWidth, 280, currentCrop),

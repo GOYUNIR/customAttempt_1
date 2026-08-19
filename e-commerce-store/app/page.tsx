@@ -106,8 +106,12 @@ export default function HomePage() {
         if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
         if (data?.config?.socialProof) setSocialProofCfg(data.config.socialProof);
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
-        const sorted = Array.isArray(data.activeProducts)
-          ? [...data.activeProducts].sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
+        // `/api/store` returns ONE canonical `allProducts` array (lifecycle
+        // flags on each product) — derive the active releases here.
+        const sorted = Array.isArray(data.allProducts)
+          ? [...data.allProducts]
+              .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
+              .sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
           : [];
         setActiveProducts(sorted);
       } catch (err) {

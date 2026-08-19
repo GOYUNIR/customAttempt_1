@@ -101,6 +101,11 @@ export interface StorageClient {
     stop: number,
     opts?: { withScores?: boolean },
   ): Promise<Array<string | number>>;
+  /** Score of a member in a sorted set, or null when the member is absent
+   *  (returns null for wrong-type keys too, so callers can treat it like
+   *  SISMEMBER). Used by the bounded dedupe sets (`entries:processed`,
+   *  `entries:email_sent`). */
+  zscore(key: string, member: string): Promise<number | null>;
   zremrangebyscore(key: string, min: number, max: number): Promise<number>;
   zcard(key: string): Promise<number>;
 }

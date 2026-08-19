@@ -8,7 +8,6 @@ import {
   cardBlockKey,
   poolStatField,
   POOL_STATS_KEY,
-  PROCESSED_SESSIONS_KEY,
   safeParseRedisItem,
   loadProducts,
   getLiveProductState,
@@ -20,8 +19,8 @@ import {
   promoUsedKey,
   promoPendingKey,
   poolKey,
-  ENTRY_EMAIL_SENT_KEY,
 } from '@/lib/server-config';
+import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
@@ -180,9 +179,9 @@ export async function POST(request: Request) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const sessionId = session.id;
-    const already = await redis.sismember(PROCESSED_SESSIONS_KEY, sessionId);
+    const already = await isProcessedSession(redis, sessionId);
 
-    if (already === 1) {
+    if (already) {
       return NextResponse.json({ received: true, skipped: 'already_processed' });
     }
 
@@ -200,7 +199,7 @@ export async function POST(request: Request) {
       // the pools/ledger, even though signature verification is now mandatory.
       if (!isValidEmail(email)) {
         console.warn('[webhook] setup session rejected: invalid email', maskEmail(email));
-        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+        await markProcessedSession(redis, sessionId);
         return NextResponse.json({ received: true, skipped: 'invalid_payload' });
       }
 
@@ -256,7 +255,7 @@ export async function POST(request: Request) {
         } catch {}
         if (cartItems.length === 0) {
           console.warn('[webhook] raffle_cart setup session rejected: empty cartItems', maskEmail(email));
-          await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+          await markProcessedSession(redis, sessionId);
           return NextResponse.json({ received: true, skipped: 'invalid_payload' });
         }
         let orderRefIndex = 0;
@@ -284,7 +283,7 @@ export async function POST(request: Request) {
         const size = clampLength(meta.size || 'Standard', 50).trim();
         if (!variant || !size) {
           console.warn('[webhook] setup session rejected: invalid variant/size', maskEmail(email));
-          await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+          await markProcessedSession(redis, sessionId);
           return NextResponse.json({ received: true, skipped: 'invalid_payload' });
         }
         const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
@@ -367,8 +366,8 @@ export async function POST(request: Request) {
 
           const emailDedupe = `${variant}:${size}:${email}`;
           try {
-            const sent = await redis.sismember(ENTRY_EMAIL_SENT_KEY, emailDedupe);
-            if (sent !== 1) {
+            const sent = await isEntryEmailSent(redis, emailDedupe);
+            if (!sent) {
               const product = Object.values(allProducts).find((p: any) => p.name === variant || p.id === productId);
               const category = (product as any)?.priceCategories?.find((item: any) => item.size === size);
               const listPrice = category?.price;
@@ -394,7 +393,7 @@ export async function POST(request: Request) {
               // send (e.g. RESEND_API_KEY missing) must be retried by the
               // confirm-setup repair path instead of being swallowed forever.
               if (emailResult?.ok === true) {
-                await redis.sadd(ENTRY_EMAIL_SENT_KEY, emailDedupe);
+                await markEntryEmailSent(redis, emailDedupe);
               } else {
                 console.error('[webhook] entry email failed', maskEmail(email), emailResult?.error || 'send failed');
               }
@@ -418,7 +417,7 @@ export async function POST(request: Request) {
         }
       }
 
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      await markProcessedSession(redis, sessionId);
     }
 
     if (session.mode === 'payment' && session.status === 'complete') {
@@ -436,7 +435,7 @@ export async function POST(request: Request) {
       // ledger/inventory accounting.
       if (!isValidEmail(email)) {
         console.warn('[webhook] payment session rejected: invalid email', maskEmail(email));
-        await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+        await markProcessedSession(redis, sessionId);
         return NextResponse.json({ received: true, skipped: 'invalid_payload' });
       }
 
@@ -525,7 +524,7 @@ export async function POST(request: Request) {
         }
       }
 
-      await redis.sadd(PROCESSED_SESSIONS_KEY, sessionId);
+      await markProcessedSession(redis, sessionId);
     }
   }
 

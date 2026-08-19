@@ -366,11 +366,25 @@ export async function GET(request: Request) {
     const requestedSlug = String(url.searchParams.get('slug') || '').trim();
 
     const payload = await withTtlCache(`store:${requestedSlug || '*'}:v2`, 10_000, () => buildStorePayload(requestedSlug));
+
+    // Slim the product-page payload: a slug request only needs the ONE product
+    // + config (the page never reads the other products). Before this change a
+    // product page downloaded the ENTIRE catalog on every load.
+    const body = requestedSlug
+      ? {
+          config: payload.config,
+          product: payload.product,
+          scheduleOverride: payload.scheduleOverride,
+          socialOverride: payload.socialOverride,
+          timestamp: payload.timestamp,
+        }
+      : payload;
+
     // Edge-cache the (now small) payload: Vercel's CDN serves it instead of
     // streaming it from the origin on every request — the single biggest Fast
     // Origin Transfer saving. Fresh within the documented ~10s window (same as
     // the server-side TTL cache). No max-age, so browsers always revalidate.
-    return NextResponse.json(payload, {
+    return NextResponse.json(body, {
       headers: edgeCacheHeaders('public, s-maxage=10, stale-while-revalidate=30'),
     });
   } catch (err: any) {
@@ -391,9 +405,6 @@ async function buildStorePayload(requestedSlug: string) {
     // products. Operators publish content via /admin (Seed Defaults or Add Product).
     return {
       config: mergePublicConfig({}),
-      activeProducts: [],
-      archivedProducts: [],
-      upcomingProducts: [],
       allProducts: [],
       product: null,
       scheduleOverride: {},
@@ -430,9 +441,6 @@ async function buildStorePayload(requestedSlug: string) {
   allProducts = sortProducts(allProducts);
   const storeTimezone = String(config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
   const lifecycleProducts = applyLifecycle(allProducts, liveStates, storeTimezone, globalSchedule);
-  const activeProducts = lifecycleProducts.filter((item) => item.isActive && !item.isArchived && !item.isUpcoming);
-  const archivedProducts = lifecycleProducts.filter((item) => item.isArchived);
-  const upcomingProducts = lifecycleProducts.filter((item) => item.isUpcoming && !item.isArchived);
 
   const product = requestedSlug
     ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null
@@ -443,9 +451,11 @@ async function buildStorePayload(requestedSlug: string) {
 
   return {
     config,
-    activeProducts,
-    archivedProducts,
-    upcomingProducts,
+    // ONE canonical product array. Every product appears exactly ONCE in the
+    // serialized payload (before this change it appeared in `allProducts` AND
+    // again in its lifecycle section array — a ~2× duplication on every load).
+    // Consumers derive active/archived/upcoming from the lifecycle flags on
+    // each product instead of receiving pre-partitioned arrays.
     allProducts: lifecycleProducts,
     product,
     scheduleOverride,

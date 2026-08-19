@@ -127,9 +127,14 @@ export function cardBlockKey(variant: string, size: string): string {
   return `entries:block:card:${variant}:${size}`;
 }
 
-/** Set of Stripe session ids already processed by confirm-setup / webhook. */
+/** ZSET of Stripe session ids already processed by confirm-setup / webhook,
+ *  scored by processing timestamp. Bounded: every write prunes members older
+ *  than 72h (Stripe's webhook retry window), so it can never grow unbounded.
+ *  Legacy SET-shaped data is self-migrated by `lib/redis-maintenance.ts`. */
 export const PROCESSED_SESSIONS_KEY = 'entries:processed';
-/** Set of `<variant>:<size>:<email>` rows that already got a confirmation email. */
+/** ZSET of `<variant>:<size>:<email>` rows that already got a confirmation
+ *  email, scored by send timestamp. Bounded: members older than 30 days are
+ *  pruned on every write (email sends only repeat within days of checkout). */
 export const ENTRY_EMAIL_SENT_KEY = 'entries:email_sent';
 /** Hash — last auto-draw timestamp per pool (field = `variant:size`). The
  *  draw-scheduler dedupe lives in ONE hash so every product/size never spawns

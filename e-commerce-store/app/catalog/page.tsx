@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import { fetchStoreJson } from '@/lib/client-store-cache';
@@ -342,11 +341,10 @@ export default function CatalogPage() {
                   : { text: 'PREVIOUSLY RELEASED', green: false }
             : null;
         return (
-          <motion.button
+          <button
             key={item.name}
-            whileHover={{ y: -3, scale: 1.01 }}
-            whileTap={{ scale: 0.985 }}
             onClick={() => handleTileClick(item)}
+            className="goyunir-catalog-tile"
             style={{
               textAlign: 'left',
               background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))'),
@@ -406,7 +404,7 @@ export default function CatalogPage() {
               </div>
             )}
           </div>
-        </motion.button>
+        </button>
         );
       })}
     </div>
@@ -441,10 +439,8 @@ export default function CatalogPage() {
           Live releases are open for entry right now. Upcoming and archived drops stay on the record so collectors can see the full story and get ahead of the next opening.
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
+        <div
+          className="goyunir-anim-fade-up"
           style={{ marginBottom: 20, padding: '10px 12px', borderRadius: themeRadius(configPalette, 16), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, 'rgba(255,255,255,0.03)'), display: 'flex', alignItems: 'center', gap: 8 }}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: configPalette.accentBlue }}>
@@ -463,7 +459,7 @@ export default function CatalogPage() {
               Clear
             </button>
           ) : null}
-        </motion.div>
+        </div>
 
         {/* Category filter — the admin-managed product tag list. Tap a chip to
             show only releases in that category. */}
@@ -603,38 +599,32 @@ export default function CatalogPage() {
         )}
       </div>
 
-      <AnimatePresence>
-        {selectedItem && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSelectedItem(null)}
+      {selectedItem && (
+        <div
+          className="goyunir-anim-fade-in"
+          onClick={() => setSelectedItem(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.82)',
+            zIndex: 300,
+            display: 'flex',
+            alignItems: 'flex-end',
+          }}
+        >
+          <div
+            className="goyunir-anim-sheet-up"
+            onClick={(e) => e.stopPropagation()}
             style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.82)',
-              zIndex: 300,
-              display: 'flex',
-              alignItems: 'flex-end',
+              width: '100%',
+              maxWidth: '480px',
+              margin: '0 auto',
+              background: configPalette.cardBackground,
+              borderRadius: `${themeRadiusNumber(configPalette, 24)}px ${themeRadiusNumber(configPalette, 24)}px 0 0`,
+              padding: '24px 20px 40px',
+              boxSizing: 'border-box',
             }}
           >
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'tween', duration: 0.3 }}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: '100%',
-                maxWidth: '480px',
-                margin: '0 auto',
-                background: configPalette.cardBackground,
-                borderRadius: `${themeRadiusNumber(configPalette, 24)}px ${themeRadiusNumber(configPalette, 24)}px 0 0`,
-                padding: '24px 20px 40px',
-                boxSizing: 'border-box',
-              }}
-            >
               <div
                 style={{
                   width: '100%',
@@ -675,10 +665,10 @@ export default function CatalogPage() {
               >
                 Close
               </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </div>
+        )
+      }
 
       {navigating && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.72)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, color: '#fff' }}>

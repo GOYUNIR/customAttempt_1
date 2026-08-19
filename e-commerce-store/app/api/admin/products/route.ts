@@ -1,5 +1,26 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY, safeParseRedisItem, unarchiveProductFromCatalog, LIVE_STATE_KEY } from '@/lib/server-config';
+import {
+  createRedisClient,
+  loadProducts,
+  verifyAdminPassword,
+  defaultStripePriceId,
+  PRODUCTS_KEY,
+  STORE_CONFIG_KEY,
+  safeParseRedisItem,
+  unarchiveProductFromCatalog,
+  LIVE_STATE_KEY,
+  POOL_STATS_KEY,
+  poolStatField,
+  LAST_AUTO_DRAW_HASH_KEY,
+  lastAutoDrawField,
+  OVERRIDES_KEY,
+  productOverrideField,
+  poolKey,
+  intentPoolKey,
+  waitlistPoolKey,
+  emailBlockKey,
+  cardBlockKey,
+} from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
@@ -103,14 +124,50 @@ async function deleteProduct(redis: any, id: string) {
   await redis.hdel(PRODUCTS_KEY, id);
 
   try {
-    // Remove EVERY trace so the product can never keep rendering:
+    // Remove EVERY trace so the product can never keep rendering AND its
+    // operational state never lingers:
     // 1) its auto-created catalogPreview entries (store:config.upcomingDrops /
     //    archiveScents) are pruned by identity; 2) its ops:catalog_archive
-    //    record is dropped; 3) its live inventory states are dropped.
+    //    record is dropped; 3) its live inventory states are dropped (fields
+    //    are `<productId>-<slug>:<size>`, so every field starting with the id
+    //    must go — the old `hdel(LIVE_STATE_KEY, id)` matched nothing).
     if (deletedProduct) {
       await syncCatalogConfigForProduct(redis, { ...deletedProduct, isUpcoming: false, isArchived: false });
+
+      // Per-product name/size records: pools, intent/waitlist pools, fraud
+      // blocks, entry counters and last-auto timestamps.
+      const name = String(deletedProduct.name || '').trim();
+      const sizes = Array.isArray(deletedProduct.priceCategories)
+        ? deletedProduct.priceCategories.map((c: any) => String(c?.size || '').trim()).filter(Boolean)
+        : [];
+      const keysToDelete: string[] = [];
+      const statsFields: string[] = [];
+      const lastAutoFields: string[] = [];
+      for (const size of sizes) {
+        if (!name || !size) continue;
+        keysToDelete.push(
+          poolKey(name, size),
+          intentPoolKey(name, size),
+          waitlistPoolKey(name, size),
+          emailBlockKey(name, size),
+          cardBlockKey(name, size),
+        );
+        statsFields.push(poolStatField('sub', name, size), poolStatField('int', name, size));
+        lastAutoFields.push(lastAutoDrawField(name, size));
+      }
+      if (keysToDelete.length > 0) await redis.del(...keysToDelete);
+      if (statsFields.length > 0) await redis.hdel(POOL_STATS_KEY, ...statsFields);
+      if (lastAutoFields.length > 0) await redis.hdel(LAST_AUTO_DRAW_HASH_KEY, ...lastAutoFields);
+      await redis.hdel(OVERRIDES_KEY, productOverrideField(id));
     }
     await unarchiveProductFromCatalog(redis, id);
+    // Drop every live-state field that belongs to this product
+    // (`<productId>-<slug>:<size>` — the plain id is never a field name).
+    try {
+      const liveRaw = (await redis.hgetall(LIVE_STATE_KEY)) || {};
+      const liveDeletes = Object.keys(liveRaw).filter((field) => field.startsWith(`${id}-`));
+      if (liveDeletes.length > 0) await redis.hdel(LIVE_STATE_KEY, ...liveDeletes);
+    } catch {}
     await redis.hdel(LIVE_STATE_KEY, id);
   } catch (err) {
     console.error('[products] Delete cleanup failed for', id, err);

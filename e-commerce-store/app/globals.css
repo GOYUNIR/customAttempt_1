@@ -272,3 +272,38 @@ textarea {
   50% { transform: translate3d(7%, -5%, 0) scale(1.16); }
   100% { transform: translate3d(-3%, 8%, 0) scale(0.96); }
 }
+
+/* ── CSS-only entrance / sheet animations ─────────────────────────────────────
+   Replaces the framer-motion usage on the catalog page (hover lift on tiles,
+   a fade-up on the search bar, and the fade + slide-up detail sheet). Plain
+   CSS keeps the public client bundle ~50–100KB lighter — no animation library
+   needed for three one-shot transitions. The reduced-motion block above
+   already collapses all of these to ~0ms. */
+.goyunir-catalog-tile {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  will-change: transform;
+}
+.goyunir-catalog-tile:hover {
+  transform: translateY(-3px) scale(1.01);
+}
+.goyunir-anim-fade-up {
+  animation: goyunirFadeUpIn 0.25s ease-out both;
+}
+.goyunir-anim-fade-in {
+  animation: goyunirFadeIn 0.2s ease-out both;
+}
+.goyunir-anim-sheet-up {
+  animation: goyunirSheetUp 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes goyunirFadeUpIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes goyunirFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes goyunirSheetUp {
+  from { transform: translateY(100%); }
+  to { transform: none; }
+}
