@@ -1,0 +1,26 @@
+{
+  // Cloudflare Workers config for the MAIN storefront app (OpenNext build).
+  // Used ONLY when deploying to Cloudflare — see DEPLOY-CLOUDFLARE.md.
+  //
+  // `npx opennextjs-cloudflare build` outputs:
+  //   .open-next/worker.js  → the whole Next.js app (routes, proxy, /og,
+  //                           /icon, /media) as a single Worker
+  //   .open-next/assets     → static assets, served by the ASSETS binding
+  //
+  // Runtime secrets (UPSTASH_*, STRIPE_*, ADMIN_*, CRON_SECRET, RESEND_*,
+  // SUPPORT_EMAIL, BRAND_NAME …) are set with `npx wrangler secret put` —
+  // NEVER commit them here. Build-time NEXT_PUBLIC_* variables are inlined
+  // by the OpenNext build and must be present in your shell when you build.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "storefront-app",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

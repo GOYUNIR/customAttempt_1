@@ -1,0 +1,1 @@
+open-next.config.ts(1,40): error TS2307: Cannot find module '@opennextjs/cloudflare' or its corresponding type declarations.

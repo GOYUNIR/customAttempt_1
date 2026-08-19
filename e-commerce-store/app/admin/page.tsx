@@ -6,6 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
+import ProductLivePreview from '@/components/ProductLivePreview';
 import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule } from '@/lib/storefront-config';
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
@@ -3696,6 +3697,17 @@ export default function AdminPortal() {
                     })()}
                   </div>
                 </div>
+
+                {/* Live storefront preview — a mini render of the REAL product
+                    page built from the current (unsaved) form + theme + copy.
+                    Updates on every keystroke: images/crops, prices, size modes,
+                    samplers, urgency/status copy, mixed ribbon, notes, sold-out. */}
+                <ProductLivePreview
+                  key={editingProduct || 'new-product'}
+                  product={productForm}
+                  theme={themeSettings}
+                  copy={copySettings}
+                />
 
                 {/* ── Math & health check: the admin portal understands what's
                     going on. Live issues (blocking red / warning amber) update on

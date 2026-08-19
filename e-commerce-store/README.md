@@ -65,11 +65,15 @@ HTTPS APIs, no platform-specific code.
   `/api/*` routes, proxy, `/og` card, `/icon` and `/media` all work unchanged,
   and the public routes already emit `CDN-Cache-Control` headers that
   Cloudflare's edge honors.
+- The repo ships the OpenNext + Workers scaffolding (`open-next.config.ts` and
+  the root `wrangler.jsonc`) plus a complete walkthrough in
+  **`DEPLOY-CLOUDFLARE.md`** — install the adapter, build, set secrets, attach
+  your domain, done.
 - The daily safety net is the tiny scheduled worker in `cron-worker/` — deploy
   it once (`cd cron-worker && npx wrangler deploy`) and set two secrets:
   `TARGET_URL` (your store URL) and `CRON_SECRET` (the same value as any
   platform). See `cron-worker/README.md`.
-- When no site URL is configured, Cloudflare Pages' `CF_PAGES_URL` is used
+- When no site URL is configured, Cloudflare's `CF_PAGES_URL` is used
   automatically.
 
 ### Any other Node host

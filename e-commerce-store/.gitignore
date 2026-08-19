@@ -44,6 +44,12 @@ yarn-error.log*
 cron-worker/.wrangler
 cron-worker/.dev.vars*
 
+# cloudflare main app (OpenNext build output + local state + secrets)
+.open-next/
+.wrangler/
+.dev.vars*
+
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
