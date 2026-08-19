@@ -37,6 +37,13 @@ yarn-error.log*
 # vercel
 .vercel
 
+# netlify (local build cache + deploy state)
+.netlify
+
+# cloudflare cron worker (local state + secrets — never commit)
+cron-worker/.wrangler
+cron-worker/.dev.vars*
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

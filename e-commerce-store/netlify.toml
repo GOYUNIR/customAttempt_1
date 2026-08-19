@@ -1,0 +1,32 @@
+# Netlify configuration for the Private Allocation Storefront.
+#
+# To deploy on Netlify:
+#   1. "Add new site → Import an existing project" → connect this repo.
+#      This file lives inside the app directory, so set the Base directory to
+#      `e-commerce-store` (where this file is) and the Build command is picked
+#      up from [build] below (npm run build).
+#   2. Add the environment variables from README.md (Production + Preview):
+#      UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN, STRIPE_*, CRON_SECRET,
+#      ADMIN_BASIC_AUTH_*, NEXT_PUBLIC_* etc.
+#   3. Deploy. The Netlify Next.js runtime plugin auto-detects the framework and
+#      handles routing, the proxy (middleware) and server functions.
+#
+# Scheduled safety net: Netlify's scheduler invokes
+# `netlify/functions/cron-tasks.mjs` on the schedule below — the platform's
+# equivalent of the Vercel cron. It pings the app's own /api/checkout/cron-draw,
+# /api/cron/recovery and /api/analytics/social-tick endpoints with
+# `Authorization: Bearer $CRON_SECRET` (see lib/cron-auth.ts). The client-side
+# countdown trigger works with or without it.
+
+[build]
+  command = "npm run build"
+
+# Runs the Netlify scheduled function in the Node runtime with esbuild bundling.
+[functions]
+  node_bundler = "esbuild"
+
+# Daily safety net — runs netlify/functions/cron-tasks.mjs once per day.
+# Requires CRON_SECRET to be set in the Netlify env (the production URL is
+# injected automatically as `URL`).
+[functions."cron-tasks"]
+  schedule = "0 0 * * *"

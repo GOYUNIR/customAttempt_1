@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey, USERS_KEY } from '@/lib/server-config';
+import { isCronAuthorized } from '@/lib/cron-auth';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
@@ -19,15 +20,10 @@ async function getConfig(redis: any) {
 }
 
 function authorized(request: Request) {
-  const url = new URL(request.url);
-  const secret = process.env.CRON_SECRET || getAdminPassword();
-  if (!secret) return true;
-  const auth = request.headers.get('authorization');
-  const key = url.searchParams.get('key') || '';
-  if (request.headers.get('x-vercel-cron') === '1') return true;
-  if (auth === `Bearer ${secret}`) return true;
-  if (key === secret) return true;
-  return false;
+  // Cross-platform scheduler auth (Vercel cron header trusted; every other
+  // scheduler sends the CRON_SECRET bearer token). Kept open when no secret is
+  // configured, matching the route's historical behavior.
+  return isCronAuthorized(request, process.env.CRON_SECRET || getAdminPassword(), { openWhenNoSecret: true });
 }
 
 export async function GET(request: Request) {

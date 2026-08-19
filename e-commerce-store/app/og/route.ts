@@ -5,6 +5,7 @@ import { getSiteUrl } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
 import { resolveBrandImageForSatori } from '@/lib/brand-image';
 import { cardSiteUrlDisplay, normalizeShareCardOptions, safeCssColor } from '@/lib/share-card-config';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 import ShareCard from '@/components/ShareCard';
 
 /**
@@ -97,7 +98,7 @@ export async function GET() {
         // whenever branding changes, so the edge can hold each card version for
         // a day while crawlers always get a FRESH card for a NEW url. This also
         // stops crawler re-fetches from regenerating the PNG at the origin.
-        headers: { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
+        headers: edgeCacheHeaders('public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400'),
       },
     );
   } catch (err) {
@@ -127,7 +128,7 @@ export async function GET() {
         ),
         {
           ...size,
-          headers: { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400' },
+          headers: edgeCacheHeaders('public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400'),
         },
       );
     } catch {

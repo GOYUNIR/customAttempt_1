@@ -4,6 +4,7 @@ import {
   safeParseRedisItem,
   PRODUCTS_KEY,
 } from '@/lib/server-config';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 
 /**
  * Serves product gallery media + the brand logo as REAL files.
@@ -64,14 +65,14 @@ function serve(media: { mime: string; bytes: Uint8Array<ArrayBuffer> }): Respons
     headers: {
       'Content-Type': media.mime,
       'Content-Length': String(media.bytes.byteLength),
-      'Cache-Control': 'public, max-age=31536000, s-maxage=31536000, immutable',
+      ...edgeCacheHeaders('public, max-age=31536000, s-maxage=31536000, immutable'),
     },
   });
 }
 
 function notFound(): Response {
   // 404s are safe to cache briefly so a bot storm can't hammer the function.
-  return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'public, max-age=300' } });
+  return new Response('Not found', { status: 404, headers: edgeCacheHeaders('public, max-age=300') });
 }
 
 export async function GET(

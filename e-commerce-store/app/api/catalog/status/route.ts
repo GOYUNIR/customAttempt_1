@@ -16,6 +16,7 @@ import { publicMediaRef } from '@/lib/media';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { resolveNextRaffleAnchorMs, normalizeCategories, resolveSizeNextAnchorMs } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +26,7 @@ export async function GET() {
     // Edge-cache so Vercel's CDN serves the catalog instead of streaming it
     // from the origin on every request (matches the 15s server TTL).
     return NextResponse.json(payload, {
-      headers: { 'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=30' },
+      headers: edgeCacheHeaders('public, s-maxage=15, stale-while-revalidate=30'),
     });
   } catch (err: any) {
     console.error('[catalog/status] Error:', err?.message || err);

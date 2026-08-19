@@ -45,8 +45,12 @@ export async function GET(request: Request) {
 
   try {
     const hasStripeKey = Boolean(process.env.STRIPE_SECRET_KEY);
-    const hasRedisUrl = Boolean(process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL);
-    const hasRedisToken = Boolean(process.env.UPSTASH_REDIS_REST_TOKEN || process.env.REDIS_TOKEN);
+    const hasRedisUrl = Boolean(
+      process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL,
+    );
+    const hasRedisToken = Boolean(
+      process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || process.env.REDIS_REST_TOKEN || process.env.REDIS_TOKEN,
+    );
     const hasResend = Boolean(process.env.RESEND_API_KEY);
 
     let redis = null as ReturnType<typeof createRedisClient>;
@@ -148,7 +152,10 @@ export async function GET(request: Request) {
       {
         error: err?.message || 'status failed',
         stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
-        redisConfigured: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+        redisConfigured: Boolean(
+          (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL) &&
+            (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || process.env.REDIS_REST_TOKEN || process.env.REDIS_TOKEN),
+        ),
         resendConfigured: Boolean(process.env.RESEND_API_KEY),
         pools: [],
         fallbackEntries: [],

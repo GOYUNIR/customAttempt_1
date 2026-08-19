@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
 import { resolveBrandImageForSatori } from '@/lib/brand-image';
 import { safeCssColor } from '@/lib/share-card-config';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,7 +51,7 @@ export default async function Icon() {
       ),
       {
         ...size,
-        headers: { 'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400' },
+        headers: edgeCacheHeaders('public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400'),
       },
     );
   } catch (err) {
@@ -76,7 +77,7 @@ export default async function Icon() {
         ),
         {
           ...size,
-          headers: { 'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400' },
+          headers: edgeCacheHeaders('public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400'),
         },
       );
     } catch {

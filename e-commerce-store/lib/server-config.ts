@@ -614,15 +614,46 @@ export async function getOnlineVisitors(redis: Redis, trafficKey: string, limit 
   }
 }
 
+/**
+ * Resolve the REST endpoint + token for Upstash Redis from the common
+ * platform aliases, so a buyer can point this app at the same Upstash database
+ * from Vercel, Netlify, Cloudflare or anywhere else:
+ *
+ *   REST URL:  UPSTASH_REDIS_REST_URL → KV_REST_API_URL (Vercel KV / Upstash)
+ *              → REDIS_REST_URL → REDIS_URL → KV_URL
+ *   Token:     UPSTASH_REDIS_REST_TOKEN → KV_REST_API_TOKEN
+ *              → REDIS_REST_TOKEN → REDIS_TOKEN
+ *
+ * The @upstash/redis client speaks the REST (HTTPS) protocol. A `redis://` /
+ * `rediss://` wire-protocol URL (Upstash's own UPSTASH_REDIS_URL, or Vercel
+ * KV's KV_URL) is skipped so construction never fails on it — only a REST
+ * endpoint (or a bare hostname, which the SDK may still attempt) is returned.
+ */
 export function createRedisClient(): Redis | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.REDIS_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.REDIS_TOKEN;
+  const url = resolveRedisRestUrl();
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ??
+    process.env.KV_REST_API_TOKEN ??
+    process.env.REDIS_REST_TOKEN ??
+    process.env.REDIS_TOKEN;
   if (!url || !token) return null;
   try {
     return new Redis({ url, token });
   } catch {
     return null;
   }
+}
+
+function resolveRedisRestUrl(): string {
+  const candidates = ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_REST_URL', 'REDIS_URL', 'KV_URL'];
+  for (const name of candidates) {
+    const value = String(process.env[name] || '').trim();
+    if (!value) continue;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.includes('://')) continue; // redis:// / rediss:// wire protocol — the REST client can't use it
+    return value;
+  }
+  return '';
 }
 
 /**
@@ -733,7 +764,9 @@ export function resolveStripePriceId(stored?: string | null): string {
 
 export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
   const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? 'localhost:3000';
-  const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.VERCEL_ENV === 'production' ? 'https' : 'http');
+  // Platform-agnostic: behind any proxy the protocol is forwarded; when it is
+  // not, assume https in production regardless of the hosting platform.
+  const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.NODE_ENV === 'production' ? 'https' : 'http');
   return new URL(path, `${protocol}://${host}`).toString();
 }
 

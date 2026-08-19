@@ -17,7 +17,13 @@ without touching a single file.
 
 ## 1. Deploy & connect
 
-1. Deploy this repo to **Vercel** (or any Next.js host).
+The app is **platform-agnostic** — the same code runs on Vercel, Netlify,
+Cloudflare (via the OpenNext adapter), Railway, Render, Fly.io or any Node
+host that runs `next start` / Next.js functions. The only external services
+are **Upstash Redis** (the data store), **Stripe** and **Resend** — all plain
+HTTPS APIs, no platform-specific code.
+
+1. Deploy this repo to your platform (steps below for the big three).
 2. Set the environment variables below in the platform's project settings
    (Production + Preview), then redeploy.
 3. Open `https://yourdomain.com/admin`, log in with the admin credentials, and
@@ -26,20 +32,65 @@ without touching a single file.
 
 > **Repo layout:** the entire application lives in the `e-commerce-store/`
 > subdirectory of this repo (it is fully self-contained — its own `package.json`,
-> lockfile, `vercel.json` and `.gitignore`). When deploying this repository,
-> set Vercel's **Root Directory** to `e-commerce-store`.
+> lockfile, `vercel.json`, `netlify.toml`, `.gitignore`). Set your platform's
+> **Root / Base directory** to `e-commerce-store`.
+
+### Vercel
+
+- Import the repo, set **Root Directory** to `e-commerce-store`.
+- The daily safety-net cron is already wired via `vercel.json`
+  (`0 0 * * *` → `/api/checkout/cron-draw`; set `CRON_SECRET` so it can
+  authenticate). Draws also fire in real time from the client countdown, so
+  the cron is a safety net, not a requirement.
+- When no site URL is configured, `VERCEL_PROJECT_PRODUCTION_URL` /
+  `VERCEL_URL` are used automatically.
+
+### Netlify
+
+- Import the repo, set **Base directory** to `e-commerce-store`. The included
+  `netlify.toml` sets the build command and the daily scheduled function.
+- The daily safety net is `netlify/functions/cron-tasks.mjs` — it pings
+  `/api/checkout/cron-draw`, `/api/cron/recovery` and
+  `/api/analytics/social-tick` with `Authorization: Bearer $CRON_SECRET`
+  (set `CRON_SECRET` in the Netlify env).
+- When no site URL is configured, Netlify's `URL` / `DEPLOY_URL` are used
+  automatically.
+- Netlify's Next.js runtime plugin handles routing, the proxy and server
+  functions automatically.
+
+### Cloudflare
+
+- Deploy the main app with the official OpenNext adapter for Cloudflare
+  (`@opennextjs/cloudflare`) — the whole app runs as a single Worker. The
+  `/api/*` routes, proxy, `/og` card, `/icon` and `/media` all work unchanged,
+  and the public routes already emit `CDN-Cache-Control` headers that
+  Cloudflare's edge honors.
+- The daily safety net is the tiny scheduled worker in `cron-worker/` — deploy
+  it once (`cd cron-worker && npx wrangler deploy`) and set two secrets:
+  `TARGET_URL` (your store URL) and `CRON_SECRET` (the same value as any
+  platform). See `cron-worker/README.md`.
+- When no site URL is configured, Cloudflare Pages' `CF_PAGES_URL` is used
+  automatically.
+
+### Any other Node host
+
+- Run `npm run build` then `npm start` (or the platform's Next.js runtime).
+- Schedule a daily hit to `/api/checkout/cron-draw` (plus the optional
+  `/api/cron/recovery` and `/api/analytics/social-tick`) with
+  `Authorization: Bearer $CRON_SECRET` — cron-job.org, GitHub Actions,
+  UptimeRobot and QStash all work. See `lib/cron-auth.ts`.
 
 ### Required environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Redis (the data store — everything lives here) |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Redis (the data store — everything lives here). Any Upstash REST pair works from any platform. Aliases accepted: `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash/Vercel KV), `REDIS_REST_URL`/`REDIS_REST_TOKEN`. Wire-protocol `redis://` URLs are skipped automatically. |
 | `STRIPE_SECRET_KEY` | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
 | `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification) |
 | `ADMIN_VERIFY_EMAIL` | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`. |
-| `CRON_SECRET` | Protects cron endpoints |
-| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, Vercel's own `VERCEL_PROJECT_PRODUCTION_URL` / `VERCEL_URL` are used automatically so the store always tags its real domain. |
+| `CRON_SECRET` | Protects the scheduled safety-net endpoints (`/api/checkout/cron-draw`, `/api/cron/*`). Schedulers authenticate with `Authorization: Bearer $CRON_SECRET`. |
+| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, the platform's own URL variables are used automatically: Vercel (`VERCEL_PROJECT_PRODUCTION_URL`/`VERCEL_URL`), Netlify (`URL`/`DEPLOY_URL`), Cloudflare Pages (`CF_PAGES_URL`). |
 
 ### Recommended environment variables
 
@@ -146,8 +197,10 @@ Everything happens in `/admin`:
 3. **When a product's countdown hits zero, the drop fires automatically** — the
    storefront pings `/api/checkout/auto-draw` the instant the timer ends (and
    re-pings with backoff if the network blips, so a flaky connection can't
-   silently miss the drop), and a Vercel cron (`vercel.json`, once daily — the
-   Hobby-plan ceiling) is the final server-side safety net. Drop times are
+   silently miss the drop), and a scheduled safety net on whatever platform you
+   deploy to (Vercel's `vercel.json` cron, Netlify's scheduled function, the
+   Cloudflare cron worker, or any external scheduler — all authenticated via
+   `CRON_SECRET`, see §1) is the final server-side backstop. Drop times are
    stored as **store-timezone wall-clock strings**
    (`store:config.dropSchedule.timezone`) and parsed consistently by the browser
    countdown AND the server engine (`lib/drop-timestamps.ts`), so a release
@@ -177,9 +230,9 @@ Everything happens in `/admin`:
    countdown end + own cadence) even on the same product. One-shot drops (a
    fixed date with no next occurrence) draw once and are done.
 
-> Set `CRON_SECRET` in Vercel so the scheduled safety-net cron
-> (`/api/checkout/cron-draw`) is authorized. The client-side countdown trigger
-> works with or without it.
+> Set `CRON_SECRET` in your platform so the scheduled safety-net endpoints
+> (`/api/checkout/cron-draw`, `/api/cron/*`) are authorized. The client-side
+> countdown trigger works with or without it.
 
 Direct-buy (FCFS) products go through the bag/cart and are charged immediately.
 

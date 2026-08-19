@@ -1,0 +1,13 @@
+{
+  // Cloudflare Workers config for the storefront's daily safety-net cron.
+  // Deploy this tiny worker SEPARATELY from the main site (see README.md in
+  // this directory). On schedule it fetches the app's own endpoints, exactly
+  // like the Vercel cron and the Netlify scheduled function.
+  "name": "storefront-cron",
+  "main": "src/index.mjs",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  }
+}

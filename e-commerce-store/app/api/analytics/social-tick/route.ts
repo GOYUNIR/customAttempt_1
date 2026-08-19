@@ -1,20 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, getSocialProofOverride, getAdminPassword } from '@/lib/server-config';
+import { isCronAuthorized } from '@/lib/cron-auth';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { maybeAutoIncrementSocialProof } from '@/lib/social-proof';
 
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const url = new URL(request.url);
-  const secret = process.env.CRON_SECRET || getAdminPassword();
-  if (!secret) return true;
-  const auth = request.headers.get('authorization');
-  const key = url.searchParams.get('key') || '';
-  if (request.headers.get('x-vercel-cron') === '1') return true;
-  if (auth === `Bearer ${secret}`) return true;
-  if (key === secret) return true;
-  return false;
+  // Cross-platform scheduler auth (Vercel cron header trusted; every other
+  // scheduler sends the CRON_SECRET bearer token). Kept open when no secret is
+  // configured, matching the route's historical behavior.
+  return isCronAuthorized(request, process.env.CRON_SECRET || getAdminPassword(), { openWhenNoSecret: true });
 }
 
 // Cron-only auto-increment trigger. It shares the exact engine the public

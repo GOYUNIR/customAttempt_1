@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, getGlobalScheduleOverride, getAllProductOverrides } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,6 @@ export async function GET() {
     return { globalScheduleOverride, productOverrides };
   });
   return NextResponse.json(payload, {
-    headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
+    headers: edgeCacheHeaders('public, s-maxage=30, stale-while-revalidate=60'),
   });
 }

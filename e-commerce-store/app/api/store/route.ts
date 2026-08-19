@@ -17,6 +17,7 @@ import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { brandLogoRef, publicMediaRef } from '@/lib/media';
+import { edgeCacheHeaders } from '@/lib/cache-headers';
 
 export const dynamic = 'force-dynamic';
 
@@ -370,7 +371,7 @@ export async function GET(request: Request) {
     // Origin Transfer saving. Fresh within the documented ~10s window (same as
     // the server-side TTL cache). No max-age, so browsers always revalidate.
     return NextResponse.json(payload, {
-      headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30' },
+      headers: edgeCacheHeaders('public, s-maxage=10, stale-while-revalidate=30'),
     });
   } catch (err: any) {
     console.error('[store] failed', err?.message || err);

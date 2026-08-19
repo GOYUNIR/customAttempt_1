@@ -171,12 +171,16 @@ Never rebuild them.
 - Admin writes bypass caches; **storefront display data can lag a few seconds**
   (up to 30s for branding/metadata).
 - **Edge caching (the Fast Origin Transfer fix).** Public GET routes return an
-  explicit `Cache-Control` so Vercel's edge cache serves the body after ONE
-  origin render instead of streaming it on every request: `/api/store`
+  explicit `Cache-Control` (+ `CDN-Cache-Control` via the shared
+  `lib/cache-headers.ts` → `edgeCacheHeaders()`, so **Vercel** honors
+  `s-maxage`, **Netlify** honors `CDN-Cache-Control`, and **Cloudflare** honors
+  both) so every platform's edge serves the body after ONE origin render
+  instead of streaming it on every request: `/api/store`
   (`public, s-maxage=10, stale-while-revalidate=30`), `/api/catalog/status`
   (`s-maxage=15`), `/api/config/public` (`s-maxage=30`), `/og` (`max-age=3600,
   s-maxage=86400`), `/icon` (`max-age=86400, s-maxage=86400`). Never set
-  `max-age` on the JSON routes — browsers should always revalidate.
+  `max-age` on the JSON routes — browsers should always revalidate (the
+  `CDN-Cache-Control` copy only affects the CDN layer, never browsers).
 - **Base64 data-URL media is NEVER shipped in public payloads anymore.** Product
   images/videos + the brand logo are stored in Redis as base64 data URLs;
   `lib/media.ts` (`publicMediaRef` / `brandLogoRef`) rewrites them into small
@@ -417,9 +421,13 @@ input like `123 realstreet` can never be saved.
 - **Triggers:** (1) the client countdown pings `/api/checkout/auto-draw`
   (`lib/client-auto-draw.ts` → `notifyDropDue()`) from the product page, catalog
   and home page the second a countdown hits zero — a drop happens immediately with
-  NO cron; (2) the Vercel cron (`vercel.json`: `0 0 * * *` → once daily, the
-  Hobby-plan ceiling — `/api/checkout/cron-draw`, auth via `x-vercel-cron` /
-  `Authorization: Bearer $CRON_SECRET`) is the server-side safety net; (3) the
+  NO cron; (2) the **platform-agnostic scheduled safety net** — Vercel's cron
+  (`vercel.json`: `0 0 * * *` → once daily, the Hobby-plan ceiling), Netlify's
+  scheduled function (`netlify/functions/cron-tasks.mjs`), Cloudflare's cron
+  worker (`cron-worker/`), or ANY external scheduler (cron-job.org, GitHub
+  Actions, QStash…) — all hit `/api/checkout/cron-draw` and authenticate via
+  `lib/cron-auth.ts` (`x-vercel-cron` header trusted for Vercel;
+  `Authorization: Bearer $CRON_SECRET` everywhere else); (3) the
   admin → Draws → Trigger Drop path (unchanged). The product page splits the
   countdown into a DISPLAY anchor (the effective `nextReleaseEndsAt`) and a
   TRIGGER anchor (the raw cycle end) so a recurring raffle shows its new timer
@@ -505,22 +513,44 @@ input like `123 realstreet` can never be saved.
   through the chain (env → request host → example.com). If a shared link shows
   no card, check the Vercel env vars for a `$…` placeholder first.
 
-## Environment Variables (set in Vercel)
+## Environment Variables (set in your hosting platform — Vercel, Netlify, Cloudflare, anywhere)
 
 | Variable | Purpose |
 | --- | --- |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth) |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth). REST-protocol pair — any platform works. Aliases: `KV_REST_API_URL`/`KV_REST_API_TOKEN`, `REDIS_REST_URL`/`REDIS_REST_TOKEN`, `REDIS_URL`/`REDIS_TOKEN` (REST-only: `redis://` wire-protocol URLs are skipped in `lib/server-config.ts`). |
 | `STRIPE_SECRET_KEY` | Stripe API |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 | `STRIPE_PRODUCT_ID` (optional) | Global default Stripe price ID when a product/size has none set in admin. Per-product IDs always win. No hardcoded Stripe ID anywhere — if unset, checkout fails loudly with `price_placeholder_not_configured`. |
 | `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD` | `/admin` protection (Basic Auth + two-step verification) |
 | `ADMIN_VERIFY_EMAIL` (recommended) | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL` / `REPLY_TO_EMAIL`. Without one, the admin portal locks behind the code step. |
-| `CRON_SECRET` | Cron endpoint auth |
+| `CRON_SECRET` | Safety-net scheduler auth. Every scheduler authenticates with `Authorization: Bearer $CRON_SECRET` (legacy `?key=` / `x-cron-secret` also accepted) — see `lib/cron-auth.ts`. |
 | `RESEND_API_KEY` / `RESEND_FROM` (optional) | Transactional email |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox address autofill (must be set in the SAME env as the deploy + redeploy) |
-| `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. When none are set, Vercel's system variables `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL` are used as a final fallback so a deployed store always tags its REAL domain. |
+| `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. When none are set, the platform's system variables are used as a final fallback so a deployed store always tags its REAL domain: Vercel `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL`, Netlify `URL` → `DEPLOY_URL`, Cloudflare Pages `CF_PAGES_URL`. |
 | `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` (optional) | Email send-from brand |
 | `SUPPORT_EMAIL` / `REPLY_TO_EMAIL` (optional) | Support address in emails |
+
+## Multi-platform deployment (beyond Vercel)
+
+The app is deliberately platform-agnostic: everything talks to Upstash Redis,
+Stripe and Resend over plain HTTPS, no platform SDKs are used, and the Next.js
+runtime (routes, proxy, `/og`, `/media`) is identical everywhere. Per platform:
+
+- **Vercel** — `vercel.json` wires the daily cron (`0 0 * * *` →
+  `/api/checkout/cron-draw`; Vercel signs the request with `x-vercel-cron`,
+  trusted by `lib/cron-auth.ts`).
+- **Netlify** — `netlify.toml` + `netlify/functions/cron-tasks.mjs` (a
+  scheduled function that pings the same endpoints with the bearer
+  `CRON_SECRET`). Netlify's Next runtime plugin handles the proxy/routing.
+- **Cloudflare** — deploy with the official OpenNext adapter; the daily safety
+  net is the separate `cron-worker/` Workers project (`wrangler.jsonc` cron +
+  `src/index.mjs` scheduled handler, bearer-auth the same way).
+- **Any other host / external scheduler** (cron-job.org, GitHub Actions,
+  UptimeRobot, QStash, self-hosted crontab) — point a daily HTTP call at
+  `/api/checkout/cron-draw` (+ optionally `/api/cron/recovery` and
+  `/api/analytics/social-tick`) with `Authorization: Bearer $CRON_SECRET`.
+  **The client-side countdown trigger still fires draws in real time with NO
+  cron at all** — the scheduled job is only the server-side safety net.
 
 The admin **SetUp tab** (`/admin → SetUp`) shows live ✓/✗ status for every
 variable (never the values) plus a production launch checklist. `/api/admin/env-status`
@@ -564,6 +594,15 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+
+- **2026-08-18 — Platform-agnostic deployment pass (works on Vercel, Netlify, Cloudflare, or any Node host):**
+  - **🔐 Cross-platform cron auth (`lib/cron-auth.ts`, dependency-free).** The four scheduled endpoints (`/api/checkout/cron-draw`, `/api/cron/auto-draw`, `/api/cron/recovery`, `/api/analytics/social-tick`) now share ONE auth helper instead of four copies of the Vercel-only check. Vercel's `x-vercel-cron: 1` header is trusted directly; every other scheduler authenticates with `Authorization: Bearer $CRON_SECRET` (legacy `?key=` query and `x-cron-secret` header also accepted). Netlify scheduled functions, Cloudflare cron workers, cron-job.org, GitHub Actions, QStash and self-hosted crontab all work. Per-route open-when-no-secret behavior preserved (draw endpoints closed, recovery/social-tick open).
+  - **📦 Netlify support shipped:** `netlify.toml` (build command + `[functions."cron-tasks"]` daily schedule) and `netlify/functions/cron-tasks.mjs` — a scheduled function that pings the same three safety-net endpoints with the bearer `CRON_SECRET` (site URL auto-injected via `URL`/`DEPLOY_PRIME_URL`).
+  - **☁️ Cloudflare support shipped:** `cron-worker/` — a tiny standalone Workers project (`wrangler.jsonc` daily cron trigger + `src/index.mjs` `scheduled` handler) that forwards the run to the same endpoints. Deploy with `npx wrangler deploy` + two secrets (`TARGET_URL`, `CRON_SECRET`). The main app deploys via the OpenNext adapter with zero code changes.
+  - **🌐 Site-URL fallbacks now cover every major host (`lib/env.ts`):** after `NEXT_PUBLIC_URL`/`NEXT_PUBLIC_SITE_URL`/`SITE_URL`, `getSiteUrl()` falls back to Vercel (`VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL`), Netlify (`URL` → `DEPLOY_URL`) and Cloudflare Pages (`CF_PAGES_URL`), accepting both bare hostnames and full `https://host` values. `buildAbsoluteUrl` no longer depends on `VERCEL_ENV` (uses `NODE_ENV`).
+  - **🛢 Redis client accepts every platform's Upstash REST aliases (`lib/server-config.ts`):** `UPSTASH_REDIS_REST_URL` → `KV_REST_API_URL` → `REDIS_REST_URL` → `REDIS_URL` (tokens likewise), skipping `redis://`/`rediss://` wire-protocol URLs that the REST client can't use. Admin SetUp/status checks updated to match.
+  - **💨 `CDN-Cache-Control` alongside `Cache-Control` everywhere (`lib/cache-headers.ts` → `edgeCacheHeaders()`):** wired into `/api/store`, `/api/catalog/status`, `/api/config/public`, `/og`, `/icon` and `/media` so Netlify's CDN (which reads `CDN-Cache-Control`) and Cloudflare's edge cache the same bodies Vercel already cached — the Fast Origin Transfer fix now holds on every platform. Browsers still always revalidate the JSON routes (only the CDN layer gets the copy).
+  - **🧪 Tests:** new `tests/cron-auth.test.ts` (6 cases: Vercel header trust, bearer/`?key=`/`x-cron-secret` acceptance + rejection, open-when-no-secret) and a new `tests/env.test.ts` platform-fallback case (Vercel/Netlify/Cloudflare hosts, placeholder/malformed skipping, explicit-URL-wins). `npm test` **105/105**, `tsc --noEmit` clean, `eslint` 0/0 on every touched file. No Redis keys were added or changed.
 
 - **2026-08-18 — "Smart admin" pass: line breaks + show/hide everywhere, Pricing & Sizes absorbs inventory, credits/points incentives, anti-exploitation math gates, diverse seeds (smart-admin-pass):**
   - **🧮 The admin portal now UNDERSTANDS the math.** New pure engine **`lib/product-sanity.ts`** (`checkProductSanity` / `checkRewardsSanity` / `sortSanityIssues` / `parseWinnerTiers`) powers a live **"Math & health check"** panel at the top of the product editor (updates on every keystroke), a **Catalog Health** card on the Overview tab (every product's issues, click-through to fix), a **rewards-economy alert** in Settings → Rewards & Points, and a **save-time gate on BOTH the client and the server** (`/api/admin/products` returns 400 when an 'error' issue exists). Checks flag: sampler credits ≥ sampler price (a guaranteed profit loop — BLOCKED), credits ≥ full-size price (free items — BLOCKED), min-order ≤ credit, raffle winner tiers exceeding inventory (BLOCKED), winners configured on FCFS sizes, per-size inventory summing to something other than the total, go-live after countdown-end (BLOCKED), past one-shot countdowns, zero-inventory live products, no Stripe IDs, reward earn-rate ≥ redeem-rate (customers farm credit — BLOCKED at settings level), and gift discounts ≥ 100%.

@@ -86,3 +86,60 @@ test('getSiteUrl rejects Vercel dashboard env placeholders that leak into values
     process.env = { ...original };
   }
 });
+
+test('getSiteUrl falls back to platform system variables when no URL is configured', () => {
+  const original = { ...process.env };
+  try {
+    const clearExplicit = () => {
+      process.env.NEXT_PUBLIC_URL = '';
+      process.env.NEXT_PUBLIC_SITE_URL = '';
+      delete process.env.SITE_URL;
+    };
+    const clearPlatform = () => {
+      delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+      delete process.env.VERCEL_URL;
+      delete process.env.URL;
+      delete process.env.DEPLOY_URL;
+      delete process.env.CF_PAGES_URL;
+    };
+
+    // Vercel: bare hostname is normalized to https.
+    clearExplicit();
+    clearPlatform();
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'goyunir.com';
+    assert.equal(getSiteUrl(), 'https://goyunir.com');
+
+    // Vercel per-deployment URL is the next fallback.
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    process.env.VERCEL_URL = 'myapp-abc123.vercel.app';
+    assert.equal(getSiteUrl(), 'https://myapp-abc123.vercel.app');
+
+    // Netlify: full https URL is kept.
+    clearPlatform();
+    process.env.URL = 'https://my-store.netlify.app';
+    assert.equal(getSiteUrl(), 'https://my-store.netlify.app');
+
+    // Netlify deploy-specific URL.
+    delete process.env.URL;
+    process.env.DEPLOY_URL = 'https://deploy-preview-12--my-store.netlify.app';
+    assert.equal(getSiteUrl(), 'https://deploy-preview-12--my-store.netlify.app');
+
+    // Cloudflare Pages: bare hostname.
+    clearPlatform();
+    process.env.CF_PAGES_URL = 'my-store.pages.dev';
+    assert.equal(getSiteUrl(), 'https://my-store.pages.dev');
+
+    // Placeholder / malformed platform values are skipped, never emitted.
+    clearPlatform();
+    process.env.VERCEL_URL = '$vercel_project_production_url';
+    process.env.CF_PAGES_URL = 'https://broken store.pages.dev';
+    assert.equal(getSiteUrl(), '');
+
+    // An explicit configured URL always wins over platform vars.
+    process.env.CF_PAGES_URL = 'pages.example';
+    process.env.NEXT_PUBLIC_URL = 'https://real.example';
+    assert.equal(getSiteUrl(), 'https://real.example');
+  } finally {
+    process.env = { ...original };
+  }
+});
