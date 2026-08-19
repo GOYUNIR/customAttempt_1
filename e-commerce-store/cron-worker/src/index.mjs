@@ -14,7 +14,7 @@
  *   - TARGET_URL  → the deployed store URL, e.g. https://your-store.com
  *   - CRON_SECRET → the same value used for any other platform's scheduler
  */
-export default {
+const cronWorker = {
   async scheduled(_event, env) {
     const base = String(env?.TARGET_URL || '').replace(/\/+$/, '');
     const secret = String(env?.CRON_SECRET || '');
@@ -35,3 +35,5 @@ export default {
     }
   },
 };
+
+export default cronWorker;

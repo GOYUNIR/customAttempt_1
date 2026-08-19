@@ -33,5 +33,15 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // The optional Cloudflare adapter config (open-next.config.ts) is only
+    // consumed by `npx opennextjs-cloudflare build` and imports
+    // `@opennextjs/cloudflare`, which is NOT a project dependency — buyers
+    // install it only when deploying to Cloudflare (see DEPLOY-CLOUDFLARE.md).
+    // Excluding it keeps the standard `npm run typecheck` green for the
+    // Vercel / Netlify / plain-Node deploys; the OpenNext build still loads
+    // and bundles it with the adapter installed.
+    "open-next.config.ts"
+  ]
 }

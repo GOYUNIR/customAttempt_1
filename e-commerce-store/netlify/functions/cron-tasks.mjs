@@ -15,7 +15,7 @@
  *   - URL          Netlify injects the production URL automatically; falls
  *                  back to DEPLOY_PRIME_URL / NEXT_PUBLIC_URL for safety.
  */
-export default async () => {
+const cronTasksHandler = async () => {
   const base = String(
     process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.NEXT_PUBLIC_URL || ''
   ).replace(/\/+$/, '');
@@ -46,3 +46,5 @@ export default async () => {
 
   return { statusCode: 200, body: JSON.stringify({ ok: true, results }) };
 };
+
+export default cronTasksHandler;
