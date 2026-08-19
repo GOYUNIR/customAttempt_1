@@ -8,7 +8,7 @@ import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import ProductLivePreview from '@/components/ProductLivePreview';
 import { toHexColor } from '@/lib/share-card-config';
-import { getNextDrawTimestampForSchedule } from '@/lib/storefront-config';
+import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib/storefront-config';
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 
@@ -1289,7 +1289,10 @@ export default function AdminPortal() {
           legal: { ...DEFAULT_LEGAL_SETTINGS, ...(s.legal || {}) },
           catalog: {
             sectionOrder: Array.isArray(s.catalog?.sectionOrder) ? s.catalog.sectionOrder : DEFAULT_CATALOG_SETTINGS.sectionOrder,
-            categories: Array.isArray(s.catalog?.categories) && s.catalog.categories.length > 0 ? s.catalog.categories : DEFAULT_CATALOG_SETTINGS.categories,
+            // An EMPTY array is a real state: the operator deleted every
+            // category. Never replace it with the seeded defaults or the
+            // deletions silently come back on the next reload.
+            categories: Array.isArray(s.catalog?.categories) ? s.catalog.categories : DEFAULT_CATALOG_SETTINGS.categories,
           },
           behavior: { ...DEFAULT_BEHAVIOR_SETTINGS, ...(s.behavior || {}) },
           checkout: { ...DEFAULT_CHECKOUT_SETTINGS, ...(s.checkout || {}) },
@@ -2119,6 +2122,9 @@ export default function AdminPortal() {
           password,
           upcomingDrops: catalogUpcoming,
           archiveScents: catalogArchive,
+          // The Catalog tab carries the admin-managed category list too — save
+          // it so category deletions persist even when saved from here.
+          categories: Array.isArray(catalogSettings.categories) ? catalogSettings.categories : [],
         }),
       });
       const data = await res.json();
@@ -3707,6 +3713,7 @@ export default function AdminPortal() {
                   product={productForm}
                   theme={themeSettings}
                   copy={copySettings}
+                  categories={catalogSettings.categories}
                 />
 
                 {/* ── Math & health check: the admin portal understands what's
@@ -4851,9 +4858,9 @@ export default function AdminPortal() {
                             Sizes: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
                           </div>
                         )}
-                        {Array.isArray(product.categories) && product.categories.length > 0 && (
+                        {visibleProductCategories(product.categories, catalogSettings.categories).length > 0 && (
                           <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                            {product.categories.map((c: string) => (
+                            {visibleProductCategories(product.categories, catalogSettings.categories).map((c: string) => (
                               <span key={c} style={{ fontSize: 8.5, color: '#7dd3fc', background: 'rgba(125,211,252,0.12)', borderRadius: 999, padding: '1px 8px' }}>{c}</span>
                             ))}
                           </div>

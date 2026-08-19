@@ -14,7 +14,7 @@ import {
 import { withTtlCache } from '@/lib/ttl-cache';
 import { publicMediaRef } from '@/lib/media';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
-import { resolveNextRaffleAnchorMs, normalizeCategories, resolveSizeNextAnchorMs } from '@/lib/storefront-config';
+import { resolveNextRaffleAnchorMs, normalizeCategories, resolveSizeNextAnchorMs, filterStaleCatalogEntries } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
 
@@ -92,8 +92,29 @@ async function buildCatalogPayload() {
     const archived = await getCatalogArchiveRecords(redis);
     const archivedProductIds = archived.map((r) => r.productId);
     const catalogPreview = storeConfig.catalogPreview || {};
-    const configuredUpcoming = Array.isArray(catalogPreview.upcomingDrops) ? catalogPreview.upcomingDrops : [];
-    const configuredArchive = Array.isArray(catalogPreview.archiveScents) ? catalogPreview.archiveScents : [];
+
+    const allProducts: any[] = [];
+    const allRaw = await redis.hgetall(PRODUCTS_KEY);
+    if (allRaw) {
+      for (const value of Object.values(allRaw)) {
+        const product = safeParseRedisItem<any>(value);
+        if (product) allProducts.push(product);
+      }
+    }
+
+    // ── Stale-entry reconciliation (deleted products) ─────────────────────
+    // `catalogPreview` entries are AUTO-created by /api/admin/products when a
+    // product is saved/archived and always carry the product's `slug`. Manual
+    // entries added in the admin Catalog tab have NO slug (that UI only has
+    // name/ETA/image/description). `filterStaleCatalogEntries` drops any
+    // configured entry with a non-empty slug whose slug/name no longer
+    // resolves to a product in store:products — i.e. a product that was
+    // DELETED — so it can never render in Upcoming or Past Archives. This
+    // self-heals both entries orphaned by the old delete bug AND entries
+    // tagged with an id that no longer exists.
+    const configuredUpcoming = filterStaleCatalogEntries(catalogPreview.upcomingDrops, allProducts);
+    const configuredArchive = filterStaleCatalogEntries(catalogPreview.archiveScents, allProducts);
+
     // Admin-configurable /catalog section order (Settings → Catalog). Default:
     // live at the BOTTOM. Unknown ids are dropped and missing ones appended.
     const rawOrder = storeConfig.catalog?.sectionOrder;
@@ -109,15 +130,6 @@ async function buildCatalogPayload() {
     // timers agree with the product page and the draw engine.
     const scheduleOverride = safeParseRedisItem<any>(redis ? await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD) : null) || {};
     const globalSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(storeConfig?.dropSchedule || {}), ...scheduleOverride };
-
-    const allProducts: any[] = [];
-    const allRaw = await redis.hgetall(PRODUCTS_KEY);
-    if (allRaw) {
-      for (const value of Object.values(allRaw)) {
-        const product = safeParseRedisItem<any>(value);
-        if (product) allProducts.push(product);
-      }
-    }
 
     const now = Date.now();
     // Same checkout-mode normalization as /api/store so the catalog and the

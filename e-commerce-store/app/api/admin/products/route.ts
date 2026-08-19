@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts , verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
+import { createRedisClient, loadProducts, verifyAdminPassword, defaultStripePriceId, PRODUCTS_KEY, STORE_CONFIG_KEY, safeParseRedisItem, unarchiveProductFromCatalog, LIVE_STATE_KEY } from '@/lib/server-config';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
@@ -31,6 +31,7 @@ async function syncCatalogConfigForProduct(
   const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];
 
   const upcomingEntry = {
+    id: product.id,
     name: product.name,
     status: 'Upcoming',
     eta: product.tagline || 'Coming soon',
@@ -39,6 +40,7 @@ async function syncCatalogConfigForProduct(
     slug: product.slug,
   };
   const archiveEntry = {
+    id: product.id,
     name: product.name,
     status: 'Archived',
     image: product.images?.[0] || `/images/${product.prefix}/1.jpeg`,
@@ -91,17 +93,27 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
 
 async function deleteProduct(redis: any, id: string) {
   const rawProduct = await redis.hget(PRODUCTS_KEY, id);
-  let deletedProduct: any = null;
-  if (typeof rawProduct === 'string') {
-    try {
-      deletedProduct = JSON.parse(rawProduct);
-    } catch {
-      deletedProduct = null;
-    }
-  }
+  // Upstash REST Redis auto-deserializes stored JSON, so `hget` can return an
+  // ALREADY-PARSED OBJECT (not a string). Reading it through safeParseRedisItem
+  // (which accepts both) guarantees the catalog-preview cleanup below actually
+  // runs — before this fix the `typeof rawProduct === 'string'` guard skipped
+  // it on the default provider and a deleted product kept rendering in the
+  // catalog's Upcoming/Past Archives sections forever.
+  const deletedProduct = safeParseRedisItem<any>(rawProduct);
   await redis.hdel(PRODUCTS_KEY, id);
-  if (deletedProduct) {
-    await syncCatalogConfigForProduct(redis, { ...deletedProduct, isUpcoming: false, isArchived: false });
+
+  try {
+    // Remove EVERY trace so the product can never keep rendering:
+    // 1) its auto-created catalogPreview entries (store:config.upcomingDrops /
+    //    archiveScents) are pruned by identity; 2) its ops:catalog_archive
+    //    record is dropped; 3) its live inventory states are dropped.
+    if (deletedProduct) {
+      await syncCatalogConfigForProduct(redis, { ...deletedProduct, isUpcoming: false, isArchived: false });
+    }
+    await unarchiveProductFromCatalog(redis, id);
+    await redis.hdel(LIVE_STATE_KEY, id);
+  } catch (err) {
+    console.error('[products] Delete cleanup failed for', id, err);
   }
 }
 

@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
@@ -1419,9 +1419,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               </div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
-            {Array.isArray(product.categories) && product.categories.length > 0 && (
+            {visibleProductCategories(product.categories, liveCtx?.catalog?.categories).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {product.categories.map((cat: string) => (
+                {visibleProductCategories(product.categories, liveCtx?.catalog?.categories).map((cat: string) => (
                   <span key={cat} style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999, background: `color-mix(in srgb, ${configPalette.accentPurple} 14%, transparent)`, color: configPalette.accentPurple, border: `1px solid color-mix(in srgb, ${configPalette.accentPurple} 30%, transparent)` }}>
                     {cat}
                   </span>

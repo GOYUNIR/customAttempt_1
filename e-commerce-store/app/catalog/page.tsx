@@ -79,7 +79,10 @@ export default function CatalogPage() {
   // Product categories (admin-managed list from Settings → Catalog). Loaded from
   // the live theme + /api/store + /api/catalog/status; drives the filter chips.
   const [categories, setCategories] = useState<string[]>(() =>
-    Array.isArray(liveCtx?.catalog?.categories) && liveCtx.catalog.categories.length > 0
+    // An EMPTY array is a real state: the operator deleted every category.
+    // Only fall back to the static defaults when the live theme carries NO
+    // catalog config at all (e.g. a pre-seed store).
+    Array.isArray(liveCtx?.catalog?.categories)
       ? liveCtx.catalog.categories
       : (GOYUNIR_STORE_SUITE.catalog as any)?.categories || [],
   );
@@ -199,7 +202,7 @@ export default function CatalogPage() {
       if (data?.config?.catalog?.sectionOrder) {
         setCatalogOrder(sanitizeSectionOrder(data.config.catalog.sectionOrder));
       }
-      if (Array.isArray(data?.config?.catalog?.categories) && data.config.catalog.categories.length > 0) {
+      if (Array.isArray(data?.config?.catalog?.categories)) {
         setCategories(data.config.catalog.categories);
       }
       if (Array.isArray(data?.allProducts)) {

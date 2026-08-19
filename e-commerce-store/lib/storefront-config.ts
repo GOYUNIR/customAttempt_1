@@ -1,5 +1,10 @@
 import { DEFAULT_LEGAL, type StoreLegalConfig } from '@/lib/legal-config';
 import { dropTimestampToMs } from './drop-timestamps';
+// Category + catalog-entry helpers live in the self-contained ./catalog-entries
+// module (no `@/` imports) so `node --test` can load them directly. Import +
+// re-export keeps every existing `from '@/lib/storefront-config'` import intact.
+import { normalizeCategories, visibleProductCategories, filterStaleCatalogEntries } from './catalog-entries';
+export { normalizeCategories, visibleProductCategories, filterStaleCatalogEntries };
 
 export interface StorefrontNote {
   label: string;
@@ -342,27 +347,6 @@ const defaultCatalogSettings: NonNullable<StorefrontConfig['catalog']> = {
 const defaultCheckoutSettings: NonNullable<StorefrontConfig['checkout']> = {
   requireAddressAutofill: true,
 };
-
-/**
- * Normalize an arbitrary value into a clean category list: trim, dedupe
- * (case-insensitive, first occurrence wins), strip entries longer than 40
- * chars, and keep at most the first 60 entries. Never throws.
- */
-export function normalizeCategories(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of value) {
-    const clean = String(raw ?? '').trim();
-    if (!clean || clean.length > 40) continue;
-    const key = clean.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(clean);
-    if (out.length >= 60) break;
-  }
-  return out;
-}
 
 /**
  * Whether customer "update address" flows must reject partial addresses

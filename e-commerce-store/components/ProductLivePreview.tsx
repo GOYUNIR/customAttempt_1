@@ -30,15 +30,17 @@ import {
 } from '@/lib/storefront-config';
 import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
 import { isVideoMedia, normalizeCrop, coverStyle, DEFAULT_CROP } from '@/lib/media';
+import { visibleProductCategories } from '@/lib/storefront-config';
 
 /** Fixed preview card + gallery-box widths (300px card − 2×1px borders). */
 const CARD_W = 300;
 const GALLERY_W = 298;
 
-export default function ProductLivePreview({ product, theme, copy }: {
+export default function ProductLivePreview({ product, theme, copy, categories }: {
   product: any;
   theme: any;
   copy: any;
+  categories?: string[];
 }) {
   const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
   const [size, setSize] = useState('');
@@ -152,7 +154,6 @@ export default function ProductLivePreview({ product, theme, copy }: {
 
   const mixedTemplate = String(product.mixedFormatRibbon || copy.mixedFormatRibbon || '').trim();
   const countdownDate = (product.isUpcoming ? product.goLiveAt : product.releaseEndsAt) || '';
-  const catCount = Array.isArray(product.categories) ? product.categories.length : 0;
   const notes = product.showNotesSection !== false && Array.isArray(product.notes) ? product.notes : [];
 
   return (
@@ -205,9 +206,9 @@ export default function ProductLivePreview({ product, theme, copy }: {
               {String(product.tagline || '').trim() && (
                 <div style={{ fontSize: 8.5, letterSpacing: '1.5px', textTransform: 'uppercase', color: cardMuted }}>{product.tagline}</div>
               )}
-              {catCount > 0 && (
+              {visibleProductCategories(product.categories, categories).length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {product.categories.map((cat: string) => (
+                  {visibleProductCategories(product.categories, categories).map((cat: string) => (
                     <span key={cat} style={{ fontSize: 7.5, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: `color-mix(in srgb, ${accent} 14%, transparent)`, color: accent, border: `1px solid color-mix(in srgb, ${accent} 30%, transparent)` }}>{cat}</span>
                   ))}
                 </div>
