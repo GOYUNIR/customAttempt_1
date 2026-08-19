@@ -61,6 +61,19 @@ pages and the site URL all read from admin config or environment variables.
 
 ### Data Storage — Redis is the source of truth
 
+**Storage backend access goes through the storage abstraction (`lib/storage/`).**
+Routes NEVER import `@upstash/redis` directly — they call `createRedisClient()`
+from `@/lib/server-config`, which is a thin alias for `createStorageClient()`
+(`lib/storage/index.ts`). The backend is selected once per process by
+`STORAGE_PROVIDER` (default `upstash`): the **Upstash REST Redis** adapter
+(`lib/storage/upstash.ts` — the battle-tested engine on every platform,
+including Cloudflare via Upstash's Marketplace integration) or the **Workers-KV**
+adapter (`lib/storage/cloudflare-kv.ts` — zero third-party storage; read its
+concurrency caveats before routing payment/raffle writes at it; falls back to an
+in-memory store for local dev/tests). The `StorageClient` contract
+(`lib/storage/types.ts`) covers exactly the command surface the codebase uses;
+new commands must be added there AND in both adapters.
+
 **Every Redis key is defined ONCE in `lib/redis-keys.ts`.** That file is the
 mandatory single source of truth for key names, helpers, and the namespace map.
 Routes import keys/helpers from `@/lib/server-config` (which re-exports the
@@ -517,7 +530,8 @@ input like `123 realstreet` can never be saved.
 
 | Variable | Purpose |
 | --- | --- |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth). REST-protocol pair — any platform works. Aliases: `KV_REST_API_URL`/`KV_REST_API_TOKEN`, `REDIS_REST_URL`/`REDIS_REST_TOKEN`, `REDIS_URL`/`REDIS_TOKEN` (REST-only: `redis://` wire-protocol URLs are skipped in `lib/server-config.ts`). |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth). REST-protocol pair — any platform works. Aliases: `KV_REST_API_URL`/`KV_REST_API_TOKEN`, `REDIS_REST_URL`/`REDIS_REST_TOKEN`, `REDIS_URL`/`REDIS_TOKEN` (REST-only: `redis://` wire-protocol URLs are skipped in `lib/storage/upstash.ts`). |
+| `STORAGE_PROVIDER` (optional) | Data backend selector — default (`upstash`) is Upstash REST Redis (recommended for payments/raffles). Set to `cloudflare-kv` to run on the Workers-KV adapter (`lib/storage/cloudflare-kv.ts`; read the concurrency caveats first). The active provider shows in `/admin → SetUp`. |
 | `STRIPE_SECRET_KEY` | Stripe API |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 | `STRIPE_PRODUCT_ID` (optional) | Global default Stripe price ID when a product/size has none set in admin. Per-product IDs always win. No hardcoded Stripe ID anywhere — if unset, checkout fails loudly with `price_placeholder_not_configured`. |
@@ -594,6 +608,13 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+
+- **2026-08-18 — Storage abstraction layer landed: Upstash Redis ↔ Workers KV behind ONE interface ("storage-layer"):**
+  - **🧱 New `lib/storage/` module — the data backend is now a seam, not a dependency.** `lib/storage/types.ts` defines the `StorageClient` contract (exactly the command surface the codebase uses — verified by inventory: strings, keyspace, hashes, lists, sets, zsets), `lib/storage/upstash.ts` wraps the `@upstash/redis` REST client (the ONLY file allowed to import it; env/alias resolution moved here unchanged), and `lib/storage/cloudflare-kv.ts` implements the same contract on **Workers KV** (envelope-encoded values with TTL, in-memory fallback for local dev/tests, auto-detects a KV-shaped global binding). `lib/storage/index.ts` → `createStorageClient()` selects the provider ONCE per process via `STORAGE_PROVIDER` (default `upstash`). Every route still calls `createRedisClient()` from `@/lib/server-config` (now a thin alias) — zero changes at call sites. The active provider is surfaced in `/admin → SetUp` (`/api/admin/env-status` now returns `storageProvider` + a "Data backend" row).
+  - **🐛 Two checkout routes used the Upstash-only 3-arg `set(key, value, { ex })` form**, which the interface (and the KV adapter) can't honor — they now use `setex(key, seconds, value)` (`/api/checkout` + `/api/checkout/cart` promo-pending locks; 10-min TTL unchanged).
+  - **🐛 `/api/admin/organize-redis`** passed an `unknown` (possibly object) value into `hset` — now coerced with `String(value)` before folding.
+  - **🧹 KV adapter formatting cleaned** (three `}export`/`}  async` run-together lines) and the stale `createRedisClient` doc in `lib/server-config.ts` rewritten for the abstraction.
+  - **🧪 Tests:** new `tests/storage.test.ts` (10 cases) exercises the KV adapter end-to-end on the in-memory fallback (strings/TTL, hashes, lists, sets, zsets, keyspace, renamenx, ping). `npm test` **115/115**, `tsc --noEmit` clean, `eslint` 0/0 on every touched file. No Redis keys were added or changed — the key layout is untouched, only the client that talks to it.
 
 - **2026-08-18 — Production finalization of the Cloudflare/preview pass ("finish what u were working on, finalize polish up for production"):**
   - **🔧 `npm run typecheck` is green again.** The prior commit shipped `open-next.config.ts`, which imports the OPTIONAL `@opennextjs/cloudflare` adapter — a package buyers install only when deploying to Cloudflare (see DEPLOY-CLOUDFLARE.md). Because `tsconfig.json` included `**/*.ts`, the standard typecheck failed with `TS2307: Cannot find module '@opennextjs/cloudflare'` on every repo — including the 95% that deploy on Vercel/Netlify/Node. `open-next.config.ts` is now excluded from the standard `tsc --noEmit` (documented inline; the OpenNext build still loads + bundles it when the adapter is installed), so the typecheck gate is green out of the box.

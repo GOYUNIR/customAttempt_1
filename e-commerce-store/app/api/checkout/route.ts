@@ -331,7 +331,7 @@ export async function POST(request: Request) {
         },
       });
       if (normalizedPromo) {
-        await redis.set(promoPendingKey(normalizedPromo, normalizedEmail), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
+        await redis.setex(promoPendingKey(normalizedPromo, normalizedEmail), PROMO_PENDING_TTL_SECONDS, session.id);
       }
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }

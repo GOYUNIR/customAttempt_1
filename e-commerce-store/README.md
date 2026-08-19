@@ -101,6 +101,7 @@ HTTPS APIs, no platform-specific code.
 | Variable | Purpose |
 | --- | --- |
 | `STRIPE_PRODUCT_ID` | Global default Stripe **Price** ID for any product/size that doesn't have one set in admin. Per-product IDs in admin always win. If nothing is set, checkout fails loudly with `price_placeholder_not_configured` instead of charging the wrong account. |
+| `STORAGE_PROVIDER` | Optional data-backend selector. Default (unset) = Upstash Redis — recommended for payments/raffles. Set to `cloudflare-kv` to run on the Workers-KV adapter (`lib/storage/cloudflare-kv.ts`; see its concurrency caveats). Active provider shows in `/admin → SetUp`. |
 | `RESEND_API_KEY`, `RESEND_FROM` | Transactional email (entry confirmations, winners, resets). |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Mapbox Address Autofill (public `pk.*` token). Without it, customers just type addresses manually. Set it in the SAME environment you deploy, then redeploy. |
 | `BRAND_NAME` or `NEXT_PUBLIC_SITE_NAME` | Brand name used in email "from" and templates. |

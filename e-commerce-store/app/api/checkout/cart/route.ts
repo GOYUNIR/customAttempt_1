@@ -344,7 +344,7 @@ export async function POST(request: Request) {
         },
       });
       if (fcfsPromoNormalized) {
-        await redis.set(promoPendingKey(fcfsPromoNormalized, email), session.id, { ex: PROMO_PENDING_TTL_SECONDS });
+        await redis.setex(promoPendingKey(fcfsPromoNormalized, email), PROMO_PENDING_TTL_SECONDS, session.id);
       }
       fcfsUrl = session.url || undefined;
     }

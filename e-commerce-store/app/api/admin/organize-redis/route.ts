@@ -229,7 +229,7 @@ export async function POST(request: Request) {
         if (!exists) return;
         const value = await redis.get(sourceKey);
         if (value != null) {
-          await redis.hset(targetHash, { [field]: value });
+          await redis.hset(targetHash, { [field]: String(value) });
           list.push(`${sourceKey} → ${targetHash}#${field}`);
         }
         await redis.del(sourceKey);

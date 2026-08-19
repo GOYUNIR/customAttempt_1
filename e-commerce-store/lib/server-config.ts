@@ -1,4 +1,4 @@
-import { Redis } from '@upstash/redis';
+import { createStorageClient, type StorageClient } from '@/lib/storage';
 import Stripe from 'stripe';
 import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -104,13 +104,13 @@ export interface ArchiveRecord {
   discountPercent?: number;
 }
 
-export async function archiveEntry(redis: Redis, record: ArchiveRecord) {
+export async function archiveEntry(redis: StorageClient, record: ArchiveRecord) {
   try {
     await redis.rpush(ARCHIVE_LEDGER_KEY, JSON.stringify(record));
   } catch {}
 }
 
-export async function loadStoreConfig(redis: Redis | null | undefined): Promise<Record<string, any>> {
+export async function loadStoreConfig(redis: StorageClient | null | undefined): Promise<Record<string, any>> {
   if (!redis) return {};
   try {
     return safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
@@ -125,7 +125,7 @@ export async function loadStoreConfig(redis: Redis | null | undefined): Promise<
  * rebuild anyway, so a short TTL here is safe and removes a Redis round trip
  * from every request on warm instances.
  */
-export function loadStoreConfigCached(redis: Redis | null | undefined): Promise<Record<string, any>> {
+export function loadStoreConfigCached(redis: StorageClient | null | undefined): Promise<Record<string, any>> {
   return withTtlCache(STORE_CONFIG_KEY, 30_000, () => loadStoreConfig(redis));
 }
 
@@ -218,7 +218,7 @@ function normalizeWinners(value: unknown, fallback = 1): number {
 }
 
 export async function getOrSeedLiveState(
-  redis: Redis,
+  redis: StorageClient,
   product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number; totalInventory?: number; inventoryPerSize?: Record<string, number> },
   size: string,
   winnersPerDraw: number,
@@ -293,7 +293,7 @@ export async function getOrSeedLiveState(
   return seed;
 }
 
-export async function saveLiveState(redis: Redis, state: LiveStateRecord) {
+export async function saveLiveState(redis: StorageClient, state: LiveStateRecord) {
   const normalized: LiveStateRecord = {
     ...state,
     sourceProductId: String(state.sourceProductId || resolveLiveStateSourceProductId(state) || ''),
@@ -306,7 +306,7 @@ export async function saveLiveState(redis: Redis, state: LiveStateRecord) {
   await redis.hset(LIVE_STATE_KEY, { [normalized.productId]: JSON.stringify(normalized) });
 }
 
-export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
+export async function listLiveStates(redis: StorageClient): Promise<LiveStateRecord[]> {
   try {
     const hash = (await redis.hgetall(LIVE_STATE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
@@ -316,7 +316,7 @@ export async function listLiveStates(redis: Redis): Promise<LiveStateRecord[]> {
   }
 }
 
-export async function getLiveProductState(redis: Redis, productOrId: any, size: string, fourth?: any): Promise<LiveStateRecord> {
+export async function getLiveProductState(redis: StorageClient, productOrId: any, size: string, fourth?: any): Promise<LiveStateRecord> {
   let id = '', name = '', slug = '', seedInv = 10, winners = 1, isActive = true;
   if (typeof productOrId === 'string') {
     id = productOrId; name = productOrId; slug = productOrId;
@@ -348,7 +348,7 @@ export async function getLiveProductState(redis: Redis, productOrId: any, size: 
   return state;
 }
 
-export async function setLiveProductState(redis: Redis, state: any) {
+export async function setLiveProductState(redis: StorageClient, state: any) {
   const normalized: LiveStateRecord = {
     productId: String(state.productId || ''),
     sourceProductId: String(state.sourceProductId || state.id || ''),
@@ -371,7 +371,7 @@ export function getWinnerCountForDraw(sizeOrConfig?: any, configWinners50 = 1, c
   return 1;
 }
 
-export async function resetPoolAndBlocks(redis: Redis, productName: string, size: string) {
+export async function resetPoolAndBlocks(redis: StorageClient, productName: string, size: string) {
   const pool = poolKey(productName, size);
   const intent = intentPoolKey(productName, size);
   await Promise.all([
@@ -384,7 +384,7 @@ export async function resetPoolAndBlocks(redis: Redis, productName: string, size
   ]);
 }
 
-export async function cleanupMatchingIntent(redis: Redis, variant: string, size: string, email: string) {
+export async function cleanupMatchingIntent(redis: StorageClient, variant: string, size: string, email: string) {
   const intentKey = intentPoolKey(variant, size);
   let removedCount = 0;
   try {
@@ -417,7 +417,7 @@ export interface LedgerRef {
  * ledger is the durable source of truth for entries and won orders.
  */
 export async function findLedgerEntriesByEmailVariant(
-  redis: Redis,
+  redis: StorageClient,
   email: string,
   variant: string,
   size?: string,
@@ -442,7 +442,7 @@ export async function findLedgerEntriesByEmailVariant(
   }
 }
 
-async function listPoolKeysForProduct(redis: Redis, prefix: 'pool' | 'intent', productName: string): Promise<string[]> {
+async function listPoolKeysForProduct(redis: StorageClient, prefix: 'pool' | 'intent', productName: string): Promise<string[]> {
   try {
     const scanPrefix = prefix === 'pool' ? POOL_KEY_PREFIX : INTENT_KEY_PREFIX;
     const keys = await redis.keys(`${scanPrefix}${productName}:*`);
@@ -465,7 +465,7 @@ export function sizeFromPoolKey(poolKey: string): string {
   return colon > 0 ? withoutPrefix.slice(colon + 1) : 'Standard';
 }
 
-export async function findPoolEntriesByEmail(redis: Redis, productNames: string[], email: string): Promise<FoundPoolEntry[]> {
+export async function findPoolEntriesByEmail(redis: StorageClient, productNames: string[], email: string): Promise<FoundPoolEntry[]> {
   const normalizedEmail = email.trim().toLowerCase();
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
@@ -491,7 +491,7 @@ export async function findPoolEntriesByEmail(redis: Redis, productNames: string[
 // to one customer verifying themselves; this is the admin's
 // full, unscoped view of every live order.
 // ============================================================
-export async function findAllOpenOrders(redis: Redis, productNames: string[]): Promise<FoundPoolEntry[]> {
+export async function findAllOpenOrders(redis: StorageClient, productNames: string[]): Promise<FoundPoolEntry[]> {
   const matches: FoundPoolEntry[] = [];
   for (const productName of productNames) {
     const poolKeys = await listPoolKeysForProduct(redis, 'pool', productName);
@@ -513,7 +513,7 @@ export async function findAllOpenOrders(redis: Redis, productNames: string[]): P
   return matches;
 }
 
-export async function removeListEntryAtIndex(redis: Redis, key: string, index: number) {
+export async function removeListEntryAtIndex(redis: StorageClient, key: string, index: number) {
   const tombstone = `__DELETED_ENTRY_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
   await redis.lset(key, index, tombstone);
   await redis.lrem(key, 1, tombstone);
@@ -522,7 +522,7 @@ export async function removeListEntryAtIndex(redis: Redis, key: string, index: n
 // Admin-driven cancel of ANY order (no email/last4 verification needed —
 // the admin password already gated this route). Frees the email/card slot
 // so the person can re-enter if the admin is resolving a support issue.
-export async function adminCancelOrder(redis: Redis, order: FoundPoolEntry, reason: string) {
+export async function adminCancelOrder(redis: StorageClient, order: FoundPoolEntry, reason: string) {
   await removeListEntryAtIndex(redis, order.poolKey, order.index);
   await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', order.variant, order.size), -1);
   const email = String(order.parsed.email || '').toLowerCase();
@@ -553,7 +553,7 @@ export async function adminCancelOrder(redis: Redis, order: FoundPoolEntry, reas
   }
 }
 
-export async function adminUpdateOrderAddress(redis: Redis, order: FoundPoolEntry, newAddress: string) {
+export async function adminUpdateOrderAddress(redis: StorageClient, order: FoundPoolEntry, newAddress: string) {
   const updated = { ...order.parsed, shippingAddress: newAddress, address: newAddress };
   await redis.lset(order.poolKey, order.index, JSON.stringify(updated));
   // Also persist the change on the permanent ledger's matching entry/winner rows
@@ -583,13 +583,13 @@ export interface CatalogArchiveRecord {
   availableFrom: string; archivedAt: string; notes?: string; soldOut?: boolean;
 }
 
-export async function archiveProductToCatalog(redis: Redis, record: CatalogArchiveRecord) {
+export async function archiveProductToCatalog(redis: StorageClient, record: CatalogArchiveRecord) {
   await redis.hset(CATALOG_ARCHIVE_KEY, { [record.productId]: JSON.stringify(record) });
 }
-export async function unarchiveProductFromCatalog(redis: Redis, productId: string) {
+export async function unarchiveProductFromCatalog(redis: StorageClient, productId: string) {
   await redis.hdel(CATALOG_ARCHIVE_KEY, productId);
 }
-export async function getCatalogArchiveRecords(redis: Redis): Promise<CatalogArchiveRecord[]> {
+export async function getCatalogArchiveRecords(redis: StorageClient): Promise<CatalogArchiveRecord[]> {
   try {
     const hash = (await redis.hgetall(CATALOG_ARCHIVE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
@@ -599,7 +599,7 @@ export async function getCatalogArchiveRecords(redis: Redis): Promise<CatalogArc
   }
 }
 
-export async function getOnlineVisitors(redis: Redis, trafficKey: string, limit = 50) {
+export async function getOnlineVisitors(redis: StorageClient, trafficKey: string, limit = 50) {
   try {
     const raw = (await redis.zrange(trafficKey, -limit, -1, { withScores: true })) as (string | number)[];
     const now = Date.now();
@@ -615,45 +615,26 @@ export async function getOnlineVisitors(redis: Redis, trafficKey: string, limit 
 }
 
 /**
- * Resolve the REST endpoint + token for Upstash Redis from the common
- * platform aliases, so a buyer can point this app at the same Upstash database
- * from Vercel, Netlify, Cloudflare or anywhere else:
+ * Storage client factory — the single way routes obtain the data backend.
  *
- *   REST URL:  UPSTASH_REDIS_REST_URL → KV_REST_API_URL (Vercel KV / Upstash)
- *              → REDIS_REST_URL → REDIS_URL → KV_URL
- *   Token:     UPSTASH_REDIS_REST_TOKEN → KV_REST_API_TOKEN
- *              → REDIS_REST_TOKEN → REDIS_TOKEN
+ * Since the storage abstraction landed, this is a thin alias for
+ * `createStorageClient()` in lib/storage/index.ts. The backend is selected
+ * ONCE per process by `STORAGE_PROVIDER`:
  *
- * The @upstash/redis client speaks the REST (HTTPS) protocol. A `redis://` /
- * `rediss://` wire-protocol URL (Upstash's own UPSTASH_REDIS_URL, or Vercel
- * KV's KV_URL) is skipped so construction never fails on it — only a REST
- * endpoint (or a bare hostname, which the SDK may still attempt) is returned.
+ *   - (unset / `upstash`)      → Upstash REST Redis — the DEFAULT and the
+ *     recommended production engine on every platform (Vercel, Netlify,
+ *     Cloudflare via Upstash's Marketplace integration, any Node host). URL
+ *     resolution (UPSTASH_REDIS_REST_URL → KV_REST_API_URL → REDIS_REST_URL
+ *     → REDIS_URL → KV_URL) and token aliases live in lib/storage/upstash.ts.
+ *   - `cloudflare-kv`          → Workers-KV adapter (zero third-party storage;
+ *     see the concurrency caveats in lib/storage/cloudflare-kv.ts before
+ *     routing payment/raffle writes at it).
+ *
+ * The function name is kept so every route/helper in the codebase continues
+ * to import from here without changes.
  */
-export function createRedisClient(): Redis | null {
-  const url = resolveRedisRestUrl();
-  const token =
-    process.env.UPSTASH_REDIS_REST_TOKEN ??
-    process.env.KV_REST_API_TOKEN ??
-    process.env.REDIS_REST_TOKEN ??
-    process.env.REDIS_TOKEN;
-  if (!url || !token) return null;
-  try {
-    return new Redis({ url, token });
-  } catch {
-    return null;
-  }
-}
-
-function resolveRedisRestUrl(): string {
-  const candidates = ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_REST_URL', 'REDIS_URL', 'KV_URL'];
-  for (const name of candidates) {
-    const value = String(process.env[name] || '').trim();
-    if (!value) continue;
-    if (/^https?:\/\//i.test(value)) return value;
-    if (value.includes('://')) continue; // redis:// / rediss:// wire protocol — the REST client can't use it
-    return value;
-  }
-  return '';
+export function createRedisClient(): StorageClient | null {
+  return createStorageClient();
 }
 
 /**
@@ -778,17 +759,17 @@ export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
 // Live-apply overrides — all stored as FIELDS of the single `ops:overrides`
 // hash (see lib/redis-keys.ts). Reading via HGET / writing via HSET keeps the
 // ops namespace to ONE key no matter how many products have overrides.
-export async function getGlobalScheduleOverride(redis: Redis): Promise<Record<string, any> | null> {
+export async function getGlobalScheduleOverride(redis: StorageClient): Promise<Record<string, any> | null> {
   return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD));
 }
-export async function saveGlobalScheduleOverride(redis: Redis, value: Record<string, any>) {
+export async function saveGlobalScheduleOverride(redis: StorageClient, value: Record<string, any>) {
   await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SCHEDULE_FIELD]: JSON.stringify(value) });
 }
 
-export async function getSocialProofOverride(redis: Redis): Promise<Record<string, any> | null> {
+export async function getSocialProofOverride(redis: StorageClient): Promise<Record<string, any> | null> {
   return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD));
 }
-export async function saveSocialProofOverride(redis: Redis, value: Record<string, any>) {
+export async function saveSocialProofOverride(redis: StorageClient, value: Record<string, any>) {
   await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SOCIAL_PROOF_FIELD]: JSON.stringify(value) });
 }
 
@@ -797,13 +778,13 @@ export interface ProductOverride {
   price50ml?: number;
   price100ml?: number;
 }
-export async function getProductOverride(redis: Redis, productId: string): Promise<ProductOverride | null> {
+export async function getProductOverride(redis: StorageClient, productId: string): Promise<ProductOverride | null> {
   return safeParseRedisItem<ProductOverride>(await redis.hget(OVERRIDES_KEY, productOverrideField(productId)));
 }
-export async function saveProductOverride(redis: Redis, productId: string, value: ProductOverride) {
+export async function saveProductOverride(redis: StorageClient, productId: string, value: ProductOverride) {
   await redis.hset(OVERRIDES_KEY, { [productOverrideField(productId)]: JSON.stringify(value) });
 }
-export async function getAllProductOverrides(redis: Redis, productIds: string[]): Promise<Record<string, ProductOverride>> {
+export async function getAllProductOverrides(redis: StorageClient, productIds: string[]): Promise<Record<string, ProductOverride>> {
   const out: Record<string, ProductOverride> = {};
   if (!redis || !Array.isArray(productIds) || productIds.length === 0) return out;
   try {
@@ -822,7 +803,7 @@ export async function getAllProductOverrides(redis: Redis, productIds: string[])
   return out;
 }
 
-export async function trackPromoClick(redis: Redis, code: string) {
+export async function trackPromoClick(redis: StorageClient, code: string) {
   const raw = await redis.hget(PROMO_CODES_KEY, code);
   const promo = safeParseRedisItem<any>(raw);
   if (!promo) return false;

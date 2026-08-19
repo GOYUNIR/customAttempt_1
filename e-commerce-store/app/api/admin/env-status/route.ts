@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminRequestAuthorized } from '@/lib/server-config';
+import { activeStorageProvider } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
+  const provider = activeStorageProvider();
+
   const items: EnvStatusItem[] = [
+    {
+      key: 'Storage provider',
+      label: 'Data backend (storage provider)',
+      required: false,
+      set: true,
+      aliases: ['STORAGE_PROVIDER'],
+      buildTime: false,
+      sensitive: false,
+      hint:
+        provider === 'cloudflare-kv'
+          ? 'STORAGE_PROVIDER=cloudflare-kv — running on the Workers KV adapter. See lib/storage/cloudflare-kv.ts for the concurrency caveats before routing payment/raffle writes at it.'
+          : 'STORAGE_PROVIDER unset — Upstash Redis (recommended for payments/raffles). Set STORAGE_PROVIDER=cloudflare-kv to run on Workers KV.',
+    },
     {
       key: 'Redis',
       label: 'Redis (primary data store)',
@@ -171,6 +187,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     items,
+    storageProvider: provider,
     environment: process.env.NODE_ENV || 'development',
     summary: {
       configured: items.filter((i) => i.set).length,
