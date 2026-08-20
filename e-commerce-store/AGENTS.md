@@ -306,7 +306,9 @@ the ledger. Settings tabs include:
   by `/api/admin/env-status`) + production launch checklist.
 - **Two-step admin verification** — after Basic Auth, `/admin` requires a
   one-time code emailed to `ADMIN_VERIFY_EMAIL` (falls back to
-  `SUPPORT_EMAIL`). proxy.ts validates a device cookie on EVERY `/api/admin`
+  `SUPPORT_EMAIL`). middleware.ts (the Edge-runtime middleware — see the
+  2026-08-20 changelog entry for the Cloudflare/OpenNext requirements)
+  validates a device cookie on EVERY `/api/admin`
   request (30 days when "remember this device" is checked, else 24h), so a
   leaked password alone can't reach the portal or its APIs. Codes are 6 digits,
   expire in 10 min, lock after 5 wrong tries, and resends are throttled to 1/min.
@@ -328,7 +330,7 @@ the ledger. Settings tabs include:
   letters + digits). Everything destructive still requires turning it OFF first,
   then entering the admin password.
 - **Admin security hygiene** — all `/admin` + `/api/admin` requests require
-  HTTP Basic Auth in `proxy.ts` (no more password-in-query bypasses), admin
+  HTTP Basic Auth in `middleware.ts` (no more password-in-query bypasses), admin
   routes compare the password with `verifyAdminPassword()` (timing-safe), and
   the admin password never travels in URLs (CSV export uses a fetch + blob).
 
@@ -624,6 +626,12 @@ is the backing endpoint.
 
 ## Change Log (append every change)
 
+- **2026-08-20 — Cloudflare Workers middleware fix (proxy.ts → middleware.ts):**
+  - **🐛 `npx opennextjs-cloudflare build` crashed with `ERROR Node.js middleware is not currently supported`.** Root cause: Next.js 16 renamed `middleware` to `proxy`, and **`proxy.ts` is hardcoded to the Node.js runtime** (the docs say "Proxy always runs on Node.js runtime" — a `runtime` config in `proxy.ts` even throws E1031). OpenNext's Cloudflare adapter explicitly rejects a Node.js `/_middleware` in `functions-config-manifest.json`; it only accepts the legacy **Edge** `middleware` convention registered in `middleware-manifest.json` at `middleware["/"]`.
+  - **🔧 Fix: `proxy.ts` was renamed to `middleware.ts`** (the deprecated-but-supported Edge middleware convention) and the named export `proxy` → `middleware`. The `config` matcher is unchanged (`/admin/:path*`, `/api/admin/:path*`). Verified against the compiled manifests: `middleware-manifest.json` now has `middleware: { "/": { name: "middleware", matchers: [...] } }` and `functions-config-manifest.json` has **no** `/_middleware` entry — so OpenNext's `useNodeMiddleware()` returns false and the build proceeds. The "middleware is deprecated" warning during `next build` is expected and harmless.
+  - **⚠️ Do NOT add `runtime: 'edge'` to the middleware `config`.** An explicit `runtime: 'edge'` in `middleware.ts` is rejected by Next 16.2.12 with E1015 (`Page /middleware provided runtime 'edge', the edge runtime for rendering is currently experimental` — verified empirically). The `middleware.ts` convention **is** the Edge runtime by default; leaving the key out is the correct explicit Edge setup.
+  - **🔒 Edge-safe import refactor.** The old `proxy.ts` imported `@/lib/server-config` and `@/lib/admin-verify`, which transitively pull in Node-only modules (`crypto`, `stripe`, `resend`) that are unavailable in the V8/workerd Edge runtime. The new `middleware.ts` imports only `createStorageClient` from `@/lib/storage` (verified zero Node builtins) and `ADMIN_DEVICES_KEY` from `@/lib/redis-keys` (zero imports), and inlines the small edge-safe helpers (`resolveAdminPassword`, `parseStoredValue`, `adminDeviceTokenFromRequest`, `adminDeviceValid`) mirroring `lib/server-config.ts` / `lib/admin-verify.ts` exactly. Behavior is byte-for-byte identical: Basic Auth on every `/admin` + `/api/admin` path, 2FA device-cookie gate (with the `/admin` page + verify-* endpoints exempt), lazy `admin:devices` expiry, `ADMIN_2FA_REQUIRED` 401, fail-open when no storage is configured.
+  - Verified: `npx opennextjs-cloudflare build` completes (`OpenNext build complete`, worker + `middleware/handler.mjs` emitted, zero Node builtins in the edge chunks), `npm run build` green, `tsc --noEmit` clean, `npm test` **129/129**, `eslint` 0/0 on every touched file. No Redis keys were added or changed.
 
 - **2026-08-19 — "Make it less laggy + organize the Redis" finalization pass (perf-payload + redis-bounded-dedupe + orphan-sweep):**
   - **🚀 `/api/store` payload cut ~in half and product pages stop downloading the whole catalog.** The endpoint used to serialize EVERY product twice — once in `allProducts` and again in its lifecycle section array (`activeProducts` / `archivedProducts` / `upcomingProducts`). It now returns ONE canonical `allProducts` array (lifecycle flags live on each product), and the four consumers (home, catalog, SiteChrome cart-pruning, Storefront) derive their sections client-side. A `?slug=` request now returns ONLY `config + product` (no `allProducts`, no sections) — product pages, the highest-traffic route, no longer download the entire catalog on every load. The 10s TTL cache + edge headers are unchanged.
