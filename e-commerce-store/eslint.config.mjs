@@ -38,6 +38,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Platform tool/build output (never source — must never be linted):
+    ".open-next/**",
+    ".wrangler/**",
+    "cron-worker/.wrangler/**",
+    ".vercel/**",
+    ".netlify/**",
     // Local dev/scratch helpers that intentionally use CommonJS requires.
     ".inspect-config.cjs",
     ".mapbox-test.mjs",

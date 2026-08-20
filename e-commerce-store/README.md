@@ -25,12 +25,28 @@ host that runs `next start` / Next.js functions. The only external services
 are **Upstash Redis** (the data store), **Stripe** and **Resend** — all plain
 HTTPS APIs, no platform-specific code.
 
-1. Deploy this repo to your platform (steps below for the big three).
-2. Set the environment variables below in the platform's project settings
-  (Production + Preview), then redeploy.
-3. Open `https://yourdomain.com/admin`, log in with the admin credentials, and
-  click **Seed Defaults** (or build your catalog by hand with **Add Product**).
-4. Your store is live.
+### Pick your platform
+
+| Platform | How hard | Why you'd pick it | Where to look |
+| --- | --- | --- | --- |
+| **Vercel** | Easiest — click "Import", done | Git-connected auto-deploys, built-in cron, zero config | [Vercel](#vercel) below |
+| **Netlify** | Easiest — click "Import", done | Same as Vercel, if you prefer Netlify | [Netlify](#netlify) below |
+| **Cloudflare** | A few terminal commands | Edge network, free tier, single Worker | [`DEPLOY-CLOUDFLARE.md`](DEPLOY-CLOUDFLARE.md) — full 6-step walkthrough |
+| **Any Node host** (Railway, Render, Fly, VPS) | `npm run build` + `npm start` | You already run a VPS/container | [Any other Node host](#any-other-node-host) below |
+
+### Common setup (every platform, once it's deployed)
+
+1. **Set the environment variables** from the tables below in your platform's
+   project settings (Production + Preview), then trigger a redeploy.
+2. Open `https://yourdomain.com/admin`, log in with the admin credentials
+   (`ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD`), complete the
+   emailed two-step code, and click **Developer → Seed Defaults** (or build
+   your catalog by hand with **Add Product**).
+3. Set your Stripe webhook to `https://yourdomain.com/api/stripe/webhook`
+   (Stripe → Developers → Webhooks).
+4. Check **/admin → SetUp** — it shows ✓/✗ for every env var and a launch
+   checklist.
+5. Your store is live.
 
 > **Repo layout:** the entire application lives in the `e-commerce-store/`
 > subdirectory of this repo (it is fully self-contained — its own `package.json`,
@@ -41,58 +57,86 @@ HTTPS APIs, no platform-specific code.
 
 ### Vercel
 
-- Import the repo, set **Root Directory** to `e-commerce-store`.
-- The daily safety-net cron is already wired via `vercel.json`
-(`0 0 * * *` → `/api/checkout/cron-draw`; set `CRON_SECRET` so it can
-authenticate). Draws also fire in real time from the client countdown, so
-the cron is a safety net, not a requirement.
-- When no site URL is configured, `VERCEL_PROJECT_PRODUCTION_URL` /
-`VERCEL_URL` are used automatically.
+1. **Import the repo**: vercel.com → **Add New → Project** → connect your Git
+   repo.
+2. **Set the Root Directory to `e-commerce-store`** (where `package.json`
+   lives) — Vercel auto-detects Next.js from there.
+3. **Environment Variables** (Project → Settings → Environment Variables, both
+   Production and Preview): add the variables from the tables below.
+4. **Deploy** (Vercel auto-deploys on every push to the connected branch).
+5. **Daily safety net**: already wired by `vercel.json`
+   (`0 0 * * *` → `/api/checkout/cron-draw`). Set `CRON_SECRET` in the env so
+   the cron can authenticate. Note: Vercel's Hobby plan allows **one cron run
+   per day** — draws still fire in real time from the client countdown, so the
+   cron is a backstop, not a requirement.
+6. When no site URL is configured, `VERCEL_PROJECT_PRODUCTION_URL` /
+   `VERCEL_URL` are used automatically — no `NEXT_PUBLIC_URL` needed unless
+   you want a specific domain.
 
 
 
 ### Netlify
 
-- Import the repo, set **Base directory** to `e-commerce-store`. The included
-`netlify.toml` sets the build command and the daily scheduled function.
-- The daily safety net is `netlify/functions/cron-tasks.mjs` — it pings
-`/api/checkout/cron-draw`, `/api/cron/recovery` and
-`/api/analytics/social-tick` with `Authorization: Bearer $CRON_SECRET`
-(set `CRON_SECRET` in the Netlify env).
-- When no site URL is configured, Netlify's `URL` / `DEPLOY_URL` are used
-automatically.
-- Netlify's Next.js runtime plugin handles routing, the proxy and server
-functions automatically.
+1. **Import the repo**: app.netlify.com → **Add new site → Import an existing
+   project** → connect your Git repo.
+2. **Set the Base directory to `e-commerce-store`**. The included
+   `netlify.toml` sets the build command and the daily scheduled function
+   automatically.
+3. **Environment Variables** (Site configuration → Environment variables, both
+   Production and Preview): add the variables from the tables below.
+4. **Deploy** (auto-deploys on push; Netlify's Next.js runtime plugin handles
+   routing, the middleware/proxy and server functions).
+5. **Daily safety net**: automatic — Netlify invokes
+   `netlify/functions/cron-tasks.mjs` daily, which pings
+   `/api/checkout/cron-draw`, `/api/cron/recovery` and
+   `/api/analytics/social-tick` with `Authorization: Bearer $CRON_SECRET`
+   (set `CRON_SECRET` in the Netlify env).
+6. When no site URL is configured, Netlify's `URL` / `DEPLOY_URL` are used
+   automatically.
 
 
 
 ### Cloudflare
 
-- Deploy the main app with the official OpenNext adapter for Cloudflare
-(`@opennextjs/cloudflare`) — the whole app runs as a single Worker. The
-`/api/*` routes, proxy, `/og` card, `/icon` and `/media` all work unchanged,
-and the public routes already emit `CDN-Cache-Control` headers that
-Cloudflare's edge honors.
-- The repo ships the OpenNext + Workers scaffolding (`open-next.config.ts` and
-the root `wrangler.jsonc`) plus a complete walkthrough in
-`DEPLOY-CLOUDFLARE.md` — install the adapter, build, set secrets, attach
-your domain, done.
+Follow the complete, copy-paste walkthrough in **`DEPLOY-CLOUDFLARE.md`** —
+six numbered steps. The one-line version (full details in the guide):
+
+```bash
+npm install
+npm run build:cloudflare          # set NEXT_PUBLIC_* in your shell first
+npx wrangler deploy               # then: npx wrangler secret put <each runtime var>
+npx wrangler domains add your-store.com   # optional — or test on *.workers.dev
+cd cron-worker && npx wrangler deploy && npx wrangler secret put TARGET_URL && npx wrangler secret put CRON_SECRET
+cd ..
+```
+
+- The whole app runs as **one Worker** via the official OpenNext adapter
+  (`@opennextjs/cloudflare` — already in `package.json`). The `/api/*` routes,
+  middleware, `/og` card, `/icon` and `/media` all work unchanged, and the
+  public routes already emit `CDN-Cache-Control` headers Cloudflare's edge
+  honors.
+- **Build-time vs runtime env vars matter on Cloudflare** — `NEXT_PUBLIC_*`
+  must be in your shell when you build; everything else is set with
+  `npx wrangler secret put` after the first deploy. The guide explains this
+  with a table.
 - The daily safety net is the tiny scheduled worker in `cron-worker/` — deploy
-it once (`cd cron-worker && npx wrangler deploy`) and set two secrets:
-`TARGET_URL` (your store URL) and `CRON_SECRET` (the same value as any
-platform). See `cron-worker/README.md`.
+  it once and set two secrets: `TARGET_URL` (your store URL) and `CRON_SECRET`
+  (the same value as any platform). See `cron-worker/README.md`.
 - When no site URL is configured, Cloudflare's `CF_PAGES_URL` is used
-automatically.
+  automatically.
 
 
 
 ### Any other Node host
 
-- Run `npm run build` then `npm start` (or the platform's Next.js runtime).
-- Schedule a daily hit to `/api/checkout/cron-draw` (plus the optional
-`/api/cron/recovery` and `/api/analytics/social-tick`) with
-`Authorization: Bearer $CRON_SECRET` — cron-job.org, GitHub Actions,
-UptimeRobot and QStash all work. See `lib/cron-auth.ts`.
+1. Run `npm run build` then `npm start` (or the platform's Next.js runtime).
+2. Set the environment variables from the tables below (Production).
+3. Schedule a daily hit to `/api/checkout/cron-draw` (plus the optional
+   `/api/cron/recovery` and `/api/analytics/social-tick`) with
+   `Authorization: Bearer $CRON_SECRET` — cron-job.org, GitHub Actions,
+   UptimeRobot and QStash all work. See `lib/cron-auth.ts`.
+4. Done — draws still fire in real time from the client countdown even without
+   any scheduler.
 
 
 

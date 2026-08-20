@@ -12,12 +12,16 @@ safety net** on Cloudflare — the equivalent of `vercel.json`'s cron or
 All three authenticate with `Authorization: Bearer $CRON_SECRET`
 (see `lib/cron-auth.ts` in the parent app).
 
+> ⚠️ **Deploy the main storefront app FIRST** (follow `DEPLOY-CLOUDFLARE.md` in
+> the repo root) — this worker needs a deployed store URL for `TARGET_URL`.
+
 ## Deploy
 
-From this directory:
+From this directory (commands must be run in this order):
 
 ```bash
-# 1. Deploy the worker (wrangler.jsonc defines the daily cron trigger)
+# 1. Deploy the worker (wrangler.jsonc defines the daily cron trigger).
+#    Deploy BEFORE adding secrets — wrangler attaches secrets to an existing worker.
 npx wrangler deploy
 
 # 2. Point it at your store (the deployed URL, e.g. https://your-store.com)
@@ -29,6 +33,21 @@ npx wrangler secret put CRON_SECRET
 
 Done — Cloudflare's scheduler invokes this worker at `0 0 * * *` (UTC) every
 day and it forwards the run to your store's endpoints.
+
+## Verify
+
+The cron fires at `00:00 UTC` daily, so right after deploying you can check the
+logs: dashboard → **Workers & Pages → `storefront-cron` → Logs**. Each daily
+run should log three lines like:
+
+```
+[storefront-cron] /api/checkout/cron-draw -> 200
+[storefront-cron] /api/cron/recovery -> 200
+[storefront-cron] /api/analytics/social-tick -> 200
+```
+
+If you see `SKIPPED — TARGET_URL or CRON_SECRET not configured`, run the two
+`secret put` commands above again (the worker must be deployed first).
 
 ## How the main app deploys on Cloudflare
 
