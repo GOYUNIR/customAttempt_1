@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/inject-mapbox-token.mjs && npx opennextjs-cloudflare build",
+    "build": "node scripts/inject-mapbox-token.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "node --test tests/*.test.ts",
