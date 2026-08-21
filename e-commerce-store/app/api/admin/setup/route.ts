@@ -11,7 +11,7 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, supabaseServiceConfigured } from '@/services/config/supabase-client';
+import { createSuperAdmin, supabaseServiceConfigured, setSupabaseRuntimeCredentials } from '@/services/config/supabase-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,13 +47,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
     }
 
-    if (!supabaseServiceConfigured()) {
+    // ── Supabase credentials (inline entry when the env is missing) ──────────
+    // Operators can paste SUPABASE_URL / ANON_KEY / SERVICE_ROLE_KEY directly.
+    // If they aren't in the environment yet, use the submitted values for THIS
+    // bootstrap and keep them as a runtime override so the readiness gate and
+    // subsequent requests in this process can reach Supabase immediately.
+    const supabaseUrl = String(body.supabaseUrl || body.supabase_url || '').trim().replace(/\/+$/, '');
+    const supabaseAnonKey = String(body.supabaseAnonKey || body.supabase_anon_key || '').trim();
+    const supabaseServiceRoleKey = String(body.supabaseServiceRoleKey || body.supabase_service_role_key || '').trim();
+
+    if (supabaseServiceConfigured()) {
+      setSupabaseRuntimeCredentials(null); // use the environment values
+    } else if (supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey) {
+      if (!/^https?:\/\//i.test(supabaseUrl)) {
+        return NextResponse.json(
+          { error: 'Enter a valid Supabase project URL (starting with https://).' },
+          { status: 400 },
+        );
+      }
+      setSupabaseRuntimeCredentials({ url: supabaseUrl, anonKey: supabaseAnonKey, serviceRoleKey: supabaseServiceRoleKey });
+    } else {
       return NextResponse.json(
         {
           error:
-            'SUPABASE_SERVICE_ROLE_KEY is not set. Add SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY to the platform environment, then run the Setup Wizard.',
+            'Enter SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY below, or set them in the platform environment.',
         },
-        { status: 500 },
+        { status: 400 },
       );
     }
 

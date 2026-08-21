@@ -621,14 +621,14 @@ export async function getOnlineVisitors(redis: StorageClient, trafficKey: string
  * `createStorageClient()` in lib/storage/index.ts. The backend is selected
  * ONCE per process by `STORAGE_PROVIDER`:
  *
- *   - (unset / `upstash`)      → Upstash REST Redis — the DEFAULT and the
- *     recommended production engine on every platform (Vercel, Netlify,
- *     Cloudflare via Upstash's Marketplace integration, any Node host). URL
- *     resolution (UPSTASH_REDIS_REST_URL → KV_REST_API_URL → REDIS_REST_URL
- *     → REDIS_URL → KV_URL) and token aliases live in lib/storage/upstash.ts.
+ *   - `supabase` / unset      → Supabase (the DEFAULT primary store); falls
+ *     back to Upstash Redis when Supabase env is absent.
  *   - `cloudflare-kv`          → Workers-KV adapter (zero third-party storage;
  *     see the concurrency caveats in lib/storage/cloudflare-kv.ts before
  *     routing payment/raffle writes at it).
+ *   - `upstash`                → Upstash REST Redis. URL resolution
+ *     (UPSTASH_REDIS_REST_URL → KV_REST_API_URL → REDIS_REST_URL → REDIS_URL
+ *     → KV_URL) and token aliases live in lib/storage/upstash.ts.
  *
  * The function name is kept so every route/helper in the codebase continues
  * to import from here without changes.

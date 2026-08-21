@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { createStorageClient } from '@/lib/storage';
 import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
 import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/edge';
-import { computeAdminReady } from '@/lib/env-discovery';
+import { computeAdminReady, detectStorageDrivers } from '@/lib/env-discovery';
 import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 
@@ -174,7 +174,9 @@ export async function middleware(request: NextRequest) {
     // password AND no Supabase super-admin). The setup checklist, provider
     // wizard and super-login endpoints stay OPEN so the operator can bootstrap
     // with no credentials. See lib/env-discovery.ts → computeAdminReady().
-    const storageOk = createStorageClient() !== null;
+    // Storage readiness is per-driver (ANY ONE of Supabase / Cloudflare / Redis)
+    // — no single backend is mandatory. See lib/env-discovery.ts.
+    const storage = detectStorageDrivers();
     const legacyAdminOk = Boolean(resolveAdminPassword());
 
     let platformConfigured: boolean | null = null;
@@ -186,7 +188,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    const ready = computeAdminReady({ storageOk, legacyAdminOk, platformConfigured });
+    const ready = computeAdminReady({ storage, legacyAdminOk, platformConfigured });
 
     if (!ready) {
       if (isSetupPath || isSetupStatusPath || isSuperLoginPath) {

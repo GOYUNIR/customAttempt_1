@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverEnvironment, computeAdminReady } from '../lib/env-discovery.ts';
+import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider } from '../lib/env-discovery.ts';
 
-test('empty environment reports the three blocking checks as missing', () => {
+test('empty environment reports storage + admin as the blocking groups', () => {
   const result = discoverEnvironment({});
   assert.equal(result.blockingReady, false);
-  assert.deepEqual(new Set(result.summary.blockingMissing), new Set(['redis-url', 'redis-token', 'admin-password']));
+  assert.deepEqual(new Set(result.summary.blockingMissing), new Set(['storage', 'admin']));
 });
 
 test('full legacy env is blocking-ready and required-ready', () => {
@@ -40,12 +40,13 @@ test('aliases satisfy checks (KV_REST_API_URL / KV_REST_API_TOKEN / SITE_URL)', 
   assert.equal(siteUrl?.present, true);
 });
 
-test('admin password is blocking but username is not (defaults to admin)', () => {
+test('no individual check is blocking — blocking state is group-level', () => {
   const result = discoverEnvironment({});
+  assert.equal(result.all.every((c) => c.blocking === false), true);
   const username = result.all.find((c) => c.id === 'admin-username');
   const password = result.all.find((c) => c.id === 'admin-password');
-  assert.equal(username?.blocking, false);
-  assert.equal(password?.blocking, true);
+  assert.equal(username?.required, true);
+  assert.equal(password?.required, true);
 });
 
 test('bindings, license and bootstrap checks are non-blocking and not required', () => {
@@ -63,16 +64,61 @@ test('bindings, license and bootstrap checks are non-blocking and not required',
   assert.ok((d1?.commands || []).some((c) => c.includes('wrangler d1 create')));
 });
 
-test('computeAdminReady requires storage AND an admin account', () => {
-  assert.equal(computeAdminReady({ storageOk: true, legacyAdminOk: true, platformConfigured: null }), true);
-  assert.equal(computeAdminReady({ storageOk: false, legacyAdminOk: true, platformConfigured: null }), false);
-  assert.equal(computeAdminReady({ storageOk: true, legacyAdminOk: false, platformConfigured: null }), false);
-  // Supabase super-admin satisfies the admin-account requirement.
-  assert.equal(computeAdminReady({ storageOk: true, legacyAdminOk: false, platformConfigured: true }), true);
-  assert.equal(computeAdminReady({ storageOk: false, legacyAdminOk: false, platformConfigured: true }), false);
-  // platformConfigured=false (wizard not run) does NOT count as an admin account.
-  assert.equal(computeAdminReady({ storageOk: true, legacyAdminOk: true, platformConfigured: false }), true);
-  assert.equal(computeAdminReady({ storageOk: true, legacyAdminOk: false, platformConfigured: false }), false);
+test('computeAdminReady unlocks on ANY storage driver + ANY admin method', () => {
+  const redis = { supabase: false, cloudflare: false, redis: true };
+  const cloudflare = { supabase: false, cloudflare: true, redis: false };
+  const supabase = { supabase: true, cloudflare: false, redis: false };
+  const none = { supabase: false, cloudflare: false, redis: false };
+
+  // redis + password
+  assert.equal(computeAdminReady({ storage: redis, legacyAdminOk: true, platformConfigured: null }), true);
+  // no storage
+  assert.equal(computeAdminReady({ storage: none, legacyAdminOk: true, platformConfigured: null }), false);
+  // storage but no admin
+  assert.equal(computeAdminReady({ storage: redis, legacyAdminOk: false, platformConfigured: null }), false);
+  // Supabase super-admin satisfies BOTH storage and admin
+  assert.equal(computeAdminReady({ storage: none, legacyAdminOk: false, platformConfigured: true }), true);
+  // platformConfigured=false (wizard not run) does NOT count
+  assert.equal(computeAdminReady({ storage: none, legacyAdminOk: false, platformConfigured: false }), false);
+  // cloudflare driver + password
+  assert.equal(computeAdminReady({ storage: cloudflare, legacyAdminOk: true, platformConfigured: null }), true);
+  // supabase driver + password
+  assert.equal(computeAdminReady({ storage: supabase, legacyAdminOk: true, platformConfigured: null }), true);
+  // legacy password alone (no storage) still false
+  assert.equal(computeAdminReady({ storage: none, legacyAdminOk: true, platformConfigured: false }), false);
+});
+
+test('detectStorageDrivers detects each driver independently', () => {
+  const d = detectStorageDrivers({
+    SUPABASE_URL: 'https://x.supabase.co',
+    SUPABASE_ANON_KEY: 'anon',
+    SUPABASE_SERVICE_ROLE_KEY: 'service',
+    UPSTASH_REDIS_REST_URL: 'https://x.upstash.io',
+    UPSTASH_REDIS_REST_TOKEN: 'token',
+  });
+  assert.equal(d.supabase, true);
+  assert.equal(d.redis, true);
+  assert.equal(d.cloudflare, false);
+});
+
+test('detectStorageDrivers honors STORAGE_PROVIDER for cloudflare + supabase needs full env', () => {
+  assert.equal(detectStorageDrivers({ STORAGE_PROVIDER: 'cloudflare-kv' }).cloudflare, true);
+  // supabase requires all three keys — partial env is not satisfied
+  assert.equal(detectStorageDrivers({ STORAGE_PROVIDER: 'supabase' }).supabase, false);
+  assert.equal(detectStorageDrivers({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'a' }).supabase, false);
+});
+
+test('detectStorageProvider defaults to supabase and reflects the detected driver', () => {
+  assert.equal(detectStorageProvider({}), 'supabase');
+  assert.equal(
+    detectStorageProvider({ UPSTASH_REDIS_REST_URL: 'https://x.upstash.io', UPSTASH_REDIS_REST_TOKEN: 't' }),
+    'upstash',
+  );
+  assert.equal(detectStorageProvider({ STORAGE_PROVIDER: 'cloudflare-kv' }), 'cloudflare-kv');
+  assert.equal(
+    detectStorageProvider({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_ROLE_KEY: 's' }),
+    'supabase',
+  );
 });
 
 test('discovery result shape carries groups and copyable commands', () => {

@@ -22,10 +22,13 @@
  *     `required` — needed for full PRODUCTION operation (payments, email,
  *                  cron safety net, canonical URL). Missing ones are shown as
  *                  warnings on the checklist but do NOT block the admin portal.
- *     `blocking` — the admin portal CANNOT open without it: the data store
- *                  (Redis URL + token) and admin credentials. Missing blocking
- *                  checks (plus a missing admin account) are what middleware.ts
- *                  uses to intercept `/admin` and show the setup checklist.
+ *     `blocking` — the admin portal CANNOT open without it. Blocking state is
+ *                  computed at the GROUP level (not per variable): the store
+ *                  needs ANY ONE storage driver (Supabase / Cloudflare KV-D1 /
+ *                  Upstash Redis) AND any one admin method (a Supabase
+ *                  super-admin OR the Basic Auth password). No single driver is
+ *                  ever mandatory — see detectStorageDrivers() +
+ *                  computeAdminReady().
  * - Values are NEVER returned — only presence booleans, names, and copyable
  *   setup commands. A leak of a secret from a setup page would be a bug.
  */
@@ -108,6 +111,103 @@ function has(env: EnvObject, ...names: string[]): boolean {
   return names.some((n) => Boolean(env[n] && String(env[n]).trim()));
 }
 
+/**
+ * Which storage drivers are individually satisfied. This is the single source of
+ * truth for "is there at least one data store configured?" — NO driver is ever
+ * mandatory on its own. Both middleware.ts and /api/admin/setup-status use this
+ * (via computeAdminReady) so they can never drift.
+ */
+export interface StorageDriverState {
+  /** SUPABASE_URL + SUPABASE_ANON_KEY + SUPABASE_SERVICE_ROLE_KEY all present. */
+  supabase: boolean;
+  /** STORAGE_PROVIDER=cloudflare-kv (or D1/KV alias) OR an active KV/D1 binding. */
+  cloudflare: boolean;
+  /** A REST-usable Redis URL + token pair (see resolveRedisRestUrl in upstash.ts). */
+  redis: boolean;
+}
+
+/** The canonical storage driver name shown on the setup checklist readout. */
+export type StorageProviderName = 'supabase' | 'cloudflare-kv' | 'upstash' | 'none';
+
+function normalizeProviderName(raw: string): string {
+  return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+}
+
+/** REST-usable Redis URL presence — mirrors resolveRedisRestUrl(): `redis://` /
+ *  `rediss://` wire-protocol URLs are skipped because the REST client can't use
+ *  them. */
+function redisRestUrlPresent(env: EnvObject): boolean {
+  const candidates = ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_REST_URL', 'REDIS_URL', 'KV_URL'];
+  for (const name of candidates) {
+    const value = String(env[name] || '').trim();
+    if (!value) continue;
+    if (/^https?:\/\//i.test(value)) return true;
+    if (value.includes('://')) continue; // redis:// / rediss:// — REST client can't use it
+    return true;
+  }
+  return false;
+}
+
+/** Detect a Cloudflare KV / D1 binding on `globalThis` (Workers/OpenNext
+ *  runtimes surface bindings there, mirroring detectWorkersKvBinding() in
+ *  lib/storage/cloudflare-kv.ts). Works for standard `env` Worker bindings. */
+function detectCloudflareStorageBinding(glob: unknown): boolean {
+  try {
+    const g = glob as Record<string, unknown>;
+    const looksLikeKv = (v: unknown) =>
+      !!v && typeof (v as { get?: unknown }).get === 'function' && typeof (v as { put?: unknown }).put === 'function' &&
+      typeof (v as { delete?: unknown }).delete === 'function' && typeof (v as { list?: unknown }).list === 'function';
+    const looksLikeD1 = (v: unknown) =>
+      !!v && typeof (v as { prepare?: unknown }).prepare === 'function' &&
+      (typeof (v as { exec?: unknown }).exec === 'function' || typeof (v as { batch?: unknown }).batch === 'function');
+    const named = ['STORE_KV', 'GOYUNIR_KV', 'ALLOCATION_KV', 'KV', 'DB', 'D1_DATABASE', 'D1'];
+    for (const name of named) {
+      const v = g[name];
+      if (looksLikeKv(v) || looksLikeD1(v)) return true;
+    }
+    for (const key of Object.keys(g)) {
+      if (!/^[A-Z_]+$/.test(key)) continue;
+      const v = g[key];
+      if (/KV/i.test(key) && looksLikeKv(v)) return true;
+      if (/D1|DB/i.test(key) && looksLikeD1(v)) return true;
+    }
+  } catch {
+    /* no binding */
+  }
+  return false;
+}
+
+/** Detect which storage drivers are configured from the runtime env + bindings. */
+export function detectStorageDrivers(env: EnvObject = process.env): StorageDriverState {
+  const provider = normalizeProviderName(env.STORAGE_PROVIDER || '');
+  const supabase =
+    has(env, 'SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL') &&
+    has(env, 'SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY') &&
+    has(env, 'SUPABASE_SERVICE_ROLE_KEY');
+  const cloudflare = provider === 'cloudflare-kv' || provider === 'd1' || detectCloudflareStorageBinding(globalThis);
+  const redis =
+    redisRestUrlPresent(env) &&
+    has(env, 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN');
+  return { supabase, cloudflare, redis };
+}
+
+/**
+ * Resolve the storage driver name to DISPLAY on the setup checklist. The
+ * readout reflects the detected/selected driver and defaults to `supabase`
+ * (the default primary store) — never a hardcoded "upstash".
+ */
+export function detectStorageProvider(env: EnvObject = process.env): StorageProviderName {
+  const provider = normalizeProviderName(env.STORAGE_PROVIDER || '');
+  if (provider === 'supabase' || provider === 'postgres' || provider === 'pg') return 'supabase';
+  if (provider === 'cloudflare-kv' || provider === 'kv' || provider === 'd1' || provider === 'workers-kv') return 'cloudflare-kv';
+  if (provider === 'upstash' || provider === 'redis') return 'upstash';
+  const drivers = detectStorageDrivers(env);
+  if (drivers.supabase) return 'supabase';
+  if (drivers.cloudflare) return 'cloudflare-kv';
+  if (drivers.redis) return 'upstash';
+  return 'supabase';
+}
+
 const WRANGLER_SECRET = (name: string) => `npx wrangler secret put ${name}`;
 
 /** The exact Cloudflare dashboard browser path where operators set variables +
@@ -127,47 +227,31 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     checks.push({ ...check, present: has(env, check.variable, ...check.aliases) });
   };
 
-  // ── Storage (blocking) ──────────────────────────────────────────────────────
+  // ── Storage (any ONE driver unlocks the store — none is mandatory) ──────────
   add({
-    id: 'redis-url',
-    name: 'Redis REST URL',
-    purpose: 'The data store URL — every product, order, entry and setting lives here. The admin portal is unusable without it.',
-    variable: 'UPSTASH_REDIS_REST_URL',
-    aliases: ['KV_REST_API_URL', 'REDIS_REST_URL', 'REDIS_URL', 'KV_URL'],
+    id: 'supabase-storage',
+    name: 'Supabase data store',
+    purpose:
+      'The DEFAULT primary store. Satisfied when SUPABASE_URL + SUPABASE_ANON_KEY + SUPABASE_SERVICE_ROLE_KEY are all set (or entered in the Setup Wizard). Backs store_kv + global_platform_settings.',
+    variable: 'SUPABASE_URL',
+    aliases: ['NEXT_PUBLIC_SUPABASE_URL'],
     kind: 'storage',
-    required: true,
-    blocking: true,
+    required: false,
+    blocking: false,
     secret: false,
     buildTime: false,
     platform: 'all',
     commands: [
-      WRANGLER_SECRET('UPSTASH_REDIS_REST_URL'),
-      'vercel env add UPSTASH_REDIS_REST_URL production',
-    ],
-  });
-
-  add({
-    id: 'redis-token',
-    name: 'Redis REST token',
-    purpose: 'The data store access token paired with the URL. Stored as a secret — never commit it.',
-    variable: 'UPSTASH_REDIS_REST_TOKEN',
-    aliases: ['KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'],
-    kind: 'storage',
-    required: true,
-    blocking: true,
-    secret: true,
-    buildTime: false,
-    platform: 'all',
-    commands: [
-      WRANGLER_SECRET('UPSTASH_REDIS_REST_TOKEN'),
-      'vercel env add UPSTASH_REDIS_REST_TOKEN production',
+      WRANGLER_SECRET('SUPABASE_URL'),
+      WRANGLER_SECRET('SUPABASE_ANON_KEY'),
+      WRANGLER_SECRET('SUPABASE_SERVICE_ROLE_KEY'),
     ],
   });
 
   add({
     id: 'storage-provider',
     name: 'Storage provider',
-    purpose: 'Which data backend is used. Default (unset) is Upstash Redis. Set STORAGE_PROVIDER=cloudflare-kv to run on the Workers-KV adapter instead of a Redis URL/token.',
+    purpose: 'Selects the data backend. Set STORAGE_PROVIDER=cloudflare-kv (or =supabase / =upstash) to force a driver. When unset the store auto-detects: Supabase first, then Cloudflare KV/D1 bindings, then Upstash Redis.',
     variable: 'STORAGE_PROVIDER',
     aliases: [],
     kind: 'storage',
@@ -179,7 +263,55 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     commands: [WRANGLER_SECRET('STORAGE_PROVIDER')],
   });
 
-  // ── Admin access (blocking) ─────────────────────────────────────────────────
+  add({
+    id: 'cloudflare-storage',
+    name: 'Cloudflare KV / D1 storage',
+    purpose: 'Zero third-party storage. Satisfied when STORAGE_PROVIDER=cloudflare-kv is set or an active KV / D1 binding is detected on the Worker.',
+    variable: 'STORAGE_PROVIDER',
+    aliases: [],
+    kind: 'storage',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'cloudflare',
+    commands: [WRANGLER_SECRET('STORAGE_PROVIDER')],
+    wranglerToml: `[[kv_namespaces]]
+binding = "KV"
+id = "<paste from: npx wrangler kv namespace create KV>"`,
+  });
+
+  add({
+    id: 'redis-url',
+    name: 'Redis REST URL (optional)',
+    purpose: 'Optional Upstash Redis URL — one of three supported drivers. Use this only when you want Redis instead of Supabase / Cloudflare.',
+    variable: 'UPSTASH_REDIS_REST_URL',
+    aliases: ['KV_REST_API_URL', 'REDIS_REST_URL', 'REDIS_URL', 'KV_URL'],
+    kind: 'storage',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('UPSTASH_REDIS_REST_URL')],
+  });
+
+  add({
+    id: 'redis-token',
+    name: 'Redis REST token (optional)',
+    purpose: 'The access token paired with the Redis REST URL. Stored as a secret — never commit it.',
+    variable: 'UPSTASH_REDIS_REST_TOKEN',
+    aliases: ['KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'],
+    kind: 'storage',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('UPSTASH_REDIS_REST_TOKEN')],
+  });
+
+  // ── Admin access (any ONE method unlocks the portal — password OR super-admin) ─
   add({
     id: 'admin-username',
     name: 'Admin Basic Auth username',
@@ -192,28 +324,22 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: false,
     buildTime: false,
     platform: 'all',
-    commands: [
-      WRANGLER_SECRET('ADMIN_BASIC_AUTH_USERNAME'),
-      'vercel env add ADMIN_BASIC_AUTH_USERNAME production',
-    ],
+    commands: [WRANGLER_SECRET('ADMIN_BASIC_AUTH_USERNAME')],
   });
 
   add({
     id: 'admin-password',
     name: 'Admin Basic Auth password',
-    purpose: 'The password that gates /admin. In production this MUST be set — the admin portal cannot open without it (unless a Supabase super-admin account is configured).',
+    purpose: 'One way to gate /admin. Either set this password OR create a Supabase super-admin in the Setup Wizard — only ONE admin method is required.',
     variable: 'ADMIN_BASIC_AUTH_PASSWORD',
     aliases: [],
     kind: 'admin',
     required: true,
-    blocking: true,
+    blocking: false,
     secret: true,
     buildTime: false,
     platform: 'all',
-    commands: [
-      WRANGLER_SECRET('ADMIN_BASIC_AUTH_PASSWORD'),
-      'vercel env add ADMIN_BASIC_AUTH_PASSWORD production',
-    ],
+    commands: [WRANGLER_SECRET('ADMIN_BASIC_AUTH_PASSWORD')],
   });
 
   add({
@@ -244,10 +370,7 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: true,
     buildTime: false,
     platform: 'all',
-    commands: [
-      WRANGLER_SECRET('STRIPE_SECRET_KEY'),
-      'vercel env add STRIPE_SECRET_KEY production',
-    ],
+    commands: [WRANGLER_SECRET('STRIPE_SECRET_KEY')],
   });
 
   add({
@@ -262,10 +385,7 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: true,
     buildTime: false,
     platform: 'all',
-    commands: [
-      WRANGLER_SECRET('STRIPE_WEBHOOK_SECRET'),
-      'vercel env add STRIPE_WEBHOOK_SECRET production',
-    ],
+    commands: [WRANGLER_SECRET('STRIPE_WEBHOOK_SECRET')],
   });
 
   add({
@@ -315,10 +435,7 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: false,
     buildTime: true,
     platform: 'all',
-    commands: [
-      'npx wrangler secret put NEXT_PUBLIC_MAPBOX_TOKEN   # then rebuild (NEXT_PUBLIC_* is build-time)',
-      'vercel env add NEXT_PUBLIC_MAPBOX_TOKEN production',
-    ],
+    commands: ['npx wrangler secret put NEXT_PUBLIC_MAPBOX_TOKEN   # then rebuild (NEXT_PUBLIC_* is build-time)'],
   });
 
   // ── Security ────────────────────────────────────────────────────────────────
@@ -334,17 +451,14 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: true,
     buildTime: false,
     platform: 'all',
-    commands: [
-      WRANGLER_SECRET('CRON_SECRET'),
-      'vercel env add CRON_SECRET production',
-    ],
+    commands: [WRANGLER_SECRET('CRON_SECRET')],
   });
 
   // ── Site identity ───────────────────────────────────────────────────────────
   add({
     id: 'site-url',
     name: 'Canonical site URL',
-    purpose: 'Used in emails, OG/social cards and canonical links. If unset, the platform system vars are used automatically (Vercel VERCEL_URL, Netlify URL, Cloudflare CF_PAGES_URL).',
+    purpose: 'Used in emails, OG/social cards and canonical links. If unset, the platform system vars are used automatically (Cloudflare CF_PAGES_URL, Netlify URL, Vercel VERCEL_URL).',
     variable: 'NEXT_PUBLIC_URL',
     aliases: ['NEXT_PUBLIC_SITE_URL', 'SITE_URL'],
     kind: 'site',
@@ -353,7 +467,7 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
     secret: false,
     buildTime: true,
     platform: 'all',
-    commands: ['vercel env add NEXT_PUBLIC_URL production   # then redeploy'],
+    commands: ['npx wrangler secret put NEXT_PUBLIC_URL   # then rebuild (NEXT_PUBLIC_* is build-time)'],
   });
 
   add({
@@ -614,21 +728,33 @@ binding = "AI"`,
   // ── Group the checks ────────────────────────────────────────────────────────
   const byKind = (kind: EnvCheckKind): EnvCheck[] => checks.filter((c) => c.kind === kind);
   const groups: EnvGroup[] = [
-    { title: 'Data store', subtitle: 'Required before the admin portal can open.', kind: 'storage', checks: byKind('storage') },
-    { title: 'Admin access', subtitle: 'Required before the admin portal can open (or a Supabase super-admin).', kind: 'admin', checks: byKind('admin') },
+    { title: 'Data store', subtitle: 'Any ONE of these unlocks the store — Supabase (default), Cloudflare KV/D1, or Upstash Redis.', kind: 'storage', checks: byKind('storage') },
+    { title: 'Admin access', subtitle: 'Any ONE admin method — a Supabase super-admin (Setup Wizard) OR the Basic Auth password.', kind: 'admin', checks: byKind('admin') },
     { title: 'Payments', subtitle: 'Needed to charge cards and run raffles.', kind: 'payment', checks: byKind('payment') },
     { title: 'Email', subtitle: 'Transactional + verification emails.', kind: 'email', checks: byKind('email') },
     { title: 'Maps', subtitle: 'Address autofill at checkout.', kind: 'maps', checks: byKind('maps') },
     { title: 'Security', subtitle: 'Scheduled-draw safety net auth.', kind: 'security', checks: byKind('security') },
     { title: 'Site identity', subtitle: 'Branding, URLs and support inbox.', kind: 'site', checks: byKind('site') },
-    { title: 'Platform configuration', subtitle: 'Optional Supabase-backed provider settings (Setup Wizard).', kind: 'platform', checks: byKind('platform') },
+    { title: 'Platform configuration', subtitle: 'Supabase-backed provider settings (Setup Wizard) — also the default data store when configured.', kind: 'platform', checks: byKind('platform') },
     { title: 'Cloudflare bindings', subtitle: 'Detected for Cloudflare deployments — not used by this storefront build.', kind: 'binding', checks: byKind('binding') },
     { title: 'Licensing', subtitle: 'Optional — enforced when a key/server is configured.', kind: 'license', checks: byKind('license') },
     { title: 'AI providers', subtitle: 'Universal AI engine (image-to-animation + SVG).', kind: 'ai', checks: byKind('ai') },
     { title: 'First-run bootstrap', subtitle: 'Optional hints for the initial operator.', kind: 'bootstrap', checks: byKind('bootstrap') },
   ];
 
-  const blockingMissing = checks.filter((c) => c.blocking && !c.present).map((c) => c.id);
+  // Blocking state is GROUP-level: the store needs ANY ONE storage driver and
+  // ANY ONE admin method. No individual variable is ever mandatory on its own.
+  const drivers = detectStorageDrivers(env);
+  const storageOk = drivers.supabase || drivers.cloudflare || drivers.redis;
+  const supabaseFull =
+    has(env, 'SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL') &&
+    has(env, 'SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY') &&
+    has(env, 'SUPABASE_SERVICE_ROLE_KEY');
+  const adminEnvOk = has(env, 'ADMIN_BASIC_AUTH_PASSWORD') || supabaseFull;
+
+  const blockingMissing: string[] = [];
+  if (!storageOk) blockingMissing.push('storage');
+  if (!adminEnvOk) blockingMissing.push('admin');
   const requiredMissing = checks.filter((c) => c.required && !c.present).map((c) => c.id);
 
   return {
@@ -646,8 +772,8 @@ binding = "AI"`,
 }
 
 export interface AdminReadinessInput {
-  /** `createStorageClient() !== null` — the data backend is reachable. */
-  storageOk: boolean;
+  /** Which storage drivers are individually satisfied (see detectStorageDrivers()). */
+  storage: StorageDriverState;
   /** A resolvable Basic Auth password (username defaults to "admin"). */
   legacyAdminOk: boolean;
   /** Supabase `is_configured` — true when a master super-admin exists. Null when unknown. */
@@ -658,10 +784,16 @@ export interface AdminReadinessInput {
  * The ONE place that decides whether the admin portal is ready to open. Used by
  * BOTH middleware.ts (edge) and /api/admin/setup-status so they can never drift.
  *
- * Ready = the data store is configured AND an admin account exists (either a
- * Supabase super-admin OR the legacy Basic Auth password).
+ * Ready = AT LEAST ONE storage driver is satisfied (Supabase / Cloudflare KV-D1 /
+ * Redis — or Supabase already configured via the wizard) AND at least one admin
+ * method exists (a Supabase super-admin OR the legacy Basic Auth password).
  */
 export function computeAdminReady(input: AdminReadinessInput): boolean {
-  const adminAccountOk = input.platformConfigured === true || input.legacyAdminOk;
-  return input.storageOk && adminAccountOk;
+  const storageOk =
+    input.storage.supabase ||
+    input.storage.cloudflare ||
+    input.storage.redis ||
+    input.platformConfigured === true;
+  const adminOk = input.platformConfigured === true || input.legacyAdminOk;
+  return storageOk && adminOk;
 }

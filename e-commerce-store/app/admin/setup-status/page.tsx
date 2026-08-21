@@ -130,7 +130,7 @@ export default function SetupStatusPage() {
             }}
           >
             <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>
-              {ready ? '✅ Ready — admin portal unlocked' : `❌ ${blockingMissing.length} blocking item${blockingMissing.length === 1 ? '' : 's'} + admin account pending`}
+              {ready ? '✅ Ready — admin portal unlocked' : `❌ ${blockingMissing.length} blocking item${blockingMissing.length === 1 ? '' : 's'} remaining`}
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>
               {ready

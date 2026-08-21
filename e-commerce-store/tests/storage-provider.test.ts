@@ -43,8 +43,8 @@ test('Supabase is the DEFAULT primary store when its env is present', () => {
   });
 });
 
-test('falls back to upstash when Supabase is absent', () => {
+test('defaults to supabase when nothing is detected (Supabase is the default primary store)', () => {
   withEnv({ [STORAGE_PROVIDER_ENV]: undefined, SUPABASE_URL: undefined, SUPABASE_SERVICE_ROLE_KEY: undefined }, () => {
-    assert.equal(resolveStorageProvider(), 'upstash');
+    assert.equal(resolveStorageProvider(), 'supabase');
   });
 });

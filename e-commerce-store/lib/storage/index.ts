@@ -2,12 +2,14 @@
  * STORAGE FACTORY — select the data backend.
  *
  * The provider is chosen ONCE per process by `STORAGE_PROVIDER`:
- *   - (unset / `upstash`)  → Upstash REST Redis — the DEFAULT and the
- *     recommended production engine on every platform (Vercel, Netlify,
- *     Cloudflare via Upstash's Marketplace integration, any Node host).
+ *   - `supabase` / unset    → Supabase (the DEFAULT primary store — `store_kv` +
+ *     `global_platform_settings`); falls back to Redis when Supabase env is absent.
  *   - `cloudflare-kv`       → Workers KV adapter (zero third-party storage;
  *     see the concurrency caveats in cloudflare-kv.ts before routing
  *     payment/raffle writes at it).
+ *   - `upstash`             → Upstash REST Redis (battle-tested engine; runs on
+ *     Vercel, Netlify, Cloudflare via Upstash's Marketplace integration, or any
+ *     Node host).
  *
  * Every route reaches this through `createRedisClient()` in
  * `lib/server-config.ts`, so swapping the backend is a one-line env change —

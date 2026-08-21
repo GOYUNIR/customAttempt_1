@@ -4,20 +4,23 @@
  *
  * WHY THIS FILE EXISTS
  * --------------------
- * The app is built on Redis (Upstash) as its primary data store, and every
+ * The app treats its key space through a Redis-compatible command surface
+ * (hashes, lists, sets, zsets), but the data layer is backend-agnostic — every
  * route reaches the store through `createRedisClient()` in lib/server-config.ts.
  * This interface is the contract between the app and whatever backend actually
  * stores the bytes, so the data layer is NOT welded to the `@upstash/redis`
  * SDK:
  *
- *   - `lib/storage/upstash.ts`      → Upstash REST adapter (the DEFAULT — the
- *     battle-tested engine, runs on Vercel, Netlify, Cloudflare via Upstash's
- *     Cloudflare integration, or any Node host).
+ *   - `lib/storage/supabase.ts`     → Supabase PostgREST adapter (the DEFAULT
+ *     primary store — `store_kv` + `global_platform_settings`).
+ *   - `lib/storage/upstash.ts`      → Upstash REST adapter (one of three drivers;
+ *     runs on Vercel, Netlify, Cloudflare via Upstash's Cloudflare integration,
+ *     or any Node host).
  *   - `lib/storage/cloudflare-kv.ts`→ Workers-KV adapter (no third-party store:
  *     good for admin/config/low-concurrency paths; see the concurrency caveats
  *     in that file before pointing payment/raffle writes at it).
  *   - `lib/storage/index.ts`        → `createStorageClient()` factory, selects a
- *     provider from `STORAGE_PROVIDER` (default `upstash`).
+ *     provider from `STORAGE_PROVIDER` (default `supabase`).
  *
  * The interface deliberately covers EXACTLY the command surface the codebase
  * uses (verified by inventory: get/set/setex, hset/hget/hgetall/hdel/hincrby,
@@ -120,10 +123,14 @@ export const STORAGE_PROVIDER_ENV = 'STORAGE_PROVIDER';
  *
  * Priority:
  *   1. Explicit `STORAGE_PROVIDER` (supabase | upstash/redis | cloudflare-kv/kv/d1).
- *   2. DEFAULT — Supabase is the PRIMARY data store when `SUPABASE_URL` + a key
- *      (`SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_ANON_KEY`) are present.
- *   3. Fallback — Upstash Redis (the battle-tested engine; returns null from
- *      the factory when unconfigured, which the app treats as "no store yet").
+ *   2. Supabase when `SUPABASE_URL` + a key (`SUPABASE_SERVICE_ROLE_KEY` or
+ *      `SUPABASE_ANON_KEY`) are present.
+ *   3. Default (nothing detected) — Supabase, the default primary store. The
+ *      factory then falls back to Upstash Redis, returning null when no store is
+ *      configured at all (which the app treats as "no store yet").
+ *
+ * NOTE: this selects the ADAPTER to instantiate. The admin-portal READINESS gate
+ * (which drivers are acceptable) lives in lib/env-discovery.ts → detectStorageDrivers().
  */
 export function resolveStorageProvider(): StorageProvider {
   const raw = String(process.env[STORAGE_PROVIDER_ENV] || '')
@@ -138,5 +145,5 @@ export function resolveStorageProvider(): StorageProvider {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
   if (url && key) return 'supabase';
-  return 'upstash';
+  return 'supabase';
 }

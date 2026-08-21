@@ -48,6 +48,9 @@ export default function SetupPage() {
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  const [supabaseServiceRoleKey, setSupabaseServiceRoleKey] = useState('');
   const [mailProvider, setMailProvider] = useState<'resend' | 'postmark' | 'sendgrid'>('resend');
   const [mailApiKey, setMailApiKey] = useState('');
   const [paymentProvider, setPaymentProvider] = useState<'stripe' | 'lemon_squeezy' | 'paddle'>('stripe');
@@ -96,6 +99,9 @@ export default function SetupPage() {
         body: JSON.stringify({
           adminEmail,
           adminPassword,
+          supabaseUrl,
+          supabaseAnonKey,
+          supabaseServiceRoleKey,
           mail_provider: mailProvider,
           mail_api_key: mailApiKey,
           payment_provider: paymentProvider,
@@ -137,7 +143,9 @@ export default function SetupPage() {
     }
   }
 
-  const supabaseReady = Boolean(status?.supabase.url && status?.supabase.serviceRoleKey);
+  // Env vars already present? If so the inline fields are optional. If not, the
+  // operator can enter Supabase credentials directly below — saving never fails.
+  const supabaseEnvDetected = Boolean(status?.supabase.url && status?.supabase.serviceRoleKey);
 
   return (
     <main style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '40px 16px' }}>
@@ -179,10 +187,11 @@ export default function SetupPage() {
           </div>
         ) : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 20 }}>
-            {!supabaseReady && (
-              <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#92400e', lineHeight: 1.5 }}>
-                <strong>Supabase env vars missing.</strong> Set <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code> and{' '}
-                <code>SUPABASE_SERVICE_ROLE_KEY</code> in your hosting platform, redeploy, then run this wizard. Saving now will fail.
+            {!supabaseEnvDetected && (
+              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#075985', lineHeight: 1.5 }}>
+                <strong>Supabase env vars not detected.</strong> You can enter <code>SUPABASE_URL</code>,{' '}
+                <code>SUPABASE_ANON_KEY</code> and <code>SUPABASE_SERVICE_ROLE_KEY</code> directly in step 2 below — they are
+                used to run the bootstrap and unlock the portal immediately.
               </div>
             )}
 
@@ -199,6 +208,20 @@ export default function SetupPage() {
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#14532d', lineHeight: 1.5 }}>
                 <strong>Supabase (default)</strong> — uses <code>store_kv</code> + <code>global_platform_settings</code>. Upstash Redis and Cloudflare D1/KV are supported as fallback adapters via the <code>STORAGE_PROVIDER</code> env var.
               </div>
+              <Field label="Supabase project URL (leave blank if already set in the environment)">
+                <input type="url" value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://your-project.supabase.co" autoComplete="off" />
+              </Field>
+              <Field label="Supabase anon key (public)">
+                <input type="password" value={supabaseAnonKey} onChange={(e) => setSupabaseAnonKey(e.target.value)} placeholder="eyJ…" autoComplete="off" />
+              </Field>
+              <Field label="Supabase service role key (secret — server only)">
+                <input type="password" value={supabaseServiceRoleKey} onChange={(e) => setSupabaseServiceRoleKey(e.target.value)} placeholder="eyJ…" autoComplete="off" />
+              </Field>
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+                If <code>SUPABASE_URL</code> / <code>SUPABASE_ANON_KEY</code> / <code>SUPABASE_SERVICE_ROLE_KEY</code> are already set in
+                the platform, leave these blank — the environment values are used. Otherwise these values bootstrap Supabase and unlock
+                the portal immediately.
+              </p>
             </Section>
 
 
@@ -256,7 +279,7 @@ export default function SetupPage() {
               <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '12px 16px', color: '#b91c1c', fontSize: 14 }}>{error}</div>
             )}
 
-            <button type="submit" disabled={busy || done || !supabaseReady} style={{ background: busy || done ? '#9ca3af' : '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '16px 24px', fontSize: 16, fontWeight: 800, cursor: busy || done ? 'default' : 'pointer' }}>
+            <button type="submit" disabled={busy || done} style={{ background: busy || done ? '#9ca3af' : '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '16px 24px', fontSize: 16, fontWeight: 800, cursor: busy || done ? 'default' : 'pointer' }}>
               {busy ? 'Saving…' : done ? 'Done ✓' : 'Save configuration & create admin'}
             </button>
 

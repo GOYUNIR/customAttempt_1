@@ -20,10 +20,38 @@ export const SUPABASE_ENV_URL = 'SUPABASE_URL';
 export const SUPABASE_ENV_ANON_KEY = 'SUPABASE_ANON_KEY';
 export const SUPABASE_ENV_SERVICE_ROLE_KEY = 'SUPABASE_SERVICE_ROLE_KEY';
 
+/**
+ * Runtime credential override — set by the Setup Wizard when the operator pastes
+ * Supabase credentials INLINE (they aren't in process.env yet). Persists for the
+ * process lifetime so the bootstrap + the readiness gate can reach Supabase
+ * immediately after a wizard save. Cleared with setSupabaseRuntimeCredentials(null).
+ */
+interface SupabaseRuntimeCredentials {
+  url?: string;
+  anonKey?: string;
+  serviceRoleKey?: string;
+}
+
+let runtimeCredentials: SupabaseRuntimeCredentials | null = null;
+
+/** Set (or clear) the inline Supabase credentials the Setup Wizard entered. */
+export function setSupabaseRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void {
+  if (!creds) {
+    runtimeCredentials = null;
+    return;
+  }
+  runtimeCredentials = {
+    url: (creds.url || '').trim().replace(/\/+$/, ''),
+    anonKey: (creds.anonKey || '').trim(),
+    serviceRoleKey: (creds.serviceRoleKey || '').trim(),
+  };
+}
+
 export function readSupabaseEnv(): { url: string; anonKey: string; serviceRoleKey: string } {
-  const url = (process.env[SUPABASE_ENV_URL] || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
-  const anonKey = (process.env[SUPABASE_ENV_ANON_KEY] || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-  const serviceRoleKey = (process.env[SUPABASE_ENV_SERVICE_ROLE_KEY] || '').trim();
+  const override = runtimeCredentials;
+  const url = (override?.url || process.env[SUPABASE_ENV_URL] || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  const anonKey = (override?.anonKey || process.env[SUPABASE_ENV_ANON_KEY] || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  const serviceRoleKey = (override?.serviceRoleKey || process.env[SUPABASE_ENV_SERVICE_ROLE_KEY] || '').trim();
   return { url, anonKey, serviceRoleKey };
 }
 

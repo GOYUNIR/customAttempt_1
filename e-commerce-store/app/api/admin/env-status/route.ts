@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminRequestAuthorized } from '@/lib/server-config';
-import { activeStorageProvider } from '@/lib/storage';
+import { detectStorageProvider } from '@/lib/env-discovery';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
-  const provider = activeStorageProvider();
+  const provider = detectStorageProvider();
   const supabase = supabaseEnvSummary();
   const configured = (await isPlatformConfigured()) === true;
   const platformSettings = await getPlatformSettings();
@@ -97,12 +97,14 @@ export async function GET(request: Request) {
       hint:
         provider === 'cloudflare-kv'
           ? 'STORAGE_PROVIDER=cloudflare-kv — running on the Workers KV adapter. See lib/storage/cloudflare-kv.ts for the concurrency caveats before routing payment/raffle writes at it.'
-          : 'STORAGE_PROVIDER unset — Upstash Redis (recommended for payments/raffles). Set STORAGE_PROVIDER=cloudflare-kv to run on Workers KV.',
+          : provider === 'supabase'
+            ? 'Supabase is the active data store (default). Set STORAGE_PROVIDER=cloudflare-kv or =upstash to switch drivers.'
+            : 'Upstash Redis is the active data store. Set STORAGE_PROVIDER=supabase or =cloudflare-kv to switch drivers.',
     },
     {
       key: 'Redis',
-      label: 'Redis (primary data store)',
-      required: true,
+      label: 'Redis (optional data store)',
+      required: false,
       set: has('UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_URL', 'KV_URL'),
       aliases: ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_URL', 'KV_URL'],
       buildTime: false,
@@ -112,7 +114,7 @@ export async function GET(request: Request) {
     {
       key: 'Redis token',
       label: 'Redis access token',
-      required: true,
+      required: false,
       set: has('UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'),
       aliases: ['UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'],
       buildTime: false,

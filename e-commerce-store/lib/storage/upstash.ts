@@ -1,5 +1,5 @@
 /**
- * Upstash Redis adapter — the DEFAULT storage provider.
+ * Upstash Redis adapter — one of three storage providers (Supabase is the default).
  *
  * Wraps the `@upstash/redis` REST client (the only file in the codebase that
  * is allowed to import it — see lib/storage/types.ts). The Upstash instance is

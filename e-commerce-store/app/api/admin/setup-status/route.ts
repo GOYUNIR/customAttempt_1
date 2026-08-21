@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminPassword, adminRequestAuthorized } from '@/lib/server-config';
-import { activeStorageProvider } from '@/lib/storage';
+import { getAdminPassword, adminRequestAuthorized } from '@/lib/server-config';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
-import { discoverEnvironment, computeAdminReady, CLOUDFLARE_VARS_PATH } from '@/lib/env-discovery';
+import {
+  discoverEnvironment,
+  computeAdminReady,
+  detectStorageDrivers,
+  detectStorageProvider,
+  CLOUDFLARE_VARS_PATH,
+} from '@/lib/env-discovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,10 +29,12 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   const discovery = discoverEnvironment();
-  const storageOk = createRedisClient() !== null;
+  const storageDrivers = detectStorageDrivers();
   const legacyAdminOk = Boolean(getAdminPassword());
   const platformConfigured = (await isPlatformConfigured()) === true;
-  const ready = computeAdminReady({ storageOk, legacyAdminOk, platformConfigured });
+  const ready = computeAdminReady({ storage: storageDrivers, legacyAdminOk, platformConfigured });
+  const storageOk =
+    storageDrivers.supabase || storageDrivers.cloudflare || storageDrivers.redis || platformConfigured;
 
   if (ready) {
     const authorized = adminRequestAuthorized(request) || (await isSuperAdminSession(request));
@@ -41,7 +48,8 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     ready,
-    storageProvider: activeStorageProvider(),
+    storageProvider: detectStorageProvider(),
+    storageDrivers,
     storageOk,
     legacyAdminOk,
     platformConfigured,
