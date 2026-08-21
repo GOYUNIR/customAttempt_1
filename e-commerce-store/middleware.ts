@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { createStorageClient } from '@/lib/storage';
 import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
 import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/edge';
+import { computeAdminReady } from '@/lib/env-discovery';
 
 
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
@@ -52,6 +53,7 @@ const TWO_FA_EXEMPT = [
   '/api/admin/verify-send',
   '/api/admin/verify-confirm',
   '/api/admin/verify-status',
+  '/api/admin/setup-status',
 ];
 
 function verifyBasicAuth(authorization: string | null) {
@@ -147,64 +149,69 @@ export async function middleware(request: NextRequest) {
   const isSetupReconfigure =
     pathname === '/admin/setup' && request.nextUrl.searchParams.get('reconfigure') === '1';
 
+  // Paths that must stay reachable BEFORE any credentials exist (the bootstrap
+  // surface). Declared once here so both admin-path blocks below share them.
+  const isSetupPath =
+    pathname === '/admin/setup' ||
+    pathname.startsWith('/admin/setup') ||
+    pathname === '/api/admin/setup' ||
+    pathname.startsWith('/api/admin/setup');
+  const isSetupStatusPath =
+    pathname === '/admin/setup-status' ||
+    pathname.startsWith('/admin/setup-status') ||
+    pathname === '/api/admin/setup-status' ||
+    pathname.startsWith('/api/admin/setup-status');
+  const isSuperLoginPath =
+    pathname === '/api/admin/super-login' ||
+    pathname.startsWith('/api/admin/super-login/');
+
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    // ── Setup Wizard gate ────────────────────────────────────────────────────
-    // When the Supabase-backed global_platform_settings row has is_configured =
-    // false (or doesn't exist yet), the standard admin login is BLOCKED and the
-    // browser is forced to /admin/setup. The setup endpoints are opened so the
-    // wizard can run BEFORE any Basic-Auth password exists. Once configured the
-    // gate flips off and the legacy Basic Auth + 2FA gates below take over.
-    const isSetupPath =
-      pathname === '/admin/setup' ||
-      pathname.startsWith('/admin/setup') ||
-      pathname === '/api/admin/setup' ||
-      pathname.startsWith('/api/admin/setup');
+    // ── Readiness gate (environment + bindings + admin account) ──────────────
+    // The admin portal is intercepted while the install is NOT ready: either the
+    // data store is missing or no admin account exists yet (no Basic Auth
+    // password AND no Supabase super-admin). The setup checklist, provider
+    // wizard and super-login endpoints stay OPEN so the operator can bootstrap
+    // with no credentials. See lib/env-discovery.ts → computeAdminReady().
+    const storageOk = createStorageClient() !== null;
+    const legacyAdminOk = Boolean(resolveAdminPassword());
 
+    let platformConfigured: boolean | null = null;
     if (supabaseEnvReady()) {
-      let configured: boolean | null = null;
       try {
-        configured = await isPlatformConfiguredEdge();
+        platformConfigured = await isPlatformConfiguredEdge();
       } catch {
-        configured = null;
+        platformConfigured = null;
       }
+    }
 
-      if (configured === false) {
-        if (isSetupPath) {
-          return NextResponse.next(); // wizard page + API are open pre-config
-        }
-        if (pathname.startsWith('/api/admin')) {
-          return NextResponse.json(
-            { error: 'PLATFORM_NOT_CONFIGURED', redirect: '/admin/setup' },
-            { status: 423, headers: { 'Cache-Control': 'no-store' } },
-          );
-        }
-        const url = request.nextUrl.clone();
-        url.pathname = '/admin/setup';
-        url.search = '';
-        return NextResponse.redirect(url);
-      }
+    const ready = computeAdminReady({ storageOk, legacyAdminOk, platformConfigured });
 
-      if (configured === true && isSetupPath) {
-        if (pathname.startsWith('/api/admin')) {
-          // Configured: the setup API goes back under the normal admin gates.
-        } else if (!isSetupReconfigure) {
-          // Wizard already ran — never show it again; go to the portal.
-          const url = request.nextUrl.clone();
-          url.pathname = '/admin';
-          url.search = '';
-          return NextResponse.redirect(url);
-        }
+    if (!ready) {
+      if (isSetupPath || isSetupStatusPath || isSuperLoginPath) {
+        return NextResponse.next(); // bootstrap endpoints are open pre-config
       }
-      // configured === null → Supabase env present but gate unreachable: keep
-      // legacy env-based admin behavior (never lock the portal).
+      if (pathname.startsWith('/api/admin')) {
+        return NextResponse.json(
+          { error: 'SETUP_REQUIRED', redirect: '/admin/setup-status' },
+          { status: 423, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/setup-status';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+
+    // Ready: the provider wizard is no longer shown (except ?reconfigure=1).
+    if (platformConfigured === true && isSetupPath && !pathname.startsWith('/api/admin') && !isSetupReconfigure) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin';
+      url.search = '';
+      return NextResponse.redirect(url);
     }
   }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    const isSuperLoginPath =
-      pathname === '/api/admin/super-login' ||
-      pathname.startsWith('/api/admin/super-login/');
-
     // A valid SUPER-ADMIN session — issued by /api/admin/super-login after a
     // Supabase master-account sign-in — authorizes the portal WITHOUT the env
     // Basic-Auth password or the email 2FA step (the master account IS the
@@ -242,7 +249,11 @@ export async function middleware(request: NextRequest) {
     // Gate 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â two-step email verification. The /admin page itself and the
     // verify-* endpoints are exempt so the operator can reach the 2FA screen;
     // everything else requires a valid device cookie from a verified browser.
-    const isPage = pathname === '/admin' || pathname === '/admin/';
+    const isPage =
+      pathname === '/admin' ||
+      pathname === '/admin/' ||
+      pathname === '/admin/setup-status' ||
+      pathname === '/admin/setup-status/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
     if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure) {
       const token = adminDeviceTokenFromRequest(request);

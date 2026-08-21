@@ -405,6 +405,12 @@ after 5 tries, so a leaked password alone can't get into `/admin`.
   providers without the Basic-Auth password. When Supabase isn't configured,
   everything falls back to the legacy `STRIPE_SECRET_KEY` / `RESEND_API_KEY` /
   `NEXT_PUBLIC_MAPBOX_TOKEN` env vars unchanged.
+- **System Configuration checklist (`/admin/setup-status`)**: until the install
+  is ready (data store + admin account present), `/admin` is intercepted and
+  redirected to this page, which scans the environment on every request and
+  shows a ✅/❌ breakdown of every variable, secret and Cloudflare binding —
+  with copyable `npx wrangler secret put …` commands and `wrangler.toml` blocks.
+  Once everything is detected, the standard portal unlocks automatically.
 - **Streamer Mode** (default ON): masks customer emails, shipping addresses,
 card numbers, tracking numbers, promo codes, order refs, phone numbers and
 names (fixed-length bullet masks — even the character lengths never leak), and
