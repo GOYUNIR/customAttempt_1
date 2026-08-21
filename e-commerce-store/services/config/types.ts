@@ -21,14 +21,41 @@ export type PaymentProvider = 'stripe' | 'lemon_squeezy' | 'paddle';
 /** Enumerated map providers — mirrors the SQL check constraint. */
 export type MapProvider = 'mapbox' | 'google_maps' | 'open_street_map';
 
-/** Enumerated AI providers — mirrors the SQL check constraint. */
-export type AiProvider = 'deepseek' | 'openai' | 'anthropic' | 'replicate' | 'workers_ai';
+/**
+ * Enumerated AI providers — mirrors the SQL check constraint.
+ *
+ * `deepseek` is "DeepSeek Pro" (the DEFAULT PRIMARY) and `deepseek_lite` is the
+ * cheaper "DeepSeek Lite" (the DEFAULT SECONDARY fallback). Both hit the same
+ * DeepSeek OpenAI-compatible endpoint and share `DEEPSEEK_API_KEY`.
+ */
+export type AiProvider =
+  | 'deepseek'
+  | 'deepseek_lite'
+  | 'openai'
+  | 'anthropic'
+  | 'replicate'
+  | 'workers_ai'
+  | 'openrouter'
+  | 'groq'
+  | 'mistral'
+  | 'google_gemini';
 
 /** Every provider union in one place for validation loops. */
 export const MAIL_PROVIDERS: readonly MailProvider[] = ['resend', 'postmark', 'sendgrid'];
 export const PAYMENT_PROVIDERS: readonly PaymentProvider[] = ['stripe', 'lemon_squeezy', 'paddle'];
 export const MAP_PROVIDERS: readonly MapProvider[] = ['mapbox', 'google_maps', 'open_street_map'];
-export const AI_PROVIDERS: readonly AiProvider[] = ['deepseek', 'openai', 'anthropic', 'replicate', 'workers_ai'];
+export const AI_PROVIDERS: readonly AiProvider[] = [
+  'deepseek',
+  'deepseek_lite',
+  'openai',
+  'anthropic',
+  'replicate',
+  'workers_ai',
+  'openrouter',
+  'groq',
+  'mistral',
+  'google_gemini',
+];
 
 /**
  * The row shape of `public.global_platform_settings`. API keys are returned
@@ -48,6 +75,9 @@ export interface GlobalPlatformSettings {
   map_api_key: string | null;
   ai_provider: AiProvider | null;
   ai_api_key: string | null;
+  /** Optional SECONDARY (fallback) AI provider — tried when the primary fails. */
+  ai_provider_secondary: AiProvider | null;
+  ai_api_key_secondary: string | null;
   /**
    * Operational (env-var-style) settings the unified setup dashboard persists.
    * Stored as a JSONB blob on the settings row — never returned to the browser
@@ -68,9 +98,12 @@ export interface PlatformSettingsInput {
   payment_webhook_secret?: string;
   map_provider: MapProvider;
   map_api_key?: string;
-  /** `null` = skip the AI engine (the storefront uses its CSS/SVG fallbacks). */
-  ai_provider: AiProvider | null;
-  ai_api_key?: string;
+  /** The PRIMARY AI provider (mandatory — the engine falls back to the secondary when this fails). */
+  ai_provider: AiProvider;
+  ai_api_key: string;
+  /** Optional secondary fallback AI provider (tried when the primary fails). */
+  ai_provider_secondary: AiProvider | null;
+  ai_api_key_secondary?: string;
 }
 
 /**
@@ -89,6 +122,7 @@ export interface PlatformSettingsPublicSummary {
   payment_provider: PaymentProvider | null;
   map_provider: MapProvider | null;
   ai_provider: AiProvider | null;
+  ai_provider_secondary: AiProvider | null;
 }
 
 /** Strip every secret from a settings row → safe for client responses. */
@@ -99,6 +133,7 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
     payment_provider: settings?.payment_provider ?? null,
     map_provider: settings?.map_provider ?? null,
     ai_provider: settings?.ai_provider ?? null,
+    ai_provider_secondary: settings?.ai_provider_secondary ?? null,
   };
 }
 
@@ -134,6 +169,10 @@ export interface OperationalSettings {
   replicate_api_token?: string;
   workers_ai_account_id?: string;
   workers_ai_api_token?: string;
+  openrouter_api_key?: string;
+  groq_api_key?: string;
+  mistral_api_key?: string;
+  google_gemini_api_key?: string;
   [key: string]: string | undefined;
 }
 
@@ -163,6 +202,10 @@ export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
   'replicate_api_token',
   'workers_ai_account_id',
   'workers_ai_api_token',
+  'openrouter_api_key',
+  'groq_api_key',
+  'mistral_api_key',
+  'google_gemini_api_key',
 ];
 
 /** Coerce an untrusted operational_settings blob → typed shape (drop unknown keys + blanks). */
@@ -203,6 +246,8 @@ export function parseSettingsRow(raw: Record<string, unknown> | null | undefined
     map_api_key: mapProvider ? String(raw.map_api_key || '').trim() || null : null,
     ai_provider: aiProvider,
     ai_api_key: aiProvider ? String(raw.ai_api_key || '').trim() || null : null,
+    ai_provider_secondary: sanitizeAiProvider(raw.ai_provider_secondary),
+    ai_api_key_secondary: sanitizeAiProvider(raw.ai_provider_secondary) ? String(raw.ai_api_key_secondary || '').trim() || null : null,
     operational_settings: parseOperationalSettings(raw.operational_settings),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,

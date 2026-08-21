@@ -32,23 +32,44 @@ interface SupabaseRuntimeCredentials {
   serviceRoleKey?: string;
 }
 
-let runtimeCredentials: SupabaseRuntimeCredentials | null = null;
+/**
+ * The runtime override is stored on `globalThis` (NOT a module-level `let`)
+ * because `supabase-client` is imported with BOTH `./supabase-client` and
+ * `./supabase-client.ts` specifiers across the app (route handlers use the
+ * `@/` alias without `.ts`, while the `node --test`-loadable services use the
+ * `.ts` form). A module-scoped variable can therefore be split into two
+ * instances by the bundler and the override set in one place would be invisible
+ * in the other. `globalThis` is a single shared namespace within a process, so
+ * the override is always seen by every consumer.
+ */
+const RUNTIME_CREDENTIALS_GLOBAL = '__goyunir_supabase_runtime_credentials__';
 
-/** Set (or clear) the inline Supabase credentials the Setup Wizard entered. */
-export function setSupabaseRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void {
+function readRuntimeCredentials(): SupabaseRuntimeCredentials | null {
+  const g = globalThis as Record<string, unknown>;
+  const v = g[RUNTIME_CREDENTIALS_GLOBAL];
+  return v && typeof v === 'object' ? (v as SupabaseRuntimeCredentials) : null;
+}
+
+function writeRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void {
+  const g = globalThis as Record<string, unknown>;
   if (!creds) {
-    runtimeCredentials = null;
+    delete g[RUNTIME_CREDENTIALS_GLOBAL];
     return;
   }
-  runtimeCredentials = {
+  g[RUNTIME_CREDENTIALS_GLOBAL] = {
     url: (creds.url || '').trim().replace(/\/+$/, ''),
     anonKey: (creds.anonKey || '').trim(),
     serviceRoleKey: (creds.serviceRoleKey || '').trim(),
   };
 }
 
+/** Set (or clear) the inline Supabase credentials the Setup Wizard entered. */
+export function setSupabaseRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void {
+  writeRuntimeCredentials(creds);
+}
+
 export function readSupabaseEnv(): { url: string; anonKey: string; serviceRoleKey: string } {
-  const override = runtimeCredentials;
+  const override = readRuntimeCredentials();
   const url = (override?.url || process.env[SUPABASE_ENV_URL] || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const anonKey = (override?.anonKey || process.env[SUPABASE_ENV_ANON_KEY] || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
   const serviceRoleKey = (override?.serviceRoleKey || process.env[SUPABASE_ENV_SERVICE_ROLE_KEY] || '').trim();
@@ -62,6 +83,20 @@ export function supabaseConfigured(): boolean {
 
 export function supabaseServiceConfigured(): boolean {
   const { url, serviceRoleKey } = readSupabaseEnv();
+  return Boolean(url && serviceRoleKey);
+}
+
+/**
+ * Whether the service-role credentials are present IN THE ENVIRONMENT (ignoring
+ * the runtime override). The Setup Wizard uses this to decide whether to clear
+ * a runtime override — the override must only be cleared when the environment
+ * itself can take over, otherwise a warm-process re-save would drop the only
+ * copy of the service-role key and fail with "SUPABASE_SERVICE_ROLE_KEY is not
+ * configured".
+ */
+export function supabaseServiceConfiguredFromEnv(): boolean {
+  const url = (process.env[SUPABASE_ENV_URL] || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  const serviceRoleKey = (process.env[SUPABASE_ENV_SERVICE_ROLE_KEY] || '').trim();
   return Boolean(url && serviceRoleKey);
 }
 

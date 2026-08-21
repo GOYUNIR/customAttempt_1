@@ -70,8 +70,10 @@ create table if not exists public.global_platform_settings (
   payment_webhook_secret text,
   map_provider text check (map_provider in ('mapbox', 'google_maps', 'open_street_map')),
   map_api_key text,
-  ai_provider text check (ai_provider in ('deepseek', 'openai', 'anthropic', 'replicate', 'workers_ai')),
+  ai_provider text check (ai_provider in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),
   ai_api_key text,
+  ai_provider_secondary text check (ai_provider_secondary in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),
+  ai_api_key_secondary text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

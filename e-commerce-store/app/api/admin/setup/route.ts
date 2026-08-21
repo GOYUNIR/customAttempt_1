@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, getAdminPassword } from '@/lib/server-config';
+import { adminRequestAuthorized, getAdminPassword, createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { isValidEmail } from '@/lib/validation';
-import { isSuperAdminSession } from '@/lib/admin-verify';
+import { isSuperAdminSession, issueAdminDevice } from '@/lib/admin-verify';
 import {
   getPlatformSettings,
   isPlatformConfigured,
@@ -13,7 +13,7 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, supabaseServiceConfigured, setSupabaseRuntimeCredentials } from '@/services/config/supabase-client';
+import { createSuperAdmin, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials } from '@/services/config/supabase-client';
 import {
   discoverEnvironment,
   computeAdminReady,
@@ -106,8 +106,8 @@ export async function POST(request: Request) {
     const supabaseAnonKey = String(body.supabaseAnonKey || body.supabase_anon_key || '').trim();
     const supabaseServiceRoleKey = String(body.supabaseServiceRoleKey || body.supabase_service_role_key || '').trim();
 
-    if (supabaseServiceConfigured()) {
-      setSupabaseRuntimeCredentials(null); // use the environment values
+    if (supabaseServiceConfiguredFromEnv()) {
+      setSupabaseRuntimeCredentials(null); // the environment can take over — drop any override
     } else if (supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey) {
       if (!/^https?:\/\//i.test(supabaseUrl)) {
         return NextResponse.json(
@@ -180,7 +180,30 @@ export async function POST(request: Request) {
     stage = 'finalize';
     await markPlatformConfigured();
 
-    return NextResponse.json({ ok: true, redirect: '/admin' });
+    // 5. On FIRST setup, sign the operator in as the super-admin immediately so
+    //    the "Open admin portal →" click lands IN the portal instead of on the
+    //    Basic-Auth + email-2FA gates. The device cookie carries `superAdmin:
+    //    true`, which middleware.ts treats as full authorization. Best-effort:
+    //    if no storage backend is reachable the operator can still super-login.
+    const response = NextResponse.json({ ok: true, redirect: '/admin' });
+    if (!alreadyConfigured) {
+      const redis = createRedisClient();
+      if (redis) {
+        try {
+          const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, true, { superAdmin: true });
+          response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: maxAgeSeconds,
+            path: '/',
+          });
+        } catch {
+          // Non-fatal — the operator can still reach /admin/setup?reconfigure=1 and sign in.
+        }
+      }
+    }
+    return response;
   } catch (err: any) {
     const message = err?.message || String(err);
     console.error('[setup] failed', message);

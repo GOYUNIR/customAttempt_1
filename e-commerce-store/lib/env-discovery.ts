@@ -707,6 +707,62 @@ binding = "AI"`,
     platform: 'all',
     commands: [WRANGLER_SECRET('REPLICATE_API_TOKEN')],
   });
+  add({
+    id: 'ai-openrouter',
+    name: 'OpenRouter API key',
+    purpose: 'OpenRouter (OpenAI-compatible) — one key for hundreds of models.',
+    variable: 'OPENROUTER_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('OPENROUTER_API_KEY')],
+  });
+  add({
+    id: 'ai-groq',
+    name: 'Groq API key',
+    purpose: 'Groq (OpenAI-compatible) — fast Llama inference.',
+    variable: 'GROQ_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('GROQ_API_KEY')],
+  });
+  add({
+    id: 'ai-mistral',
+    name: 'Mistral API key',
+    purpose: 'Mistral (OpenAI-compatible) — Mistral models.',
+    variable: 'MISTRAL_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('MISTRAL_API_KEY')],
+  });
+  add({
+    id: 'ai-google-gemini',
+    name: 'Google Gemini API key',
+    purpose: 'Google Gemini — Gemini 1.5 Flash text generation.',
+    variable: 'GEMINI_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('GEMINI_API_KEY')],
+  });
 
   // ── First-run bootstrap ─────────────────────────────────────────────────────
   add({

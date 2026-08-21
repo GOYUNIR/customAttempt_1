@@ -174,15 +174,17 @@ const MAP_OPTIONS: ProviderSpec[] = [
 
 const AI_OPTIONS: ProviderSpec[] = [
   {
-    value: 'none',
-    label: 'Skip AI for now',
-    hint: 'The storefront falls back to its built-in CSS/SVG animation presets. You can add an AI provider later.',
-    fields: [],
-  },
-  {
     value: 'deepseek',
     label: 'DeepSeek Pro',
-    hint: 'OpenAI-compatible — best price/quality for image-to-animation prompts.',
+    hint: 'OpenAI-compatible — best price/quality for image-to-animation prompts (the default primary).',
+    fields: [
+      { key: 'ai_api_key', label: 'API key', envVar: 'DEEPSEEK_API_KEY', secret: true, placeholder: 'sk-…', hint: 'DeepSeek platform → API Keys.' },
+    ],
+  },
+  {
+    value: 'deepseek_lite',
+    label: 'DeepSeek Lite',
+    hint: 'Same DeepSeek API, lighter tier — a cheap secondary fallback.',
     fields: [
       { key: 'ai_api_key', label: 'API key', envVar: 'DEEPSEEK_API_KEY', secret: true, placeholder: 'sk-…', hint: 'DeepSeek platform → API Keys.' },
     ],
@@ -204,6 +206,38 @@ const AI_OPTIONS: ProviderSpec[] = [
     ],
   },
   {
+    value: 'openrouter',
+    label: 'OpenRouter',
+    hint: 'One key for hundreds of models (OpenAI-compatible).',
+    fields: [
+      { key: 'ai_api_key', label: 'API key', envVar: 'OPENROUTER_API_KEY', secret: true, placeholder: 'sk-or-…', hint: 'OpenRouter → Keys → Create key.' },
+    ],
+  },
+  {
+    value: 'groq',
+    label: 'Groq',
+    hint: 'Fast Llama inference (OpenAI-compatible).',
+    fields: [
+      { key: 'ai_api_key', label: 'API key', envVar: 'GROQ_API_KEY', secret: true, placeholder: 'gsk_…', hint: 'Groq Cloud → API Keys.' },
+    ],
+  },
+  {
+    value: 'mistral',
+    label: 'Mistral',
+    hint: 'Mistral models (OpenAI-compatible).',
+    fields: [
+      { key: 'ai_api_key', label: 'API key', envVar: 'MISTRAL_API_KEY', secret: true, placeholder: '…', hint: 'Mistral AI → API Keys.' },
+    ],
+  },
+  {
+    value: 'google_gemini',
+    label: 'Google Gemini',
+    hint: 'Gemini 1.5 Flash text generation.',
+    fields: [
+      { key: 'ai_api_key', label: 'API key', envVar: 'GEMINI_API_KEY', secret: true, placeholder: 'AIza…', hint: 'Google AI Studio → API key.' },
+    ],
+  },
+  {
     value: 'replicate',
     label: 'Replicate',
     hint: 'Hosted models (async predictions).',
@@ -217,6 +251,17 @@ const AI_OPTIONS: ProviderSpec[] = [
     hint: 'Native Cloudflare binding — no key required.',
     fields: [],
   },
+];
+
+/** Secondary (fallback) AI options — same providers plus a "no fallback" choice.
+ *  The fields are re-keyed to `ai_api_key_secondary` so they never collide with
+ *  the primary slot's `ai_api_key` in the shared form state. */
+const AI_SECONDARY_OPTIONS: ProviderSpec[] = [
+  { value: 'none', label: 'No fallback', hint: 'The primary provider is the only one used.', fields: [] },
+  ...AI_OPTIONS.map((o) => ({
+    ...o,
+    fields: o.fields.map((f) => ({ ...f, key: 'ai_api_key_secondary', envVar: undefined, command: undefined })),
+  })),
 ];
 
 const SECURITY_FIELDS: FieldSpec[] = [
@@ -257,8 +302,10 @@ const DEFAULT_FORM: Record<string, string> = {
   payment_webhook_secret: '',
   map_provider: 'mapbox',
   map_api_key: '',
-  ai_provider: 'none',
+  ai_provider: 'deepseek',
   ai_api_key: '',
+  ai_provider_secondary: 'deepseek_lite',
+  ai_api_key_secondary: '',
   storage_provider: 'supabase',
   supabase_url: '',
   supabase_anon_key: '',
@@ -455,7 +502,7 @@ const STEPS = [
   { id: 2, label: 'Primary data store' },
   { id: 3, label: 'Core services' },
   { id: 4, label: 'Security & identity' },
-  { id: 5, label: 'Optional features' },
+  { id: 5, label: 'AI engine' },
 ];
 
 // Maps the API's failure `stage` back to the wizard step + a plain-English hint
@@ -596,6 +643,7 @@ export default function SetupPage() {
         supabaseAnonKey: form.supabase_anon_key,
         supabaseServiceRoleKey: form.supabase_service_role_key,
         ai_provider: form.ai_provider === 'none' ? '' : form.ai_provider,
+        ai_provider_secondary: form.ai_provider_secondary === 'none' ? '' : form.ai_provider_secondary,
         payment_provider: form.payment_provider === 'none' ? '' : form.payment_provider,
       };
       const res = await fetch('/api/admin/setup', {
@@ -648,6 +696,7 @@ export default function SetupPage() {
   const activeEmail = EMAIL_OPTIONS.find((o) => o.value === form.mail_provider) || EMAIL_OPTIONS[0];
   const activeMap = MAP_OPTIONS.find((o) => o.value === form.map_provider) || MAP_OPTIONS[0];
   const activeAi = AI_OPTIONS.find((o) => o.value === form.ai_provider) || AI_OPTIONS[0];
+  const activeAiSecondary = AI_SECONDARY_OPTIONS.find((o) => o.value === form.ai_provider_secondary) || AI_SECONDARY_OPTIONS[0];
   const errorContext = errorStage ? STAGE_CONTEXT[errorStage] : undefined;
 
   const scrollToTop = () => {
@@ -701,6 +750,24 @@ export default function SetupPage() {
         if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or choose a keyless maps provider).`;
       }
     }
+    if (step === 4) {
+      // AI is now MANDATORY — the primary provider always needs a key (the
+      // keyless Workers AI binding is the only exception).
+      if (form.ai_provider !== 'workers_ai') {
+        for (const f of activeAi.fields) {
+          if (f.optional) continue;
+          if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
+        }
+      }
+      // Secondary fallback is OPTIONAL — only validate its key when a real
+      // (non-keyless) provider is actually selected.
+      if (form.ai_provider_secondary !== 'none' && form.ai_provider_secondary !== 'workers_ai') {
+        for (const f of activeAiSecondary.fields) {
+          if (f.optional) continue;
+          if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or set the fallback to "No fallback").`;
+        }
+      }
+    }
     return errs;
   }
 
@@ -751,7 +818,7 @@ export default function SetupPage() {
             SETUP WIZARD
           </div>
           <h1 style={{ fontSize: 30, fontWeight: 800, margin: '16px 0 6px', color: '#111' }}>Configure your store</h1>
-          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Five short steps — admin account, data store, core services, security and optional AI.</p>
+          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Five short steps — admin account, data store, core services, security and the AI engine.</p>
         </div>
 
         {ready && !reconfigure ? (
@@ -873,9 +940,17 @@ export default function SetupPage() {
             )}
 
             {step === 4 && (
-              <Section title="5 · Optional features — AI engine" subtitle="Powers image-to-animation + dynamic SVG asset generation. Safe to skip — the storefront falls back to built-in presets.">
-                <ProviderSelect label="AI provider" value={form.ai_provider} options={AI_OPTIONS} onChange={(v) => set('ai_provider', v)} />
-                <ProviderFields fields={activeAi.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+              <Section title="5 · AI engine" subtitle="Powers image-to-animation + dynamic SVG asset generation. The primary provider is required; the secondary fallback is optional.">
+                <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Primary AI provider (required)</div>
+                  <ProviderSelect label="Primary provider" value={form.ai_provider} options={AI_OPTIONS} onChange={(v) => set('ai_provider', v)} />
+                  <ProviderFields fields={activeAi.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+                </div>
+                <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Secondary AI provider (optional fallback)</div>
+                  <ProviderSelect label="Fallback provider" value={form.ai_provider_secondary} options={AI_SECONDARY_OPTIONS} onChange={(v) => set('ai_provider_secondary', v)} />
+                  <ProviderFields fields={activeAiSecondary.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+                </div>
               </Section>
             )}
 

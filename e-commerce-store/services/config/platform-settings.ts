@@ -103,13 +103,25 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
     return { ok: false, error: 'Enter a map provider API key.' };
   }
 
-  // AI is OPTIONAL. A missing / blank / 'none' provider means "skip the AI
-  // engine" — the storefront then falls back to its built-in CSS/SVG presets.
-  const aiRaw = String(raw.ai_provider ?? '').trim();
-  const aiProvider = !aiRaw || aiRaw.toLowerCase() === 'none' ? null : sanitizeAiProvider(raw.ai_provider);
+  // AI is now MANDATORY (primary). The engine only falls back to the built-in
+  // CSS/SVG presets when the primary call fails AND no secondary is configured.
+  const aiProvider = sanitizeAiProvider(raw.ai_provider);
+  if (!aiProvider) return { ok: false, error: 'Choose a valid AI provider (the AI engine is required).' };
   const aiApiKey = String(raw.ai_api_key || '').trim();
-  if (aiProvider && aiProvider !== 'workers_ai' && !aiApiKey) {
+  if (aiProvider !== 'workers_ai' && !aiApiKey) {
     return { ok: false, error: 'Enter an AI provider API key (Workers AI needs none).' };
+  }
+
+  // The SECONDARY fallback provider is OPTIONAL. When set, its key is required
+  // (Workers AI excepted). Blank / 'none' means "no secondary".
+  const aiSecondaryRaw = String(raw.ai_provider_secondary ?? '').trim();
+  const aiProviderSecondary =
+    !aiSecondaryRaw || aiSecondaryRaw.toLowerCase() === 'none'
+      ? null
+      : sanitizeAiProvider(raw.ai_provider_secondary);
+  const aiApiKeySecondary = String(raw.ai_api_key_secondary || '').trim();
+  if (aiProviderSecondary && aiProviderSecondary !== 'workers_ai' && !aiApiKeySecondary) {
+    return { ok: false, error: 'Enter a secondary AI provider API key (Workers AI needs none), or clear the secondary provider.' };
   }
 
   return {
@@ -123,7 +135,9 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       map_provider: mapProvider,
       map_api_key: mapApiKey || undefined,
       ai_provider: aiProvider,
-      ai_api_key: aiProvider && aiApiKey ? aiApiKey : undefined,
+      ai_api_key: aiApiKey,
+      ai_provider_secondary: aiProviderSecondary,
+      ai_api_key_secondary: aiProviderSecondary && aiApiKeySecondary ? aiApiKeySecondary : undefined,
     },
   };
 }
@@ -140,8 +154,10 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     payment_webhook_secret: input.payment_webhook_secret || null,
     map_provider: input.map_provider,
     map_api_key: input.map_api_key || null,
-    ai_provider: input.ai_provider || null,
+    ai_provider: input.ai_provider,
     ai_api_key: input.ai_api_key || null,
+    ai_provider_secondary: input.ai_provider_secondary || null,
+    ai_api_key_secondary: input.ai_api_key_secondary || null,
   });
   clearPlatformSettingsCache();
 }

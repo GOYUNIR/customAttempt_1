@@ -11,3 +11,4 @@
 export * from './types';
 export { createAiDriver, AI_DRIVER_CATALOG, type AiDriverResolutionOptions } from './registry';
 export { AiFactory } from './factory';
+export { FallbackAiDriver } from './fallback.driver';
