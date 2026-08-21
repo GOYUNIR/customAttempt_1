@@ -67,7 +67,8 @@ export interface PlatformSettingsInput {
   payment_webhook_secret?: string;
   map_provider: MapProvider;
   map_api_key?: string;
-  ai_provider: AiProvider;
+  /** `null` = skip the AI engine (the storefront uses its CSS/SVG fallbacks). */
+  ai_provider: AiProvider | null;
   ai_api_key?: string;
 }
 

@@ -99,10 +99,12 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
     return { ok: false, error: 'Enter a map provider API key.' };
   }
 
-  const aiProvider = sanitizeAiProvider(raw.ai_provider);
-  if (!aiProvider) return { ok: false, error: 'Choose a valid AI provider.' };
+  // AI is OPTIONAL. A missing / blank / 'none' provider means "skip the AI
+  // engine" — the storefront then falls back to its built-in CSS/SVG presets.
+  const aiRaw = String(raw.ai_provider ?? '').trim();
+  const aiProvider = !aiRaw || aiRaw.toLowerCase() === 'none' ? null : sanitizeAiProvider(raw.ai_provider);
   const aiApiKey = String(raw.ai_api_key || '').trim();
-  if (aiProvider !== 'workers_ai' && !aiApiKey) {
+  if (aiProvider && aiProvider !== 'workers_ai' && !aiApiKey) {
     return { ok: false, error: 'Enter an AI provider API key (Workers AI needs none).' };
   }
 
@@ -117,7 +119,7 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       map_provider: mapProvider,
       map_api_key: mapApiKey || undefined,
       ai_provider: aiProvider,
-      ai_api_key: aiApiKey || undefined,
+      ai_api_key: aiProvider && aiApiKey ? aiApiKey : undefined,
     },
   };
 }
@@ -134,7 +136,7 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     payment_webhook_secret: input.payment_webhook_secret || null,
     map_provider: input.map_provider,
     map_api_key: input.map_api_key || null,
-    ai_provider: input.ai_provider,
+    ai_provider: input.ai_provider || null,
     ai_api_key: input.ai_api_key || null,
   });
   clearPlatformSettingsCache();

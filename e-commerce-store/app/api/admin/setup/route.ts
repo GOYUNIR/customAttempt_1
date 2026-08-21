@@ -105,15 +105,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── super-admin account ──────────────────────────────────────────────────
+    // ── super-admin account (first setup only) ───────────────────────────────
     const adminEmail = String(body.adminEmail || '').trim().toLowerCase();
     const adminPassword = String(body.adminPassword || '');
-    if (!isValidEmail(adminEmail)) {
-      return NextResponse.json({ error: 'Enter a valid super-admin email address.' }, { status: 400 });
-    }
-    if (adminPassword.length < 6 || adminPassword.length > 128) {
-      return NextResponse.json({ error: 'Super-admin password must be 6–128 characters.' }, { status: 400 });
-    }
 
     // ── provider keys ────────────────────────────────────────────────────────
     const normalized = normalizePlatformSettingsInput(body);
@@ -134,14 +128,28 @@ export async function POST(request: Request) {
       );
     }
 
+    // First-run requires a valid master account; re-configuration keeps the
+    // existing super-admin and never re-creates it (re-creating would 422 on
+    // the duplicate email and silently fail the save).
+    if (!alreadyConfigured) {
+      if (!isValidEmail(adminEmail)) {
+        return NextResponse.json({ error: 'Enter a valid super-admin email address.' }, { status: 400 });
+      }
+      if (adminPassword.length < 6 || adminPassword.length > 128) {
+        return NextResponse.json({ error: 'Super-admin password must be 6–128 characters.' }, { status: 400 });
+      }
+    }
+
     // 1. Persist provider keys (is_configured stays false until the admin exists).
     await savePlatformSettings(normalized.input);
 
     // 2. Persist operational settings (security / site / payments / AI / storage).
     await saveOperationalSettings(operational);
 
-    // 3. Create the master super-admin (service role).
-    await createSuperAdmin({ email: adminEmail, password: adminPassword });
+    // 3. Create the master super-admin on first setup only.
+    if (!alreadyConfigured) {
+      await createSuperAdmin({ email: adminEmail, password: adminPassword });
+    }
 
     // 4. Flip the gate — clears the settings cache so the runtime driver
     //    factories re-resolve against the newly persisted providers.
