@@ -60,6 +60,30 @@ storefront:
   (`/api/admin/webhooks`, exponential backoff ×3) and **maintenance mode**
   (`MAINTENANCE_MODE=true`).
 
+### 4-tier RBAC routing + Universal Item Engine + Lockdown
+
+The enterprise multi-tenant foundation (4-tier role hierarchy, an extensible
+"any business type" item engine, and post-setup configuration lockdown) ships
+as three pure, edge-safe modules plus one Supabase migration:
+
+- **`lib/rbac.ts`** — the 4-tier hierarchy + role/capability matrix. Route
+  prefixes: `/a` (Tier 1 super-admin), `/s` (Tier 2 sales), `/b` (Tier 3
+  business owner); everything else — including each merchant's **custom domain**
+  — is the Tier 4 end-customer storefront. `canAccessTenant()` enforces
+  tenant isolation (super-admin unrestricted, sales → assigned tenants,
+  owner/staff/customer → own tenant).
+- **`lib/item-engine/`** — the **Universal Item Engine**. One item record per
+  business vertical via a schema-driven `itemType` + JSON `rules` blob:
+  `fcfs`, `raffle`, `appointment`, `table_booking`, `ticketed_access`,
+  `subscription`. Adding a vertical = one JSON Schema, no DB rewrite.
+- **`lib/lockdown.ts`** — the **Lockdown Engine**. Critical system parameters
+  (storage, admin auth, payment, cron, license) are frozen after setup and can
+  only be changed by an authenticated Tier-1 super-admin with fresh **step-up**
+  verification.
+- **`supabase/migrations/00003_tenant_routing.sql`** — `tenants.business_type`
+  + `custom_domain`, `users.role`, the `tenant_items` table (JSONB `rules`), the
+  `system_locks` table, and strict RLS tenant-isolation policies.
+
 ### Local dev + setup commands
 
 ```bash
