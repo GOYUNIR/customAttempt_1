@@ -38,3 +38,25 @@ test('AI still requires a key when a real provider is selected', () => {
   const missingKey = normalizePlatformSettingsInput({ ...BASE, ai_provider: 'deepseek', ai_api_key: '' });
   assert.equal(missingKey.ok, false);
 });
+
+test('Payments are optional — missing / blank / "none" provider is accepted as "skip"', () => {
+  const omitted = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', map_provider: 'open_street_map' });
+  assert.ok(omitted.ok);
+  if (omitted.ok) {
+    assert.equal(omitted.input.payment_provider, null);
+    assert.equal(omitted.input.payment_api_key, null);
+  }
+
+  const explicitNone = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'none', payment_api_key: '', map_provider: 'open_street_map' });
+  assert.ok(explicitNone.ok);
+  if (explicitNone.ok) assert.equal(explicitNone.input.payment_provider, null);
+
+  const blank = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: '', payment_api_key: '', map_provider: 'open_street_map' });
+  assert.ok(blank.ok);
+  if (blank.ok) assert.equal(blank.input.payment_provider, null);
+});
+
+test('Payments still require a key when a real provider is selected', () => {
+  const missingKey = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: '', map_provider: 'open_street_map' });
+  assert.equal(missingKey.ok, false);
+});

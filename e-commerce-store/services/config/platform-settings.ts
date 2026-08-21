@@ -86,10 +86,14 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   const mailApiKey = String(raw.mail_api_key || '').trim();
   if (!mailApiKey) return { ok: false, error: 'Enter an email provider API key.' };
 
-  const paymentProvider = sanitizePaymentProvider(raw.payment_provider);
-  if (!paymentProvider) return { ok: false, error: 'Choose a valid payment provider.' };
+  // Payments are OPTIONAL. A missing / blank / 'none' provider means "skip
+  // payments for now" — checkout simply won't run until one is configured.
+  const paymentRaw = String(raw.payment_provider ?? '').trim();
+  const isPaymentSkip = !paymentRaw || paymentRaw.toLowerCase() === 'none';
+  const paymentProvider = isPaymentSkip ? null : sanitizePaymentProvider(raw.payment_provider);
+  if (!isPaymentSkip && !paymentProvider) return { ok: false, error: 'Choose a valid payment provider.' };
   const paymentApiKey = String(raw.payment_api_key || '').trim();
-  if (!paymentApiKey) return { ok: false, error: 'Enter a payment provider API key.' };
+  if (paymentProvider && !paymentApiKey) return { ok: false, error: 'Enter a payment provider API key.' };
   const paymentWebhookSecret = String(raw.payment_webhook_secret || '').trim();
 
   const mapProvider = sanitizeMapProvider(raw.map_provider);
@@ -114,7 +118,7 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       mail_provider: mailProvider,
       mail_api_key: mailApiKey,
       payment_provider: paymentProvider,
-      payment_api_key: paymentApiKey,
+      payment_api_key: paymentProvider ? paymentApiKey : null,
       payment_webhook_secret: paymentWebhookSecret || undefined,
       map_provider: mapProvider,
       map_api_key: mapApiKey || undefined,

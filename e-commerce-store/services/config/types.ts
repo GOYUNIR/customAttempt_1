@@ -62,8 +62,9 @@ export interface GlobalPlatformSettings {
 export interface PlatformSettingsInput {
   mail_provider: MailProvider;
   mail_api_key: string;
-  payment_provider: PaymentProvider;
-  payment_api_key: string;
+  /** `null` = payments skipped for now (no payment provider configured yet). */
+  payment_provider: PaymentProvider | null;
+  payment_api_key: string | null;
   payment_webhook_secret?: string;
   map_provider: MapProvider;
   map_api_key?: string;

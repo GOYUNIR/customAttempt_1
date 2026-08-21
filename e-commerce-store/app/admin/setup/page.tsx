@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 
 // ── shared styles ─────────────────────────────────────────────────────────────
 const inputStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
+const invalidInputStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #ef4444', background: '#fef2f2', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
 const selectStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%' } as const;
 const labelStyle = { fontSize: 13, fontWeight: 700, color: '#374151' } as const;
 const hintStyle = { fontSize: 12, color: '#6b7280', margin: 0, lineHeight: 1.5 } as const;
@@ -79,12 +80,18 @@ const STORAGE_OPTIONS: ProviderSpec[] = [
     hint: 'Zero third-party store via native Cloudflare bindings. Concurrency caveats apply to raffle/payment writes.',
     fields: [
       { key: 'cloudflare_kv_binding', label: 'KV namespace binding', envVar: 'wrangler.toml', placeholder: 'SITE_CACHE', hint: 'The binding name from wrangler.toml [[kv_namespaces]]. Create the namespace with `npx wrangler kv namespace create`.', command: 'npx wrangler kv namespace create' },
-      { key: 'cloudflare_d1_binding', label: 'D1 database binding', envVar: 'wrangler.toml', placeholder: 'DB', hint: 'The binding name from wrangler.toml [[d1_databases]].' },
+      { key: 'cloudflare_d1_binding', label: 'D1 database binding', envVar: 'wrangler.toml', placeholder: 'DB', optional: true, hint: 'The binding name from wrangler.toml [[d1_databases]] — only needed for the D1 adapter.' },
     ],
   },
 ];
 
 const PAYMENT_OPTIONS: ProviderSpec[] = [
+  {
+    value: 'none',
+    label: 'Skip payments for now',
+    hint: 'Launch without a payment provider. You can add Stripe / Lemon Squeezy / Paddle later from the reconfigure screen.',
+    fields: [],
+  },
   {
     value: 'stripe',
     label: 'Stripe',
@@ -226,8 +233,6 @@ const IDENTITY_FIELDS: FieldSpec[] = [
 ];
 
 // ── status + form types ───────────────────────────────────────────────────────
-type Check = { present: boolean; required: boolean; blocking: boolean };
-type DiscoveryGroup = { title: string; kind: string; checks: Check[] };
 type Status = {
   configured: boolean;
   ready: boolean;
@@ -240,7 +245,6 @@ type Status = {
   platformProviders: { mail_provider: string | null; payment_provider: string | null; map_provider: string | null; ai_provider: string | null };
   environment: string;
   cloudflareVarsPath: string;
-  discovery: { groups: DiscoveryGroup[]; summary: { present: number; total: number; blockingMissing: string[]; requiredMissing: string[] } };
 };
 
 const DEFAULT_FORM: Record<string, string> = {
@@ -271,14 +275,6 @@ const DEFAULT_FORM: Record<string, string> = {
   stripe_product_id: '',
 };
 
-function envKind(discovery: Status['discovery'] | undefined, kind: string): { present: boolean; required: boolean } {
-  const group = discovery?.groups.find((g) => g.kind === kind);
-  return {
-    present: Boolean(group?.checks.some((c) => c.present)),
-    required: Boolean(group?.checks.some((c) => c.required || c.blocking)),
-  };
-}
-
 /** Build the copyable CLI command for a field's env var (or null when N/A). */
 function commandFor(f: FieldSpec): string | null {
   if (f.command) return f.command;
@@ -298,7 +294,7 @@ function Section(props: { title: string; subtitle?: string; children: ReactNode 
   );
 }
 
-function Field(props: { label: string; hint?: string; optional?: boolean; children: ReactNode }) {
+function Field(props: { label: string; hint?: string; optional?: boolean; error?: string; children: ReactNode }) {
   return (
     <label style={{ display: 'grid', gap: 6 }}>
       <span style={labelStyle}>
@@ -306,6 +302,7 @@ function Field(props: { label: string; hint?: string; optional?: boolean; childr
         {props.optional ? <span style={{ color: '#9ca3af', fontWeight: 600 }}> · optional</span> : null}
       </span>
       {props.children}
+      {props.error && <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>{props.error}</span>}
       {props.hint && <span style={hintStyle}>{props.hint}</span>}
     </label>
   );
@@ -338,6 +335,7 @@ function SecretInput(props: {
   placeholder?: string;
   autoComplete?: string;
   required?: boolean;
+  invalid?: boolean;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -348,8 +346,9 @@ function SecretInput(props: {
         onChange={(e) => props.onChange(e.target.value)}
         autoComplete={props.autoComplete || 'off'}
         required={props.required}
+        aria-invalid={props.invalid || undefined}
         placeholder={props.placeholder}
-        style={{ ...inputStyle, paddingRight: 46 }}
+        style={{ ...(props.invalid ? invalidInputStyle : inputStyle), paddingRight: 46 }}
       />
       <button
         type="button"
@@ -365,7 +364,7 @@ function SecretInput(props: {
   );
 }
 
-function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, string>; onChange: (k: string, v: string) => void; copied: string; onCopy: (t: string) => void }) {
+function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, string>; onChange: (k: string, v: string) => void; copied: string; onCopy: (t: string) => void; errors?: Record<string, string> }) {
   if (props.fields.length === 0) {
     return <p style={noteStyle}>No API key required for this option.</p>;
   }
@@ -373,15 +372,17 @@ function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, str
     <div style={{ display: 'grid', gap: 12 }}>
       {props.fields.map((f) => {
         const cmd = commandFor(f);
+        const err = props.errors?.[f.key];
         return (
           <div key={f.key} style={{ display: 'grid', gap: 6 }}>
-            <Field label={f.label} hint={f.hint} optional={f.optional}>
+            <Field label={f.label} hint={f.hint} optional={f.optional} error={err}>
               {f.secret ? (
                 <SecretInput
                   value={props.values[f.key] || ''}
                   onChange={(v) => props.onChange(f.key, v)}
                   autoComplete="off"
                   placeholder={f.placeholder}
+                  invalid={Boolean(err)}
                 />
               ) : (
                 <input
@@ -389,8 +390,9 @@ function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, str
                   value={props.values[f.key] || ''}
                   onChange={(e) => props.onChange(f.key, e.target.value)}
                   autoComplete="off"
+                  aria-invalid={err ? true : undefined}
                   placeholder={f.placeholder}
-                  style={inputStyle}
+                  style={err ? invalidInputStyle : inputStyle}
                 />
               )}
             </Field>
@@ -442,39 +444,6 @@ function CopyCommand(props: { text: string; copied: string; onCopy: (t: string) 
       <button type="button" onClick={() => props.onCopy(props.text)} style={{ background: props.copied === props.text ? '#10b981' : '#fff', color: props.copied === props.text ? '#fff' : '#111', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
         {props.copied === props.text ? 'Copied ✓' : 'Copy'}
       </button>
-    </div>
-  );
-}
-
-function Badge(props: { label: string; present: boolean; required: boolean }) {
-  const tone = props.present ? 'ok' : props.required ? 'need' : 'opt';
-  const bg = tone === 'ok' ? '#ecfdf5' : tone === 'need' ? '#fef2f2' : '#fffbeb';
-  const color = tone === 'ok' ? '#047857' : tone === 'need' ? '#b91c1c' : '#92400e';
-  const glyph = tone === 'ok' ? '✅ Configured' : tone === 'need' ? '❌ Action Needed' : '⚠️ Optional';
-  return <span style={{ background: bg, color, borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 700 }}>{props.label} · {glyph}</span>;
-}
-
-function HealthBanner(props: { status: Status | null; loading: boolean; error: string; onRefresh: () => void }) {
-  const ready = props.status?.ready === true;
-  const present = props.status?.discovery.summary.present ?? 0;
-  const total = props.status?.discovery.summary.total ?? 0;
-  const blocking = props.status?.discovery.summary.blockingMissing ?? [];
-  return (
-    <div style={{ background: ready ? '#ecfdf5' : '#fff', border: `1px solid ${ready ? '#a7f3d0' : '#e5e7eb'}`, borderRadius: 16, padding: '18px 20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: '#111' }}>Environment Health & Scan</h2>
-          <p style={{ fontSize: 13, color: '#6b7280', margin: '4px 0 0' }}>
-            {props.loading ? 'Scanning…' : ready ? '✅ Ready — all blocking requirements met.' : `❌ ${blocking.length} blocking item(s) remaining`}
-            {props.status ? ` · ${present}/${total} variables detected` : ''}
-          </p>
-        </div>
-        <button type="button" onClick={props.onRefresh} disabled={props.loading} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: props.loading ? 'default' : 'pointer', opacity: props.loading ? 0.6 : 1 }}>{props.loading ? 'Scanning…' : '↻ Re-scan'}</button>
-      </div>
-      {props.error && <p style={{ color: '#b91c1c', fontSize: 13, margin: '10px 0 0' }}>{props.error}</p>}
-      {props.status && blocking.length > 0 && (
-        <p style={{ fontSize: 12, color: '#6b7280', margin: '10px 0 0' }}>Missing: {blocking.join(' · ')}. Fill the steps below (or set the platform env vars) and save to unlock.</p>
-      )}
     </div>
   );
 }
@@ -534,8 +503,6 @@ function Stepper(props: { step: number; onStep: (i: number) => void }) {
 
 export default function SetupPage() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [statusError, setStatusError] = useState('');
   const [form, setForm] = useState<Record<string, string>>(DEFAULT_FORM);
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -546,6 +513,7 @@ export default function SetupPage() {
   const [reconfigure, setReconfigure] = useState(false);
   const [step, setStep] = useState(0);
   const [notice, setNotice] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.search.includes('reconfigure=1')) {
@@ -554,20 +522,13 @@ export default function SetupPage() {
   }, []);
 
   const load = useCallback(async () => {
-    setLoadingStatus(true);
-    setStatusError('');
     try {
       const res = await fetch('/api/admin/setup', { cache: 'no-store' });
+      if (!res.ok) return;
       const data = (await res.json().catch(() => ({}))) as Partial<Status>;
-      if (!res.ok || !data.discovery) {
-        setStatusError('Could not load the setup status. Check the server logs.');
-        return;
-      }
       setStatus(data as Status);
     } catch {
-      setStatusError('Could not reach the setup endpoint. Check your connection.');
-    } finally {
-      setLoadingStatus(false);
+      // Status fetch failed — the wizard still works without the readiness gate.
     }
   }, []);
 
@@ -578,6 +539,21 @@ export default function SetupPage() {
   function set(key: string, value: string) {
     setNotice('');
     setForm((prev) => ({ ...prev, [key]: value }));
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function clearError(key: string) {
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }
 
   async function copy(text: string) {
@@ -592,6 +568,19 @@ export default function SetupPage() {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+
+    // Final gate: surface any still-missing required fields client-side before
+    // hitting the server, and jump to the first step that needs attention.
+    const validation = validateAllSteps();
+    if (Object.keys(validation.errors).length > 0) {
+      setErrors(validation.errors);
+      if (validation.firstStep >= 0) {
+        setStep(validation.firstStep);
+        scrollToTop();
+      }
+      return;
+    }
+
     setBusy(true);
     setError('');
     setErrorStage(null);
@@ -605,6 +594,7 @@ export default function SetupPage() {
         supabaseAnonKey: form.supabase_anon_key,
         supabaseServiceRoleKey: form.supabase_service_role_key,
         ai_provider: form.ai_provider === 'none' ? '' : form.ai_provider,
+        payment_provider: form.payment_provider === 'none' ? '' : form.payment_provider,
       };
       const res = await fetch('/api/admin/setup', {
         method: 'POST',
@@ -617,7 +607,6 @@ export default function SetupPage() {
         setErrorStage(data.stage || null);
         return;
       }
-      // Re-scan the environment health check in place — no hard refresh needed.
       await load();
       setNotice('saved');
     } catch {
@@ -659,17 +648,89 @@ export default function SetupPage() {
   const activeAi = AI_OPTIONS.find((o) => o.value === form.ai_provider) || AI_OPTIONS[0];
   const errorContext = errorStage ? STAGE_CONTEXT[errorStage] : undefined;
 
-  const badges = [
-    { label: 'Store', present: status?.storageOk === true, required: true },
-    { label: 'Auth', present: Boolean(status?.legacyAdminOk || status?.platformConfigured), required: true },
-    { label: 'Payments', present: Boolean(status?.platformProviders?.payment_provider) || envKind(status?.discovery, 'payment').present, required: envKind(status?.discovery, 'payment').required },
-    { label: 'Email', present: Boolean(status?.platformProviders?.mail_provider) || envKind(status?.discovery, 'email').present, required: envKind(status?.discovery, 'email').required },
-    { label: 'Maps', present: Boolean(status?.platformProviders?.map_provider) || envKind(status?.discovery, 'maps').present, required: envKind(status?.discovery, 'maps').required },
-    { label: 'AI', present: Boolean(status?.platformProviders?.ai_provider) || envKind(status?.discovery, 'ai').present, required: false },
-    { label: 'Security', present: Boolean(status?.legacyAdminOk) || envKind(status?.discovery, 'security').present, required: false },
-  ];
+  const scrollToTop = () => {
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-    const primaryBtn = { background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '14px 22px', fontSize: 15, fontWeight: 800, cursor: 'pointer' } as const;
+  const emailValid = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
+  function validateStep(step: number): Record<string, string> {
+    const errs: Record<string, string> = {};
+    if (step === 0 && !configured) {
+      const email = adminEmail.trim();
+      if (!email) errs.adminEmail = 'Enter the master admin email address.';
+      else if (!emailValid(email)) errs.adminEmail = 'Enter a valid email address.';
+      if (!adminPassword) errs.adminPassword = 'Enter a password.';
+      else if (adminPassword.length < 6 || adminPassword.length > 128) errs.adminPassword = 'Password must be 6–128 characters.';
+    }
+    if (step === 1) {
+      for (const f of activeStorage.fields) {
+        if (f.optional) continue;
+        if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
+      }
+      if (form.storage_provider !== 'supabase') {
+        for (const f of STORAGE_OPTIONS[0].fields) {
+          if (f.optional) continue;
+          if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
+        }
+      }
+    }
+    if (step === 2) {
+      if (form.payment_provider !== 'none') {
+        for (const f of activePayment.fields) {
+          if (f.optional) continue;
+          if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or choose "Skip payments for now").`;
+        }
+      }
+      for (const f of activeEmail.fields) {
+        if (f.optional) continue;
+        if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
+      }
+      for (const f of activeMap.fields) {
+        if (f.optional) continue;
+        if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or choose a keyless maps provider).`;
+      }
+    }
+    return errs;
+  }
+
+  function validateAllSteps(): { firstStep: number; errors: Record<string, string> } {
+    let firstStep = -1;
+    let errors: Record<string, string> = {};
+    for (let i = 0; i <= 4; i++) {
+      const errs = validateStep(i);
+      if (Object.keys(errs).length > 0) {
+        if (firstStep === -1) firstStep = i;
+        errors = { ...errors, ...errs };
+      }
+    }
+    return { firstStep, errors };
+  }
+
+  function goToStep(i: number) {
+    setStep(i);
+    setErrors({});
+    scrollToTop();
+  }
+
+  function handleNext() {
+    const errs = validateStep(step);
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      return;
+    }
+    setErrors({});
+    setStep(Math.min(4, step + 1));
+    scrollToTop();
+  }
+
+  function handleBack() {
+    setStep(Math.max(0, step - 1));
+    setErrors({});
+    scrollToTop();
+  }
+
+  const primaryBtn = { background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '14px 22px', fontSize: 15, fontWeight: 800, cursor: 'pointer' } as const;
   const ghostBtn = { background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 999, padding: '14px 22px', fontSize: 15, fontWeight: 700, cursor: 'pointer' } as const;
 
   return (
@@ -681,12 +742,6 @@ export default function SetupPage() {
           </div>
           <h1 style={{ fontSize: 30, fontWeight: 800, margin: '16px 0 6px', color: '#111' }}>Configure your store</h1>
           <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Five short steps — admin account, data store, core services, security and optional AI.</p>
-        </div>
-
-        <HealthBanner status={status} loading={loadingStatus} error={statusError} onRefresh={load} />
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {badges.map((b) => <Badge key={b.label} label={b.label} present={b.present} required={b.required} />)}
         </div>
 
         {ready && !reconfigure ? (
@@ -710,11 +765,11 @@ export default function SetupPage() {
               </Section>
             )}
 
-            <Stepper step={step} onStep={setStep} />
+            <Stepper step={step} onStep={goToStep} />
 
             {notice === 'saved' && (
               <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ color: '#047857', fontSize: 14, fontWeight: 700 }}>✓ Saved — the environment health check above has been refreshed in place.</span>
+                <span style={{ color: '#047857', fontSize: 14, fontWeight: 700 }}>✓ Saved — configuration updated.</span>
                 <button type="button" onClick={() => window.location.assign('/admin')} style={{ ...primaryBtn, padding: '10px 16px', fontSize: 13 }}>Open admin portal →</button>
               </div>
             )}
@@ -729,11 +784,11 @@ export default function SetupPage() {
                 {!configured ? (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <Field label="Email" hint="Where the master sign-in + two-step code are sent.">
-                        <input type="email" required value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} />
+                      <Field label="Email" hint="Where the master sign-in + two-step code are sent." error={errors.adminEmail}>
+                        <input type="email" required value={adminEmail} onChange={(e) => { setAdminEmail(e.target.value); clearError('adminEmail'); }} placeholder="you@example.com" autoComplete="email" aria-invalid={errors.adminEmail ? true : undefined} style={errors.adminEmail ? invalidInputStyle : inputStyle} />
                       </Field>
-                      <Field label="Password" hint="6–128 characters. Store it in a password manager.">
-                        <SecretInput value={adminPassword} onChange={setAdminPassword} autoComplete="new-password" required />
+                      <Field label="Password" hint="6–128 characters. Store it in a password manager." error={errors.adminPassword}>
+                        <SecretInput value={adminPassword} onChange={(v) => { setAdminPassword(v); clearError('adminPassword'); }} autoComplete="new-password" required invalid={Boolean(errors.adminPassword)} />
                       </Field>
                     </div>
                     <p style={noteStyle}>This account signs into <code>/admin</code> and can update providers later — it is separate from the storefront customer accounts.</p>
@@ -747,14 +802,14 @@ export default function SetupPage() {
             {step === 1 && (
               <Section title="2 · Primary data store" subtitle="Pick the backend that stores products, carts, entries and configuration — then enter only that backend's keys.">
                 <StoragePicker value={form.storage_provider} options={STORAGE_OPTIONS} onChange={(v) => set('storage_provider', v)} />
-                <ProviderFields fields={activeStorage.fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                <ProviderFields fields={activeStorage.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                 {form.storage_provider !== 'supabase' && (
                   <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: '#075985' }}>Supabase credentials (still required)</div>
                     <p style={{ fontSize: 12, color: '#075985', margin: 0, lineHeight: 1.5 }}>
                       Your master admin account and provider settings live in Supabase, so Supabase credentials are required even when the storefront data lives in {activeStorage.label}. Enter them here.
                     </p>
-                    <ProviderFields fields={STORAGE_OPTIONS[0].fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                    <ProviderFields fields={STORAGE_OPTIONS[0].fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                   </div>
                 )}
               </Section>
@@ -766,19 +821,19 @@ export default function SetupPage() {
                   <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Payments & webhooks</div>
                     <ProviderSelect label="Payment provider" value={form.payment_provider} options={PAYMENT_OPTIONS} onChange={(v) => set('payment_provider', v)} />
-                    <ProviderFields fields={activePayment.fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                    <ProviderFields fields={activePayment.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                   </div>
 
                   <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Transactional email</div>
                     <ProviderSelect label="Email provider" value={form.mail_provider} options={EMAIL_OPTIONS} onChange={(v) => set('mail_provider', v)} />
-                    <ProviderFields fields={activeEmail.fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                    <ProviderFields fields={activeEmail.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                   </div>
 
                   <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Address autofill (maps)</div>
                     <ProviderSelect label="Maps provider" value={form.map_provider} options={MAP_OPTIONS} onChange={(v) => set('map_provider', v)} />
-                    <ProviderFields fields={activeMap.fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                    <ProviderFields fields={activeMap.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                   </div>
                 </div>
               </Section>
@@ -788,11 +843,11 @@ export default function SetupPage() {
               <Section title="4 · System security & site identity" subtitle="Admin portal protection, the cron safety net, and how your store names itself.">
                 <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Security</div>
-                  <ProviderFields fields={SECURITY_FIELDS} values={form} onChange={set} copied={copied} onCopy={copy} />
+                  <ProviderFields fields={SECURITY_FIELDS} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                 </div>
                 <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Site identity</div>
-                  <ProviderFields fields={IDENTITY_FIELDS} values={form} onChange={set} copied={copied} onCopy={copy} />
+                  <ProviderFields fields={IDENTITY_FIELDS} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                 </div>
               </Section>
             )}
@@ -800,7 +855,7 @@ export default function SetupPage() {
             {step === 4 && (
               <Section title="5 · Optional features — AI engine" subtitle="Powers image-to-animation + dynamic SVG asset generation. Safe to skip — the storefront falls back to built-in presets.">
                 <ProviderSelect label="AI provider" value={form.ai_provider} options={AI_OPTIONS} onChange={(v) => set('ai_provider', v)} />
-                <ProviderFields fields={activeAi.fields} values={form} onChange={set} copied={copied} onCopy={copy} />
+                <ProviderFields fields={activeAi.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
               </Section>
             )}
 
@@ -824,11 +879,11 @@ export default function SetupPage() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-              <button type="button" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0 || busy} style={{ ...ghostBtn, opacity: step === 0 || busy ? 0.5 : 1, cursor: step === 0 || busy ? 'default' : 'pointer' }}>
+              <button type="button" onClick={handleBack} disabled={step === 0 || busy} style={{ ...ghostBtn, opacity: step === 0 || busy ? 0.5 : 1, cursor: step === 0 || busy ? 'default' : 'pointer' }}>
                 ← Back
               </button>
               {step < 4 ? (
-                <button type="button" onClick={() => setStep((s) => Math.min(4, s + 1))} style={primaryBtn}>Continue →</button>
+                <button type="button" onClick={handleNext} disabled={busy} style={primaryBtn}>Continue →</button>
               ) : (
                 <button type="submit" disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }}>
                   {busy ? 'Saving…' : 'Save configuration & create admin'}
