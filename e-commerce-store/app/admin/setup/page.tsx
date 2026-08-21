@@ -311,6 +311,60 @@ function Field(props: { label: string; hint?: string; optional?: boolean; childr
   );
 }
 
+function EyeIcon(props: { open: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {props.open ? (
+        <>
+          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      ) : (
+        <>
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+          <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+          <line x1="1" y1="1" x2="23" y2="23" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Password input with a show/hide eye toggle — lets operators inspect typed/pasted secrets. */
+function SecretInput(props: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  autoComplete?: string;
+  required?: boolean;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input
+        type={show ? 'text' : 'password'}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        autoComplete={props.autoComplete || 'off'}
+        required={props.required}
+        placeholder={props.placeholder}
+        style={{ ...inputStyle, paddingRight: 46 }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        aria-label={show ? 'Hide secret' : 'Show secret'}
+        aria-pressed={show}
+        title={show ? 'Hide' : 'Show'}
+        style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 6, color: '#6b7280', borderRadius: 8 }}
+      >
+        <EyeIcon open={show} />
+      </button>
+    </div>
+  );
+}
+
 function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, string>; onChange: (k: string, v: string) => void; copied: string; onCopy: (t: string) => void }) {
   if (props.fields.length === 0) {
     return <p style={noteStyle}>No API key required for this option.</p>;
@@ -322,14 +376,23 @@ function ProviderFields(props: { fields: FieldSpec[]; values: Record<string, str
         return (
           <div key={f.key} style={{ display: 'grid', gap: 6 }}>
             <Field label={f.label} hint={f.hint} optional={f.optional}>
-              <input
-                type={f.secret ? 'password' : 'text'}
-                value={props.values[f.key] || ''}
-                onChange={(e) => props.onChange(f.key, e.target.value)}
-                autoComplete="off"
-                placeholder={f.placeholder}
-                style={inputStyle}
-              />
+              {f.secret ? (
+                <SecretInput
+                  value={props.values[f.key] || ''}
+                  onChange={(v) => props.onChange(f.key, v)}
+                  autoComplete="off"
+                  placeholder={f.placeholder}
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={props.values[f.key] || ''}
+                  onChange={(e) => props.onChange(f.key, e.target.value)}
+                  autoComplete="off"
+                  placeholder={f.placeholder}
+                  style={inputStyle}
+                />
+              )}
             </Field>
             {f.envVar && <p style={mutedStyle}>Env var: <code>{f.envVar}</code></p>}
             {cmd && <CopyCommand text={cmd} copied={props.copied} onCopy={props.onCopy} />}
@@ -424,6 +487,26 @@ const STEPS = [
   { id: 5, label: 'Optional features' },
 ];
 
+// Maps the API's failure `stage` back to the wizard step + a plain-English hint
+// so the operator sees WHICH service/key failed, not a generic message.
+const STAGE_CONTEXT: Record<string, { step: number; title: string; message: string }> = {
+  storage_init: {
+    step: 1,
+    title: 'Data store connection failed',
+    message: 'The primary data store rejected the connection. Double-check the Supabase Project URL / service role key (or the Upstash REST URL + token), confirm the project is reachable, and that the required tables/namespace exist — then save again.',
+  },
+  create_admin: {
+    step: 0,
+    title: 'Master admin creation failed',
+    message: 'The master admin account could not be created. Confirm the Supabase service role key is valid and that the Auth service (and profiles table) is provisioned, then try again.',
+  },
+  finalize: {
+    step: 4,
+    title: 'Finalizing configuration failed',
+    message: 'Provider settings were saved, but the final configuration flag could not be written. Re-save to retry.',
+  },
+};
+
 function Stepper(props: { step: number; onStep: (i: number) => void }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -458,6 +541,7 @@ export default function SetupPage() {
   const [adminPassword, setAdminPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [errorStage, setErrorStage] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
   const [reconfigure, setReconfigure] = useState(false);
   const [step, setStep] = useState(0);
@@ -510,6 +594,7 @@ export default function SetupPage() {
     e.preventDefault();
     setBusy(true);
     setError('');
+    setErrorStage(null);
     setNotice('');
     try {
       const body: Record<string, unknown> = {
@@ -526,9 +611,10 @@ export default function SetupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
       if (!res.ok || !data.ok) {
         setError(String(data.error || 'Setup could not be completed.'));
+        setErrorStage(data.stage || null);
         return;
       }
       // Re-scan the environment health check in place — no hard refresh needed.
@@ -571,6 +657,7 @@ export default function SetupPage() {
   const activeEmail = EMAIL_OPTIONS.find((o) => o.value === form.mail_provider) || EMAIL_OPTIONS[0];
   const activeMap = MAP_OPTIONS.find((o) => o.value === form.map_provider) || MAP_OPTIONS[0];
   const activeAi = AI_OPTIONS.find((o) => o.value === form.ai_provider) || AI_OPTIONS[0];
+  const errorContext = errorStage ? STAGE_CONTEXT[errorStage] : undefined;
 
   const badges = [
     { label: 'Store', present: status?.storageOk === true, required: true },
@@ -617,7 +704,7 @@ export default function SetupPage() {
               <Section title="Reconfigure — sign in as super-admin" subtitle="This platform is already configured. Sign in with the master account to update providers without the env Basic-Auth password.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <Field label="Super-admin email"><input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} /></Field>
-                  <Field label="Super-admin password"><input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} autoComplete="current-password" style={inputStyle} /></Field>
+                  <Field label="Super-admin password"><SecretInput value={adminPassword} onChange={setAdminPassword} autoComplete="current-password" /></Field>
                 </div>
                 <button type="button" onClick={superLogin} disabled={busy} style={{ ...primaryBtn, padding: '12px 18px', fontSize: 14, justifySelf: 'start', opacity: busy ? 0.6 : 1 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
               </Section>
@@ -646,7 +733,7 @@ export default function SetupPage() {
                         <input type="email" required value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} />
                       </Field>
                       <Field label="Password" hint="6–128 characters. Store it in a password manager.">
-                        <input type="password" required value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} autoComplete="new-password" style={inputStyle} />
+                        <SecretInput value={adminPassword} onChange={setAdminPassword} autoComplete="new-password" required />
                       </Field>
                     </div>
                     <p style={noteStyle}>This account signs into <code>/admin</code> and can update providers later — it is separate from the storefront customer accounts.</p>
@@ -718,7 +805,22 @@ export default function SetupPage() {
             )}
 
             {error && (
-              <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '12px 16px', color: '#b91c1c', fontSize: 14 }}>{error}</div>
+              <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ color: '#b91c1c', fontSize: 15, fontWeight: 800 }}>{errorContext ? errorContext.title : 'Setup failed'}</span>
+                  {errorContext && (
+                    <button
+                      type="button"
+                      onClick={() => { setStep(errorContext.step); setError(''); setErrorStage(null); }}
+                      style={{ marginLeft: 'auto', background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      Go to step {errorContext.step + 1}
+                    </button>
+                  )}
+                </div>
+                {errorContext && <p style={{ color: '#7f1d1d', fontSize: 13, margin: 0, lineHeight: 1.5 }}>{errorContext.message}</p>}
+                <p style={{ color: '#b91c1c', fontSize: 13, margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-word', lineHeight: 1.5 }}>{error}</p>
+              </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>

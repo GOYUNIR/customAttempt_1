@@ -68,6 +68,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Tracks how far the bootstrap got before an error so the wizard can surface a
+  // contextual alert pointing at the exact step (storage → admin → finalize).
+  let stage: 'storage_init' | 'create_admin' | 'finalize' = 'storage_init';
   try {
     let body: Record<string, unknown> = {};
     try {
@@ -141,26 +144,31 @@ export async function POST(request: Request) {
     }
 
     // 1. Persist provider keys (is_configured stays false until the admin exists).
+    stage = 'storage_init';
     await savePlatformSettings(normalized.input);
 
     // 2. Persist operational settings (security / site / payments / AI / storage).
+    stage = 'storage_init';
     await saveOperationalSettings(operational);
 
     // 3. Create the master super-admin on first setup only.
+    stage = 'create_admin';
     if (!alreadyConfigured) {
       await createSuperAdmin({ email: adminEmail, password: adminPassword });
     }
 
     // 4. Flip the gate — clears the settings cache so the runtime driver
     //    factories re-resolve against the newly persisted providers.
+    stage = 'finalize';
     await markPlatformConfigured();
 
     return NextResponse.json({ ok: true, redirect: '/admin' });
   } catch (err: any) {
-    console.error('[setup] failed', err?.message || err);
+    const message = err?.message || String(err);
+    console.error('[setup] failed', message);
     return NextResponse.json(
-      { error: 'Setup could not be completed. Check the server logs for details.' },
-      { status: 500 },
+      { success: false, error: message, stage },
+      { status: 422 },
     );
   }
 }
