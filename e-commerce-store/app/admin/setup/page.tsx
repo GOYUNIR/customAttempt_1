@@ -245,6 +245,8 @@ type Status = {
   platformProviders: { mail_provider: string | null; payment_provider: string | null; map_provider: string | null; ai_provider: string | null };
   environment: string;
   cloudflareVarsPath: string;
+  /** Raw Supabase schema/connection error from the status endpoint (e.g. a missing table). */
+  supabaseSchemaError?: string;
 };
 
 const DEFAULT_FORM: Record<string, string> = {
@@ -462,7 +464,7 @@ const STAGE_CONTEXT: Record<string, { step: number; title: string; message: stri
   storage_init: {
     step: 1,
     title: 'Data store connection failed',
-    message: 'The primary data store rejected the connection. Double-check the Supabase Project URL / service role key (or the Upstash REST URL + token), confirm the project is reachable, and that the required tables/namespace exist — then save again.',
+    message: 'The primary data store rejected the connection. If you chose Supabase, the most common cause is that the schema has not been applied to this project yet — run `supabase db push`, or paste supabase/migrations/00001_init.sql + 00002_setup_operational.sql into the Supabase SQL editor, then save again. Otherwise double-check the Project URL / service role key (or the Upstash REST URL + token) and confirm the project is reachable.',
   },
   create_admin: {
     step: 0,
@@ -649,7 +651,15 @@ export default function SetupPage() {
   const errorContext = errorStage ? STAGE_CONTEXT[errorStage] : undefined;
 
   const scrollToTop = () => {
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (typeof window === 'undefined') return;
+    // Defer one tick so React has committed the new step's DOM before we scroll,
+    // then scroll every possible container to the top (window, <html>, <body>) —
+    // some browsers/embedders scroll a different element or ignore ScrollToOptions.
+    window.setTimeout(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }, 0);
   };
 
   const emailValid = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
@@ -776,6 +786,16 @@ export default function SetupPage() {
             {notice === 'signed-in' && (
               <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 12, padding: '12px 16px' }}>
                 <span style={{ color: '#047857', fontSize: 14, fontWeight: 700 }}>✓ Signed in — you can now update the providers below.</span>
+              </div>
+            )}
+
+            {status?.supabaseSchemaError && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>Supabase schema not applied</div>
+                <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
+                  The <code>global_platform_settings</code> table is missing from your Supabase project, so saving will fail. Run{' '}
+                  <code>supabase db push</code> or paste <code>supabase/migrations/00001_init.sql</code> (+ <code>00002_setup_operational.sql</code>) into the Supabase SQL editor, then continue.
+                </p>
               </div>
             )}
 

@@ -38,8 +38,25 @@ export const dynamic = 'force-dynamic';
  *       an already-configured platform requires the admin password.
  */
 export async function GET() {
-  const settings = await getPlatformSettings({ force: true });
-  const configured = await isPlatformConfigured({ force: true });
+  let settings: Awaited<ReturnType<typeof getPlatformSettings>> = null;
+  let configured: Awaited<ReturnType<typeof isPlatformConfigured>> = null;
+  let supabaseSchemaError = '';
+
+  // A missing Supabase schema (tables never applied) must not 500 the status
+  // endpoint — capture the failure and surface it so the wizard can warn the
+  // operator BEFORE they save instead of only after the POST blows up.
+  try {
+    settings = await getPlatformSettings({ force: true });
+  } catch (err: unknown) {
+    supabaseSchemaError = (err as Error)?.message || String(err);
+  }
+  try {
+    configured = await isPlatformConfigured({ force: true });
+  } catch (err: unknown) {
+    if (!supabaseSchemaError) supabaseSchemaError = (err as Error)?.message || String(err);
+    configured = false;
+  }
+
   const platformProviders = toPublicSummary(settings);
 
   const storageDrivers = detectStorageDrivers();
@@ -64,6 +81,7 @@ export async function GET() {
     environment: process.env.NODE_ENV || 'development',
     cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
     discovery: discoverEnvironment(),
+    supabaseSchemaError,
   });
 }
 
@@ -166,8 +184,15 @@ export async function POST(request: Request) {
   } catch (err: any) {
     const message = err?.message || String(err);
     console.error('[setup] failed', message);
+    // The most common Supabase bootstrap failure is a schema that was never
+    // applied (PostgREST 404 "Could not find the table … in the schema cache").
+    // Translate it into an actionable next step instead of a raw PGRST error.
+    const schemaMissing = /could not find the table|schema cache|PGRST205|does not exist/i.test(message);
+    const hint = schemaMissing
+      ? ' — The Supabase schema is missing: run `supabase db push`, or paste supabase/migrations/00001_init.sql + 00002_setup_operational.sql into the Supabase SQL editor, then save again.'
+      : '';
     return NextResponse.json(
-      { success: false, error: message, stage },
+      { success: false, error: message + hint, stage, schemaMissing },
       { status: 422 },
     );
   }
