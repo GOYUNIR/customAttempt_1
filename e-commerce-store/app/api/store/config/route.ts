@@ -127,7 +127,9 @@ const DEFAULT_CONFIG = {
   // list buyers can add/rename/delete — products are tagged with any subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
-    categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
+    // Categories are EMPTY by default — they only exist after the admin runs
+    // Seed Defaults (the seed writes this list into Redis).
+    categories: [],
   },
   // Checkout & orders policy (admin → Settings → Checkout & Orders).
   checkout: {

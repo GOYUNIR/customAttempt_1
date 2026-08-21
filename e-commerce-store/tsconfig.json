@@ -42,6 +42,12 @@
     // Excluding it keeps the standard `npm run typecheck` green for the
     // Vercel / Netlify / plain-Node deploys; the OpenNext build still loads
     // and bundles it with the adapter installed.
-    "open-next.config.ts"
+    "open-next.config.ts",
+    // The multi-tenant platform (Supabase + Cloudflare Workers/KV) is a
+    // self-contained sibling workspace with its OWN tsconfig, deps and tests
+    // (see multi-tenant-platform/README.md). Its optional packages
+    // (@supabase/supabase-js, @cloudflare/workers-types) are NOT storefront
+    // dependencies, so it is excluded from the storefront typecheck.
+    "multi-tenant-platform"
   ]
 }

@@ -17,6 +17,14 @@ without touching a single file.
 
 
 
+## Related workspaces
+
+- **`multi-tenant-platform/`** — a self-contained multi-tenant website template
+  platform: Supabase Postgres + RLS as the source of truth, Cloudflare Workers +
+  Cloudflare KV for edge delivery. Strict shared TS contracts, SQL migrations
+  with RLS policies, an edge-rendering Worker and an admin Save/Publish +
+  cache-invalidation pipeline. See its `README.md`.
+
 ## 1. Deploy & connect
 
 The app is **platform-agnostic** — the same code runs on Vercel, Netlify,

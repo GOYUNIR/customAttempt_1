@@ -44,6 +44,9 @@ const eslintConfig = defineConfig([
     "cron-worker/.wrangler/**",
     ".vercel/**",
     ".netlify/**",
+    // Multi-tenant platform (Supabase + Workers/KV) — self-contained sibling
+    // workspace with its own lint/typecheck/test scripts (see its README).
+    "multi-tenant-platform/**",
     // Local dev/scratch helpers that intentionally use CommonJS requires.
     ".inspect-config.cjs",
     ".mapbox-test.mjs",

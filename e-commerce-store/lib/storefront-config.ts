@@ -339,8 +339,9 @@ const defaultCatalogSettings: NonNullable<StorefrontConfig['catalog']> = {
   // Default /catalog section order: live at the BOTTOM (per the template
   // default) — operators can reorder from /admin → Settings → Catalog.
   sectionOrder: ['upcoming', 'archive', 'live'],
-  // Seeded admin-managed categories (Settings → Catalog → Categories).
-  categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
+  // Admin-managed categories (Settings → Catalog → Categories). EMPTY until
+  // the seed runs — an unseeded store deliberately has no categories.
+  categories: [],
 };
 
 /** Default checkout & orders policy (admin → Settings → Checkout & Orders). */

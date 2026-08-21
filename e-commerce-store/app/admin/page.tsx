@@ -625,9 +625,10 @@ const DEFAULT_LEGAL_SETTINGS = {
 
 const DEFAULT_CATALOG_SETTINGS = {
   sectionOrder: ['upcoming', 'archive', 'live'],
-  // Admin-managed product categories (Settings → Catalog). Buyers can add,
-  // rename and delete these freely; products are tagged with any subset.
-  categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
+  // Admin-managed product categories (Settings → Catalog). EMPTY until the
+  // store is seeded — the seed writes the starter list into Redis. Buyers can
+  // add, rename and delete these freely; products are tagged with any subset.
+  categories: [],
 };
 
 const DEFAULT_BEHAVIOR_SETTINGS = {
@@ -6040,7 +6041,7 @@ export default function AdminPortal() {
                       Product categories
                     </div>
                     <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
-                      The categories buyers can tag products with — e.g. Perfume, Clothes, Shoes, Food, Tools, Tires, Pastries, Beanies, Winter, Summer, Men, Unisex, Women. Add or remove freely; customers filter the catalog by them. Products keep their tags even if a category is later deleted (the chip just stops being clickable).
+                      The categories buyers can tag products with — e.g. New Arrivals, Apparel, Men, Unisex. This list is empty until the store is seeded (Seed Defaults writes the starter list) or you add your first category. Add or remove freely; customers filter the catalog by them. Products keep their tags even if a category is later deleted (the chip just stops being clickable).
                     </p>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
                       <input

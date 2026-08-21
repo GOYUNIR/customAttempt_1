@@ -273,7 +273,10 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   // subset.
   catalog: {
     sectionOrder: ['upcoming', 'archive', 'live'],
-    categories: ['New Arrivals', 'Limited Edition', 'Best Sellers', 'Signature', 'Seasonal', 'Perfume', 'Fragrance', 'Candles & Home', 'Apparel', 'Accessories', 'Men', 'Women', 'Unisex'],
+    // Categories are EMPTY by default — they only exist after the admin runs
+    // Seed Defaults (the seed writes this list into Redis). An unseeded store
+    // deliberately has no categories.
+    categories: [],
   },
   checkout: {
     requireAddressAutofill: true,

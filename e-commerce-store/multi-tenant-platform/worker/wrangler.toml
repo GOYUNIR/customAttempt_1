@@ -1,0 +1,32 @@
+# Cloudflare Worker — multi-tenant edge storefront.
+#
+# Local dev (uses [vars] + .dev.vars):
+#   wrangler dev
+# Deploy:
+#   wrangler kv namespace create SITE_CACHE        # once — paste id below
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_ANON_KEY
+#   wrangler deploy
+name = "mtp-edge-storefront"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The compiled per-tenant cache. Create it first:
+#   wrangler kv namespace create SITE_CACHE
+[[kv_namespaces]]
+binding = "SITE_CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+# Apex of the platform — tenant subdomains live one level under it:
+#   demo.yourplatform.com → tenant key "demo"
+PLATFORM_ROOT_DOMAIN = "yourplatform.com"
+# How long a compiled site payload stays in KV (the spec's 24h default).
+SITE_CACHE_TTL_SECONDS = "86400"
+# Bump to invalidate every cached tenant at once (see cacheKeyForSite).
+CACHE_VERSION = "1"
+
+# Runtime secrets (never commit; set via `wrangler secret put`):
+#   SUPABASE_URL          e.g. https://xxxx.supabase.co
+#   SUPABASE_ANON_KEY     the anon/public key (RLS gates reads to published sites)
