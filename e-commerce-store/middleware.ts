@@ -161,6 +161,13 @@ export async function middleware(request: NextRequest) {
     pathname === '/api/admin/super-login' ||
     pathname.startsWith('/api/admin/super-login/');
 
+  // The setup wizard's STATUS read (GET) must stay reachable even AFTER the
+  // platform is configured, so the reconfigure page can detect `configured`
+  // and render the "sign in as super-admin" panel. POST stays fully gated by
+  // the route's own guard (Basic Auth or a super-admin session) — this only
+  // opens the read-only status probe, never a write path.
+  const isSetupRead = isSetupPath && request.method.toUpperCase() === 'GET';
+
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     // Deprecated: /admin/setup-status was folded into the unified /admin/setup
     // dashboard. Redirect direct traffic (page or API) so old bookmarks and any
@@ -241,7 +248,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && (!ADMIN_USER || !ADMIN_PASSWORD)) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && (!ADMIN_USER || !ADMIN_PASSWORD)) {
       return new NextResponse('Admin not configured', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
@@ -253,7 +260,7 @@ export async function middleware(request: NextRequest) {
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
     const authHeader = request.headers.get('authorization');
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !verifyBasicAuth(authHeader)) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
@@ -267,7 +274,7 @@ export async function middleware(request: NextRequest) {
       pathname === '/admin' ||
       pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
-    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure) {
+    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead) {
       const token = adminDeviceTokenFromRequest(request);
       const redis = createStorageClient();
       let verified = false;

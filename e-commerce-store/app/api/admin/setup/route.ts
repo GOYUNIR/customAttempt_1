@@ -37,7 +37,7 @@ export const dynamic = 'force-dynamic';
  *       Basic Auth exists, so the FIRST save needs no credentials; a RE-save on
  *       an already-configured platform requires the admin password.
  */
-export async function GET() {
+export async function GET(request: Request) {
   let settings: Awaited<ReturnType<typeof getPlatformSettings>> = null;
   let configured: Awaited<ReturnType<typeof isPlatformConfigured>> = null;
   let supabaseSchemaError = '';
@@ -65,6 +65,20 @@ export async function GET() {
   const ready = computeAdminReady({ storage: storageDrivers, legacyAdminOk, platformConfigured });
   const storageOk =
     storageDrivers.supabase || storageDrivers.cloudflare || storageDrivers.redis || platformConfigured;
+
+  // ── reconfigure status (no secret exposure to unauthenticated callers) ──────
+  // Once the platform is configured, the reconfigure wizard still needs to know
+  // `configured`/`ready` so it can render the "sign in as super-admin" panel —
+  // but an unauthenticated caller must NOT receive the full provider/env
+  // snapshot (presence booleans, provider names, schema error text). Return the
+  // minimal safe status for unauthenticated requests; the full payload is only
+  // served to a caller with Basic Auth or a super-admin session.
+  if (platformConfigured) {
+    const authorized = adminRequestAuthorized(request) || (await isSuperAdminSession(request));
+    if (!authorized) {
+      return NextResponse.json({ configured: true, ready: true, signedIn: false });
+    }
+  }
 
   return NextResponse.json({
     configured: platformConfigured,

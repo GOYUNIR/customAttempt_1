@@ -653,6 +653,17 @@ export default function SetupPage() {
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
       if (!res.ok || !data.ok) {
+        // A 401/403 on an already-configured platform means the operator hasn't
+        // authenticated yet. Surface the exact reason and make sure the
+        // "sign in as super-admin" panel is visible instead of a generic error.
+        if (res.status === 401 || res.status === 403) {
+          setReconfigure(true);
+          setError(
+            data.error ||
+              'Sign in first: use the "Sign in as super-admin" panel above (master account) or authenticate with the admin Basic Auth password, then save again.',
+          );
+          return;
+        }
         setError(String(data.error || 'Setup could not be completed.'));
         setErrorStage(data.stage || null);
         return;
@@ -682,6 +693,9 @@ export default function SetupPage() {
       }
       setError('');
       setNotice('signed-in');
+      // Refresh the readiness/configured status now that the super-admin device
+      // cookie is set, so the page knows the platform is unlocked.
+      await load();
     } catch {
       setError('Sign-in failed. Check your connection.');
     } finally {
@@ -832,7 +846,7 @@ export default function SetupPage() {
           </div>
         ) : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 18 }}>
-            {configured && (
+            {(configured || reconfigure) && (
               <Section title="Reconfigure — sign in as super-admin" subtitle="This platform is already configured. Sign in with the master account to update providers without the env Basic-Auth password.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <Field label="Super-admin email"><input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} /></Field>
