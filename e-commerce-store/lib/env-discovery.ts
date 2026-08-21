@@ -218,7 +218,7 @@ export const CLOUDFLARE_VARS_PATH =
 /**
  * Build the full registry against a given env object. Called fresh each time so
  * `present` always reflects the CURRENT environment (the middleware re-runs it
- * per request; the setup-status route calls it once per GET).
+ * per request; the /api/admin/setup route calls it once per GET).
  */
 export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryResult {
   const checks: EnvCheck[] = [];
@@ -782,7 +782,7 @@ export interface AdminReadinessInput {
 
 /**
  * The ONE place that decides whether the admin portal is ready to open. Used by
- * BOTH middleware.ts (edge) and /api/admin/setup-status so they can never drift.
+ * BOTH middleware.ts (edge) and /api/admin/setup so they can never drift.
  *
  * Ready = AT LEAST ONE storage driver is satisfied (Supabase / Cloudflare KV-D1 /
  * Redis — or Supabase already configured via the wizard) AND at least one admin

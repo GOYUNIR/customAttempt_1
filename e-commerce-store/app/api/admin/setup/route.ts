@@ -1,17 +1,26 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized } from '@/lib/server-config';
+import { adminRequestAuthorized, getAdminPassword } from '@/lib/server-config';
 import { isValidEmail } from '@/lib/validation';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import {
   getPlatformSettings,
   isPlatformConfigured,
   savePlatformSettings,
+  saveOperationalSettings,
+  normalizeOperationalSettingsInput,
   markPlatformConfigured,
   normalizePlatformSettingsInput,
 } from '@/services/config/platform-settings';
-import { toPublicSummary } from '@/services/config/types';
+import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { createSuperAdmin, supabaseServiceConfigured, setSupabaseRuntimeCredentials } from '@/services/config/supabase-client';
+import {
+  discoverEnvironment,
+  computeAdminReady,
+  detectStorageDrivers,
+  detectStorageProvider,
+  CLOUDFLARE_VARS_PATH,
+} from '@/lib/env-discovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,10 +40,30 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const settings = await getPlatformSettings({ force: true });
   const configured = await isPlatformConfigured({ force: true });
+  const platformProviders = toPublicSummary(settings);
+
+  const storageDrivers = detectStorageDrivers();
+  const legacyAdminOk = Boolean(getAdminPassword());
+  const platformConfigured = configured === true;
+  const ready = computeAdminReady({ storage: storageDrivers, legacyAdminOk, platformConfigured });
+  const storageOk =
+    storageDrivers.supabase || storageDrivers.cloudflare || storageDrivers.redis || platformConfigured;
+
   return NextResponse.json({
-    configured: configured === true,
+    configured: platformConfigured,
+    ready,
+    storageProvider: detectStorageProvider(),
+    storageDrivers,
+    storageOk,
+    legacyAdminOk,
+    platformConfigured,
+    platformProviders,
+    operationalConfigured: hasOperationalSettings(settings?.operational_settings),
     supabase: supabaseEnvSummary(),
-    settings: toPublicSummary(settings),
+    settings: platformProviders,
+    environment: process.env.NODE_ENV || 'development',
+    cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
+    discovery: discoverEnvironment(),
   });
 }
 
@@ -92,6 +121,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: normalized.error }, { status: 400 });
     }
 
+    // ── operational settings (security / site / payments / AI / storage) ─────
+    const operational = normalizeOperationalSettingsInput(body);
+
     // ── re-configuration guard ───────────────────────────────────────────────
     const alreadyConfigured = (await isPlatformConfigured()) === true;
     const superAdminSession = await isSuperAdminSession(request);
@@ -105,10 +137,14 @@ export async function POST(request: Request) {
     // 1. Persist provider keys (is_configured stays false until the admin exists).
     await savePlatformSettings(normalized.input);
 
-    // 2. Create the master super-admin (service role).
+    // 2. Persist operational settings (security / site / payments / AI / storage).
+    await saveOperationalSettings(operational);
+
+    // 3. Create the master super-admin (service role).
     await createSuperAdmin({ email: adminEmail, password: adminPassword });
 
-    // 3. Flip the gate.
+    // 4. Flip the gate — clears the settings cache so the runtime driver
+    //    factories re-resolve against the newly persisted providers.
     await markPlatformConfigured();
 
     return NextResponse.json({ ok: true, redirect: '/admin' });

@@ -25,11 +25,13 @@ import {
 import {
   GLOBAL_PLATFORM_SETTINGS_ROW_ID,
   parseSettingsRow,
+  parseOperationalSettings,
   sanitizeMailProvider,
   sanitizePaymentProvider,
   sanitizeMapProvider,
   sanitizeAiProvider,
   type GlobalPlatformSettings,
+  type OperationalSettings,
   type PlatformSettingsInput,
 } from './types.ts';
 
@@ -134,6 +136,24 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     map_api_key: input.map_api_key || null,
     ai_provider: input.ai_provider,
     ai_api_key: input.ai_api_key || null,
+  });
+  clearPlatformSettingsCache();
+}
+
+/**
+ * Extract + sanitize the operational (env-var-style) settings from a wizard
+ * payload. Only whitelisted keys are kept and blank values are dropped, so an
+ * operator can submit the full form without every field filled in.
+ */
+export function normalizeOperationalSettingsInput(raw: Record<string, unknown>): OperationalSettings {
+  return parseOperationalSettings(raw);
+}
+
+/** Persist ONLY the operational_settings JSONB column (leaves is_configured untouched). */
+export async function saveOperationalSettings(settings: OperationalSettings): Promise<void> {
+  await upsertPlatformSettingsRow({
+    id: GLOBAL_PLATFORM_SETTINGS_ROW_ID,
+    operational_settings: settings as unknown as Record<string, unknown>,
   });
   clearPlatformSettingsCache();
 }

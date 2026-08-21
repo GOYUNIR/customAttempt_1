@@ -55,7 +55,6 @@ const TWO_FA_EXEMPT = [
   '/api/admin/verify-send',
   '/api/admin/verify-confirm',
   '/api/admin/verify-status',
-  '/api/admin/setup-status',
 ];
 
 function verifyBasicAuth(authorization: string | null) {
@@ -158,16 +157,27 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/admin/setup') ||
     pathname === '/api/admin/setup' ||
     pathname.startsWith('/api/admin/setup');
-  const isSetupStatusPath =
-    pathname === '/admin/setup-status' ||
-    pathname.startsWith('/admin/setup-status') ||
-    pathname === '/api/admin/setup-status' ||
-    pathname.startsWith('/api/admin/setup-status');
   const isSuperLoginPath =
     pathname === '/api/admin/super-login' ||
     pathname.startsWith('/api/admin/super-login/');
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    // Deprecated: /admin/setup-status was folded into the unified /admin/setup
+    // dashboard. Redirect direct traffic (page or API) so old bookmarks and any
+    // stale SETUP_REQUIRED deep-links still land somewhere useful.
+    if (pathname.startsWith('/admin/setup-status')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/setup';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    if (pathname.startsWith('/api/admin/setup-status')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/api/admin/setup';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+
     // ── Readiness gate (environment + bindings + admin account) ──────────────
     // The admin portal is intercepted while the install is NOT ready: either the
     // data store is missing or no admin account exists yet (no Basic Auth
@@ -191,17 +201,17 @@ export async function middleware(request: NextRequest) {
     const ready = computeAdminReady({ storage, legacyAdminOk, platformConfigured });
 
     if (!ready) {
-      if (isSetupPath || isSetupStatusPath || isSuperLoginPath) {
+      if (isSetupPath || isSuperLoginPath) {
         return NextResponse.next(); // bootstrap endpoints are open pre-config
       }
       if (pathname.startsWith('/api/admin')) {
         return NextResponse.json(
-          { error: 'SETUP_REQUIRED', redirect: '/admin/setup-status' },
+          { error: 'SETUP_REQUIRED', redirect: '/admin/setup' },
           { status: 423, headers: { 'Cache-Control': 'no-store' } },
         );
       }
       const url = request.nextUrl.clone();
-      url.pathname = '/admin/setup-status';
+      url.pathname = '/admin/setup';
       url.search = '';
       return NextResponse.redirect(url);
     }
@@ -255,9 +265,7 @@ export async function middleware(request: NextRequest) {
     // everything else requires a valid device cookie from a verified browser.
     const isPage =
       pathname === '/admin' ||
-      pathname === '/admin/' ||
-      pathname === '/admin/setup-status' ||
-      pathname === '/admin/setup-status/';
+      pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
     if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure) {
       const token = adminDeviceTokenFromRequest(request);

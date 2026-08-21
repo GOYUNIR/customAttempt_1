@@ -43,13 +43,16 @@ storefront:
   `GRACE` (1–3 days) → full access + "License payment pending." banner;
   `EXPIRED`/`MISSING` → Demo Mode (POST/PUT/DELETE write routes blocked).
 - **`/admin` interception + auto-discovery** (`lib/env-discovery.ts`): a missing
-  data store or admin account redirects `/admin` → `/admin/setup-status`, which
-  shows per-variable ✅/❌ + copyable `npx wrangler secret put …` commands and
-  the exact Cloudflare path
+  data store or admin account redirects `/admin` → `/admin/setup`, the unified
+  setup dashboard, which shows a live environment-health scan, per-category
+  badges, and copyable `npx wrangler secret put …` commands plus the exact
+  Cloudflare path
   *Workers & Pages → [Project] → Settings → Variables and Secrets → Production*.
-- **Setup wizard** (`/admin/setup`): master admin → data store → email →
-  payment → map → **AI provider** (DeepSeek Pro / OpenAI / Anthropic /
-  Replicate / Workers AI), persisted to `global_platform_settings`.
+- **Setup dashboard** (`/admin/setup`): one page for the whole install —
+  data store matrix (Supabase / Upstash Redis / Cloudflare KV-D1), master
+  admin, email / payment / map providers, **AI provider** (DeepSeek Pro /
+  OpenAI / Anthropic / Replicate / Workers AI), security, site identity and
+  Stripe keys — persisted to `global_platform_settings`.
 - **Universal AI engine** (`services/ai/`): image-to-animation + dynamic SVG
   generation via `/api/ai/animation` and `/api/ai/generate`, with CSS/SVG
   fallback presets and masked keys (`sk-ds-••••••••1234`).
@@ -229,7 +232,7 @@ cd ..
 | Variable                                | Purpose                                                                                                                                                                                                                                                               |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `STRIPE_PRODUCT_ID`                     | Global default Stripe **Price** ID for any product/size that doesn't have one set in admin. Per-product IDs in admin always win. If nothing is set, checkout fails loudly with `price_placeholder_not_configured` instead of charging the wrong account.              |
-| `STORAGE_PROVIDER`                      | Optional data-backend selector. Default (unset) = auto-detect: **Supabase first** (when `SUPABASE_URL` + a key are present), then Cloudflare KV/D1 bindings, then Upstash Redis. Set `supabase`, `cloudflare-kv` (or `d1`), or `upstash` to force a driver. Active provider shows in `/admin → SetUp` + `/admin/setup-status`. |
+| `STORAGE_PROVIDER`                      | Optional data-backend selector. Default (unset) = auto-detect: **Supabase first** (when `SUPABASE_URL` + a key are present), then Cloudflare KV/D1 bindings, then Upstash Redis. Set `supabase`, `cloudflare-kv` (or `d1`), or `upstash` to force a driver. Active provider shows in `/admin → SetUp` + `/admin/setup`. |
 | `RESEND_API_KEY`, `RESEND_FROM`         | Transactional email (entry confirmations, winners, resets).                                                                                                                                                                                                           |
 | `NEXT_PUBLIC_MAPBOX_TOKEN`              | Mapbox Address Autofill (public `pk.*` token). Without it, customers just type addresses manually. Set it in the SAME environment you deploy, then redeploy.                                                                                                          |
 | `BRAND_NAME` or `NEXT_PUBLIC_SITE_NAME` | Brand name used in email "from" and templates.                                                                                                                                                                                                                        |
@@ -463,7 +466,7 @@ after 5 tries, so a leaked password alone can't get into `/admin`.
   providers without the Basic-Auth password. When Supabase isn't configured,
   everything falls back to the legacy `STRIPE_SECRET_KEY` / `RESEND_API_KEY` /
   `NEXT_PUBLIC_MAPBOX_TOKEN` env vars unchanged.
-- **System Configuration checklist (`/admin/setup-status`)**: until the install
+- **System Configuration dashboard (`/admin/setup`)**: until the install
   is ready (data store + admin account present), `/admin` is intercepted and
   redirected to this page, which scans the environment on every request and
   shows a ✅/❌ breakdown of every variable, secret and Cloudflare binding —

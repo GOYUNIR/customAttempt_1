@@ -48,6 +48,12 @@ export interface GlobalPlatformSettings {
   map_api_key: string | null;
   ai_provider: AiProvider | null;
   ai_api_key: string | null;
+  /**
+   * Operational (env-var-style) settings the unified setup dashboard persists.
+   * Stored as a JSONB blob on the settings row — never returned to the browser
+   * by `toPublicSummary()`.
+   */
+  operational_settings?: OperationalSettings | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -94,6 +100,86 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
   };
 }
 
+/**
+ * Operational (env-var-style) settings the unified setup dashboard persists.
+ * These mirror `process.env` variables that cannot be written at runtime, so
+ * the wizard stores them in `global_platform_settings.operational_settings`
+ * for reference/backup AND surfaces the exact `npx wrangler secret put` /
+ * `vercel env add` commands to set them in the platform.
+ */
+export interface OperationalSettings {
+  storage_provider?: string;
+  supabase_url?: string;
+  supabase_anon_key?: string;
+  supabase_service_role_key?: string;
+  upstash_redis_rest_url?: string;
+  upstash_redis_rest_token?: string;
+  cloudflare_kv_binding?: string;
+  cloudflare_d1_binding?: string;
+  admin_basic_auth_username?: string;
+  admin_basic_auth_password?: string;
+  admin_verify_email?: string;
+  cron_secret?: string;
+  site_url?: string;
+  brand_name?: string;
+  support_email?: string;
+  stripe_secret_key?: string;
+  stripe_webhook_secret?: string;
+  stripe_product_id?: string;
+  deepseek_api_key?: string;
+  openai_api_key?: string;
+  anthropic_api_key?: string;
+  replicate_api_token?: string;
+  workers_ai_account_id?: string;
+  workers_ai_api_token?: string;
+  [key: string]: string | undefined;
+}
+
+/** The whitelisted operational keys the wizard may persist (never arbitrary). */
+export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
+  'storage_provider',
+  'supabase_url',
+  'supabase_anon_key',
+  'supabase_service_role_key',
+  'upstash_redis_rest_url',
+  'upstash_redis_rest_token',
+  'cloudflare_kv_binding',
+  'cloudflare_d1_binding',
+  'admin_basic_auth_username',
+  'admin_basic_auth_password',
+  'admin_verify_email',
+  'cron_secret',
+  'site_url',
+  'brand_name',
+  'support_email',
+  'stripe_secret_key',
+  'stripe_webhook_secret',
+  'stripe_product_id',
+  'deepseek_api_key',
+  'openai_api_key',
+  'anthropic_api_key',
+  'replicate_api_token',
+  'workers_ai_account_id',
+  'workers_ai_api_token',
+];
+
+/** Coerce an untrusted operational_settings blob → typed shape (drop unknown keys + blanks). */
+export function parseOperationalSettings(raw: unknown): OperationalSettings {
+  const out: OperationalSettings = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const src = raw as Record<string, unknown>;
+  for (const key of OPERATIONAL_SETTING_KEYS) {
+    const v = String(src[key] ?? '').trim();
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
+/** Whether an operational_settings blob holds any real values (presence badge). */
+export function hasOperationalSettings(settings: OperationalSettings | null | undefined): boolean {
+  return Boolean(settings && Object.keys(settings).length > 0);
+}
+
 /** Coerce an untrusted raw row (PostgREST JSON) into the typed shape. */
 export function parseSettingsRow(raw: Record<string, unknown> | null | undefined): GlobalPlatformSettings | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -115,6 +201,7 @@ export function parseSettingsRow(raw: Record<string, unknown> | null | undefined
     map_api_key: mapProvider ? String(raw.map_api_key || '').trim() || null : null,
     ai_provider: aiProvider,
     ai_api_key: aiProvider ? String(raw.ai_api_key || '').trim() || null : null,
+    operational_settings: parseOperationalSettings(raw.operational_settings),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   };
