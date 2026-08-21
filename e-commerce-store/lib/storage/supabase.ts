@@ -2,28 +2,44 @@
  * SUPABASE STORAGE ADAPTER — implements the `StorageClient` contract on top of
  * a PostgREST `store_kv` table so Supabase can be the PRIMARY data store.
  *
- * This is the DEFAULT provider when `SUPABASE_URL` + a key are present (see
- * `resolveStorageProvider()` in types.ts). It reuses the exact same envelope
- * encoding as the Workers-KV adapter (`CloudflareKvStorageClient`) by wrapping
- * a PostgREST-backed `KvStore` — every logical key is one `store_kv` row whose
- * `value` is `{ "v": <value>, "e": <expiresAtMs|null>, "t": <type> }`.
+ * This is the DEFAULT provider when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
+ * are present (see `resolveStorageProvider()` in types.ts). It reuses the exact
+ * same envelope encoding as the Workers-KV adapter (`CloudflareKvStorageClient`)
+ * by wrapping a PostgREST-backed `KvStore` — every logical key is one `store_kv`
+ * row whose `value` is `{ "v": <value>, "e": <expiresAtMs|null>, "t": <type> }`.
  *
- * CONCURRENCY CAVEATS — PostgREST (like Workers KV) has NO atomic counters, so
- * collection mutations are read-modify-write. SAFE: admin edits, config,
- * product CRUD, settings, seed/wipe, rate-limit bumps. RISKY: concurrent
- * customer checkouts appending to the same raffle pool (`rpush`) or the
- * double-entry `sadd` guards — under a real traffic spike entries can be lost.
- * For production payment/raffle writes keep Upstash Redis (set
- * `STORAGE_PROVIDER=upstash`) which runs everywhere.
+ * ⚠️ SERVICE-ROLE KEY REQUIRED. `public.store_kv` has ROW LEVEL SECURITY enabled
+ * (see supabase/migrations/00001_init.sql) and no anon/authenticated policy, so
+ * the ANON key can neither read nor write it. The adapter therefore resolves
+ * ONLY the service-role key — a Supabase project without a service-role key is
+ * treated as "not configured" and the factory falls back to Upstash Redis. The
+ * service-role key is used exclusively server-side and never shipped to a
+ * browser.
+ *
+ * Credentials resolve through `readSupabaseEnv()` (services/config/supabase-client.ts)
+ * so the SAME env aliases (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
+ * AND the Setup Wizard's inline runtime override (`setSupabaseRuntimeCredentials`)
+ * are honored here — keeping the storage adapter in lock-step with the wizard and
+ * the admin readiness gate. (Previously this file read `process.env` directly and
+ * silently fell back to the anon key, so a wizard save with inline credentials
+ * never activated Supabase storage, and an anon-only project read an empty KV.)
+ *
+ * CONCURRENCY CAVEATS — PostgREST has NO atomic counters, so collection mutations
+ * are read-modify-write. SAFE: admin edits, config, product CRUD, settings,
+ * seed/wipe, rate-limit bumps. RISKY: concurrent customer checkouts appending to
+ * the same raffle pool (`rpush`) or the double-entry `sadd` guards — under a real
+ * traffic spike entries can be lost. For production payment/raffle writes keep
+ * Upstash Redis (set `STORAGE_PROVIDER=upstash`) which runs everywhere.
  */
 
 import { CloudflareKvStorageClient, type KvStore } from './cloudflare-kv';
 import type { StorageClient } from './types';
+import { readSupabaseEnv } from '@/services/config/supabase-client';
 
 function readSupabaseStorageEnv(): { url: string; key: string } {
-  const url = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
-  const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
-  return { url, key };
+  // Service-role key ONLY — `store_kv` RLS blocks the anon key (see header).
+  const { url, serviceRoleKey } = readSupabaseEnv();
+  return { url, key: serviceRoleKey };
 }
 
 /** Minimal PostgREST-backed KV store (get/put/delete/list). */
@@ -66,18 +82,33 @@ class SupabaseKvStore implements KvStore {
     let expiresAt: string | null = null;
     if (options?.expiration) expiresAt = new Date(options.expiration).toISOString();
     else if (options?.expirationTtl) expiresAt = new Date(Date.now() + options.expirationTtl * 1000).toISOString();
-    await fetch(this.base(), {
+    const res = await fetch(this.base(), {
       method: 'POST',
       headers: { ...this.headers(), Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ key, value, expires_at: expiresAt }),
     });
+    // Surface write failures (bad key, RLS, missing schema) instead of silently
+    // dropping data — admin saves / seed / wipe must never report success while
+    // the underlying PostgREST write actually failed.
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Supabase store_kv write failed (${res.status}): ${text.slice(0, 300)}`);
+    }
   }
 
   async delete(key: string): Promise<void> {
-    await fetch(`${this.base()}?key=eq.${encodeURIComponent(key)}`, {
+    const res = await fetch(`${this.base()}?key=eq.${encodeURIComponent(key)}`, {
       method: 'DELETE',
       headers: this.headers(),
     });
+    // A successful DELETE is 204 even when no row matched; anything else is a
+    // real failure (bad key, RLS, missing schema). Note `del()` / `mutate()` in
+    // cloudflare-kv.ts wrap `kv.delete` in `.catch(() => {})`, so this surfaces
+    // only where it is genuinely actionable and never breaks fail-open paths.
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Supabase store_kv delete failed (${res.status}): ${text.slice(0, 300)}`);
+    }
   }
 
   async list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
@@ -106,7 +137,7 @@ export function createSupabaseClient(): StorageClient | null {
   }
 }
 
-/** Whether the Supabase storage adapter is configured (env present). */
+/** Whether the Supabase storage adapter is configured (URL + service-role key). */
 export function supabaseStorageConfigured(): boolean {
   const { url, key } = readSupabaseStorageEnv();
   return Boolean(url && key);

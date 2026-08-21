@@ -50,6 +50,9 @@ cron-worker/.dev.vars*
 .dev.vars*
 !.dev.vars.example
 
+# supabase local CLI state (machine-specific: project ref, pooler URL, versions)
+supabase/.temp/
+
 
 # typescript
 *.tsbuildinfo
