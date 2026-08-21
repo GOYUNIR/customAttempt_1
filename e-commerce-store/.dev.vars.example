@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dev.vars.example — local development environment template.
+#
+# Copy to `.dev.vars` (Cloudflare Workers) or `.env.local` (Next.js) and fill in
+# real values. NEVER commit real secrets. For production, set these in your
+# platform dashboard or via `npx wrangler secret put NAME`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Primary data store: Supabase (default) ───────────────────────────────────
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# ── Alternative / fallback data stores ───────────────────────────────────────
+# STORAGE_PROVIDER=supabase | upstash | cloudflare-kv
+STORAGE_PROVIDER=supabase
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+
+# ── Licensing gatekeeper ─────────────────────────────────────────────────────
+CLIENT_LICENSE_KEY=
+# LICENSE_KEY=            # legacy alias of CLIENT_LICENSE_KEY
+LICENSE_SERVER_URL=
+# LICENSE_ENFORCED=true   # force enforcement even without a key/server
+
+# ── Admin portal (HTTP Basic Auth + two-step verification) ───────────────────
+ADMIN_BASIC_AUTH_USERNAME=admin
+ADMIN_BASIC_AUTH_PASSWORD=
+ADMIN_VERIFY_EMAIL=
+
+# ── Payments (Stripe keeps raffle card-save + webhooks) ──────────────────────
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRODUCT_ID=
+
+# ── Email (Resend default) ───────────────────────────────────────────────────
+RESEND_API_KEY=
+RESEND_FROM=
+# EMAIL_FROM=
+
+# ── Maps ─────────────────────────────────────────────────────────────────────
+NEXT_PUBLIC_MAPBOX_TOKEN=
+
+# ── Universal AI engine ──────────────────────────────────────────────────────
+DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+REPLICATE_API_TOKEN=
+# Workers AI needs no key — it uses the native Cloudflare `AI` binding.
+
+# ── Cron safety net ──────────────────────────────────────────────────────────
+CRON_SECRET=
+
+# ── Site identity ────────────────────────────────────────────────────────────
+NEXT_PUBLIC_URL=
+BRAND_NAME=
+SUPPORT_EMAIL=
+
+# ── Operations ───────────────────────────────────────────────────────────────
+# MAINTENANCE_MODE=true  # show the maintenance screen to unauthenticated visitors

@@ -4,6 +4,8 @@ import { createStorageClient } from '@/lib/storage';
 import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
 import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/edge';
 import { computeAdminReady } from '@/lib/env-discovery';
+import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
+import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 
 
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
@@ -278,9 +280,50 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // ── LICENSE GATE (sync MISSING-key Demo Mode) ─────────────────────────────
+  // When licensing is enforced and no key is present, public write routes are
+  // blocked. Admin/auth/Stripe-webhook paths stay reachable so the operator can
+  // still sign in and fix the key. (Full ACTIVE/GRACE/EXPIRED classification is
+  // async and happens route-side via lib/license.ts + /api/admin/license.)
+  if (licenseEnforced() && !resolveLicenseKey()) {
+    const method = request.method.toUpperCase();
+    const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+    const isExempt =
+      pathname.startsWith('/api/admin') ||
+      pathname.startsWith('/api/auth') ||
+      pathname.startsWith('/api/stripe') ||
+      pathname.startsWith('/api/ai');
+    if (isWrite && pathname.startsWith('/api/') && !isExempt) {
+      return NextResponse.json(
+        { error: 'DEMO_MODE', message: 'Writes are disabled until a valid license key is configured.' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+  }
+
+  // ── MAINTENANCE MODE (unauthenticated visitors) ───────────────────────────
+  // When MAINTENANCE_MODE is on, page requests redirect to /maintenance unless
+  // the visitor carries valid admin Basic Auth (an authenticated admin can view
+  // the public site normally). API routes + static assets stay reachable.
+  if (maintenanceModeEnabled()) {
+    const isApi = pathname.startsWith('/api/');
+    if (!isApi && !isMaintenanceExemptPath(pathname)) {
+      const authed = verifyBasicAuth(request.headers.get('authorization'));
+      if (!authed) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/maintenance';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+    }
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*'],
+  // The middleware now ALSO enforces the license gate + maintenance mode on
+  // public routes, so it must run beyond just /admin. It skips Next.js
+  // internals, media and static assets to stay cheap.
+  matcher: ['/((?!_next/|media/|favicon\\.ico|robots\\.txt|sitemap\\.xml).*)'],
 };

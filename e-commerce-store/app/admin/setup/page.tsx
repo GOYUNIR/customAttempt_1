@@ -33,6 +33,14 @@ const MAP_PROVIDERS: ProviderOption<'mapbox' | 'google_maps' | 'open_street_map'
   { value: 'open_street_map', label: 'OpenStreetMap', hint: 'Free + keyless (Nominatim). Rate limited — fine for testing.' },
 ];
 
+const AI_PROVIDERS: ProviderOption<'deepseek' | 'openai' | 'anthropic' | 'replicate' | 'workers_ai'>[] = [
+  { value: 'deepseek', label: 'DeepSeek Pro', hint: 'OpenAI-compatible — best price/quality for image-to-animation prompts.' },
+  { value: 'openai', label: 'OpenAI', hint: 'GPT-4o-mini chat completions.' },
+  { value: 'anthropic', label: 'Anthropic', hint: 'Claude Messages API.' },
+  { value: 'replicate', label: 'Replicate', hint: 'Hosted Llama etc. (async predictions).' },
+  { value: 'workers_ai', label: 'Workers AI', hint: 'Native Cloudflare binding — no key required.' },
+];
+
 type Status = { configured: boolean; supabase: { url: boolean; anonKey: boolean; serviceRoleKey: boolean } };
 
 export default function SetupPage() {
@@ -47,6 +55,8 @@ export default function SetupPage() {
   const [paymentWebhookSecret, setPaymentWebhookSecret] = useState('');
   const [mapProvider, setMapProvider] = useState<'mapbox' | 'google_maps' | 'open_street_map'>('mapbox');
   const [mapApiKey, setMapApiKey] = useState('');
+  const [aiProvider, setAiProvider] = useState<'deepseek' | 'openai' | 'anthropic' | 'replicate' | 'workers_ai'>('deepseek');
+  const [aiApiKey, setAiApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
@@ -84,9 +94,17 @@ export default function SetupPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          adminEmail, adminPassword, mailProvider, mailApiKey,
-          paymentProvider, paymentApiKey, paymentWebhookSecret,
-          mapProvider, mapApiKey,
+          adminEmail,
+          adminPassword,
+          mail_provider: mailProvider,
+          mail_api_key: mailApiKey,
+          payment_provider: paymentProvider,
+          payment_api_key: paymentApiKey,
+          payment_webhook_secret: paymentWebhookSecret,
+          map_provider: mapProvider,
+          map_api_key: mapApiKey,
+          ai_provider: aiProvider,
+          ai_api_key: aiApiKey,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; redirect?: string };
@@ -177,7 +195,14 @@ export default function SetupPage() {
               </Field>
             </Section>
 
-            <Section title="2 · Email provider" subtitle="Transactional + verification emails (entry confirmations, winners, 2FA codes).">
+            <Section title="2 · Data store" subtitle="Supabase is the default primary data store. Set STORAGE_PROVIDER=upstash or =cloudflare-kv (D1/KV) to switch adapters.">
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#14532d', lineHeight: 1.5 }}>
+                <strong>Supabase (default)</strong> — uses <code>store_kv</code> + <code>global_platform_settings</code>. Upstash Redis and Cloudflare D1/KV are supported as fallback adapters via the <code>STORAGE_PROVIDER</code> env var.
+              </div>
+            </Section>
+
+
+            <Section title="3 · Email provider" subtitle="Transactional + verification emails (entry confirmations, winners, 2FA codes).">
               <ProviderSelect label="Provider" value={mailProvider} options={EMAIL_PROVIDERS} onChange={setMailProvider} />
               <Field label="API key">
                 <input type="password" required value={mailApiKey} onChange={(e) => setMailApiKey(e.target.value)} placeholder={mailProvider === 'resend' ? 're_…' : 'Server token / API key'} autoComplete="off" />
@@ -187,7 +212,7 @@ export default function SetupPage() {
               </p>
             </Section>
 
-            <Section title="3 · Payment provider" subtitle="Hosted checkouts. Stripe also powers raffle card-save + webhooks.">
+            <Section title="4 · Payment provider" subtitle="Hosted checkouts. Stripe also powers raffle card-save + webhooks.">
               <ProviderSelect label="Provider" value={paymentProvider} options={PAYMENT_PROVIDERS} onChange={setPaymentProvider} />
               <Field label="API key">
                 <input type="password" required value={paymentApiKey} onChange={(e) => setPaymentApiKey(e.target.value)} placeholder={paymentProvider === 'stripe' ? 'sk_live_… / sk_test_…' : 'API key'} autoComplete="off" />
@@ -204,7 +229,7 @@ export default function SetupPage() {
               </p>
             </Section>
 
-            <Section title="4 · Map provider" subtitle="Address autofill on checkout + account forms.">
+            <Section title="5 · Map provider" subtitle="Address autofill on checkout + account forms.">
               <ProviderSelect label="Provider" value={mapProvider} options={MAP_PROVIDERS} onChange={setMapProvider} />
               {mapProvider !== 'open_street_map' && (
                 <Field label="API key">
@@ -213,6 +238,19 @@ export default function SetupPage() {
               )}
               {mapProvider === 'open_street_map' && <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>OpenStreetMap needs no key.</p>}
             </Section>
+
+            <Section title="6 · AI provider" subtitle="Universal AI engine — image-to-animation + dynamic SVG asset generation.">
+              <ProviderSelect label="Provider" value={aiProvider} options={AI_PROVIDERS} onChange={setAiProvider} />
+              {aiProvider !== 'workers_ai' && (
+                <Field label="API key">
+                  <input type="password" required value={aiApiKey} onChange={(e) => setAiApiKey(e.target.value)} placeholder={aiProvider === 'deepseek' ? 'sk-…' : aiProvider === 'anthropic' ? 'sk-ant-…' : 'API key'} autoComplete="off" />
+                </Field>
+              )}
+              {aiProvider === 'workers_ai' && <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Workers AI uses the native Cloudflare binding — no key required.</p>}
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Keys are stored masked (e.g. <code>sk-ds-••••••••1234</code>) and never returned to the browser.</p>
+            </Section>
+
+
 
             {error && (
               <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '12px 16px', color: '#b91c1c', fontSize: 14 }}>{error}</div>

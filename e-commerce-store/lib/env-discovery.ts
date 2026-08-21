@@ -41,6 +41,7 @@ export type EnvCheckKind =
   | 'platform'
   | 'binding'
   | 'license'
+  | 'ai'
   | 'bootstrap';
 
 export type EnvPlatform = 'all' | 'cloudflare' | 'vercel' | 'netlify' | 'node';
@@ -108,6 +109,11 @@ function has(env: EnvObject, ...names: string[]): boolean {
 }
 
 const WRANGLER_SECRET = (name: string) => `npx wrangler secret put ${name}`;
+
+/** The exact Cloudflare dashboard browser path where operators set variables +
+ *  secrets manually — surfaced verbatim on the setup checklist per the spec. */
+export const CLOUDFLARE_VARS_PATH =
+  'Workers & Pages -> [Your Project Name] -> Settings -> Variables and Secrets -> Production';
 
 /**
  * Build the full registry against a given env object. Called fresh each time so
@@ -499,26 +505,26 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
 binding = "AI"`,
   });
 
-  // ── Licensing (optional — not enforced by this build) ───────────────────────
+  // ── Licensing (enforced when a key/server is configured — lib/license.ts) ──
   add({
     id: 'license-key',
     name: 'License key',
-    purpose: 'Optional license key for gated/white-label deployments. Not enforced by the storefront runtime — shown for completeness.',
-    variable: 'LICENSE_KEY',
-    aliases: [],
+    purpose: 'White-label license key. When set (or LICENSE_SERVER_URL is), the store enforces Demo Mode on MISSING/EXPIRED keys (write routes blocked).',
+    variable: 'CLIENT_LICENSE_KEY',
+    aliases: ['LICENSE_KEY'],
     kind: 'license',
     required: false,
     blocking: false,
     secret: true,
     buildTime: false,
     platform: 'all',
-    commands: [WRANGLER_SECRET('LICENSE_KEY')],
+    commands: [WRANGLER_SECRET('CLIENT_LICENSE_KEY')],
   });
 
   add({
     id: 'license-server',
     name: 'License server URL',
-    purpose: 'Optional endpoint that validates LICENSE_KEY. Not enforced by this build — shown for completeness.',
+    purpose: 'Optional endpoint that validates CLIENT_LICENSE_KEY asynchronously (cached).',
     variable: 'LICENSE_SERVER_URL',
     aliases: [],
     kind: 'license',
@@ -528,6 +534,64 @@ binding = "AI"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('LICENSE_SERVER_URL')],
+  });
+
+  // ── AI providers (universal AI engine — services/ai) ───────────────────────
+  add({
+    id: 'ai-deepseek',
+    name: 'DeepSeek Pro API key',
+    purpose: 'DeepSeek Pro (OpenAI-compatible) — the default AI provider for image-to-animation + SVG generation.',
+    variable: 'DEEPSEEK_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('DEEPSEEK_API_KEY')],
+  });
+  add({
+    id: 'ai-openai',
+    name: 'OpenAI API key',
+    purpose: 'OpenAI GPT-4o-mini chat completions.',
+    variable: 'OPENAI_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('OPENAI_API_KEY')],
+  });
+  add({
+    id: 'ai-anthropic',
+    name: 'Anthropic API key',
+    purpose: 'Anthropic Claude Messages API.',
+    variable: 'ANTHROPIC_API_KEY',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('ANTHROPIC_API_KEY')],
+  });
+  add({
+    id: 'ai-replicate',
+    name: 'Replicate API token',
+    purpose: 'Replicate hosted models (async predictions).',
+    variable: 'REPLICATE_API_TOKEN',
+    aliases: [],
+    kind: 'ai',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('REPLICATE_API_TOKEN')],
   });
 
   // ── First-run bootstrap ─────────────────────────────────────────────────────
@@ -559,7 +623,8 @@ binding = "AI"`,
     { title: 'Site identity', subtitle: 'Branding, URLs and support inbox.', kind: 'site', checks: byKind('site') },
     { title: 'Platform configuration', subtitle: 'Optional Supabase-backed provider settings (Setup Wizard).', kind: 'platform', checks: byKind('platform') },
     { title: 'Cloudflare bindings', subtitle: 'Detected for Cloudflare deployments — not used by this storefront build.', kind: 'binding', checks: byKind('binding') },
-    { title: 'Licensing', subtitle: 'Optional — not enforced by the storefront runtime.', kind: 'license', checks: byKind('license') },
+    { title: 'Licensing', subtitle: 'Optional — enforced when a key/server is configured.', kind: 'license', checks: byKind('license') },
+    { title: 'AI providers', subtitle: 'Universal AI engine (image-to-animation + SVG).', kind: 'ai', checks: byKind('ai') },
     { title: 'First-run bootstrap', subtitle: 'Optional hints for the initial operator.', kind: 'bootstrap', checks: byKind('bootstrap') },
   ];
 

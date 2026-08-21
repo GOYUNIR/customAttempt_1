@@ -112,6 +112,8 @@ test('normalizePlatformSettingsInput validates the wizard payload', () => {
     payment_webhook_secret: '',
     map_provider: 'open_street_map',
     map_api_key: '',
+    ai_provider: 'workers_ai',
+    ai_api_key: '',
   });
   assert.ok(good.ok);
   if (good.ok) {
@@ -330,6 +332,6 @@ test('provider enum lists match the SQL check constraints', () => {
     normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: 'y', map_provider: 'mapbox', map_api_key: '' }).ok,
     false,
   );
-  const oms = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: 'y', map_provider: 'open_street_map' });
+  const oms = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: 'y', map_provider: 'open_street_map', ai_provider: 'workers_ai' });
   assert.ok(oms.ok);
 });

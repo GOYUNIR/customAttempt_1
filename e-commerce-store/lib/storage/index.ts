@@ -15,6 +15,7 @@
  */
 
 import { createCloudflareKvClient } from './cloudflare-kv';
+import { createSupabaseClient } from './supabase';
 import { createUpstashClient } from './upstash';
 import { resolveStorageProvider, type StorageClient, type StorageProvider } from './types';
 
@@ -22,6 +23,12 @@ export * from './types';
 
 export function createStorageClient(): StorageClient | null {
   const provider: StorageProvider = resolveStorageProvider();
+  if (provider === 'supabase') {
+    const supabase = createSupabaseClient();
+    if (supabase) return supabase;
+    // Supabase selected but not actually configured → fall back to Redis.
+    return createUpstashClient();
+  }
   if (provider === 'cloudflare-kv') {
     // Never returns null (falls back to an in-memory store for local dev).
     return createCloudflareKvClient();

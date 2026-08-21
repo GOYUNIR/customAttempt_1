@@ -25,6 +25,64 @@ without touching a single file.
   with RLS policies, an edge-rendering Worker and an admin Save/Publish +
   cache-invalidation pipeline. See its `README.md`.
 
+## Multi-tenant B2B SaaS platform (Supabase, licensing, AI, webhooks)
+
+This template also ships a full multi-tenant B2B SaaS foundation on top of the
+storefront:
+
+- **Supabase is the default primary data store.** When `SUPABASE_URL` + a key
+  are present, the storage layer (`lib/storage/`) uses a PostgREST `store_kv`
+  table. **Upstash Redis** (`UPSTASH_REDIS_REST_URL/TOKEN`) and **Cloudflare
+  D1 / Workers KV** (`STORAGE_PROVIDER=cloudflare-kv`) remain supported fallback
+  adapters. The schema lives in
+  [`supabase/migrations/00001_init.sql`](supabase/migrations/00001_init.sql)
+  (`tenants`, `users`, `global_platform_settings`, `analytics_events`,
+  `audit_logs`, `outbound_webhooks`, `store_kv`).
+- **Licensing gatekeeper** (`lib/license.ts`): `CLIENT_LICENSE_KEY` +
+  async `LICENSE_SERVER_URL` validation (cached). `ACTIVE` → full access;
+  `GRACE` (1–3 days) → full access + "License payment pending." banner;
+  `EXPIRED`/`MISSING` → Demo Mode (POST/PUT/DELETE write routes blocked).
+- **`/admin` interception + auto-discovery** (`lib/env-discovery.ts`): a missing
+  data store or admin account redirects `/admin` → `/admin/setup-status`, which
+  shows per-variable ✅/❌ + copyable `npx wrangler secret put …` commands and
+  the exact Cloudflare path
+  *Workers & Pages → [Project] → Settings → Variables and Secrets → Production*.
+- **Setup wizard** (`/admin/setup`): master admin → data store → email →
+  payment → map → **AI provider** (DeepSeek Pro / OpenAI / Anthropic /
+  Replicate / Workers AI), persisted to `global_platform_settings`.
+- **Universal AI engine** (`services/ai/`): image-to-animation + dynamic SVG
+  generation via `/api/ai/animation` and `/api/ai/generate`, with CSS/SVG
+  fallback presets and masked keys (`sk-ds-••••••••1234`).
+- **Analytics** (`/api/admin/analytics`), **outbound webhooks**
+  (`/api/admin/webhooks`, exponential backoff ×3) and **maintenance mode**
+  (`MAINTENANCE_MODE=true`).
+
+### Local dev + setup commands
+
+```bash
+# 1. Copy the env template and fill real values
+cp .dev.vars.example .env.local          # Next.js dev
+cp .dev.vars.example .dev.vars           # Cloudflare Workers dev
+
+# 2. Create the Cloudflare resources (D1 / R2 / KV) if using those adapters
+npx wrangler d1 create your_db
+npx wrangler r2 bucket create your_bucket
+npx wrangler kv namespace create SITE_CACHE
+
+# 3. Apply the Supabase schema
+supabase db push                          # or: psql "$DATABASE_URL" -f supabase/migrations/00001_init.sql
+
+# 4. Set runtime secrets
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put CLIENT_LICENSE_KEY
+npx wrangler secret put DEEPSEEK_API_KEY
+npx wrangler secret put MAINTENANCE_MODE   # set to "true" to enable
+
+# 5. Run + verify
+npm run dev
+npm run typecheck && npm run lint && npm test
+```
+
 ## 1. Deploy & connect
 
 The app is **platform-agnostic** — the same code runs on Vercel, Netlify,

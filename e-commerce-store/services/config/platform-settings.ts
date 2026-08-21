@@ -28,6 +28,7 @@ import {
   sanitizeMailProvider,
   sanitizePaymentProvider,
   sanitizeMapProvider,
+  sanitizeAiProvider,
   type GlobalPlatformSettings,
   type PlatformSettingsInput,
 } from './types.ts';
@@ -96,6 +97,13 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
     return { ok: false, error: 'Enter a map provider API key.' };
   }
 
+  const aiProvider = sanitizeAiProvider(raw.ai_provider);
+  if (!aiProvider) return { ok: false, error: 'Choose a valid AI provider.' };
+  const aiApiKey = String(raw.ai_api_key || '').trim();
+  if (aiProvider !== 'workers_ai' && !aiApiKey) {
+    return { ok: false, error: 'Enter an AI provider API key (Workers AI needs none).' };
+  }
+
   return {
     ok: true,
     input: {
@@ -106,6 +114,8 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       payment_webhook_secret: paymentWebhookSecret || undefined,
       map_provider: mapProvider,
       map_api_key: mapApiKey || undefined,
+      ai_provider: aiProvider,
+      ai_api_key: aiApiKey || undefined,
     },
   };
 }
@@ -122,6 +132,8 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     payment_webhook_secret: input.payment_webhook_secret || null,
     map_provider: input.map_provider,
     map_api_key: input.map_api_key || null,
+    ai_provider: input.ai_provider,
+    ai_api_key: input.ai_api_key || null,
   });
   clearPlatformSettingsCache();
 }

@@ -43,6 +43,7 @@ type Status = {
   platformConfigured: boolean;
   platformProviders: { mail_provider: string | null; payment_provider: string | null; map_provider: string | null };
   environment: string;
+  cloudflareVarsPath: string;
   discovery: {
     groups: EnvGroup[];
     summary: { present: number; total: number; blockingMissing: string[]; requiredMissing: string[] };
@@ -106,6 +107,13 @@ export default function SetupStatusPage() {
             This page runs before the admin portal unlocks. It scans the runtime environment on every request and shows
             exactly what is configured <span style={{ fontWeight: 700 }}>✅</span> and what is missing <span style={{ fontWeight: 700 }}>❌</span>.
           </p>
+
+        {status?.cloudflareVarsPath && (
+          <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 12, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#075985', lineHeight: 1.5 }}>
+            <strong>Setting variables manually (Cloudflare):</strong> <code>{status.cloudflareVarsPath}</code>
+          </div>
+        )}
+
         </div>
 
         {loading ? (

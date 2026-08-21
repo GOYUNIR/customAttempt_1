@@ -172,6 +172,17 @@ export function productOverrideField(productId: string): string {
   return `product:${String(productId || '')}`;
 }
 
+// Outbound webhooks (multi-tenant B2B SaaS events: user.registered,
+// license.updated, settings.changed). Delivered by lib/webhooks.ts with
+// exponential backoff. Subscribers map lives in the config string; pending
+// jobs are JSON lines in the queue list.
+/** String — JSON object mapping event name → subscriber URL(s). */
+export const WEBHOOK_CONFIG_KEY = 'ops:webhooks:config';
+/** List — pending outbound webhook jobs (JSON strings). */
+export const WEBHOOK_QUEUE_KEY = 'ops:webhooks:queue';
+
+
+
 // ────────────────────────────────────────────────────────────────────────────
 // Auth
 // ────────────────────────────────────────────────────────────────────────────
@@ -217,6 +228,16 @@ export const ADMIN_DEVICE_COOKIE = 'goyunir_admin_device';
 // ────────────────────────────────────────────────────────────────────────────
 // Analytics (social proof counters + online visitors)
 // ────────────────────────────────────────────────────────────────────────────
+
+
+/** Prefix for per-tenant daily usage hashes (`analytics:usage:<tenant>:<day>`).
+ *  Fields: `api_calls`, `ai_generations`, `system_events` (see lib/analytics.ts). */
+export const ANALYTICS_USAGE_PREFIX = 'analytics:usage';
+export function analyticsUsageKey(tenantId: string, day: string): string {
+  const t = String(tenantId || 'default').trim().toLowerCase().slice(0, 64) || 'default';
+  return `${ANALYTICS_USAGE_PREFIX}:${t}:${String(day || '').slice(0, 10)}`;
+}
+
 
 /** ZSET of visitor ids scored by last-seen timestamp. */
 export const ANALYTICS_ONLINE_KEY = 'analytics:online';

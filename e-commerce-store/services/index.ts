@@ -20,3 +20,5 @@ export { PaymentFactory, resolveStripeClient, resolvePaymentWebhookSecret } from
 export * from './payment/types';
 export { MapFactory } from './maps/factory';
 export * from './maps/types';
+export { AiFactory, createAiDriver, AI_DRIVER_CATALOG } from './ai';
+export * from './ai/types';

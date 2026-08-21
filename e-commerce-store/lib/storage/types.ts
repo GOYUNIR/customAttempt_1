@@ -110,16 +110,33 @@ export interface StorageClient {
   zcard(key: string): Promise<number>;
 }
 
-export type StorageProvider = 'upstash' | 'cloudflare-kv';
+export type StorageProvider = 'supabase' | 'upstash' | 'cloudflare-kv';
 
 /** The env var name that selects the backend provider. */
 export const STORAGE_PROVIDER_ENV = 'STORAGE_PROVIDER';
 
+/**
+ * Resolve the active storage backend.
+ *
+ * Priority:
+ *   1. Explicit `STORAGE_PROVIDER` (supabase | upstash/redis | cloudflare-kv/kv/d1).
+ *   2. DEFAULT — Supabase is the PRIMARY data store when `SUPABASE_URL` + a key
+ *      (`SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_ANON_KEY`) are present.
+ *   3. Fallback — Upstash Redis (the battle-tested engine; returns null from
+ *      the factory when unconfigured, which the app treats as "no store yet").
+ */
 export function resolveStorageProvider(): StorageProvider {
   const raw = String(process.env[STORAGE_PROVIDER_ENV] || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '');
-  if (raw === 'cloudflare-kv' || raw === 'cloudflare' || raw === 'kv') return 'cloudflare-kv';
+  if (raw === 'supabase' || raw === 'postgres' || raw === 'pg') return 'supabase';
+  if (raw === 'cloudflare-kv' || raw === 'cloudflare' || raw === 'kv' || raw === 'd1' || raw === 'workers-kv') {
+    return 'cloudflare-kv';
+  }
+  if (raw === 'upstash' || raw === 'redis') return 'upstash';
+  const url = String(process.env.SUPABASE_URL || '').trim();
+  const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  if (url && key) return 'supabase';
   return 'upstash';
 }

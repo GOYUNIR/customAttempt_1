@@ -5,7 +5,7 @@ import { isSuperAdminSession } from '@/lib/admin-verify';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
-import { discoverEnvironment, computeAdminReady } from '@/lib/env-discovery';
+import { discoverEnvironment, computeAdminReady, CLOUDFLARE_VARS_PATH } from '@/lib/env-discovery';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +48,7 @@ export async function GET(request: Request) {
     platformProviders,
     supabase: supabaseEnvSummary(),
     environment: process.env.NODE_ENV || 'development',
+    cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
     discovery,
   });
 }
