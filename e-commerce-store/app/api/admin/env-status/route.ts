@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { adminRequestAuthorized } from '@/lib/server-config';
 import { activeStorageProvider } from '@/lib/storage';
+import { supabaseEnvSummary } from '@/services/config/edge';
+import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
+import { toPublicSummary } from '@/services/config/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +38,54 @@ export async function GET(request: Request) {
   }
 
   const provider = activeStorageProvider();
+  const supabase = supabaseEnvSummary();
+  const configured = (await isPlatformConfigured()) === true;
+  const platformSettings = await getPlatformSettings();
+  const platformProviders = toPublicSummary(platformSettings);
 
   const items: EnvStatusItem[] = [
+    {
+      key: 'Supabase URL',
+      label: 'Supabase project URL (platform settings)',
+      required: false,
+      set: supabase.url,
+      aliases: ['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'],
+      buildTime: false,
+      sensitive: false,
+      hint: 'Supabase is the source of truth for global_platform_settings (provider keys + the Setup Wizard gate).',
+    },
+    {
+      key: 'Supabase anon key',
+      label: 'Supabase anon key',
+      required: false,
+      set: supabase.anonKey,
+      aliases: ['SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY'],
+      buildTime: false,
+      sensitive: true,
+      hint: 'Public anon key — used for the is_platform_configured RPC and the super-admin password grant.',
+    },
+    {
+      key: 'Supabase service role key',
+      label: 'Supabase service role key',
+      required: false,
+      set: supabase.serviceRoleKey,
+      aliases: ['SUPABASE_SERVICE_ROLE_KEY'],
+      buildTime: false,
+      sensitive: true,
+      hint: 'Server-only trusted writer — the Setup Wizard uses it to persist provider keys + create the master super-admin.',
+    },
+    {
+      key: 'Platform providers',
+      label: 'Platform providers (Setup Wizard)',
+      required: false,
+      set: configured,
+      aliases: [],
+      buildTime: false,
+      sensitive: false,
+      hint: configured
+        ? `Email: ${platformProviders.mail_provider || 'unset'} · Payment: ${platformProviders.payment_provider || 'unset'} · Maps: ${platformProviders.map_provider || 'unset'}`
+        : 'Not configured — the Setup Wizard (/admin/setup) runs on first visit.',
+    },
     {
       key: 'Storage provider',
       label: 'Data backend (storage provider)',
@@ -188,6 +237,9 @@ export async function GET(request: Request) {
     ok: true,
     items,
     storageProvider: provider,
+    supabase,
+    platformConfigured: configured,
+    platformProviders,
     environment: process.env.NODE_ENV || 'development',
     summary: {
       configured: items.filter((i) => i.set).length,

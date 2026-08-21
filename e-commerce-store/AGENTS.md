@@ -550,6 +550,7 @@ input like `123 realstreet` can never be saved.
 | --- | --- |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth). REST-protocol pair — any platform works. Aliases: `KV_REST_API_URL`/`KV_REST_API_TOKEN`, `REDIS_REST_URL`/`REDIS_REST_TOKEN`, `REDIS_URL`/`REDIS_TOKEN` (REST-only: `redis://` wire-protocol URLs are skipped in `lib/storage/upstash.ts`). |
 | `STORAGE_PROVIDER` (optional) | Data backend selector — default (`upstash`) is Upstash REST Redis (recommended for payments/raffles). Set to `cloudflare-kv` to run on the Workers-KV adapter (`lib/storage/cloudflare-kv.ts`; read the concurrency caveats first). The active provider shows in `/admin → SetUp`. |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (optional) | The Setup Wizard's source of truth for `global_platform_settings` (provider keys + the platform configuration gate). Aliases: `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Without them the store runs on the legacy env-var providers (Stripe/Resend/Mapbox) exactly as before. |
 | `STRIPE_SECRET_KEY` | Stripe API |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 | `STRIPE_PRODUCT_ID` (optional) | Global default Stripe price ID when a product/size has none set in admin. Per-product IDs always win. No hardcoded Stripe ID anywhere — if unset, checkout fails loudly with `price_placeholder_not_configured`. |
@@ -625,6 +626,15 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+- **2026-08-21 — Driver-engine services layer + Setup Wizard + super-admin login (services-driver-engine):**
+  - **🧩 New `services/` driver engine** — the storefront's hardcoded Stripe/Resend/Mapbox calls now sit behind pluggable driver contracts. `services/config` (Supabase `global_platform_settings` store + `edge.ts` middleware gate), `services/email` (Resend/Postmark/SendGrid), `services/payment` (Stripe/LemonSqueezy/Paddle — Stripe keeps the raffle card-save + webhook path), `services/maps` (Mapbox/GoogleMaps/OpenStreetMap). Each category has a `types.ts` contract + a `registry.ts` (pure factory, `node --test`-loadable) + a `factory.ts` (resolves the active provider from wizard settings → legacy env fallback).
+  - **🧙 First-run Setup Wizard (`/admin/setup` + `/api/admin/setup`)** — self-hosted buyers pick Email/Payment/Map providers, paste API keys, and create the master super-admin (Supabase Auth user flagged `is_super_admin`). Persisted to `public.global_platform_settings` via the new **`00003_global_platform_settings.sql`** migration (singleton row, RLS locked to super-admins, only public read is the `is_platform_configured()` RPC). `middleware.ts` forces `/admin` → `/admin/setup` while `is_configured = false`.
+  - **🔑 Super-admin login (`POST /api/admin/super-login`)** — the master account signs back in via Supabase (`verifySuperAdminSignIn` verifies credentials + `profiles.is_super_admin`). Success issues an `admin:devices` cookie with `superAdmin: true`; `middleware.ts` treats that session as full authorization (skipping Basic Auth + 2FA), and the setup API accepts it for provider re-configuration. `/admin/setup?reconfigure=1` surfaces the sign-in form.
+  - **🔁 Every payment/email/map call site re-wired through the factories** — checkout, cart, direct, confirm-setup, webhook, auto-draw, draw, `lib/email.ts`, `app/layout.tsx` (map token) all resolve their provider at runtime with legacy env fallbacks, so an existing store keeps working with zero config.
+  - **📊 Status surfaced** — `/api/admin/env-status` + `/api/admin/self-test` now report Supabase env presence + the active providers (names only, never keys).
+  - **🧪 Tests** — new `tests/super-admin.test.ts` (4 cases, mocked fetch) on top of the existing driver tests; **151/151 pass**, typecheck + lint clean. **No new Redis keys** (the super-admin marker lives on the existing `admin:devices` hash).
+
+
 
 - **2026-08-21 — Cloudflare Worker Delivery & Caching Bridge (mtp-cf-worker-flush):**
   - **🧱 `multi-tenant-platform/worker` now deploys as `template-edge-renderer`.** `wrangler.toml` sets the worker name + `compatibility_date = "2024-01-01"` (with `nodejs_compat`). The `SITE_CACHE` KV binding keeps its placeholder `id` (paste the real one from `npx wrangler kv namespace create SITE_CACHE`); `SUPABASE_URL` / `SUPABASE_ANON_KEY` / new **`FLUSH_CACHE_SECRET`** are runtime secrets (`wrangler secret put`, never committed). New `.dev.vars.example` for local dev — the root `.gitignore` now un-ignores exactly that example file (`.dev.vars*` is still ignored otherwise).

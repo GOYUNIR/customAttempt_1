@@ -13,8 +13,7 @@
  * provider SDKs directly.
  */
 
-export * from './config/types';
-export * from './config/platform-settings';
+export * from './config';
 export { EmailFactory } from './email/factory';
 export * from './email/types';
 export { PaymentFactory, resolveStripeClient, resolvePaymentWebhookSecret } from './payment/factory';

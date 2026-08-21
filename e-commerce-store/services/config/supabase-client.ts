@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SERVICES / CONFIG — Supabase REST client (fetch only, zero SDK).
  *
  * The whole driver engine reads/writes `public.global_platform_settings`
@@ -37,21 +37,30 @@ export function supabaseServiceConfigured(): boolean {
   return Boolean(url && serviceRoleKey);
 }
 
-function headers(key: string, extra?: Record<string, string>): Record<string, string> {
-  return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(extra || {}) };
+function headers(key: string, extra?: Record<string, string>, bearer?: string): Record<string, string> {
+  return { apikey: key, Authorization: `Bearer ${bearer || key}`, 'Content-Type': 'application/json', ...(extra || {}) };
 }
 
 /** Generic PostgREST fetch. Throws a descriptive Error on non-2xx. */
 export async function supabaseRestFetch(
   path: string,
-  options: { key: string; method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; prefer?: string },
+  options: {
+    key: string;
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    body?: unknown;
+    prefer?: string;
+    /** Optional user access token — used for USER-SCOPED queries (RLS) where the
+     *  Authorization header must carry the signed-in user's JWT instead of the
+     *  anon/service key. The `apikey` header still carries `options.key`. */
+    bearer?: string;
+  },
 ): Promise<unknown> {
   const { url } = readSupabaseEnv();
   if (!url || !options.key) throw new Error('Supabase is not configured (SUPABASE_URL / key missing).');
   const prefer = options.prefer || (options.method === 'POST' ? 'return=representation' : undefined);
   const res = await fetch(`${url}/rest/v1${path}`, {
     method: options.method || 'GET',
-    headers: headers(options.key, prefer ? { Prefer: prefer } : undefined),
+    headers: headers(options.key, prefer ? { Prefer: prefer } : undefined, options.bearer),
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   if (!res.ok) {
@@ -172,9 +181,13 @@ export async function createSuperAdmin(input: {
   return { id, email: String(created?.email || input.email) };
 }
 
-/** Verify an operator email+password against Supabase Auth. Returns the user id
- *  on success, null on bad credentials. */
-export async function verifySuperAdminCredentials(email: string, password: string): Promise<string | null> {
+/** Verify an operator email+password against Supabase Auth (password grant).
+ *  Returns { id, email, accessToken } on success, null on bad credentials.
+ *  Does NOT yet confirm the super-admin flag — see verifySuperAdminSignIn. */
+export async function verifySuperAdminCredentials(
+  email: string,
+  password: string,
+): Promise<{ id: string; email: string; accessToken: string } | null> {
   if (!supabaseConfigured()) return null;
   const { anonKey } = readSupabaseEnv();
   try {
@@ -182,10 +195,39 @@ export async function verifySuperAdminCredentials(email: string, password: strin
       key: anonKey,
       method: 'POST',
       body: { email, password },
-    })) as { access_token?: string; user?: { id?: string } } | null;
-    if (!result?.user?.id) return null;
-    return String(result.user.id);
+    })) as { access_token?: string; user?: { id?: string; email?: string } } | null;
+    if (!result?.access_token || !result.user?.id) return null;
+    return {
+      id: String(result.user.id),
+      email: String(result.user.email || email).trim().toLowerCase(),
+      accessToken: String(result.access_token),
+    };
   } catch {
     return null;
   }
+}
+
+/** Full super-admin sign-in: verify credentials AND confirm the
+ *  `profiles.is_super_admin` flag (via the authenticated user's own RLS-scoped
+ *  read of their profile row). Returns the master account on success, null when
+ *  the credentials are wrong OR the user is not a super-admin. */
+export async function verifySuperAdminSignIn(
+  email: string,
+  password: string,
+): Promise<{ id: string; email: string } | null> {
+  const credentials = await verifySuperAdminCredentials(email, password);
+  if (!credentials) return null;
+  try {
+    const { anonKey } = readSupabaseEnv();
+    const rows = (await supabaseRestFetch(
+      `/profiles?id=eq.${encodeURIComponent(credentials.id)}&select=is_super_admin&limit=1`,
+      { key: anonKey, bearer: credentials.accessToken },
+    )) as Array<{ is_super_admin?: boolean }> | null;
+    if (Array.isArray(rows) && rows.length > 0 && rows[0]?.is_super_admin === true) {
+      return { id: credentials.id, email: credentials.email };
+    }
+  } catch {
+    // profile read failed — treat as not-a-super-admin (fail closed)
+  }
+  return null;
 }

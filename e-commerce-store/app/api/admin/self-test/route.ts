@@ -15,6 +15,9 @@ import {
   type LiveStateRecord,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
+import { supabaseEnvSummary } from '@/services/config/edge';
+import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
+import { toPublicSummary } from '@/services/config/types';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -87,6 +90,22 @@ export async function GET(request: Request) {
   );
 
   // ------------------------------------------------------------------
+  // Supabase + driver-engine platform settings (Setup Wizard).
+  const supabaseSummary = supabaseEnvSummary();
+  push('Env: SUPABASE_URL', supabaseSummary.url, supabaseSummary.url ? 'set' : 'not set — Setup Wizard disabled');
+  push('Env: SUPABASE_ANON_KEY', supabaseSummary.anonKey, supabaseSummary.anonKey ? 'set' : 'not set');
+  push('Env: SUPABASE_SERVICE_ROLE_KEY', supabaseSummary.serviceRoleKey, supabaseSummary.serviceRoleKey ? 'set' : 'not set — cannot persist provider keys');
+  const configured = (await isPlatformConfigured()) === true;
+  const platformSettings = await getPlatformSettings();
+  const providers = toPublicSummary(platformSettings);
+  push(
+    'Platform providers (Setup Wizard)',
+    configured,
+    configured
+      ? `email=${providers.mail_provider || 'unset'} payment=${providers.payment_provider || 'unset'} maps=${providers.map_provider || 'unset'}`
+      : 'not configured — /admin/setup runs on first visit'
+  );
+
   // Redis + Stripe connectivity
   // ------------------------------------------------------------------
   const redis = createRedisClient();

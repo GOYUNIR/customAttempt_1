@@ -117,9 +117,35 @@ async function adminDeviceValid(redis: any, token: string): Promise<boolean> {
   }
   return Boolean(parsed.email || parsed.createdAt);
 }
+
+/** Whether a device token maps to a SUPER-ADMIN session (created by
+ *  /api/admin/super-login after a Supabase master-account sign-in). Mirrors the
+ *  `superAdmin` marker stored on `admin:devices`; inlined edge-safe. */
+async function adminDeviceIsSuperAdmin(redis: any, token: string): Promise<boolean> {
+  if (!token) return false;
+  const raw = await redis.hget(ADMIN_DEVICES_KEY, token).catch(() => null);
+  if (!raw) return false;
+  const parsed = parseStoredValue(raw) as { email?: string; createdAt?: number; expiresAt?: number; superAdmin?: boolean } | null;
+  if (!parsed) return false;
+  if (Number(parsed.expiresAt) > 0 && Date.now() > Number(parsed.expiresAt)) {
+    try {
+      await redis.hdel(ADMIN_DEVICES_KEY, token);
+    } catch {
+      /* best-effort */
+    }
+    return false;
+  }
+  return parsed.superAdmin === true;
+}
+
 export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
+  // The Setup Wizard is ALSO the "re-configure providers" page: once the
+  // platform is configured, visiting /admin/setup?reconfigure=1 lets the
+  // master super-admin sign back in (Supabase) to update providers.
+  const isSetupReconfigure =
+    pathname === '/admin/setup' && request.nextUrl.searchParams.get('reconfigure') === '1';
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     // ── Setup Wizard gate ────────────────────────────────────────────────────
@@ -161,7 +187,7 @@ export async function middleware(request: NextRequest) {
       if (configured === true && isSetupPath) {
         if (pathname.startsWith('/api/admin')) {
           // Configured: the setup API goes back under the normal admin gates.
-        } else {
+        } else if (!isSetupReconfigure) {
           // Wizard already ran — never show it again; go to the portal.
           const url = request.nextUrl.clone();
           url.pathname = '/admin';
@@ -175,7 +201,26 @@ export async function middleware(request: NextRequest) {
   }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    if (!ADMIN_USER || !ADMIN_PASSWORD) {
+    const isSuperLoginPath =
+      pathname === '/api/admin/super-login' ||
+      pathname.startsWith('/api/admin/super-login/');
+
+    // A valid SUPER-ADMIN session — issued by /api/admin/super-login after a
+    // Supabase master-account sign-in — authorizes the portal WITHOUT the env
+    // Basic-Auth password or the email 2FA step (the master account IS the
+    // credential). Resolved once here so the gates below can reuse it.
+    const deviceToken = adminDeviceTokenFromRequest(request);
+    const storage = createStorageClient();
+    let superAdminOk = false;
+    if (storage) {
+      try {
+        superAdminOk = await adminDeviceIsSuperAdmin(storage, deviceToken);
+      } catch {
+        superAdminOk = false;
+      }
+    }
+
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && (!ADMIN_USER || !ADMIN_PASSWORD)) {
       return new NextResponse('Admin not configured', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
@@ -187,7 +232,7 @@ export async function middleware(request: NextRequest) {
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
     const authHeader = request.headers.get('authorization');
-    if (!verifyBasicAuth(authHeader)) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
@@ -199,7 +244,7 @@ export async function middleware(request: NextRequest) {
     // everything else requires a valid device cookie from a verified browser.
     const isPage = pathname === '/admin' || pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
-    if (!isPage && !isVerifyEndpoint) {
+    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure) {
       const token = adminDeviceTokenFromRequest(request);
       const redis = createStorageClient();
       let verified = false;

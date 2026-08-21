@@ -154,6 +154,7 @@ cd ..
 | Variable                                                 | Purpose                                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`     | Redis (the data store — everything lives here). Any Upstash REST pair works from any platform. Aliases accepted: `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash/Vercel KV), `REDIS_REST_URL`/`REDIS_REST_TOKEN`. Wire-protocol `redis://` URLs are skipped automatically.                                                      |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Optional — the Setup Wizard's source of truth for `global_platform_settings` (provider keys + the configuration gate). Aliases: `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`. Without them the store uses the legacy env-var providers (Stripe/Resend/Mapbox) unchanged. |
 | `STRIPE_SECRET_KEY`                                      | Stripe API key                                                                                                                                                                                                                                                                                                                 |
 | `STRIPE_WEBHOOK_SECRET`                                  | Stripe webhook signing secret                                                                                                                                                                                                                                                                                                  |
 | `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification)                                                                                                                                                                                                                                                                         |
@@ -396,6 +397,14 @@ emails a 6-digit code to `ADMIN_VERIFY_EMAIL` (fallback `SUPPORT_EMAIL`) that
 you must enter before the portal unlocks. Check "remember this device" to
 skip the code for 30 days on that browser. Wrong codes lock out for 15 minutes
 after 5 tries, so a leaked password alone can't get into `/admin`.
+- **Setup Wizard + super-admin login**: on first run `/admin` redirects to
+  `/admin/setup`, where you pick your Email / Payment / Map providers, paste API
+  keys, and create the master super-admin (stored in Supabase
+  `global_platform_settings`). Afterwards the master account can sign back in at
+  `/admin/setup?reconfigure=1` (or `POST /api/admin/super-login`) to change
+  providers without the Basic-Auth password. When Supabase isn't configured,
+  everything falls back to the legacy `STRIPE_SECRET_KEY` / `RESEND_API_KEY` /
+  `NEXT_PUBLIC_MAPBOX_TOKEN` env vars unchanged.
 - **Streamer Mode** (default ON): masks customer emails, shipping addresses,
 card numbers, tracking numbers, promo codes, order refs, phone numbers and
 names (fixed-length bullet masks — even the character lengths never leak), and

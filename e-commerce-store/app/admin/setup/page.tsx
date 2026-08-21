@@ -50,6 +50,10 @@ export default function SetupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const [superEmail, setSuperEmail] = useState('');
+  const [superPassword, setSuperPassword] = useState('');
+  const [superBusy, setSuperBusy] = useState(false);
+  const [superError, setSuperError] = useState('');
 
   const loadStatus = useCallback(async () => {
     setLoadingStatus(true);
@@ -96,6 +100,25 @@ export default function SetupPage() {
     }
   }
 
+  async function superLogin() {
+    setSuperError('');
+    setSuperBusy(true);
+    try {
+      const res = await fetch('/api/admin/super-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: superEmail, password: superPassword }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok) { setSuperError(data.error || 'Sign-in failed.'); return; }
+      window.location.href = '/admin';
+    } catch {
+      setSuperError('Sign-in failed. Check your connection and try again.');
+    } finally {
+      setSuperBusy(false);
+    }
+  }
+
   const supabaseReady = Boolean(status?.supabase.url && status?.supabase.serviceRoleKey);
 
   return (
@@ -114,9 +137,27 @@ export default function SetupPage() {
         {loadingStatus ? (
           <div style={{ textAlign: 'center', color: '#9ca3af', padding: 40 }}>Checking configuration…</div>
         ) : status?.configured ? (
-          <div style={{ background: '#fff', borderRadius: 16, padding: 24, textAlign: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.08)' }}>
-            <p style={{ fontWeight: 700, fontSize: 17 }}>This store is already configured.</p>
-            <Link href="/admin" style={{ display: 'inline-block', marginTop: 12, background: '#111', color: '#fff', padding: '12px 24px', borderRadius: 999, textDecoration: 'none', fontWeight: 700 }}>Open the Admin Portal</Link>
+          <div style={{ display: 'grid', gap: 20 }}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 24, textAlign: 'center', boxShadow: '0 12px 30px rgba(0,0,0,0.08)' }}>
+              <p style={{ fontWeight: 700, fontSize: 17, margin: 0 }}>This store is already configured.</p>
+              <p style={{ color: '#6b7280', fontSize: 13, margin: '6px 0 12px', lineHeight: 1.5 }}>Sign in with your master account to update providers, or open the portal with the admin password.</p>
+              <Link href="/admin" style={{ display: 'inline-block', marginTop: 12, background: '#111', color: '#fff', padding: '12px 24px', borderRadius: 999, textDecoration: 'none', fontWeight: 700 }}>Open the Admin Portal</Link>
+            </div>
+
+            <Section title="Super-admin sign in" subtitle="Re-configure email / payment / map providers without the admin password.">
+              <Field label="Admin email">
+                <input type="email" required value={superEmail} onChange={(e) => setSuperEmail(e.target.value)} placeholder="admin@yourbrand.com" autoComplete="email" />
+              </Field>
+              <Field label="Admin password">
+                <input type="password" required value={superPassword} onChange={(e) => setSuperPassword(e.target.value)} placeholder="Supabase master password" autoComplete="current-password" />
+              </Field>
+              {superError && (
+                <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '12px 16px', color: '#b91c1c', fontSize: 14 }}>{superError}</div>
+              )}
+              <button type="button" disabled={superBusy} onClick={superLogin} style={{ background: superBusy ? '#9ca3af' : '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '14px 20px', fontSize: 15, fontWeight: 800, cursor: superBusy ? 'default' : 'pointer' }}>
+                {superBusy ? 'Signing in…' : 'Sign in as super-admin'}
+              </button>
+            </Section>
           </div>
         ) : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 20 }}>

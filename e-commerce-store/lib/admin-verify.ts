@@ -19,7 +19,7 @@ import {
   ADMIN_DEVICES_KEY,
   adminVerifyKey,
 } from '@/lib/redis-keys';
-import { safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
 
 const CODE_TTL_SECONDS = 10 * 60; // 10 minutes
@@ -184,6 +184,7 @@ export async function issueAdminDevice(
   redis: any,
   email: string,
   remember: boolean,
+  meta: Record<string, unknown> = {},
 ): Promise<{ token: string; maxAgeSeconds: number }> {
   const token = randomBytes(32).toString('hex');
   const maxAgeSeconds = remember ? DEVICE_TTL_SECONDS : SESSION_DEVICE_TTL_SECONDS;
@@ -192,6 +193,7 @@ export async function issueAdminDevice(
       email: String(email || '').trim().toLowerCase(),
       createdAt: Date.now(),
       expiresAt: Date.now() + maxAgeSeconds * 1000,
+      ...meta,
     }),
   });
   return { token, maxAgeSeconds };
@@ -223,4 +225,42 @@ export function adminDeviceTokenFromRequest(request: Request): string {
   const match = cookie.match(/(?:^|;\s*)goyunir_admin_device=([^;]+)/);
   return match ? decodeURIComponent(match[1]) : '';
 }
+
+/** Read + lazy-expire the parsed `admin:devices` record for a token. Returns the
+ *  record (which may carry `superAdmin: true`) or null when the token is unknown
+ *  or expired. Mirrors the expiry discipline of `isAdminDeviceValid` — hash
+ *  fields can't carry a per-field TTL, so expired entries are deleted the first
+ *  time they're checked. */
+export async function readAdminDevice(
+  redis: any,
+  token: string,
+): Promise<{ email?: string; createdAt?: number; expiresAt?: number; superAdmin?: boolean } | null> {
+  if (!token) return null;
+  const raw = await redis.hget(ADMIN_DEVICES_KEY, token).catch(() => null);
+  if (!raw) return null;
+  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number; expiresAt?: number; superAdmin?: boolean }>(raw);
+  if (!parsed) return null;
+  if (Number(parsed.expiresAt) > 0 && Date.now() > Number(parsed.expiresAt)) {
+    try {
+      await redis.hdel(ADMIN_DEVICES_KEY, token);
+    } catch {
+      /* best-effort */
+    }
+    return null;
+  }
+  return parsed;
+}
+
+/** Whether the current request's device cookie maps to a SUPER-ADMIN session —
+ *  i.e. the master account signed in through /api/admin/super-login (Supabase).
+ *  Used to let that account re-configure providers without the env Basic-Auth
+ *  password. */
+export async function isSuperAdminSession(request: Request): Promise<boolean> {
+  const redis = createRedisClient();
+  if (!redis) return false;
+  const token = adminDeviceTokenFromRequest(request);
+  const record = await readAdminDevice(redis, token);
+  return record?.superAdmin === true;
+}
+
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminRequestAuthorized } from '@/lib/server-config';
 import { isValidEmail } from '@/lib/validation';
+import { isSuperAdminSession } from '@/lib/admin-verify';
 import {
   getPlatformSettings,
   isPlatformConfigured,
@@ -74,9 +75,10 @@ export async function POST(request: Request) {
 
     // ── re-configuration guard ───────────────────────────────────────────────
     const alreadyConfigured = (await isPlatformConfigured()) === true;
-    if (alreadyConfigured && !adminRequestAuthorized(request, adminPassword)) {
+    const superAdminSession = await isSuperAdminSession(request);
+    if (alreadyConfigured && !adminRequestAuthorized(request, adminPassword) && !superAdminSession) {
       return NextResponse.json(
-        { error: 'The platform is already configured. Enter the admin password to update providers.' },
+        { error: 'The platform is already configured. Enter the admin password or sign in as the super-admin to update providers.' },
         { status: 403 },
       );
     }
