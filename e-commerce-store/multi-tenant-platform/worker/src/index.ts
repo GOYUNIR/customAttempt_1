@@ -8,12 +8,14 @@
  *                             (24h TTL) → render HTML.
  *
  * Cache invalidation happens in the Admin Portal via the Cloudflare API
- * (see multi-tenant-platform/admin-portal/src/publish.ts).
+ * (see multi-tenant-platform/admin-portal/src/publish.ts) or the Worker's own
+ * POST /api/flush-cache route (see src/flush.ts).
  */
 import { resolveSiteKey } from '../../shared/hostname.ts';
 import { getCachedSite, setCachedSite, resolveCacheVersion } from './cache.ts';
 import { createSupabaseClient, loadCompiledSite } from './supabase.ts';
 import { renderSiteHtml, renderNotFoundHtml } from './render.ts';
+import { FLUSH_CACHE_PATH, handleFlushCache } from './flush.ts';
 import type { Env } from './env.ts';
 
 export default {
@@ -22,6 +24,11 @@ export default {
 
     if (url.pathname === '/__health') {
       return jsonResponse({ ok: true, service: 'mtp-edge-storefront', time: new Date().toISOString() });
+    }
+
+    // Cache-invalidation hook (Admin Portal → POST { hostname } with bearer secret).
+    if (url.pathname === FLUSH_CACHE_PATH) {
+      return handleFlushCache(request, env);
     }
 
     const resolved = resolveSiteKey(url.hostname, env.PLATFORM_ROOT_DOMAIN);

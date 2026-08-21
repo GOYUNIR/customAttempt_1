@@ -48,3 +48,20 @@ export async function setCachedSite(env: Env, siteKey: string, compiled: Compile
     expirationTtl: resolveTtlSeconds(env),
   });
 }
+
+/**
+ * Delete every cached version of a tenant's key (`v1..v<current>`). Deleting a
+ * missing key is a no-op, so this is always safe to call — e.g. when the Admin
+ * Portal flushes a hostname whose payload was never written. Returns the keys
+ * that were deleted (for the flush endpoint's response body).
+ */
+export async function deleteCachedSite(env: Env, siteKey: string): Promise<string[]> {
+  const currentVersion = resolveCacheVersion(env);
+  const deletedKeys: string[] = [];
+  for (let version = 1; version <= currentVersion; version++) {
+    const key = cacheKeyForSite(siteKey, version);
+    await env.SITE_CACHE.delete(key);
+    deletedKeys.push(key);
+  }
+  return deletedKeys;
+}

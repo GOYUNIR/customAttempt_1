@@ -9,4 +9,10 @@ export interface Env {
   PLATFORM_ROOT_DOMAIN: string;
   SITE_CACHE_TTL_SECONDS?: string;
   CACHE_VERSION?: string;
+  /**
+   * Shared bearer secret guarding `POST /api/flush-cache` (set via
+   * `wrangler secret put FLUSH_CACHE_SECRET`). The Admin Portal must send
+   * `Authorization: Bearer <this value>` when it invalidates a tenant's cache.
+   */
+  FLUSH_CACHE_SECRET?: string;
 }

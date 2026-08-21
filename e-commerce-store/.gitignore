@@ -48,6 +48,7 @@ cron-worker/.dev.vars*
 .open-next/
 .wrangler/
 .dev.vars*
+!.dev.vars.example
 
 
 # typescript

@@ -28,21 +28,26 @@ multi-tenant-platform/
 │       ├── 00001_initial_schema.sql   # tables + RLS + grants + triggers
 │       └── 00002_seed_demo_site.sql   # optional published demo tenant
 ├── worker/                        # Cloudflare Worker (edge rendering)
-│   ├── wrangler.toml              # KV binding, platform apex, TTL, cache version
+│   ├── wrangler.toml              # name, compat date, KV binding, TTL, cache version
+│   ├── .dev.vars.example          # copy to .dev.vars for local secrets
 │   ├── src/
-│   │   ├── index.ts               # fetch handler — fast path / slow path / __health
+│   │   ├── index.ts               # fetch handler — fast path / slow path / __health / flush route
 │   │   ├── env.ts                 # typed bindings (SITE_CACHE, secrets)
-│   │   ├── cache.ts               # get/set compiled payload in KV (24h TTL)
+│   │   ├── cache.ts               # get/set/delete compiled payload in KV (24h TTL)
 │   │   ├── supabase.ts            # slow path — supabase-js + runtime normalizers
+│   │   ├── flush.ts               # POST /api/flush-cache — Admin Portal cache invalidation
 │   │   └── render.ts              # SSR boilerplate layout + JSON injection + CSS
 │   └── test/hostname.test.ts      # node --test
+│       test/flush.test.ts         #   + flush-endpoint tests
 └── admin-portal/                  # cache-invalidation + publish pipeline
     ├── src/
     │   ├── cloudflare-kv.ts       # Cloudflare API bulk/single key purge (typed)
     │   ├── supabase-admin.ts      # service-role client (the trusted writer)
     │   ├── publish.ts             # Save/Publish: Postgres write → KV purge
+    │   ├── flush-client.ts        # alternative: POST /api/flush-cache on the Worker
     │   └── route.example.ts       # Request → Response endpoint (Next.js verbatim)
     └── test/publish.test.ts       # node --test
+        test/flush-client.test.ts  #   + flush-client tests
 ```
 
 ## 1 · Supabase (source of truth + RLS)
@@ -68,17 +73,25 @@ invisible until the owner publishes — and can never be rendered by the edge.
 
 ## 2 · Cloudflare Worker (edge routing + caching)
 
+The Worker is deployed as **`template-edge-renderer`** (`compatibility_date =
+2024-01-01`, `nodejs_compat`).
+
 ```bash
 cd multi-tenant-platform/worker
 npm install
 
+# local secrets (gitignored) — same three values you will `secret put` in prod
+cp .dev.vars.example .dev.vars
+
 # create the KV namespace once, then paste its id into wrangler.toml
 npx wrangler kv namespace create SITE_CACHE
 
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_ANON_KEY
+# runtime secrets (never committed; read from the environment at runtime)
+npx wrangler secret put SUPABASE_URL         # e.g. https://xxxx.supabase.co
+npx wrangler secret put SUPABASE_ANON_KEY    # the anon/public key (RLS-gated reads)
+npx wrangler secret put FLUSH_CACHE_SECRET   # bearer secret guarding POST /api/flush-cache
 
-npx wrangler dev          # local test (set PLATFORM_ROOT_DOMAIN in [vars])
+npx wrangler dev          # local test (PLATFORM_ROOT_DOMAIN comes from [vars])
 npx wrangler deploy
 ```
 
@@ -102,6 +115,17 @@ then the page is served.
 Bump `CACHE_VERSION` in `wrangler.toml` to invalidate every tenant's cache at
 once (key derivation includes the version).
 
+**Cache-invalidation hook (`POST /api/flush-cache`):** the Admin Portal calls
+this route when a user updates/saves their layout. It requires
+`Authorization: Bearer $FLUSH_CACHE_SECRET` (constant-time compared, fails
+closed when the secret is unset), accepts `{ "hostname": "demo.yourplatform.com" }`,
+and deletes every cached version of that tenant's KV key
+(`site_cache:v1..v<N>:<siteKey>`) — the next visitor is served a freshly
+compiled payload. Hostname resolution mirrors the fast path: full hosts
+(`www.shop.acme.com` → `shop.acme.com`), platform subdomains
+(`demo.yourplatform.com` → `demo`) and bare keys (`demo`, `shop.acme.com`)
+all work. See `src/flush.ts`.
+
 ## 3 · Admin cache-invalidation trigger (Save / Publish)
 
 `admin-portal/src/publish.ts` is the boilerplate for your Admin Portal's
@@ -111,14 +135,21 @@ once (key derivation includes the version).
 1. **Writes to Supabase** (service role): upserts `site_settings`
    (site_name/theme_config/layout_blocks) and replaces the product catalog.
 2. **Flips `sites.is_published`**.
-3. **Instantly overwrites/deletes the Cloudflare KV keys** for every hostname
-   the site owns (`site_cache:v<N>:<subdomain>` + `site_cache:v<N>:<custom_domain>`)
-   via the Cloudflare API bulk-delete endpoint — the live site updates for the
-   next visitor immediately, and the Worker re-warms KV on the following miss.
+3. **Instantly deletes the Cloudflare KV keys** for every hostname the site owns
+   (`site_cache:v<N>:<subdomain>` + `site_cache:v<N>:<custom_domain>`) — either
+   through the **Cloudflare API bulk-delete endpoint** (`cloudflare-kv.ts`), or
+   through the Worker's **`/api/flush-cache` route** (`flush-client.ts` →
+   `flushSiteCache(workerBaseUrl, flushSecret, hostname)`). The live site
+   updates for the next visitor immediately, and the Worker re-warms KV on the
+   following miss.
 
-Required env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+Direct-API path env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
 `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_KV_NAMESPACE_ID`, `CLOUDFLARE_API_TOKEN`,
 `ADMIN_API_SECRET`, `CACHE_VERSION` (must equal the Worker's).
+
+Worker-route path env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`ADMIN_API_SECRET`, `WORKER_FLUSH_URL` (e.g. the `*.workers.dev` URL),
+`WORKER_FLUSH_SECRET` (the Worker's `FLUSH_CACHE_SECRET`), `CACHE_VERSION`.
 
 ## 4 · Development protocol
 
