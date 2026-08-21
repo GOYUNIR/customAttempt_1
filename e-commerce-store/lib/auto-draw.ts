@@ -27,7 +27,6 @@ import {
   buildAbsoluteUrl,
   cardBlockKey,
   createRedisClient,
-  createStripeClient,
   DRAW_HISTORY_KEY,
   emailBlockKey,
   getGlobalScheduleOverride,
@@ -69,6 +68,8 @@ import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
 import { dropTimestampToMs, formatStoreWallClock, splitEntriesByCycleEnd } from '@/lib/drop-timestamps';
+import { resolveStripeClient } from '@/services/payment/factory';
+
 
 export { productNameFromPoolKey };
 
@@ -236,7 +237,7 @@ async function evaluatePoolDue(opts: {
 
 export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoDrawResult> {
   const redis = options.redis || createRedisClient();
-  const stripe = options.stripe || createStripeClient();
+  const stripe = options.stripe || (await resolveStripeClient());
   const now = options.now ?? Date.now();
   const dryRun = options.dryRun === true;
 

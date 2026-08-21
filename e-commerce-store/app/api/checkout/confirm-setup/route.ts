@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   safeParseRedisItem,
   archiveEntry,
   emailBlockKey,
@@ -17,6 +16,7 @@ import {
   poolKey,
   waitlistPoolKey,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
@@ -361,7 +361,7 @@ async function lockOneEntry(opts: {
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    const stripe = createStripeClient();
+    const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'System offline.' }, { status: 500 });
     }

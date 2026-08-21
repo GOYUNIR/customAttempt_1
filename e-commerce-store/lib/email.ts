@@ -1,14 +1,64 @@
-import { Resend } from 'resend';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { normalizeSiteBase } from '@/lib/url-utils';
+import { EmailFactory } from '@/services/email';
+import type { EmailDriver } from '@/services/email';
+
 
 export { normalizeSiteBase };
 
+/**
+ * Resolve the active email driver through the driver engine (EmailFactory).
+ *
+ * The factory reads `global_platform_settings` (Setup Wizard) FIRST and falls
+ * back to the legacy env vars, so every send below works unchanged for stores
+ * that configured Resend via the wizard OR via RESEND_API_KEY.
+ */
+async function getEmailDriver(): Promise<EmailDriver | null> {
+  try {
+    return await EmailFactory.getDriver();
+  } catch (err) {
+    console.error('[email] driver factory error', err);
+    return null;
+  }
+}
+
+/**
+ * Migration bridge: every `resend.emails.send({...})` call below is routed
+ * through the EmailDriver factory instead of the Resend SDK. The shim keeps
+ * the historical `{ data, error }` result shape so the 12 transactional
+ * templates in this file did not need rewriting.
+ */
 function getResend() {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) return null;
-  return new Resend(key);
+  return {
+    emails: {
+      send: async (payload: {
+        from?: string;
+        to: string;
+        replyTo?: string;
+        subject: string;
+        html: string;
+        text?: string;
+      }): Promise<{ data: { id?: string } | null; error: unknown }> => {
+        const driver = await getEmailDriver();
+        if (!driver) {
+          console.warn('[email] no email provider configured — email skipped');
+          return { data: null, error: new Error('No email provider configured') };
+        }
+        const result = await driver.sendTransactional({
+          from: payload.from || from(),
+          to: payload.to,
+          replyTo: payload.replyTo || replyTo(),
+          subject: payload.subject,
+          html: payload.html,
+          text: payload.text,
+        });
+        if (result.ok) return { data: { id: result.id }, error: null };
+        console.error('[email] send failed via driver', result.error);
+        return { data: null, error: result.error ?? new Error('Email send failed') };
+      },
+    },
+  };
 }
 
 /** Brand name used inside transactional emails. Prefers the platform env
@@ -671,57 +721,14 @@ export async function sendWelcomeEmail(opts: {
   }
 }
 
-/** Shared one-time-code email template (admin 2FA + customer email verification). */
-function sendCodeEmail(opts: {
-  to: string;
-  code: string;
-  subject: string;
-  headline: string;
-  body: string;
-  ctaLabel?: string;
-  ctaUrl?: string;
-}) {
-  const resend = getResend();
-  if (!resend) return { ok: false, skipped: true };
-  const brand = emailBrandName();
-  try {
-    return resend.emails.send({
-      from: from(),
-      to: opts.to,
-      replyTo: replyTo(),
-      subject: opts.subject,
-      html: `
-        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
-          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand}</p>
-          <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">${opts.headline}</h1>
-          <p style="margin:0 0 14px;color:#4b5563">${opts.body}</p>
-          <div style="margin:0 0 18px;padding:16px 18px;border-radius:18px;background:#111;color:#fff;display:inline-block;font-weight:800;letter-spacing:6px;font-size:26px;text-align:center">${opts.code}</div>
-          <p style="margin:0 0 8px;color:#6b7280;font-size:12px">The code expires in 10 minutes and can only be used once. If you didn't request it, you can safely ignore this email.</p>
-          ${opts.ctaUrl ? `<p style="margin:0 0 20px"><a href="${opts.ctaUrl}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;text-decoration:none;border-radius:999px;font-weight:700;font-size:14px">${opts.ctaLabel || 'Open'}</a></p>` : ''}
-          <p style="margin:0;color:#6b7280;font-size:13px">Questions? Reach us anytime at <a href="mailto:${supportEmail()}" style="color:#111">${supportEmail()}</a>.</p>
-        </div>
-      `,
-    }).then(({ data, error }: { data?: any; error?: any }) => {
-      if (error) {
-        console.error('[email] code email error', error);
-        return { ok: false, error };
-      }
-      return { ok: true, id: data?.id };
-    });
-  } catch (err) {
-    console.error('[email] code email failed', err);
-    return { ok: false, error: err };
-  }
-}
-
 /** Admin portal two-step verification code (sent to ADMIN_VERIFY_EMAIL / SUPPORT_EMAIL). */
-export function sendAdminVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
-  return sendCodeEmail({
-    to: opts.to,
-    code: opts.code,
-    // The code lives in the SUBJECT so it shows in the phone's push-notification
-    // preview (and the mailbox list) — the operator can read and type it without
-    // opening the email. iOS Mail + Android Gmail also use it for OTP autofill.
+export async function sendAdminVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
+  const driver = await getEmailDriver();
+  if (!driver) return { ok: false, skipped: true };
+  // The code lives in the SUBJECT so it shows in the phone's push-notification
+  // preview (and the mailbox list) — the operator can read and type it without
+  // opening the email. iOS Mail + Android Gmail also use it for OTP autofill.
+  return driver.send2FA(opts.to, opts.code, {
     subject: `${emailBrandName()} — Admin sign-in code: ${opts.code}`,
     headline: 'Admin sign-in verification',
     body: 'A request was made to open the store admin portal. Enter this one-time code to finish signing in.',
@@ -729,11 +736,11 @@ export function sendAdminVerificationEmail(opts: { to: string; code: string; sit
 }
 
 /** Customer email-verification code (sent after signup so the inbox is real before rewards unlock). */
-export function sendCustomerVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
-  return sendCodeEmail({
-    to: opts.to,
-    code: opts.code,
-    // Same notification-preview trick as the admin 2FA email.
+export async function sendCustomerVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
+  const driver = await getEmailDriver();
+  if (!driver) return { ok: false, skipped: true };
+  // Same notification-preview trick as the admin 2FA email.
+  return driver.send2FA(opts.to, opts.code, {
     subject: `${emailBrandName()} — Your verification code: ${opts.code}`,
     headline: 'Confirm your email address',
     body: `We need to make sure ${opts.to} is really you before your welcome points and one-time member credit are unlocked. Enter this one-time code to verify your account.`,

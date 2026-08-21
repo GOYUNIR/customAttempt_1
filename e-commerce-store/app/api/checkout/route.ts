@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createRedisClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { PaymentFactory } from '@/services/payment/factory';
+import { StripeDriver } from '@/services/payment/stripe.driver';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
@@ -41,10 +43,17 @@ async function countChargedByEmail(redis: any, email: string, variant: string, s
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    const stripe = createStripeClient();
-    if (!redis || !stripe) {
+    if (!redis) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
+    // Resolve the payment provider through the driver engine (Setup Wizard
+    // settings → legacy env fallback). Stripe is the ONLY provider that can run
+    // the raffle card-save (setup) flow; instant-buy (FCFS) runs on any driver.
+    const payment = await PaymentFactory.getDriver();
+    if (!payment || !payment.configured) {
+      return NextResponse.json({ error: 'Payment provider is not configured.' }, { status: 500 });
+    }
+    const stripe = payment.provider === 'stripe' ? (payment as StripeDriver).getStripeClient() : null;
 
     let body: any = {};
     try {
@@ -247,22 +256,34 @@ export async function POST(request: Request) {
       return `${protocol}://${host}`;
     })();
 
-    // Get or create customer
+    // Stripe-only gate: raffle card-save (setup mode) is a Stripe concept. The
+    // other providers power the instant-buy (FCFS) path only.
+    if ((checkoutMode === 'RAFFLE' || usesWaitlist) && !stripe) {
+      return NextResponse.json({
+        error:
+          'Raffle card-save requires the Stripe payment provider. Change the payment provider in Setup, or switch this size to instant-buy.',
+      }, { status: 400 });
+    }
+
+    // Get or create customer (Stripe-specific; the hosted checkouts of the
+    // other providers collect the email themselves).
     let customer;
-    const existing = await stripe.customers.list({ email, limit: 1 });
-    if (existing.data.length > 0) {
-      customer = existing.data[0];
-    } else {
-      customer = await stripe.customers.create({
-        email,
-        metadata: { initialShippingAddress: address },
-      });
+    if (stripe) {
+      const existing = await stripe.customers.list({ email, limit: 1 });
+      if (existing.data.length > 0) {
+        customer = existing.data[0];
+      } else {
+        customer = await stripe.customers.create({
+          email,
+          metadata: { initialShippingAddress: address },
+        });
+      }
     }
 
     if (checkoutMode === 'RAFFLE' || usesWaitlist) {
-      const session = await stripe.checkout.sessions.create({
+      const session = await stripe!.checkout.sessions.create({
         mode: 'setup',
-        customer: customer.id,
+        customer: customer!.id,
         payment_method_types: ['card'],
         success_url: `${origin}/${productSlug}?setup=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/${productSlug}?setup=cancel`,
@@ -282,25 +303,13 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ url: session.url, sessionId: session.id });
     } else {
-      const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer: customer.id,
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: 'usd',
-              unit_amount: priceCents,
-              product_data: {
-                name: `${product.name} - ${size}`,
-                description: product.tagline || product.desc || undefined,
-              },
-            },
-            quantity: 1,
-          },
-        ],
-        success_url: `${origin}/${productSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/${productSlug}?purchase=cancel`,
+      const session = await payment.createCheckoutSession(priceCents, `${productId}:${size}`, {
+        successUrl: `${origin}/${productSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${origin}/${productSlug}?purchase=cancel`,
+        customerEmail: normalizedEmail,
+        receiptEmail: email,
+        productName: `${product.name} - ${size}`,
+        productDescription: product.tagline || product.desc || undefined,
         metadata: {
           productId: String(productId),
           productSlug,
@@ -314,26 +323,11 @@ export async function POST(request: Request) {
           ref: String(ref || promoCode || '').trim().toUpperCase(),
           entryType: usesWaitlist ? 'waitlist' : 'direct',
         },
-        payment_intent_data: {
-          receipt_email: email,
-          metadata: {
-            productId: String(productId),
-            productSlug,
-            variant: String(product.name || ''),
-            size: String(size),
-            email: normalizedEmail,
-            address: String(address),
-            maxPerEmail: String(maxPerEmail),
-            orderRef,
-            promoCode: normalizedPromo,
-            ref: String(ref || promoCode || '').trim().toUpperCase(),
-          },
-        },
       });
       if (normalizedPromo) {
-        await redis.setex(promoPendingKey(normalizedPromo, normalizedEmail), PROMO_PENDING_TTL_SECONDS, session.id);
+        await redis.setex(promoPendingKey(normalizedPromo, normalizedEmail), PROMO_PENDING_TTL_SECONDS, session.sessionId);
       }
-      return NextResponse.json({ url: session.url, sessionId: session.id });
+      return NextResponse.json({ url: session.url, sessionId: session.sessionId });
     }
   } catch (err: any) {
     console.error('[checkout] failed', err?.message || err);

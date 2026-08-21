@@ -4,7 +4,6 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   buildAbsoluteUrl,
   createRedisClient,
-  createStripeClient,
   safeParseRedisItem,
   archiveEntry,
   resolveCustomerId,
@@ -12,6 +11,7 @@ import {
   LAST_DRAW_KEY,
   loadProducts,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
 import { poolKey, intentPoolKey } from '@/lib/redis-keys';
 import { buildOrderRef } from '@/lib/order-ref';
@@ -27,7 +27,7 @@ export interface DrawResult {
 
 export async function runDropDraw(request: Request | NextRequest) {
   const redis = createRedisClient();
-  const stripe = createStripeClient();
+  const stripe = await resolveStripeClient();
   const resultsSummary: DrawResult[] = [];
 
   if (!redis) {

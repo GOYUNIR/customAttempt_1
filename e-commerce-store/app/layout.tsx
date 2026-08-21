@@ -11,6 +11,7 @@ import { brandLogoRef } from '@/lib/media';
 import { revisionHash } from '@/lib/share-card-config';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { contentSpacingScale } from '@/lib/storefront-config';
+import { MapFactory } from '@/services/maps/factory';
 
 /**
  * Bump this constant ANY time the share-card code changes (markup, colors,
@@ -155,9 +156,22 @@ export default async function RootLayout({
   // body client-side. Falls back to the dark defaults when Redis is empty.
   const redis = createRedisClient();
   const liveValue = await buildLiveTheme(redis);
+  // Resolve the ACTIVE map provider token through the driver engine (Setup
+  // Wizard → env fallback). The token rides in the theme blob and the inline
+  // script writes it to window.ENV_MAPBOX_TOKEN — the address-autofill module
+  // already checks that global FIRST, so a wizard-configured key (or a swapped
+  // provider) takes effect on the very next page load with NO rebuild. Mapbox
+  // pk.* / restricted Google keys are public-client by design.
+  let mapToken = '';
+  try {
+    const mapDriver = await MapFactory.getDriver();
+    mapToken = mapDriver.getToken();
+  } catch {
+    mapToken = '';
+  }
   const colors = liveValue.themeColors || {};
   // Keep the inline JSON safe for a <script> block (escape any "</" sequences).
-  const safeJson = JSON.stringify(liveValue).replace(/</g, '\\u003c');
+  const safeJson = JSON.stringify({ ...liveValue, mapToken }).replace(/</g, '\\u003c');
   // The CSS custom properties applied by the synchronous inline script below
   // (and consumed by the storefront CSS) are baked into the server HTML too, so
   // React hydration sees the same <html> style the inline script leaves behind.
@@ -195,7 +209,7 @@ export default async function RootLayout({
         <script id="goyunir-theme-json" type="application/json" dangerouslySetInnerHTML={{ __html: safeJson }} />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var el=document.getElementById('goyunir-theme-json');var t=el?JSON.parse(el.textContent):null;if(!t)return;var c=t.themeColors||{};var b=document.body.style;if(c.primaryBackground)b.background=c.primaryBackground;if(c.textMain)b.color=c.textMain;if(c.fontFamily)b.fontFamily=c.fontFamily;var r=document.documentElement.style;var rad=Number(c.borderRadius);r.setProperty('--ui-radius',(Number.isFinite(rad)&&rad>=0?rad:24)+'px');r.setProperty('--background',c.primaryBackground||'#f2f2f7');r.setProperty('--foreground',c.textMain||'#1d1d1f');r.setProperty('--ui-chrome-alpha',String(Math.max(40,Math.min(100,Number(c.chromeTransparency)||62))));r.setProperty('--ui-surface-alpha',String(Math.max(40,Math.min(100,Number(c.surfaceTransparency)||100))));r.setProperty('--ui-radius-style',String(c.radiusStyle||'squircle'));r.setProperty('--ui-card-shadow',String(Number(c.cardShadow)||14));r.setProperty('--ui-glass-blur',String(Number(c.backdropBlur)||80));r.setProperty('--ui-spacing-scale',String(c.contentSpacing==='compact'?0.88:(c.contentSpacing==='spacious'?1.15:1)));window.__GOYUNIR_THEME__=t;}catch(e){}})();`,
+            __html: `(function(){try{var el=document.getElementById('goyunir-theme-json');var t=el?JSON.parse(el.textContent):null;if(!t)return;var c=t.themeColors||{};var b=document.body.style;if(c.primaryBackground)b.background=c.primaryBackground;if(c.textMain)b.color=c.textMain;if(c.fontFamily)b.fontFamily=c.fontFamily;var r=document.documentElement.style;var rad=Number(c.borderRadius);r.setProperty('--ui-radius',(Number.isFinite(rad)&&rad>=0?rad:24)+'px');r.setProperty('--background',c.primaryBackground||'#f2f2f7');r.setProperty('--foreground',c.textMain||'#1d1d1f');r.setProperty('--ui-chrome-alpha',String(Math.max(40,Math.min(100,Number(c.chromeTransparency)||62))));r.setProperty('--ui-surface-alpha',String(Math.max(40,Math.min(100,Number(c.surfaceTransparency)||100))));r.setProperty('--ui-radius-style',String(c.radiusStyle||'squircle'));r.setProperty('--ui-card-shadow',String(Number(c.cardShadow)||14));r.setProperty('--ui-glass-blur',String(Number(c.backdropBlur)||80));r.setProperty('--ui-spacing-scale',String(c.contentSpacing==='compact'?0.88:(c.contentSpacing==='spacious'?1.15:1)));window.__GOYUNIR_THEME__=t;if(t.mapToken){try{window.ENV_MAPBOX_TOKEN=t.mapToken;}catch(e2){}}}catch(e){}})();`,
           }}
         />
         <ThemeProvider value={liveValue}>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, createStripeClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, verifyAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
+import { createRedisClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, verifyAdminPassword, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
@@ -47,7 +48,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    const stripe = createStripeClient();
+    const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'System offline' }, { status: 500 });
     }

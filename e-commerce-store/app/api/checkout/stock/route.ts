@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createStripeClient } from '@/lib/server-config';
-
-const stripe = createStripeClient();
+import { resolveStripeClient } from '@/services/payment/factory';
 
 export async function GET() {
   try {
+    const stripe = await resolveStripeClient();
     if (!stripe) {
       return NextResponse.json({
         activePriceMap: {},

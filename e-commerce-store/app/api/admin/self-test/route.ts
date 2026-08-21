@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   loadProducts,
   adminRequestAuthorized,
   safeParseRedisItem,
@@ -15,6 +14,7 @@ import {
   ENTRY_EMAIL_SENT_KEY,
   type LiveStateRecord,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -90,7 +90,7 @@ export async function GET(request: Request) {
   // Redis + Stripe connectivity
   // ------------------------------------------------------------------
   const redis = createRedisClient();
-  const stripe = createStripeClient();
+  const stripe = await resolveStripeClient();
   push('Redis client', Boolean(redis), redis ? 'ok' : 'failed');
 
   if (redis) {

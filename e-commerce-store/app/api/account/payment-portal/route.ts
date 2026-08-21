@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   findPoolEntriesByEmail,
   loadProducts,
   loadStoreConfig,
   STRIPE_PORTAL_CACHE_KEY,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { getSessionUser } from '@/lib/session-auth';
 
 export const dynamic = 'force-dynamic';
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     }
 
     const redis = createRedisClient();
-    const stripe = createStripeClient();
+    const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });
     }

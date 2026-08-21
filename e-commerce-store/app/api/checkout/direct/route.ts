@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   getLiveProductState,
   saveLiveState,
   archiveEntry,
@@ -11,6 +10,7 @@ import {
   safeParseRedisItem,
   STORE_CONFIG_KEY,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
@@ -34,7 +34,7 @@ async function getRefPrefix(redis: any): Promise<string> {
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    const stripe = createStripeClient();
+    const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });
     }

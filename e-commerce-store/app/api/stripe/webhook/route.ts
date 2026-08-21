@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   archiveEntry,
   cleanupMatchingIntent,
   emailBlockKey,
@@ -22,6 +21,7 @@ import {
 } from '@/lib/server-config';
 import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { sendEntryConfirmedEmail } from '@/lib/email';
+import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
@@ -127,7 +127,9 @@ async function resolvePromo(
 
 export async function POST(request: Request) {
   const redis = createRedisClient();
-  const stripe = createStripeClient();
+  // Resolve the Stripe client + webhook secret through the payment driver
+  // engine (Setup Wizard settings → legacy env fallback).
+  const [stripe, webhookSecret] = await Promise.all([resolveStripeClient(), resolvePaymentWebhookSecret()]);
   if (!redis || !stripe) {
     return NextResponse.json({ error: 'Offline' }, { status: 500 });
   }
@@ -145,7 +147,7 @@ export async function POST(request: Request) {
   }
 
   const sig = request.headers.get('stripe-signature');
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  const secret = webhookSecret;
   // Unverified parsing is ONLY allowed in local development with an explicit
   // opt-in flag — never in production, and never just because a header is
   // missing. Forging a checkout.session.completed event must be impossible.

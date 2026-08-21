@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createStorageClient } from '@/lib/storage';
 import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
+import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/edge';
+
 
 const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
 const ADMIN_PASSWORD = resolveAdminPassword();
@@ -116,7 +118,61 @@ async function adminDeviceValid(redis: any, token: string): Promise<boolean> {
   return Boolean(parsed.email || parsed.createdAt);
 }
 export async function middleware(request: NextRequest) {
+
   const pathname = request.nextUrl.pathname;
+
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    // ── Setup Wizard gate ────────────────────────────────────────────────────
+    // When the Supabase-backed global_platform_settings row has is_configured =
+    // false (or doesn't exist yet), the standard admin login is BLOCKED and the
+    // browser is forced to /admin/setup. The setup endpoints are opened so the
+    // wizard can run BEFORE any Basic-Auth password exists. Once configured the
+    // gate flips off and the legacy Basic Auth + 2FA gates below take over.
+    const isSetupPath =
+      pathname === '/admin/setup' ||
+      pathname.startsWith('/admin/setup') ||
+      pathname === '/api/admin/setup' ||
+      pathname.startsWith('/api/admin/setup');
+
+    if (supabaseEnvReady()) {
+      let configured: boolean | null = null;
+      try {
+        configured = await isPlatformConfiguredEdge();
+      } catch {
+        configured = null;
+      }
+
+      if (configured === false) {
+        if (isSetupPath) {
+          return NextResponse.next(); // wizard page + API are open pre-config
+        }
+        if (pathname.startsWith('/api/admin')) {
+          return NextResponse.json(
+            { error: 'PLATFORM_NOT_CONFIGURED', redirect: '/admin/setup' },
+            { status: 423, headers: { 'Cache-Control': 'no-store' } },
+          );
+        }
+        const url = request.nextUrl.clone();
+        url.pathname = '/admin/setup';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+
+      if (configured === true && isSetupPath) {
+        if (pathname.startsWith('/api/admin')) {
+          // Configured: the setup API goes back under the normal admin gates.
+        } else {
+          // Wizard already ran — never show it again; go to the portal.
+          const url = request.nextUrl.clone();
+          url.pathname = '/admin';
+          url.search = '';
+          return NextResponse.redirect(url);
+        }
+      }
+      // configured === null → Supabase env present but gate unreachable: keep
+      // legacy env-based admin behavior (never lock the portal).
+    }
+  }
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     if (!ADMIN_USER || !ADMIN_PASSWORD) {

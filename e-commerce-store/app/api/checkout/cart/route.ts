@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   createRedisClient,
-  createStripeClient,
   loadProducts,
   getLiveProductState,
   ARCHIVE_LEDGER_KEY,
@@ -13,6 +12,7 @@ import {
   poolKey,
   STORE_CONFIG_KEY,
 } from '@/lib/server-config';
+import { resolveStripeClient } from '@/services/payment/factory';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
@@ -76,7 +76,7 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    const stripe = createStripeClient();
+    const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
