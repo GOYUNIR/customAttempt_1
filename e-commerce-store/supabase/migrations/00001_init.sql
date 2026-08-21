@@ -81,6 +81,13 @@ values ('00000000-0000-0000-0000-0000000000c0', false)
 on conflict (id) do nothing;
 
 -- ── store_kv — generic KV backing the Supabase StorageClient adapter ────────
+create table if not exists public.store_kv (
+  key text primary key,
+  value text not null,
+  expires_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+create index if not exists store_kv_expires_idx on public.store_kv (expires_at);
 
 -- ── Analytics events (per-tenant usage metrics) ─────────────────────────────
 create table if not exists public.analytics_events (
@@ -196,11 +203,3 @@ create trigger global_platform_settings_set_updated_at before update on public.g
 drop trigger if exists outbound_webhooks_set_updated_at on public.outbound_webhooks;
 create trigger outbound_webhooks_set_updated_at before update on public.outbound_webhooks
   for each row execute function public.set_updated_at();
-
-create table if not exists public.store_kv (
-  key text primary key,
-  value text not null,
-  expires_at timestamptz,
-  updated_at timestamptz not null default now()
-);
-create index if not exists store_kv_expires_idx on public.store_kv (expires_at);
