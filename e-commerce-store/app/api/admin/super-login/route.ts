@@ -38,7 +38,10 @@ export async function POST(request: Request) {
 
   if (!supabaseConfigured()) {
     return NextResponse.json(
-      { error: 'Supabase is not configured. Run the Setup Wizard first.' },
+      {
+        error:
+          'Supabase is not configured: SUPABASE_URL and SUPABASE_ANON_KEY are not set in the environment, so the super-admin account cannot be verified. Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in your hosting platform (and redeploy), then try again. (Credentials entered inline in the Setup Wizard only last for the current server session.)',
+      },
       { status: 503 },
     );
   }

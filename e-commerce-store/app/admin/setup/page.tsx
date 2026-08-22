@@ -562,6 +562,7 @@ export default function SetupPage() {
   const [reconfigure, setReconfigure] = useState(false);
   const [step, setStep] = useState(0);
   const [notice, setNotice] = useState('');
+  const [warning, setWarning] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -634,6 +635,7 @@ export default function SetupPage() {
     setError('');
     setErrorStage(null);
     setNotice('');
+    setWarning('');
     try {
       const body: Record<string, unknown> = {
         ...form,
@@ -651,7 +653,7 @@ export default function SetupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string; warning?: string };
       if (!res.ok || !data.ok) {
         // A 401/403 on an already-configured platform means the operator hasn't
         // authenticated yet. Surface the exact reason and make sure the
@@ -670,6 +672,7 @@ export default function SetupPage() {
       }
       await load();
       setNotice('saved');
+      setWarning(typeof data.warning === 'string' ? data.warning : '');
     } catch {
       setError('Setup could not be completed. Check your connection.');
     } finally {
@@ -867,6 +870,13 @@ export default function SetupPage() {
             {notice === 'signed-in' && (
               <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 12, padding: '12px 16px' }}>
                 <span style={{ color: '#047857', fontSize: 14, fontWeight: 700 }}>✓ Signed in — you can now update the providers below.</span>
+              </div>
+            )}
+
+            {warning && (
+              <div style={{ background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#9a3412' }}>⚠ Credentials not persisted</div>
+                <p style={{ fontSize: 13, color: '#9a3412', margin: 0, lineHeight: 1.5 }}>{warning}</p>
               </div>
             )}
 

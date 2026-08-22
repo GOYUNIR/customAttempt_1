@@ -13,7 +13,7 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials } from '@/services/config/supabase-client';
+import { createSuperAdmin, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess } from '@/services/config/supabase-client';
 import {
   discoverEnvironment,
   computeAdminReady,
@@ -156,7 +156,22 @@ export async function POST(request: Request) {
     // ── re-configuration guard ───────────────────────────────────────────────
     const alreadyConfigured = (await isPlatformConfigured()) === true;
     const superAdminSession = await isSuperAdminSession(request);
-    if (alreadyConfigured && !adminRequestAuthorized(request, adminPassword) && !superAdminSession) {
+    const basicAuthOk = adminRequestAuthorized(request, adminPassword);
+
+    // Beyond the Basic-Auth password and a valid super-admin device session, the
+    // Supabase SERVICE-ROLE key is accepted as authorization: it is the master
+    // write credential for `global_platform_settings`, so proving it (a successful
+    // authenticated read) is equivalent to super-admin. This unblocks the deadlock
+    // where the platform is already configured but the Supabase env was never set
+    // (inline wizard credentials are volatile and lost on a cold start) — the
+    // operator can re-enter their credentials and save again instead of being met
+    // with a 403 they can't resolve.
+    let serviceRoleAuthorized = false;
+    if (alreadyConfigured && !basicAuthOk && !superAdminSession) {
+      serviceRoleAuthorized = await verifyServiceRoleAccess();
+    }
+
+    if (alreadyConfigured && !basicAuthOk && !superAdminSession && !serviceRoleAuthorized) {
       return NextResponse.json(
         { error: 'The platform is already configured. Enter the admin password or sign in as the super-admin to update providers.' },
         { status: 403 },
@@ -199,7 +214,17 @@ export async function POST(request: Request) {
     //    Basic-Auth + email-2FA gates. The device cookie carries `superAdmin:
     //    true`, which middleware.ts treats as full authorization. Best-effort:
     //    if no storage backend is reachable the operator can still super-login.
-    const response = NextResponse.json({ ok: true, redirect: '/admin' });
+    const response = NextResponse.json({
+      ok: true,
+      redirect: '/admin',
+      // When Supabase credentials were entered inline (not present in the env),
+      // they only survive the current server session. Surface this so the
+      // operator knows to persist them as environment variables — otherwise they
+      // will be locked out of the admin portal again on the next restart/deploy.
+      warning: supabaseServiceConfiguredFromEnv()
+        ? undefined
+        : 'Supabase credentials were entered inline and are NOT saved as environment variables. They only work for the current server session. Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in your hosting platform (and redeploy) — otherwise you will be locked out of the admin portal on the next restart or deploy.',
+    });
     if (!alreadyConfigured) {
       const redis = createRedisClient();
       if (redis) {

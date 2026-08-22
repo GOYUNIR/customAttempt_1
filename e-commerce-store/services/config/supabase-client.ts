@@ -192,6 +192,32 @@ export async function fetchPlatformSettingsRow(): Promise<Record<string, unknown
   return rows[0];
 }
 
+/**
+ * Verify the CURRENT service-role credential can actually reach the project and
+ * read `global_platform_settings` — proof the caller holds the Supabase master
+ * key. This is equivalent to super-admin authorization for the Setup Wizard's
+ * reconfiguration guard: the service-role key is exactly what lets you write
+ * `global_platform_settings` directly, so accepting it cannot be a privilege
+ * escalation. It unblocks the deadlock where the platform is already configured
+ * but the Supabase env was never set (inline wizard credentials are volatile and
+ * lost on a cold start) — the operator can re-enter their credentials and save
+ * again without a pre-existing session. Returns true only on a successful
+ * authenticated read (a 401/403/network failure → false).
+ */
+export async function verifyServiceRoleAccess(): Promise<boolean> {
+  if (!supabaseServiceConfigured()) return false;
+  const { serviceRoleKey } = readSupabaseEnv();
+  try {
+    await supabaseRestFetch(
+      `/global_platform_settings?id=eq.${GLOBAL_PLATFORM_SETTINGS_ROW_ID}&select=id&limit=1`,
+      { key: serviceRoleKey },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Service-role upsert of the settings row (merge-duplicates on the fixed id). */
 export async function upsertPlatformSettingsRow(row: Record<string, unknown>): Promise<void> {
   if (!supabaseServiceConfigured()) {
