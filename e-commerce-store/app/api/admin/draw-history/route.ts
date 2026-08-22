@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, verifyAdminPassword, DRAW_HISTORY_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, verifyAdminPassword, getAdminVerifyEmail, DRAW_HISTORY_KEY } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
       const encoded = authHeader.slice(6);
       const decoded = atob(encoded);
       const [user, pass] = decoded.split(':');
-      if (user === process.env.ADMIN_BASIC_AUTH_USERNAME && verifyAdminPassword(pass)) {
+      if (user === getAdminVerifyEmail() && verifyAdminPassword(pass)) {
         isAuthorized = true;
       }
     } catch {}

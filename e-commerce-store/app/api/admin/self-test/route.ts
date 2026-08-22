@@ -67,7 +67,6 @@ export async function GET(request: Request) {
     'STRIPE_WEBHOOK_SECRET',
     'UPSTASH_REDIS_REST_URL',
     'UPSTASH_REDIS_REST_TOKEN',
-    'ADMIN_BASIC_AUTH_USERNAME',
     'ADMIN_BASIC_AUTH_PASSWORD',
     'CRON_SECRET',
   ];

@@ -1,43 +1,36 @@
 {
+  // ═══════════════════════════════════════════════════════════════════════════
   // Cloudflare Workers config for the MAIN storefront app (OpenNext build).
   // Used ONLY when deploying to Cloudflare — see DEPLOY-CLOUDFLARE.md.
   //
   // `npx opennextjs-cloudflare build` outputs:
-  //   .open-next/worker.js  → the whole Next.js app (routes, proxy, /og,
+  //   .open-next/worker.js  → the whole Next.js app (routes, middleware, /og,
   //                           /icon, /media) as a single Worker
   //   .open-next/assets     → static assets, served by the ASSETS binding
   //
-  // ── Environment variables: how they are set on Cloudflare ─────────────────────
-  // Plaintext (non-secret) variables live in the [vars] block at the bottom of
-  // this file. The first `wrangler deploy` creates them as editable "Variables"
-  // in the dashboard (Workers & Pages → [project] → Settings → Variables and
-  // Secrets → Production), so you can just fill them in there — no CLI needed.
+  // ── ENVIRONMENT VARIABLES — the COMPLETE reference ─────────────────────────
+  // This covers EVERY variable this store can read. They live in the Cloudflare
+  // dashboard under "Runtime variables and secrets":
+  //   Workers & Pages → [project] → Settings → Variables and Secrets → Production
   //
-  // SECRETS are NEVER committed here. Set them in the dashboard under the
-  // "Secrets" column, or from the terminal with:
-  //   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-  //   npx wrangler secret put SUPABASE_ANON_KEY
-  //   npx wrangler secret put SUPABASE_URL
-  //   npx wrangler secret put UPSTASH_REDIS_REST_URL
-  //   npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
-  //   npx wrangler secret put ADMIN_BASIC_AUTH_PASSWORD
-  //   npx wrangler secret put ADMIN_VERIFY_EMAIL
-  //   npx wrangler secret put STRIPE_SECRET_KEY
-  //   npx wrangler secret put STRIPE_WEBHOOK_SECRET
-  //   npx wrangler secret put STRIPE_PRODUCT_ID
-  //   npx wrangler secret put RESEND_API_KEY
-  //   npx wrangler secret put RESEND_FROM
-  //   npx wrangler secret put CRON_SECRET
-  //   npx wrangler secret put CLIENT_LICENSE_KEY
-  //   npx wrangler secret put DEEPSEEK_API_KEY
-  //   (optional AI fallbacks: OPENAI_API_KEY / ANTHROPIC_API_KEY /
-  //    REPLICATE_API_TOKEN / OPENROUTER_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY /
-  //    GOOGLE_GEMINI_API_KEY)
+  // Legend:
+  //   [REQUIRED]     the app breaks without it (payments / raffles / admin)
+  //   [RECOMMENDED]  works without it, but set it for production
+  //   [OPTIONAL]     only needed for a specific feature
+  //   [SETUP WIZARD] enter it on the site at /admin/setup — the wizard SAVES a
+  //                  copy AND shows the exact `npx wrangler secret put` command.
+  //                  (step 1 data store · step 3 core services · step 4 security
+  //                  & identity · step 5 AI engine)
   //
-  // BUILD-TIME variables are inlined by the OpenNext build and must be present in
-  // your SHELL when you run `npm run build:cloudflare` — they can NOT be set in
-  // the dashboard:
-  //   NEXT_PUBLIC_URL, NEXT_PUBLIC_SITE_NAME, NEXT_PUBLIC_MAPBOX_TOKEN
+  // Every entry is annotated with its necessity + a REALISTIC EXAMPLE VALUE so
+  // you know what it should look like.
+  //
+  // ── How secrets vs plaintext vars work on Cloudflare ───────────────────────
+  //   • Plaintext (non-secret) variables → the `vars` block at the bottom. The
+  //     first `wrangler deploy` auto-creates them as editable "Variables".
+  //   • SECRETS → the dashboard "Secrets" column, or `npx wrangler secret put
+  //     NAME`. NEVER commit a real secret in this file.
+  // ═══════════════════════════════════════════════════════════════════════════
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storefront-app",
   "main": ".open-next/worker.js",
@@ -50,14 +43,89 @@
   "observability": {
     "enabled": true
   },
-  // ── Plaintext (non-secret) runtime variables ────────────────────────────────
-  // These are auto-created as editable "Variables" in the Cloudflare dashboard
-  // the first time you `wrangler deploy`. Fill them there (or keep the defaults).
+  // ── PLAINTEXT (non-secret) RUNTIME variables ───────────────────────────────
+  // Auto-created as editable "Variables" on the first deploy. These are the only
+  // values safe to keep as plaintext (they are not credentials).
   "vars": {
+    // [OPTIONAL] force a data store. One of: "supabase" (default) | "upstash" |
+    //   "cloudflare-kv". Looks like: "supabase"          (SETUP WIZARD step 1)
     "STORAGE_PROVIDER": "supabase",
-    "ADMIN_BASIC_AUTH_USERNAME": "admin",
+
+    // [RECOMMENDED] the ADMIN EMAIL — this is the email you sign into /admin
+    //   with (there is NO separate "username" anymore) and the inbox that
+    //   receives the 6-digit /admin two-step code.
+    //   Looks like: "you@example.com"                    (SETUP WIZARD step 4)
+    "ADMIN_VERIFY_EMAIL": "",
+
+    // [OPTIONAL] brand name used in emails + templates.
+    //   Looks like: "Acme"                                (SETUP WIZARD step 4)
     "BRAND_NAME": "",
+
+    // [OPTIONAL] support inbox shown in the footer + used for customer emails.
+    //   Looks like: "help@example.com"                    (SETUP WIZARD step 4)
     "SUPPORT_EMAIL": "",
+
+    // [OPTIONAL] "true" shows the maintenance screen to unauthenticated visitors.
+    //   Looks like: "true" (or empty = off)
     "MAINTENANCE_MODE": ""
   }
+  //
+  // ── SECRETS — set in the dashboard ("Secrets" column) or via: ──────────────
+  //   npx wrangler secret put NAME
+  // (Never paste these into the `vars` block above.)
+  //
+  // ── DATA STORE (one backend required — Supabase is the default) ────────────
+  //   SUPABASE_URL               [REQUIRED for Supabase]  "https://abcdefgh.supabase.co"  (SETUP WIZARD step 1)
+  //   SUPABASE_ANON_KEY          [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…"          (SETUP WIZARD step 1)
+  //   SUPABASE_SERVICE_ROLE_KEY  [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…" (server-only) (SETUP WIZARD step 1)
+  //   UPSTASH_REDIS_REST_URL     [OPTIONAL alt store]     "https://fast-swan-12345.upstash.io" (SETUP WIZARD step 1)
+  //   UPSTASH_REDIS_REST_TOKEN   [OPTIONAL alt store]     "AX3rAS…"               (SETUP WIZARD step 1)
+  //
+  // ── ADMIN ──────────────────────────────────────────────────────────────────
+  //   ADMIN_BASIC_AUTH_PASSWORD  [RECOMMENDED] the /admin HTTP Basic Auth password.
+  //     Only needed if you don't use the master admin account (email + password)
+  //     created by the Setup Wizard. Looks like: "a-long-random-password"
+  //                                                          (SETUP WIZARD step 4)
+  //   (There is NO ADMIN_BASIC_AUTH_USERNAME — you sign in with your EMAIL, i.e.
+  //    ADMIN_VERIFY_EMAIL above.)
+  //
+  // ── PAYMENTS ───────────────────────────────────────────────────────────────
+  //   STRIPE_SECRET_KEY          [REQUIRED for payments]  "sk_live_51AbCdEf…"    (SETUP WIZARD step 3)
+  //   STRIPE_WEBHOOK_SECRET      [REQUIRED for payments]  "whsec_AbCdEf…"        (SETUP WIZARD step 3)
+  //   STRIPE_PRODUCT_ID          [OPTIONAL] default price "price_1AbCdEf…"       (SETUP WIZARD step 3)
+  //   LEMONSQUEEZY_API_KEY       [OPTIONAL alt payments]  "eyJ0eXAiOiJKV1Qi…"    (SETUP WIZARD step 3)
+  //   PADDLE_API_KEY             [OPTIONAL alt payments]  "…"                    (SETUP WIZARD step 3)
+  //
+  // ── EMAIL ──────────────────────────────────────────────────────────────────
+  //   RESEND_API_KEY             [REQUIRED for email]     "re_AbCdEfG…"          (SETUP WIZARD step 3)
+  //   RESEND_FROM                [RECOMMENDED]            "Acme <onboarding@resend.dev>" (SETUP WIZARD step 3)
+  //   POSTMARK_API_KEY           [OPTIONAL alt email]     "…"                    (SETUP WIZARD step 3)
+  //   SENDGRID_API_KEY           [OPTIONAL alt email]     "SG.AbCdEfG…"          (SETUP WIZARD step 3)
+  //
+  // ── CRON SAFETY NET ────────────────────────────────────────────────────────
+  //   CRON_SECRET                [RECOMMENDED]            "a-long-random-string" (SETUP WIZARD step 4)
+  //
+  // ── AI ENGINE ──────────────────────────────────────────────────────────────
+  //   DEEPSEEK_API_KEY           [RECOMMENDED primary]    "sk-abcd…"             (SETUP WIZARD step 5)
+  //   OPENAI_API_KEY             [OPTIONAL]               "sk-…"                 (SETUP WIZARD step 5)
+  //   ANTHROPIC_API_KEY          [OPTIONAL]               "sk-ant-api03-…"       (SETUP WIZARD step 5)
+  //   REPLICATE_API_TOKEN        [OPTIONAL]               "r8_AbCdEf…"           (SETUP WIZARD step 5)
+  //   OPENROUTER_API_KEY         [OPTIONAL]               "sk-or-v1-…"           (SETUP WIZARD step 5)
+  //   GROQ_API_KEY               [OPTIONAL]               "gsk_AbCdEf…"          (SETUP WIZARD step 5)
+  //   MISTRAL_API_KEY            [OPTIONAL]               "…"                    (SETUP WIZARD step 5)
+  //   GOOGLE_GEMINI_API_KEY      [OPTIONAL]               "AIzaSy…"              (SETUP WIZARD step 5)
+  //   (Workers AI needs NO key — it uses the native Cloudflare `AI` binding.)
+  //
+  // ── LICENSING (optional) ───────────────────────────────────────────────────
+  //   CLIENT_LICENSE_KEY         [OPTIONAL]               "LIC-…"   (alias: LICENSE_KEY)
+  //   LICENSE_SERVER_URL         [OPTIONAL]               "https://license.example.com/check"
+  //   LICENSE_ENFORCED           [OPTIONAL]               "true"
+  //
+  // ── BUILD-TIME (NOT runtime) — these are INLINED at build time and MUST be in
+  //   your SHELL when you run `npm run build:cloudflare`. They can NOT be set in
+  //   the Cloudflare dashboard:
+  //   NEXT_PUBLIC_URL            [RECOMMENDED]            "https://yourdomain.com"
+  //   NEXT_PUBLIC_SITE_NAME      [OPTIONAL]               "Acme"     (alias: BRAND_NAME)
+  //   NEXT_PUBLIC_MAPBOX_TOKEN   [OPTIONAL maps]          "pk.eyJ1Ijoi…"          (SETUP WIZARD step 3)
+  //   GOOGLE_MAPS_API_KEY        [OPTIONAL alt maps]      "AIzaSy…"               (SETUP WIZARD step 3)
 }

@@ -12,7 +12,6 @@ test('full legacy env is blocking-ready and required-ready', () => {
   const result = discoverEnvironment({
     UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
     UPSTASH_REDIS_REST_TOKEN: 'secret',
-    ADMIN_BASIC_AUTH_USERNAME: 'admin',
     ADMIN_BASIC_AUTH_PASSWORD: 'pw',
     ADMIN_VERIFY_EMAIL: 'admin@example.com',
     STRIPE_SECRET_KEY: 'sk_…',
@@ -43,10 +42,9 @@ test('aliases satisfy checks (KV_REST_API_URL / KV_REST_API_TOKEN / SITE_URL)', 
 test('no individual check is blocking — blocking state is group-level', () => {
   const result = discoverEnvironment({});
   assert.equal(result.all.every((c) => c.blocking === false), true);
-  const username = result.all.find((c) => c.id === 'admin-username');
   const password = result.all.find((c) => c.id === 'admin-password');
-  assert.equal(username?.required, true);
   assert.equal(password?.required, true);
+  assert.equal(password?.blocking, false);
 });
 
 test('bindings, license and bootstrap checks are non-blocking and not required', () => {

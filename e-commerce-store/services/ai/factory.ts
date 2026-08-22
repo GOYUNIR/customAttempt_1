@@ -15,7 +15,7 @@
  */
 
 import { getPlatformSettings } from '@/services/config/platform-settings';
-import type { AiProvider } from '@/services/config/types';
+import { isDeepSeekProvider, type AiProvider } from '@/services/config/types';
 import { createAiDriver, type AiDriverResolutionOptions } from './registry';
 import type { AiDriver } from './types';
 import { FallbackAiDriver } from './fallback.driver';
@@ -46,7 +46,13 @@ export class AiFactory {
     // 2. SECONDARY (optional) — wizard-configured only, no env fallback.
     let secondary: AiDriver | null = null;
     if (settings?.ai_provider_secondary) {
-      const key = settings.ai_api_key_secondary || '';
+      let key = settings.ai_api_key_secondary || '';
+      // DeepSeek Pro and DeepSeek Lite share ONE key — when the secondary is a
+      // DeepSeek variant and the primary is too, reuse the primary key so the
+      // operator never has to enter the DeepSeek key twice.
+      if (!key && isDeepSeekProvider(settings.ai_provider_secondary) && isDeepSeekProvider(settings.ai_provider)) {
+        key = settings.ai_api_key || '';
+      }
       if (settings.ai_provider_secondary === 'workers_ai' || key) {
         secondary = createAiDriver(settings.ai_provider_secondary, key, options);
       }

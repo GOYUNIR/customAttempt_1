@@ -218,6 +218,25 @@ export async function verifyServiceRoleAccess(): Promise<boolean> {
   }
 }
 
+/**
+ * Read-only verification that the `global_platform_settings` schema is FULLY
+ * applied — the table AND every column the wizard writes. A missing table throws
+ * PostgREST `PGRST205`; a missing column (e.g. `ai_api_key_secondary` when
+ * `00004_ai_secondary.sql` was never applied) throws `PGRST204`. This lets the
+ * Setup Wizard surface the exact migration gap on the data-store step BEFORE the
+ * final save, instead of after the operator fills every other step.
+ */
+export async function probePlatformSettingsSchema(): Promise<void> {
+  if (!supabaseServiceConfigured()) {
+    throw new Error('Supabase service role key is not configured — enter your Supabase Project URL, anon key and service role key.');
+  }
+  const { serviceRoleKey } = readSupabaseEnv();
+  await supabaseRestFetch(
+    `/global_platform_settings?select=id,is_configured,mail_provider,mail_api_key,payment_provider,payment_api_key,payment_webhook_secret,map_provider,map_api_key,ai_provider,ai_api_key,ai_provider_secondary,ai_api_key_secondary,operational_settings&limit=1`,
+    { key: serviceRoleKey },
+  );
+}
+
 /** Service-role upsert of the settings row (merge-duplicates on the fixed id). */
 export async function upsertPlatformSettingsRow(row: Record<string, unknown>): Promise<void> {
   if (!supabaseServiceConfigured()) {

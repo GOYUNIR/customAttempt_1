@@ -55,7 +55,6 @@ export const LOCKED_PARAMETER_KEYS: readonly string[] = [
   'upstash_redis_rest_url',
   'upstash_redis_rest_token',
   'cloudflare_kv_binding',
-  'admin_basic_auth_username',
   'admin_basic_auth_password',
   'cron_secret',
   'payment_provider',

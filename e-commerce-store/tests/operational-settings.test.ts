@@ -45,7 +45,6 @@ test('normalizeOperationalSettingsInput round-trips a wizard payload', () => {
   const normalized = normalizeOperationalSettingsInput({
     storage_provider: 'upstash',
     upstash_redis_rest_url: 'https://x.upstash.io',
-    admin_basic_auth_username: 'admin',
     cron_secret: 'secret',
     stripe_secret_key: 'sk_live_x',
     openai_api_key: 'sk-openai',
@@ -54,7 +53,6 @@ test('normalizeOperationalSettingsInput round-trips a wizard payload', () => {
   });
   assert.equal(normalized.storage_provider, 'upstash');
   assert.equal(normalized.upstash_redis_rest_url, 'https://x.upstash.io');
-  assert.equal(normalized.admin_basic_auth_username, 'admin');
   assert.equal(normalized.cron_secret, 'secret');
   assert.equal(normalized.stripe_secret_key, 'sk_live_x');
   assert.equal(normalized.openai_api_key, 'sk-openai');

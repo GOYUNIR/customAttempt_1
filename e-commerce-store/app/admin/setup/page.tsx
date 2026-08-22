@@ -257,7 +257,7 @@ const AI_OPTIONS: ProviderSpec[] = [
  *  The fields are re-keyed to `ai_api_key_secondary` so they never collide with
  *  the primary slot's `ai_api_key` in the shared form state. */
 const AI_SECONDARY_OPTIONS: ProviderSpec[] = [
-  { value: 'none', label: 'No fallback', hint: 'The primary provider is the only one used.', fields: [] },
+  { value: 'none', label: 'No fallback', hint: 'Leave this as “No fallback” if you only want one AI provider — the primary provider is the only one used. (DeepSeek Pro and DeepSeek Lite share one key.)', fields: [] },
   ...AI_OPTIONS.map((o) => ({
     ...o,
     fields: o.fields.map((f) => ({ ...f, key: 'ai_api_key_secondary', envVar: undefined, command: undefined })),
@@ -265,8 +265,7 @@ const AI_SECONDARY_OPTIONS: ProviderSpec[] = [
 ];
 
 const SECURITY_FIELDS: FieldSpec[] = [
-  { key: 'admin_basic_auth_username', label: 'Admin Basic Auth username', envVar: 'ADMIN_BASIC_AUTH_USERNAME', placeholder: 'admin', hint: 'One of two ways to gate /admin (the other is the Supabase super-admin). Defaults to "admin".' },
-  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, hint: 'HTTP Basic Auth password for /admin. Required if you are not using the Supabase super-admin.' },
+  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, hint: 'HTTP Basic Auth password for /admin. Required if you are not using the master admin account.' },
   { key: 'admin_verify_email', label: 'Admin two-step inbox', envVar: 'ADMIN_VERIFY_EMAIL', hint: 'Inbox that receives the 6-digit /admin sign-in code (falls back to SUPPORT_EMAIL).' },
   { key: 'cron_secret', label: 'Cron secret', envVar: 'CRON_SECRET', secret: true, hint: 'Authenticates the scheduled draw safety net (Authorization: Bearer $CRON_SECRET).' },
 ];
@@ -304,7 +303,7 @@ const DEFAULT_FORM: Record<string, string> = {
   map_api_key: '',
   ai_provider: 'deepseek',
   ai_api_key: '',
-  ai_provider_secondary: 'deepseek_lite',
+  ai_provider_secondary: 'none',
   ai_api_key_secondary: '',
   storage_provider: 'supabase',
   supabase_url: '',
@@ -314,7 +313,6 @@ const DEFAULT_FORM: Record<string, string> = {
   upstash_redis_rest_token: '',
   cloudflare_kv_binding: '',
   cloudflare_d1_binding: '',
-  admin_basic_auth_username: '',
   admin_basic_auth_password: '',
   admin_verify_email: '',
   cron_secret: '',
@@ -511,12 +509,22 @@ const STAGE_CONTEXT: Record<string, { step: number; title: string; message: stri
   storage_init: {
     step: 0,
     title: 'Data store connection failed',
-    message: 'The primary data store rejected the connection. If you chose Supabase, the most common cause is that the schema has not been applied to this project yet — run `supabase db push`, or paste supabase/migrations/00001_init.sql + 00002_setup_operational.sql into the Supabase SQL editor, then save again. Otherwise double-check the Project URL / service role key (or the Upstash REST URL + token) and confirm the project is reachable.',
+    message: 'The primary data store rejected the connection. If you chose Supabase, the most common cause is that the schema has not been fully applied to this project yet — run `supabase db push`, or paste the migrations in supabase/migrations/ (00001_init.sql, 00002_setup_operational.sql, 00003_tenant_routing.sql, 00004_ai_secondary.sql) into the Supabase SQL editor, then save again. Otherwise double-check the Project URL / service role key (or the Upstash REST URL + token) and confirm the project is reachable.',
   },
   create_admin: {
     step: 1,
     title: 'Master admin creation failed',
     message: 'The master admin account could not be created. Confirm the Supabase service role key is valid and that the Auth service (and profiles table) is provisioned, then try again.',
+  },
+  core_services: {
+    step: 2,
+    title: 'Core services verification failed',
+    message: 'A payment, email or maps key was rejected. Double-check the Stripe / email API key (and the Mapbox public token) for the provider you selected — a wrong key here is caught before anything is saved.',
+  },
+  ai: {
+    step: 4,
+    title: 'AI provider verification failed',
+    message: 'The AI provider rejected the API key. Confirm the key for the provider you selected (DeepSeek, OpenAI, Anthropic, etc.) and that the account is active.',
   },
   finalize: {
     step: 4,
@@ -662,7 +670,7 @@ export default function SetupPage() {
           setReconfigure(true);
           setError(
             data.error ||
-              'Sign in first: use the "Sign in as super-admin" panel above (master account) or authenticate with the admin Basic Auth password, then save again.',
+              'Sign in first: use the "Sign in as admin" panel above (master account) or authenticate with the admin Basic Auth password, then save again.',
           );
           return;
         }
@@ -691,7 +699,7 @@ export default function SetupPage() {
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-        setError(String(data.error || 'Super-admin sign-in failed.'));
+        setError(String(data.error || 'Admin sign-in failed.'));
         return;
       }
       setError('');
@@ -779,9 +787,15 @@ export default function SetupPage() {
       // Secondary fallback is OPTIONAL — only validate its key when a real
       // (non-keyless) provider is actually selected.
       if (form.ai_provider_secondary !== 'none' && form.ai_provider_secondary !== 'workers_ai') {
-        for (const f of activeAiSecondary.fields) {
-          if (f.optional) continue;
-          if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or set the fallback to "No fallback").`;
+        // DeepSeek Pro + Lite share one key — a DeepSeek secondary inherits the
+        // primary DeepSeek key, so its own field can stay empty.
+        const isDeepSeek = (p: string) => p === 'deepseek' || p === 'deepseek_lite';
+        const reusesPrimaryKey = isDeepSeek(form.ai_provider_secondary) && isDeepSeek(form.ai_provider) && Boolean((form.ai_api_key || '').trim());
+        if (!reusesPrimaryKey) {
+          for (const f of activeAiSecondary.fields) {
+            if (f.optional) continue;
+            if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required (or set the fallback to "No fallback").`;
+          }
         }
       }
     }
@@ -807,13 +821,113 @@ export default function SetupPage() {
     scrollToTop();
   }
 
-  function handleNext() {
+  async function handleNext() {
     const errs = validateStep(step);
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
     }
     setErrors({});
+
+    // Data-store step — verify the connection + schema BEFORE advancing, so the
+    // operator learns about a broken data store immediately instead of after
+    // filling every other step and hitting the final save.
+    if (step === 0) {
+      setBusy(true);
+      setError('');
+      setErrorStage(null);
+      try {
+        const res = await fetch('/api/admin/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            supabaseUrl: form.supabase_url,
+            supabaseAnonKey: form.supabase_anon_key,
+            supabaseServiceRoleKey: form.supabase_service_role_key,
+            probe: 'storage',
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
+        if (!res.ok || !data.ok) {
+          setError(String(data.error || 'The data store connection failed.'));
+          setErrorStage(data.stage || 'storage_init');
+          return;
+        }
+      } catch {
+        setError('The data store connection failed. Check your connection.');
+        setErrorStage('storage_init');
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // Core-services step — verify the payment / email / maps keys against their
+    // real APIs BEFORE advancing, so a wrong Stripe/Resend key is caught now.
+    if (step === 2) {
+      setBusy(true);
+      setError('');
+      setErrorStage(null);
+      try {
+        const res = await fetch('/api/admin/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            supabaseUrl: form.supabase_url,
+            supabaseAnonKey: form.supabase_anon_key,
+            supabaseServiceRoleKey: form.supabase_service_role_key,
+            probe: 'core',
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
+        if (!res.ok || !data.ok) {
+          setError(String(data.error || 'The core services could not be verified.'));
+          setErrorStage(data.stage || 'core_services');
+          return;
+        }
+      } catch {
+        setError('The core services could not be verified. Check your connection.');
+        setErrorStage('core_services');
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // AI step — verify the primary (and secondary) AI key against its real API.
+    if (step === 4) {
+      setBusy(true);
+      setError('');
+      setErrorStage(null);
+      try {
+        const res = await fetch('/api/admin/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...form,
+            supabaseUrl: form.supabase_url,
+            supabaseAnonKey: form.supabase_anon_key,
+            supabaseServiceRoleKey: form.supabase_service_role_key,
+            probe: 'ai',
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
+        if (!res.ok || !data.ok) {
+          setError(String(data.error || 'The AI provider could not be verified.'));
+          setErrorStage(data.stage || 'ai');
+          return;
+        }
+      } catch {
+        setError('The AI provider could not be verified. Check your connection.');
+        setErrorStage('ai');
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
     setStep(Math.min(4, step + 1));
     scrollToTop();
   }
@@ -856,10 +970,10 @@ export default function SetupPage() {
         ) : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 18 }}>
             {(configured || reconfigure) && (
-              <Section title="Reconfigure — sign in as super-admin" subtitle="This platform is already configured. Sign in with the master account to update providers without the env Basic-Auth password.">
+              <Section title="Reconfigure — sign in as admin" subtitle="This platform is already configured. Sign in with the master account to update providers without the env Basic-Auth password.">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <Field label="Super-admin email"><input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} /></Field>
-                  <Field label="Super-admin password"><SecretInput value={adminPassword} onChange={setAdminPassword} autoComplete="current-password" /></Field>
+                  <Field label="Admin email"><input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" style={inputStyle} /></Field>
+                  <Field label="Admin password"><SecretInput value={adminPassword} onChange={setAdminPassword} autoComplete="current-password" /></Field>
                 </div>
                 <button type="button" onClick={superLogin} disabled={busy} style={{ ...primaryBtn, padding: '12px 18px', fontSize: 14, justifySelf: 'start', opacity: busy ? 0.6 : 1 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
               </Section>
@@ -890,14 +1004,14 @@ export default function SetupPage() {
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>Supabase schema not applied</div>
                 <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
-                  The <code>global_platform_settings</code> table is missing from your Supabase project, so saving will fail. Run{' '}
-                  <code>supabase db push</code> or paste <code>supabase/migrations/00001_init.sql</code> (+ <code>00002_setup_operational.sql</code>) into the Supabase SQL editor, then continue.
+                  The <code>global_platform_settings</code> table (or one of its columns) is missing from your Supabase project, so saving will fail. Run{' '}
+                  <code>supabase db push</code> or paste the migrations in <code>supabase/migrations/</code> (<code>00001_init.sql</code>, <code>00002_setup_operational.sql</code>, <code>00003_tenant_routing.sql</code>, <code>00004_ai_secondary.sql</code>) into the Supabase SQL editor, then continue.
                 </p>
               </div>
             )}
 
             {step === 1 && (
-              <Section title="2 · Master admin account" subtitle="Creates the master Supabase Auth account (flagged super-admin) that unlocks /admin.">
+              <Section title="2 · Master admin account" subtitle="Creates the master admin account (Supabase Auth) that unlocks /admin.">
                 {!configured ? (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -911,7 +1025,7 @@ export default function SetupPage() {
                     <p style={noteStyle}>This account signs into <code>/admin</code> and can update providers later — it is separate from the storefront customer accounts.</p>
                   </>
                 ) : (
-                  <p style={noteStyle}>A master admin account already exists. Use the “Sign in as super-admin” panel above to unlock editing, then continue through the steps.</p>
+                  <p style={noteStyle}>A master admin account already exists. Use the “Sign in as admin” panel above to unlock editing, then continue through the steps.</p>
                 )}
               </Section>
             )}
@@ -978,6 +1092,7 @@ export default function SetupPage() {
                 </div>
                 <div style={{ background: '#f9fafb', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Secondary AI provider (optional fallback)</div>
+                  <p style={noteStyle}>Only fill this in if you want a backup provider that takes over when the primary fails. Leave it as “No fallback” to use a single provider — DeepSeek Pro and DeepSeek Lite share the same key.</p>
                   <ProviderSelect label="Fallback provider" value={form.ai_provider_secondary} options={AI_SECONDARY_OPTIONS} onChange={(v) => set('ai_provider_secondary', v)} />
                   <ProviderFields fields={activeAiSecondary.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                 </div>
@@ -1008,7 +1123,9 @@ export default function SetupPage() {
                 ← Back
               </button>
               {step < 4 ? (
-                <button type="button" onClick={handleNext} disabled={busy} style={primaryBtn}>Continue →</button>
+                <button type="button" onClick={handleNext} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }}>
+                  {busy && step === 0 ? 'Verifying data store…' : 'Continue →'}
+                </button>
               ) : (
                 <button type="submit" disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }}>
                   {busy ? 'Saving…' : 'Save configuration & create admin'}

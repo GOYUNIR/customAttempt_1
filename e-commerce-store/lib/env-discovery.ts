@@ -311,26 +311,11 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     commands: [WRANGLER_SECRET('UPSTASH_REDIS_REST_TOKEN')],
   });
 
-  // ── Admin access (any ONE method unlocks the portal — password OR super-admin) ─
-  add({
-    id: 'admin-username',
-    name: 'Admin Basic Auth username',
-    purpose: 'The username for the /admin HTTP Basic Auth login. Defaults to "admin" when unset.',
-    variable: 'ADMIN_BASIC_AUTH_USERNAME',
-    aliases: [],
-    kind: 'admin',
-    required: true,
-    blocking: false,
-    secret: false,
-    buildTime: false,
-    platform: 'all',
-    commands: [WRANGLER_SECRET('ADMIN_BASIC_AUTH_USERNAME')],
-  });
-
+  // ── Admin access (any ONE method unlocks the portal — password OR master admin) ─
   add({
     id: 'admin-password',
     name: 'Admin Basic Auth password',
-    purpose: 'One way to gate /admin. Either set this password OR create a Supabase super-admin in the Setup Wizard — only ONE admin method is required.',
+    purpose: 'One way to gate /admin. Either set this password OR create a master admin account in the Setup Wizard — only ONE admin method is required.',
     variable: 'ADMIN_BASIC_AUTH_PASSWORD',
     aliases: [],
     kind: 'admin',
@@ -519,7 +504,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
   add({
     id: 'supabase-anon',
     name: 'Supabase anon key',
-    purpose: 'Public anon key for the is_platform_configured RPC + super-admin sign-in.',
+    purpose: 'Public anon key for the is_platform_configured RPC + admin sign-in.',
     variable: 'SUPABASE_ANON_KEY',
     aliases: ['NEXT_PUBLIC_SUPABASE_ANON_KEY'],
     kind: 'platform',
@@ -534,7 +519,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
   add({
     id: 'supabase-service',
     name: 'Supabase service role key',
-    purpose: 'Server-only trusted writer — the Setup Wizard uses it to persist provider keys + create the master super-admin.',
+    purpose: 'Server-only trusted writer — the Setup Wizard uses it to persist provider keys + create the master admin account.',
     variable: 'SUPABASE_SERVICE_ROLE_KEY',
     aliases: [],
     kind: 'platform',
@@ -769,7 +754,7 @@ binding = "AI"`,
     id: 'initial-admin-email',
     name: 'Initial admin email',
     purpose:
-      'Optional bootstrap hint. In this build the master admin is created by the Setup Wizard (Supabase super-admin) or by setting the Basic Auth credentials above — there is no automatic "first registration claims admin" flow. Set this to keep the operator informed of the intended admin inbox.',
+      'Optional bootstrap hint. In this build the master admin is created by the Setup Wizard (Supabase admin) or by setting the Basic Auth credentials above — there is no automatic "first registration claims admin" flow. Set this to keep the operator informed of the intended admin inbox.',
     variable: 'INITIAL_ADMIN_EMAIL',
     aliases: [],
     kind: 'bootstrap',
@@ -785,7 +770,7 @@ binding = "AI"`,
   const byKind = (kind: EnvCheckKind): EnvCheck[] => checks.filter((c) => c.kind === kind);
   const groups: EnvGroup[] = [
     { title: 'Data store', subtitle: 'Any ONE of these unlocks the store — Supabase (default), Cloudflare KV/D1, or Upstash Redis.', kind: 'storage', checks: byKind('storage') },
-    { title: 'Admin access', subtitle: 'Any ONE admin method — a Supabase super-admin (Setup Wizard) OR the Basic Auth password.', kind: 'admin', checks: byKind('admin') },
+    { title: 'Admin access', subtitle: 'Any ONE admin method — a master admin account (Setup Wizard) OR the Basic Auth password.', kind: 'admin', checks: byKind('admin') },
     { title: 'Payments', subtitle: 'Needed to charge cards and run raffles.', kind: 'payment', checks: byKind('payment') },
     { title: 'Email', subtitle: 'Transactional + verification emails.', kind: 'email', checks: byKind('email') },
     { title: 'Maps', subtitle: 'Address autofill at checkout.', kind: 'maps', checks: byKind('maps') },

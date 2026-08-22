@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createAiDriver, AI_DRIVER_CATALOG } from '../services/ai/registry.ts';
 import { maskApiKey } from '../services/ai/types.ts';
 import { FallbackAiDriver } from '../services/ai/fallback.driver.ts';
-import { sanitizeAiProvider, AI_PROVIDERS } from '../services/config/types.ts';
+import { sanitizeAiProvider, AI_PROVIDERS, isDeepSeekProvider } from '../services/config/types.ts';
 
 test('ai provider enum matches the catalog + SQL check constraint', () => {
   assert.deepEqual(
@@ -27,6 +27,14 @@ test('sanitizeAiProvider only accepts the enumerated providers', () => {
   assert.equal(sanitizeAiProvider('mistral'), 'mistral');
   assert.equal(sanitizeAiProvider('google_gemini'), 'google_gemini');
   assert.equal(sanitizeAiProvider('chatgpt'), null);
+});
+
+test('isDeepSeekProvider treats Pro and Lite as the same keyed provider', () => {
+  assert.equal(isDeepSeekProvider('deepseek'), true);
+  assert.equal(isDeepSeekProvider('deepseek_lite'), true);
+  assert.equal(isDeepSeekProvider('openai'), false);
+  assert.equal(isDeepSeekProvider(null), false);
+  assert.equal(isDeepSeekProvider(undefined), false);
 });
 
 test('maskApiKey formats sk-ds-••••••••1234 style masks', () => {

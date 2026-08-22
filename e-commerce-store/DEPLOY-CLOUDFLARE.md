@@ -128,7 +128,6 @@ npx wrangler secret put UPSTASH_REDIS_REST_URL
 npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
 npx wrangler secret put STRIPE_SECRET_KEY
 npx wrangler secret put STRIPE_WEBHOOK_SECRET
-npx wrangler secret put ADMIN_BASIC_AUTH_USERNAME
 npx wrangler secret put ADMIN_BASIC_AUTH_PASSWORD
 npx wrangler secret put ADMIN_VERIFY_EMAIL
 

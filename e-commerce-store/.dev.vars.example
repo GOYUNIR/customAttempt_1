@@ -24,7 +24,8 @@ LICENSE_SERVER_URL=
 # LICENSE_ENFORCED=true   # force enforcement even without a key/server
 
 # ── Admin portal (HTTP Basic Auth + two-step verification) ───────────────────
-ADMIN_BASIC_AUTH_USERNAME=admin
+# The admin signs in with their EMAIL (the Basic Auth "username" field is the
+# admin email, resolved from ADMIN_VERIFY_EMAIL → SUPPORT_EMAIL → REPLY_TO_EMAIL).
 ADMIN_BASIC_AUTH_PASSWORD=
 ADMIN_VERIFY_EMAIL=
 

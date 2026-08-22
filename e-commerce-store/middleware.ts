@@ -8,7 +8,12 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 
 
-const ADMIN_USER = process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin';
+// The admin signs in with their EMAIL (not a username). The Basic Auth
+// "username" field now accepts the admin email — resolved from
+// ADMIN_VERIFY_EMAIL → SUPPORT_EMAIL → REPLY_TO_EMAIL. When none is set the
+// email check is skipped (the password is the secret), so a bare password-only
+// setup keeps working.
+const ADMIN_EMAIL = resolveAdminEmail();
 const ADMIN_PASSWORD = resolveAdminPassword();
 
 /**
@@ -26,6 +31,19 @@ function resolveAdminPassword(): string {
   const configured = process.env.ADMIN_BASIC_AUTH_PASSWORD;
   if (configured) return configured;
   if (process.env.NODE_ENV !== 'production') return 'goyunir-admin-dev';
+  return '';
+}
+
+/**
+ * The admin EMAIL used for the Basic Auth "username" field. Mirrors
+ * `getAdminVerifyEmail()` in lib/server-config.ts — inlined edge-safe here.
+ */
+function resolveAdminEmail(): string {
+  const direct = (process.env.ADMIN_VERIFY_EMAIL || '').trim();
+  if (direct) return direct;
+  const support = (process.env.SUPPORT_EMAIL || process.env.REPLY_TO_EMAIL || '').trim();
+  if (support) return support;
+  if (process.env.NODE_ENV !== 'production') return 'admin@localhost.dev';
   return '';
 }
 
@@ -70,7 +88,10 @@ function verifyBasicAuth(authorization: string | null) {
   if (colon < 0) return false;
   const user = decoded.slice(0, colon);
   const pass = decoded.slice(colon + 1);
-  return timingSafeStringEq(user, ADMIN_USER) && timingSafeStringEq(pass, ADMIN_PASSWORD);
+  // The admin signs in with their EMAIL (not a username). When no admin email
+  // is configured the email comparison is skipped — the password is the secret.
+  const emailOk = !ADMIN_EMAIL || timingSafeStringEq(user, ADMIN_EMAIL);
+  return emailOk && timingSafeStringEq(pass, ADMIN_PASSWORD);
 }
 /**
  * Edge-safe minimal JSON parse for Redis values. Mirrors
@@ -248,10 +269,10 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && (!ADMIN_USER || !ADMIN_PASSWORD)) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !ADMIN_PASSWORD) {
       return new NextResponse('Admin not configured', {
         status: 401,
-        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
+        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
       });
     }
 
@@ -263,7 +284,7 @@ export async function middleware(request: NextRequest) {
     if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {
         status: 401,
-        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal"' },
+        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
       });
     }
 

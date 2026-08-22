@@ -131,10 +131,10 @@ HTTPS APIs, no platform-specific code.
 
 1. **Set the environment variables** from the tables below in your platform's
    project settings (Production + Preview), then trigger a redeploy.
-2. Open `https://yourdomain.com/admin`, log in with the admin credentials
-   (`ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD`), complete the
-   emailed two-step code, and click **Developer → Seed Defaults** (or build
-   your catalog by hand with **Add Product**).
+2. Open `https://yourdomain.com/admin`, log in with your **admin email + password**
+   (the Basic Auth "username" is your admin email, from `ADMIN_VERIFY_EMAIL`),
+   complete the emailed two-step code, and click **Developer → Seed Defaults**
+   (or build your catalog by hand with **Add Product**).
 3. Set your Stripe webhook to `https://yourdomain.com/api/stripe/webhook`
    (Stripe → Developers → Webhooks).
 4. Check **/admin → SetUp** — it shows ✓/✗ for every env var and a launch
@@ -242,8 +242,8 @@ cd ..
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Optional — the Setup Wizard's source of truth for `global_platform_settings` (provider keys + the configuration gate). Aliases: `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`. Without them the store uses the legacy env-var providers (Stripe/Resend/Mapbox) unchanged. |
 | `STRIPE_SECRET_KEY`                                      | Stripe API key                                                                                                                                                                                                                                                                                                                 |
 | `STRIPE_WEBHOOK_SECRET`                                  | Stripe webhook signing secret                                                                                                                                                                                                                                                                                                  |
-| `ADMIN_BASIC_AUTH_USERNAME`, `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification)                                                                                                                                                                                                                                                                         |
-| `ADMIN_VERIFY_EMAIL`                                     | Inbox that receives the `/admin` two-step code. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`.                                                                                                                                                                                                                                |
+| `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification). The Basic Auth **username field is the admin email** (`ADMIN_VERIFY_EMAIL` → `SUPPORT_EMAIL` → `REPLY_TO_EMAIL`), not a separate username. |
+| `ADMIN_VERIFY_EMAIL`                                     | Inbox that receives the `/admin` two-step code — and the email used for the Basic Auth "username". Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`.                                                                                                                                                                            |
 | `CRON_SECRET`                                            | Protects the scheduled safety-net endpoints (`/api/checkout/cron-draw`, `/api/cron/*`). Schedulers authenticate with `Authorization: Bearer $CRON_SECRET`.                                                                                                                                                                     |
 | `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, the platform's own URL variables are used automatically: Vercel (`VERCEL_PROJECT_PRODUCTION_URL`/`VERCEL_URL`), Netlify (`URL`/`DEPLOY_URL`), Cloudflare Pages (`CF_PAGES_URL`). |
 
@@ -571,7 +571,7 @@ renamed in place with no data loss.
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Store shows 0 items                            | Seed defaults or add a product in `/admin`                                                                                                         |
 | Product page 404                               | Product isn't in Redis — add/seed it in `/admin`                                                                                                   |
-| `/admin` won't open                            | Check `ADMIN_BASIC_AUTH_USERNAME` / `ADMIN_BASIC_AUTH_PASSWORD`                                                                                    |
+| `/admin` won't open                            | Check `ADMIN_BASIC_AUTH_PASSWORD` (sign in with the admin email, not a username)                                                                                                                  |
 | "Price not configured" / `price_placeholder_*` | Set the Stripe Price ID for that size in `/admin`                                                                                                  |
 | Settings don't show immediately                | Storefront caches ~10–30s; wait and refresh                                                                                                        |
 | Mapbox dropdown missing                        | `NEXT_PUBLIC_MAPBOX_TOKEN` unset or not redeployed                                                                                                 |

@@ -153,7 +153,6 @@ export interface OperationalSettings {
   upstash_redis_rest_token?: string;
   cloudflare_kv_binding?: string;
   cloudflare_d1_binding?: string;
-  admin_basic_auth_username?: string;
   admin_basic_auth_password?: string;
   admin_verify_email?: string;
   cron_secret?: string;
@@ -186,7 +185,6 @@ export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
   'upstash_redis_rest_token',
   'cloudflare_kv_binding',
   'cloudflare_d1_binding',
-  'admin_basic_auth_username',
   'admin_basic_auth_password',
   'admin_verify_email',
   'cron_secret',
@@ -276,4 +274,15 @@ export function sanitizeMapProvider(value: unknown): MapProvider | null {
 export function sanitizeAiProvider(value: unknown): AiProvider | null {
   const v = String(value || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
   return (AI_PROVIDERS as readonly string[]).includes(v) ? (v as AiProvider) : null;
+}
+
+/**
+ * DeepSeek Pro (`deepseek`) and DeepSeek Lite (`deepseek_lite`) are the SAME
+ * DeepSeek OpenAI-compatible API — one `DEEPSEEK_API_KEY`, two tiers. This
+ * helper lets the wizard + factory treat them as a single keyed provider so the
+ * operator only ever enters the DeepSeek key once and can switch Pro ↔ Lite
+ * freely.
+ */
+export function isDeepSeekProvider(provider: AiProvider | null | undefined): boolean {
+  return provider === 'deepseek' || provider === 'deepseek_lite';
 }

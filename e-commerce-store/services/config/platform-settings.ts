@@ -30,6 +30,7 @@ import {
   sanitizePaymentProvider,
   sanitizeMapProvider,
   sanitizeAiProvider,
+  isDeepSeekProvider,
   type GlobalPlatformSettings,
   type OperationalSettings,
   type PlatformSettingsInput,
@@ -121,7 +122,15 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       : sanitizeAiProvider(raw.ai_provider_secondary);
   const aiApiKeySecondary = String(raw.ai_api_key_secondary || '').trim();
   if (aiProviderSecondary && aiProviderSecondary !== 'workers_ai' && !aiApiKeySecondary) {
-    return { ok: false, error: 'Enter a secondary AI provider API key (Workers AI needs none), or clear the secondary provider.' };
+    // DeepSeek Pro and DeepSeek Lite share ONE key — a DeepSeek secondary reuses
+    // the primary DeepSeek key when its own field is left empty, so the operator
+    // only ever enters the DeepSeek key once. Any other provider still needs its
+    // own secondary key.
+    const reusesPrimaryDeepSeekKey =
+      isDeepSeekProvider(aiProviderSecondary) && isDeepSeekProvider(aiProvider) && Boolean(aiApiKey);
+    if (!reusesPrimaryDeepSeekKey) {
+      return { ok: false, error: 'Enter a secondary AI provider API key (Workers AI needs none), or clear the secondary provider.' };
+    }
   }
 
   return {

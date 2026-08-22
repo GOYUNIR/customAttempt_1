@@ -682,7 +682,10 @@ export function adminRequestAuthorized(request: Request, suppliedPassword?: stri
     if (colon < 0) return false;
     const user = decoded.slice(0, colon);
     const pass = decoded.slice(colon + 1);
-    return user === (process.env.ADMIN_BASIC_AUTH_USERNAME || 'admin') && verifyAdminPassword(pass);
+    // The admin signs in with their EMAIL (not a username). When no admin email
+    // is configured the email comparison is skipped — the password is the secret.
+    const adminEmail = getAdminVerifyEmail();
+    return (!adminEmail || user === adminEmail) && verifyAdminPassword(pass);
   } catch {
     return false;
   }

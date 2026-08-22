@@ -84,7 +84,7 @@ export async function GET(request: Request) {
         hasRedisUrl,
         hasRedisToken,
         hasResend,
-        hasAdminUser: Boolean(process.env.ADMIN_BASIC_AUTH_USERNAME),
+        hasAdminEmail: Boolean(process.env.ADMIN_VERIFY_EMAIL || process.env.SUPPORT_EMAIL || process.env.REPLY_TO_EMAIL),
         hasAdminPassword: Boolean(getAdminPassword()),
         hasCronSecret: Boolean(process.env.CRON_SECRET),
       },

@@ -59,8 +59,17 @@ test('secondary AI fallback is optional (blank / none → null)', () => {
   if (explicitNone.ok) assert.equal(explicitNone.input.ai_provider_secondary, null);
 });
 
-test('secondary AI requires a key when a real provider is selected', () => {
-  const missingKey = normalizePlatformSettingsInput({ ...BASE, ai_provider_secondary: 'deepseek_lite', ai_api_key_secondary: '' });
+test('secondary AI reuses the primary DeepSeek key (Pro/Lite share one key)', () => {
+  const reused = normalizePlatformSettingsInput({ ...BASE, ai_provider_secondary: 'deepseek_lite', ai_api_key_secondary: '' });
+  assert.ok(reused.ok);
+  if (reused.ok) {
+    assert.equal(reused.input.ai_provider_secondary, 'deepseek_lite');
+    assert.equal(reused.input.ai_api_key_secondary, undefined);
+  }
+});
+
+test('secondary AI still requires its own key for a non-DeepSeek provider', () => {
+  const missingKey = normalizePlatformSettingsInput({ ...BASE, ai_provider_secondary: 'openai', ai_api_key_secondary: '' });
   assert.equal(missingKey.ok, false);
 });
 
