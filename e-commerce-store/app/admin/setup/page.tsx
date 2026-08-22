@@ -4,8 +4,8 @@
  * /admin/setup — the production Setup Wizard.
  *
  * A clean 5-step flow:
- *   1. Master admin account
- *   2. Primary data store
+ *   1. Primary data store
+ *   2. Master admin account
  *   3. Essential core services (payments + webhooks, transactional email, maps)
  *   4. System security & site identity
  *   5. Optional features (AI engine)
@@ -498,8 +498,8 @@ function CopyCommand(props: { text: string; copied: string; onCopy: (t: string) 
 }
 
 const STEPS = [
-  { id: 1, label: 'Master admin account' },
-  { id: 2, label: 'Primary data store' },
+  { id: 1, label: 'Primary data store' },
+  { id: 2, label: 'Master admin account' },
   { id: 3, label: 'Core services' },
   { id: 4, label: 'Security & identity' },
   { id: 5, label: 'AI engine' },
@@ -509,12 +509,12 @@ const STEPS = [
 // so the operator sees WHICH service/key failed, not a generic message.
 const STAGE_CONTEXT: Record<string, { step: number; title: string; message: string }> = {
   storage_init: {
-    step: 1,
+    step: 0,
     title: 'Data store connection failed',
     message: 'The primary data store rejected the connection. If you chose Supabase, the most common cause is that the schema has not been applied to this project yet — run `supabase db push`, or paste supabase/migrations/00001_init.sql + 00002_setup_operational.sql into the Supabase SQL editor, then save again. Otherwise double-check the Project URL / service role key (or the Upstash REST URL + token) and confirm the project is reachable.',
   },
   create_admin: {
-    step: 0,
+    step: 1,
     title: 'Master admin creation failed',
     message: 'The master admin account could not be created. Confirm the Supabase service role key is valid and that the Auth service (and profiles table) is provisioned, then try again.',
   },
@@ -732,14 +732,14 @@ export default function SetupPage() {
 
   function validateStep(step: number): Record<string, string> {
     const errs: Record<string, string> = {};
-    if (step === 0 && !configured) {
+    if (step === 1 && !configured) {
       const email = adminEmail.trim();
       if (!email) errs.adminEmail = 'Enter the master admin email address.';
       else if (!emailValid(email)) errs.adminEmail = 'Enter a valid email address.';
       if (!adminPassword) errs.adminPassword = 'Enter a password.';
       else if (adminPassword.length < 6 || adminPassword.length > 128) errs.adminPassword = 'Password must be 6–128 characters.';
     }
-    if (step === 1) {
+    if (step === 0) {
       for (const f of activeStorage.fields) {
         if (f.optional) continue;
         if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
@@ -835,7 +835,13 @@ export default function SetupPage() {
             SETUP WIZARD
           </div>
           <h1 style={{ fontSize: 30, fontWeight: 800, margin: '16px 0 6px', color: '#111' }}>Configure your store</h1>
-          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Five short steps — admin account, data store, core services, security and the AI engine.</p>
+          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Five short steps — data store, admin account, core services, security and the AI engine.</p>
+          <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 12, padding: '12px 14px', display: 'grid', gap: 4, textAlign: 'left', marginTop: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#3730a3' }}>🔑 Credentials live as environment variables</div>
+            <p style={{ fontSize: 12.5, color: '#3730a3', margin: 0, lineHeight: 1.5 }}>
+              This wizard saves a copy of every key, but the durable source of truth is your hosting platform. If a field cannot be saved here, set it there instead — on Cloudflare: <code>{status?.cloudflareVarsPath || 'Workers & Pages → [Project] → Settings → Variables and Secrets'}</code> (or <code>npx wrangler secret put NAME</code>); on Vercel: Project → Settings → Environment Variables; locally: <code>.env.local</code> / <code>.dev.vars</code>.
+            </p>
+          </div>
         </div>
 
         {ready && !reconfigure ? (
@@ -890,8 +896,8 @@ export default function SetupPage() {
               </div>
             )}
 
-            {step === 0 && (
-              <Section title="1 · Master admin account" subtitle="Creates the master Supabase Auth account (flagged super-admin) that unlocks /admin.">
+            {step === 1 && (
+              <Section title="2 · Master admin account" subtitle="Creates the master Supabase Auth account (flagged super-admin) that unlocks /admin.">
                 {!configured ? (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -910,8 +916,8 @@ export default function SetupPage() {
               </Section>
             )}
 
-            {step === 1 && (
-              <Section title="2 · Primary data store" subtitle="Pick the backend that stores products, carts, entries and configuration — then enter only that backend's keys.">
+            {step === 0 && (
+              <Section title="1 · Primary data store" subtitle="Set up the data store first — products, carts, entries and configuration live here, and the master admin account is created on it. Enter only the chosen backend's keys.">
                 <StoragePicker value={form.storage_provider} options={STORAGE_OPTIONS} onChange={(v) => set('storage_provider', v)} />
                 <ProviderFields fields={activeStorage.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
                 {form.storage_provider !== 'supabase' && (

@@ -7,10 +7,37 @@
   //                           /icon, /media) as a single Worker
   //   .open-next/assets     → static assets, served by the ASSETS binding
   //
-  // Runtime secrets (UPSTASH_*, STRIPE_*, ADMIN_*, CRON_SECRET, RESEND_*,
-  // SUPPORT_EMAIL, BRAND_NAME …) are set with `npx wrangler secret put` —
-  // NEVER commit them here. Build-time NEXT_PUBLIC_* variables are inlined
-  // by the OpenNext build and must be present in your shell when you build.
+  // ── Environment variables: how they are set on Cloudflare ─────────────────────
+  // Plaintext (non-secret) variables live in the [vars] block at the bottom of
+  // this file. The first `wrangler deploy` creates them as editable "Variables"
+  // in the dashboard (Workers & Pages → [project] → Settings → Variables and
+  // Secrets → Production), so you can just fill them in there — no CLI needed.
+  //
+  // SECRETS are NEVER committed here. Set them in the dashboard under the
+  // "Secrets" column, or from the terminal with:
+  //   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+  //   npx wrangler secret put SUPABASE_ANON_KEY
+  //   npx wrangler secret put SUPABASE_URL
+  //   npx wrangler secret put UPSTASH_REDIS_REST_URL
+  //   npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
+  //   npx wrangler secret put ADMIN_BASIC_AUTH_PASSWORD
+  //   npx wrangler secret put ADMIN_VERIFY_EMAIL
+  //   npx wrangler secret put STRIPE_SECRET_KEY
+  //   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+  //   npx wrangler secret put STRIPE_PRODUCT_ID
+  //   npx wrangler secret put RESEND_API_KEY
+  //   npx wrangler secret put RESEND_FROM
+  //   npx wrangler secret put CRON_SECRET
+  //   npx wrangler secret put CLIENT_LICENSE_KEY
+  //   npx wrangler secret put DEEPSEEK_API_KEY
+  //   (optional AI fallbacks: OPENAI_API_KEY / ANTHROPIC_API_KEY /
+  //    REPLICATE_API_TOKEN / OPENROUTER_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY /
+  //    GOOGLE_GEMINI_API_KEY)
+  //
+  // BUILD-TIME variables are inlined by the OpenNext build and must be present in
+  // your SHELL when you run `npm run build:cloudflare` — they can NOT be set in
+  // the dashboard:
+  //   NEXT_PUBLIC_URL, NEXT_PUBLIC_SITE_NAME, NEXT_PUBLIC_MAPBOX_TOKEN
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storefront-app",
   "main": ".open-next/worker.js",
@@ -22,5 +49,15 @@
   },
   "observability": {
     "enabled": true
+  },
+  // ── Plaintext (non-secret) runtime variables ────────────────────────────────
+  // These are auto-created as editable "Variables" in the Cloudflare dashboard
+  // the first time you `wrangler deploy`. Fill them there (or keep the defaults).
+  "vars": {
+    "STORAGE_PROVIDER": "supabase",
+    "ADMIN_BASIC_AUTH_USERNAME": "admin",
+    "BRAND_NAME": "",
+    "SUPPORT_EMAIL": "",
+    "MAINTENANCE_MODE": ""
   }
 }

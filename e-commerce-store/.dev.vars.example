@@ -46,6 +46,10 @@ DEEPSEEK_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 REPLICATE_API_TOKEN=
+OPENROUTER_API_KEY=
+GROQ_API_KEY=
+MISTRAL_API_KEY=
+GOOGLE_GEMINI_API_KEY=
 # Workers AI needs no key — it uses the native Cloudflare `AI` binding.
 
 # ── Cron safety net ──────────────────────────────────────────────────────────
