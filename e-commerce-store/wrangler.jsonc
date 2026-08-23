@@ -22,8 +22,18 @@
   //                  (step 1 data store · step 3 core services · step 4 security
   //                  & identity · step 5 AI engine)
   //
-  // Every entry is annotated with its necessity + a REALISTIC EXAMPLE VALUE so
-  // you know what it should look like.
+  // WHERE to set each value:
+  //   (NECESSARY HERE)  put it in THIS file / the Cloudflare dashboard (or your
+  //                     BUILD SHELL for NEXT_PUBLIC_*). The server reads it from
+  //                     the environment directly, so the site cannot stand in
+  //                     for it.
+  //   (USE SITE)        set it on the site instead (admin portal, or the
+  //                     /admin/setup wizard). For these, the environment is only
+  //                     an optional fallback.
+  //
+  // Every entry is annotated with its necessity + a REALISTIC EXAMPLE VALUE
+  // (e.g. pk.eyJ…, sk_live_…, you@example.com) so you can see exactly what to
+  // paste. The examples are never real keys — always swap in your own.
   //
   // ── How secrets vs plaintext vars work on Cloudflare ───────────────────────
   //   • Plaintext (non-secret) variables → the `vars` block at the bottom. The
@@ -48,25 +58,29 @@
   // values safe to keep as plaintext (they are not credentials).
   "vars": {
     // [OPTIONAL] force a data store. One of: "supabase" (default) | "upstash" |
-    //   "cloudflare-kv". Looks like: "supabase"          (SETUP WIZARD step 1)
+    //   "cloudflare-kv". (NECESSARY HERE — only if you override the default)
+    //   Example: "supabase"                              (SETUP WIZARD step 1)
     "STORAGE_PROVIDER": "supabase",
 
     // [RECOMMENDED] the ADMIN EMAIL — this is the email you sign into /admin
     //   with (there is NO separate "username" anymore) and the inbox that
-    //   receives the 6-digit /admin two-step code.
-    //   Looks like: "you@example.com"                    (SETUP WIZARD step 4)
+    //   receives the 6-digit /admin two-step code. (NECESSARY HERE)
+    //   Example: "you@example.com"                       (SETUP WIZARD step 4)
     "ADMIN_VERIFY_EMAIL": "",
 
-    // [OPTIONAL] brand name used in emails + templates.
-    //   Looks like: "Acme"                                (SETUP WIZARD step 4)
+    // [OPTIONAL] brand name used in emails + templates. (USE SITE)
+    //   Prefer /admin → Settings → Branding & Share (brandName) — this env is
+    //   only a fallback.  Example: "Acme"                 (SETUP WIZARD step 4)
     "BRAND_NAME": "",
 
     // [OPTIONAL] support inbox shown in the footer + used for customer emails.
-    //   Looks like: "help@example.com"                    (SETUP WIZARD step 4)
+    //   (USE SITE) Prefer /admin → Settings → Footer — this env is only a
+    //   fallback.  Example: "help@example.com"            (SETUP WIZARD step 4)
     "SUPPORT_EMAIL": "",
 
-    // [OPTIONAL] "true" shows the maintenance screen to unauthenticated visitors.
-    //   Looks like: "true" (or empty = off)
+    // [OPTIONAL] "true" shows the maintenance screen to unauthenticated
+    //   visitors. (NECESSARY HERE)
+    //   Example: "true" (or empty = off)
     "MAINTENANCE_MODE": ""
   }
   //
@@ -75,57 +89,57 @@
   // (Never paste these into the `vars` block above.)
   //
   // ── DATA STORE (one backend required — Supabase is the default) ────────────
-  //   SUPABASE_URL               [REQUIRED for Supabase]  "https://abcdefgh.supabase.co"  (SETUP WIZARD step 1)
-  //   SUPABASE_ANON_KEY          [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…"          (SETUP WIZARD step 1)
-  //   SUPABASE_SERVICE_ROLE_KEY  [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…" (server-only) (SETUP WIZARD step 1)
-  //   UPSTASH_REDIS_REST_URL     [OPTIONAL alt store]     "https://fast-swan-12345.upstash.io" (SETUP WIZARD step 1)
-  //   UPSTASH_REDIS_REST_TOKEN   [OPTIONAL alt store]     "AX3rAS…"               (SETUP WIZARD step 1)
+  //   SUPABASE_URL               [REQUIRED for Supabase]  "https://abcdefgh.supabase.co"  (NECESSARY HERE) (SETUP WIZARD step 1)
+  //   SUPABASE_ANON_KEY          [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…"          (NECESSARY HERE) (SETUP WIZARD step 1)
+  //   SUPABASE_SERVICE_ROLE_KEY  [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…" (server-only) (NECESSARY HERE) (SETUP WIZARD step 1)
+  //   UPSTASH_REDIS_REST_URL     [OPTIONAL alt store]     "https://fast-swan-12345.upstash.io" (NECESSARY HERE) (SETUP WIZARD step 1)
+  //   UPSTASH_REDIS_REST_TOKEN   [OPTIONAL alt store]     "AX3rASFh…"             (NECESSARY HERE) (SETUP WIZARD step 1)
   //
   // ── ADMIN ──────────────────────────────────────────────────────────────────
   //   ADMIN_BASIC_AUTH_PASSWORD  [RECOMMENDED] the /admin HTTP Basic Auth password.
   //     Only needed if you don't use the master admin account (email + password)
-  //     created by the Setup Wizard. Looks like: "a-long-random-password"
-  //                                                          (SETUP WIZARD step 4)
+  //     created by the Setup Wizard. (NECESSARY HERE)
+  //     Example: "a-long-random-password"                  (SETUP WIZARD step 4)
   //   (There is NO ADMIN_BASIC_AUTH_USERNAME — you sign in with your EMAIL, i.e.
   //    ADMIN_VERIFY_EMAIL above.)
   //
   // ── PAYMENTS ───────────────────────────────────────────────────────────────
-  //   STRIPE_SECRET_KEY          [REQUIRED for payments]  "sk_live_51AbCdEf…"    (SETUP WIZARD step 3)
-  //   STRIPE_WEBHOOK_SECRET      [REQUIRED for payments]  "whsec_AbCdEf…"        (SETUP WIZARD step 3)
-  //   STRIPE_PRODUCT_ID          [OPTIONAL] default price "price_1AbCdEf…"       (SETUP WIZARD step 3)
-  //   LEMONSQUEEZY_API_KEY       [OPTIONAL alt payments]  "eyJ0eXAiOiJKV1Qi…"    (SETUP WIZARD step 3)
-  //   PADDLE_API_KEY             [OPTIONAL alt payments]  "…"                    (SETUP WIZARD step 3)
+  //   STRIPE_SECRET_KEY          [REQUIRED for payments]  "sk_live_51AbCdEf…"    (USE SITE) (SETUP WIZARD step 3)
+  //   STRIPE_WEBHOOK_SECRET      [REQUIRED for payments]  "whsec_AbCdEf…"        (USE SITE) (SETUP WIZARD step 3)
+  //   STRIPE_PRODUCT_ID          [OPTIONAL] default price "price_1AbCdEf…"       (USE SITE) (SETUP WIZARD step 3)
+  //   LEMONSQUEEZY_API_KEY       [OPTIONAL alt payments]  "eyJ0eXAiOiJKV1Qi…"    (USE SITE) (SETUP WIZARD step 3)
+  //   PADDLE_API_KEY             [OPTIONAL alt payments]  "pdl_live_AbCdEf…"     (USE SITE) (SETUP WIZARD step 3)
   //
   // ── EMAIL ──────────────────────────────────────────────────────────────────
-  //   RESEND_API_KEY             [REQUIRED for email]     "re_AbCdEfG…"          (SETUP WIZARD step 3)
-  //   RESEND_FROM                [RECOMMENDED]            "Acme <onboarding@resend.dev>" (SETUP WIZARD step 3)
-  //   POSTMARK_API_KEY           [OPTIONAL alt email]     "…"                    (SETUP WIZARD step 3)
-  //   SENDGRID_API_KEY           [OPTIONAL alt email]     "SG.AbCdEfG…"          (SETUP WIZARD step 3)
+  //   RESEND_API_KEY             [REQUIRED for email]     "re_AbCdEfG…"          (USE SITE) (SETUP WIZARD step 3)
+  //   RESEND_FROM                [RECOMMENDED]            "Acme <onboarding@resend.dev>" (NECESSARY HERE) (SETUP WIZARD step 3)
+  //   POSTMARK_API_KEY           [OPTIONAL alt email]     "9f4a2c1e…"            (USE SITE) (SETUP WIZARD step 3)
+  //   SENDGRID_API_KEY           [OPTIONAL alt email]     "SG.AbCdEfG…"          (USE SITE) (SETUP WIZARD step 3)
   //
   // ── CRON SAFETY NET ────────────────────────────────────────────────────────
-  //   CRON_SECRET                [RECOMMENDED]            "a-long-random-string" (SETUP WIZARD step 4)
+  //   CRON_SECRET                [RECOMMENDED]            "a-long-random-string" (NECESSARY HERE) (SETUP WIZARD step 4)
   //
   // ── AI ENGINE ──────────────────────────────────────────────────────────────
-  //   DEEPSEEK_API_KEY           [RECOMMENDED primary]    "sk-abcd…"             (SETUP WIZARD step 5)
-  //   OPENAI_API_KEY             [OPTIONAL]               "sk-…"                 (SETUP WIZARD step 5)
-  //   ANTHROPIC_API_KEY          [OPTIONAL]               "sk-ant-api03-…"       (SETUP WIZARD step 5)
-  //   REPLICATE_API_TOKEN        [OPTIONAL]               "r8_AbCdEf…"           (SETUP WIZARD step 5)
-  //   OPENROUTER_API_KEY         [OPTIONAL]               "sk-or-v1-…"           (SETUP WIZARD step 5)
-  //   GROQ_API_KEY               [OPTIONAL]               "gsk_AbCdEf…"          (SETUP WIZARD step 5)
-  //   MISTRAL_API_KEY            [OPTIONAL]               "…"                    (SETUP WIZARD step 5)
-  //   GOOGLE_GEMINI_API_KEY      [OPTIONAL]               "AIzaSy…"              (SETUP WIZARD step 5)
+  //   DEEPSEEK_API_KEY           [RECOMMENDED primary]    "sk-abcd…"             (USE SITE) (SETUP WIZARD step 5)
+  //   OPENAI_API_KEY             [OPTIONAL]               "sk-proj-…"            (USE SITE) (SETUP WIZARD step 5)
+  //   ANTHROPIC_API_KEY          [OPTIONAL]               "sk-ant-api03-…"       (USE SITE) (SETUP WIZARD step 5)
+  //   REPLICATE_API_TOKEN        [OPTIONAL]               "r8_AbCdEf…"           (USE SITE) (SETUP WIZARD step 5)
+  //   OPENROUTER_API_KEY         [OPTIONAL]               "sk-or-v1-…"           (USE SITE) (SETUP WIZARD step 5)
+  //   GROQ_API_KEY               [OPTIONAL]               "gsk_AbCdEf…"          (USE SITE) (SETUP WIZARD step 5)
+  //   MISTRAL_API_KEY            [OPTIONAL]               "AbCdEfGh…"            (USE SITE) (SETUP WIZARD step 5)
+  //   GOOGLE_GEMINI_API_KEY      [OPTIONAL]               "AIzaSy…"              (USE SITE) (SETUP WIZARD step 5)
   //   (Workers AI needs NO key — it uses the native Cloudflare `AI` binding.)
   //
   // ── LICENSING (optional) ───────────────────────────────────────────────────
-  //   CLIENT_LICENSE_KEY         [OPTIONAL]               "LIC-…"   (alias: LICENSE_KEY)
-  //   LICENSE_SERVER_URL         [OPTIONAL]               "https://license.example.com/check"
-  //   LICENSE_ENFORCED           [OPTIONAL]               "true"
+  //   CLIENT_LICENSE_KEY         [OPTIONAL]               "LIC-…"   (alias: LICENSE_KEY) (NECESSARY HERE)
+  //   LICENSE_SERVER_URL         [OPTIONAL]               "https://license.example.com/check" (NECESSARY HERE)
+  //   LICENSE_ENFORCED           [OPTIONAL]               "true"                  (NECESSARY HERE)
   //
   // ── BUILD-TIME (NOT runtime) — these are INLINED at build time and MUST be in
   //   your SHELL when you run `npm run build:cloudflare`. They can NOT be set in
   //   the Cloudflare dashboard:
-  //   NEXT_PUBLIC_URL            [RECOMMENDED]            "https://yourdomain.com"
-  //   NEXT_PUBLIC_SITE_NAME      [OPTIONAL]               "Acme"     (alias: BRAND_NAME)
-  //   NEXT_PUBLIC_MAPBOX_TOKEN   [OPTIONAL maps]          "pk.eyJ1Ijoi…"          (SETUP WIZARD step 3)
-  //   GOOGLE_MAPS_API_KEY        [OPTIONAL alt maps]      "AIzaSy…"               (SETUP WIZARD step 3)
+  //   NEXT_PUBLIC_URL            [RECOMMENDED]            "https://yourdomain.com"  (NECESSARY HERE — build shell)
+  //   NEXT_PUBLIC_SITE_NAME      [OPTIONAL]               "Acme"     (alias: BRAND_NAME) (USE SITE)
+  //   NEXT_PUBLIC_MAPBOX_TOKEN   [OPTIONAL maps]          "pk.eyJ1Ijoi…"          (NECESSARY HERE — build shell) (SETUP WIZARD step 3)
+  //   GOOGLE_MAPS_API_KEY        [OPTIONAL alt maps]      "AIzaSy…"               (NECESSARY HERE — build shell) (SETUP WIZARD step 3)
 }
