@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { buildSchemaFixPlan, type SchemaFixPlan } from '@/lib/setup-schema-guide';
 
 // ── shared styles ─────────────────────────────────────────────────────────────
 const inputStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
@@ -60,9 +61,9 @@ const STORAGE_OPTIONS: ProviderSpec[] = [
     label: 'Supabase (recommended)',
     hint: 'Postgres + Auth + row-level security. Also stores your configuration and the master admin account.',
     fields: [
-      { key: 'supabase_url', label: 'Project URL', envVar: 'SUPABASE_URL', placeholder: 'https://your-project.supabase.co', hint: 'Supabase dashboard → Project Settings → API → Project URL.' },
-      { key: 'supabase_anon_key', label: 'Anon public key', envVar: 'SUPABASE_ANON_KEY', secret: true, hint: 'Project Settings → API → anon public key (safe to expose in the browser).' },
-      { key: 'supabase_service_role_key', label: 'Service role key', envVar: 'SUPABASE_SERVICE_ROLE_KEY', secret: true, hint: 'Project Settings → API → service_role key — server-only, never expose it.' },
+      { key: 'supabase_url', label: 'Project URL', envVar: 'SUPABASE_URL', placeholder: 'https://abcdefghijklm.supabase.co', hint: 'Supabase dashboard → Project Settings → API → Project URL (e.g. https://abcdefghijklm.supabase.co).' },
+      { key: 'supabase_anon_key', label: 'Anon public key', envVar: 'SUPABASE_ANON_KEY', secret: true, placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…', hint: 'Project Settings → API → anon public key — a long JWT starting with "eyJ…" (safe to expose in the browser).' },
+      { key: 'supabase_service_role_key', label: 'Service role key', envVar: 'SUPABASE_SERVICE_ROLE_KEY', secret: true, placeholder: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.…', hint: 'Project Settings → API → service_role key — a long JWT starting with "eyJ…", server-only, never expose it.' },
     ],
   },
   {
@@ -70,8 +71,8 @@ const STORAGE_OPTIONS: ProviderSpec[] = [
     label: 'Upstash Redis',
     hint: 'REST Redis — the battle-tested engine for concurrent raffle and payment writes.',
     fields: [
-      { key: 'upstash_redis_rest_url', label: 'REST URL', envVar: 'UPSTASH_REDIS_REST_URL', placeholder: 'https://….upstash.io', hint: 'Upstash Console → Redis → REST API → UPSTASH_REDIS_REST_URL.' },
-      { key: 'upstash_redis_rest_token', label: 'REST token', envVar: 'UPSTASH_REDIS_REST_TOKEN', secret: true, hint: 'Same page → UPSTASH_REDIS_REST_TOKEN.' },
+      { key: 'upstash_redis_rest_url', label: 'REST URL', envVar: 'UPSTASH_REDIS_REST_URL', placeholder: 'https://eu1-brave-falcon-12345.upstash.io', hint: 'Upstash Console → Redis → REST API → UPSTASH_REDIS_REST_URL (e.g. https://eu1-brave-falcon-12345.upstash.io).' },
+      { key: 'upstash_redis_rest_token', label: 'REST token', envVar: 'UPSTASH_REDIS_REST_TOKEN', secret: true, placeholder: 'AX3rASFh…', hint: 'Same page → UPSTASH_REDIS_REST_TOKEN — a long alphanumeric token (e.g. AX3rASFh…).' },
     ],
   },
   {
@@ -97,9 +98,9 @@ const PAYMENT_OPTIONS: ProviderSpec[] = [
     label: 'Stripe',
     hint: 'Full support — raffle card-save + instant-buy + signed webhooks.',
     fields: [
-      { key: 'payment_api_key', label: 'Secret key', envVar: 'STRIPE_SECRET_KEY', secret: true, placeholder: 'sk_live_…', hint: 'Stripe Dashboard → Developers → API keys → Secret key.' },
-      { key: 'payment_webhook_secret', label: 'Webhook signing secret', envVar: 'STRIPE_WEBHOOK_SECRET', secret: true, placeholder: 'whsec_…', hint: 'Stripe Dashboard → Developers → Webhooks → your /api/stripe/webhook endpoint → Signing secret.' },
-      { key: 'stripe_product_id', label: 'Default price ID', envVar: 'STRIPE_PRODUCT_ID', optional: true, placeholder: 'price_…', hint: 'Global fallback price. Per-product / per-size price IDs set in /admin always win.' },
+      { key: 'payment_api_key', label: 'Secret key', envVar: 'STRIPE_SECRET_KEY', secret: true, placeholder: 'sk_live_51…', hint: 'Stripe Dashboard → Developers → API keys → Secret key (starts with "sk_live_" or "sk_test_").' },
+      { key: 'payment_webhook_secret', label: 'Webhook signing secret', envVar: 'STRIPE_WEBHOOK_SECRET', secret: true, placeholder: 'whsec_…', hint: 'Stripe Dashboard → Developers → Webhooks → your /api/stripe/webhook endpoint → Signing secret (starts with "whsec_").' },
+      { key: 'stripe_product_id', label: 'Default price ID', envVar: 'STRIPE_PRODUCT_ID', optional: true, placeholder: 'price_1ABC…', hint: 'Global fallback price. Per-product / per-size price IDs set in /admin always win (starts with "price_").' },
     ],
   },
   {
@@ -107,7 +108,7 @@ const PAYMENT_OPTIONS: ProviderSpec[] = [
     label: 'Lemon Squeezy',
     hint: 'Merchant-of-record checkout — instant-buy only (no raffle card-save).',
     fields: [
-      { key: 'payment_api_key', label: 'API key', envVar: 'LEMONSQUEEZY_API_KEY', secret: true, placeholder: 'eyJ…', hint: 'Lemon Squeezy → Settings → API → API key.' },
+      { key: 'payment_api_key', label: 'API key', envVar: 'LEMONSQUEEZY_API_KEY', secret: true, placeholder: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.…', hint: 'Lemon Squeezy → Settings → API → API key (a long JWT starting with "eyJ…").' },
     ],
   },
   {
@@ -115,7 +116,7 @@ const PAYMENT_OPTIONS: ProviderSpec[] = [
     label: 'Paddle',
     hint: 'Paddle Billing custom checkout — instant-buy only (no raffle card-save).',
     fields: [
-      { key: 'payment_api_key', label: 'API key', envVar: 'PADDLE_API_KEY', secret: true, placeholder: '…', hint: 'Paddle → Developer tools → Authentication → API key.' },
+      { key: 'payment_api_key', label: 'API key', envVar: 'PADDLE_API_KEY', secret: true, placeholder: 'pdl_live_AbCdEf…', hint: 'Paddle → Developer tools → Authentication → API key (starts with "pdl_live_" or "pdl_test_").' },
     ],
   },
 ];
@@ -126,7 +127,7 @@ const EMAIL_OPTIONS: ProviderSpec[] = [
     label: 'Resend',
     hint: 'Developer-friendly — the onboarding@resend.dev sandbox works immediately for testing.',
     fields: [
-      { key: 'mail_api_key', label: 'API key', envVar: 'RESEND_API_KEY', secret: true, placeholder: 're_…', hint: 'Resend → API Keys → Create API key.' },
+      { key: 'mail_api_key', label: 'API key', envVar: 'RESEND_API_KEY', secret: true, placeholder: 're_AbCdEf123456…', hint: 'Resend → API Keys → Create API key (starts with "re_").' },
     ],
   },
   {
@@ -134,7 +135,7 @@ const EMAIL_OPTIONS: ProviderSpec[] = [
     label: 'Postmark',
     hint: 'Fast transactional delivery. Requires a verified sender signature.',
     fields: [
-      { key: 'mail_api_key', label: 'Server API token', envVar: 'POSTMARK_API_KEY', secret: true, placeholder: '…', hint: 'Postmark → Servers → your server → API Tokens.' },
+      { key: 'mail_api_key', label: 'Server API token', envVar: 'POSTMARK_API_KEY', secret: true, placeholder: '9f4a2c1e-7d3b-4f8a-9c5e-1234567890ab', hint: 'Postmark → Servers → your server → API Tokens (a 36-character UUID).' },
     ],
   },
   {
@@ -142,7 +143,7 @@ const EMAIL_OPTIONS: ProviderSpec[] = [
     label: 'SendGrid',
     hint: 'Twilio SendGrid v3 mail API. Requires a verified sender address.',
     fields: [
-      { key: 'mail_api_key', label: 'API key', envVar: 'SENDGRID_API_KEY', secret: true, placeholder: 'SG.…', hint: 'SendGrid → Settings → API Keys → Create API key.' },
+      { key: 'mail_api_key', label: 'API key', envVar: 'SENDGRID_API_KEY', secret: true, placeholder: 'SG.AbCdEf123456…', hint: 'SendGrid → Settings → API Keys → Create API key (starts with "SG.").' },
     ],
   },
 ];
@@ -153,7 +154,7 @@ const MAP_OPTIONS: ProviderSpec[] = [
     label: 'Mapbox',
     hint: 'Address autofill via search-js — the storefront default.',
     fields: [
-      { key: 'map_api_key', label: 'Public access token', envVar: 'NEXT_PUBLIC_MAPBOX_TOKEN', placeholder: 'pk.…', hint: 'Mapbox → Account → Access tokens. This is build-time on Cloudflare — set it in the shell BEFORE building.' },
+      { key: 'map_api_key', label: 'Public access token', envVar: 'NEXT_PUBLIC_MAPBOX_TOKEN', placeholder: 'pk.eyJ1Ijoi…', hint: 'Mapbox → Account → Access tokens (starts with "pk.eyJ1Ijoi…"). This is build-time on Cloudflare — set it in the shell BEFORE building.' },
     ],
   },
   {
@@ -161,7 +162,7 @@ const MAP_OPTIONS: ProviderSpec[] = [
     label: 'Google Maps',
     hint: 'Places API address autofill.',
     fields: [
-      { key: 'map_api_key', label: 'API key', envVar: 'GOOGLE_MAPS_API_KEY', secret: true, placeholder: 'AIza…', hint: 'Google Cloud Console → APIs & Services → Credentials → Create credentials → API key.' },
+      { key: 'map_api_key', label: 'API key', envVar: 'GOOGLE_MAPS_API_KEY', secret: true, placeholder: 'AIzaSy…', hint: 'Google Cloud Console → APIs & Services → Credentials → Create credentials → API key (starts with "AIza").' },
     ],
   },
   {
@@ -194,7 +195,7 @@ const AI_OPTIONS: ProviderSpec[] = [
     label: 'OpenAI',
     hint: 'GPT-4o-mini chat completions.',
     fields: [
-      { key: 'ai_api_key', label: 'API key', envVar: 'OPENAI_API_KEY', secret: true, placeholder: 'sk-…', hint: 'OpenAI platform → API keys.' },
+      { key: 'ai_api_key', label: 'API key', envVar: 'OPENAI_API_KEY', secret: true, placeholder: 'sk-proj-…', hint: 'OpenAI platform → API keys (project keys start with "sk-proj-").' },
     ],
   },
   {
@@ -226,7 +227,7 @@ const AI_OPTIONS: ProviderSpec[] = [
     label: 'Mistral',
     hint: 'Mistral models (OpenAI-compatible).',
     fields: [
-      { key: 'ai_api_key', label: 'API key', envVar: 'MISTRAL_API_KEY', secret: true, placeholder: '…', hint: 'Mistral AI → API Keys.' },
+      { key: 'ai_api_key', label: 'API key', envVar: 'MISTRAL_API_KEY', secret: true, placeholder: 'AbCdEfGh…', hint: 'Mistral AI → API Keys (a random alphanumeric string, no prefix).' },
     ],
   },
   {
@@ -234,7 +235,7 @@ const AI_OPTIONS: ProviderSpec[] = [
     label: 'Google Gemini',
     hint: 'Gemini 1.5 Flash text generation.',
     fields: [
-      { key: 'ai_api_key', label: 'API key', envVar: 'GEMINI_API_KEY', secret: true, placeholder: 'AIza…', hint: 'Google AI Studio → API key.' },
+      { key: 'ai_api_key', label: 'API key', envVar: 'GEMINI_API_KEY', secret: true, placeholder: 'AIzaSy…', hint: 'Google AI Studio → API key (starts with "AIza").' },
     ],
   },
   {
@@ -265,15 +266,15 @@ const AI_SECONDARY_OPTIONS: ProviderSpec[] = [
 ];
 
 const SECURITY_FIELDS: FieldSpec[] = [
-  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, hint: 'HTTP Basic Auth password for /admin. Required if you are not using the master admin account.' },
-  { key: 'admin_verify_email', label: 'Admin two-step inbox', envVar: 'ADMIN_VERIFY_EMAIL', hint: 'Inbox that receives the 6-digit /admin sign-in code (falls back to SUPPORT_EMAIL).' },
-  { key: 'cron_secret', label: 'Cron secret', envVar: 'CRON_SECRET', secret: true, hint: 'Authenticates the scheduled draw safety net (Authorization: Bearer $CRON_SECRET).' },
+  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, placeholder: '••••••••••••', hint: 'HTTP Basic Auth password for /admin (any strong password). Required if you are not using the master admin account.' },
+  { key: 'admin_verify_email', label: 'Admin two-step inbox', envVar: 'ADMIN_VERIFY_EMAIL', placeholder: 'admin@yourstore.com', hint: 'Inbox that receives the 6-digit /admin sign-in code (falls back to SUPPORT_EMAIL).' },
+  { key: 'cron_secret', label: 'Cron secret', envVar: 'CRON_SECRET', secret: true, placeholder: 'a-long-random-string', hint: 'Authenticates the scheduled draw safety net (Authorization: Bearer $CRON_SECRET) — use a long random string.' },
 ];
 
 const IDENTITY_FIELDS: FieldSpec[] = [
-  { key: 'brand_name', label: 'Brand name', envVar: 'BRAND_NAME', hint: 'Shown in emails. Also editable in /admin → Settings → Branding & Share.' },
-  { key: 'site_url', label: 'Site URL', envVar: 'NEXT_PUBLIC_URL', placeholder: 'https://yourdomain.com', hint: 'Canonical / OG / email URL. Build-time on Cloudflare — set it in the shell BEFORE building.' },
-  { key: 'support_email', label: 'Support email', envVar: 'SUPPORT_EMAIL', hint: 'The support inbox shown in the footer and used for customer emails.' },
+  { key: 'brand_name', label: 'Brand name', envVar: 'BRAND_NAME', placeholder: 'Your Brand', hint: 'Shown in emails. Also editable in /admin → Settings → Branding & Share.' },
+  { key: 'site_url', label: 'Site URL', envVar: 'NEXT_PUBLIC_URL', placeholder: 'https://www.yourstore.com', hint: 'Canonical / OG / email URL (e.g. https://www.yourstore.com). Build-time on Cloudflare — set it in the shell BEFORE building.' },
+  { key: 'support_email', label: 'Support email', envVar: 'SUPPORT_EMAIL', placeholder: 'support@yourstore.com', hint: 'The support inbox shown in the footer and used for customer emails.' },
 ];
 
 // ── status + form types ───────────────────────────────────────────────────────
@@ -495,6 +496,63 @@ function CopyCommand(props: { text: string; copied: string; onCopy: (t: string) 
   );
 }
 
+/** Rich, stupid-proof "Supabase schema not applied" fix: numbered steps + the
+ *  exact SQL to run, each with a 1-click "Copy SQL" button (no repo hunting). */
+function SchemaFixCard(props: { plan: SchemaFixPlan; tone?: 'red' | 'yellow' }) {
+  const [copiedFile, setCopiedFile] = useState('');
+  const t = props.tone === 'yellow'
+    ? { background: '#fffbeb', border: '#fde68a', text: '#92400e', sub: '#b45309' }
+    : { background: '#fef2f2', border: '#fecaca', text: '#b91c1c', sub: '#7f1d1d' };
+
+  async function copySql(file: string, sql: string) {
+    try {
+      await navigator.clipboard.writeText(sql);
+      setCopiedFile(file);
+      window.setTimeout(() => setCopiedFile(''), 2000);
+    } catch {
+      /* clipboard unavailable — the SQL is still visible to select + copy manually */
+    }
+  }
+
+  return (
+    <div style={{ background: t.background, border: `1px solid ${t.border}`, borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 12 }}>
+      <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: t.text }}>{props.plan.title}</div>
+        <p style={{ fontSize: 13, color: t.sub, margin: 0, lineHeight: 1.5 }}>{props.plan.intro}</p>
+      </div>
+
+      <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
+        {props.plan.steps.map((s, i) => (
+          <li key={i} style={{ fontSize: 13, color: t.sub, lineHeight: 1.55 }}>{s}</li>
+        ))}
+      </ol>
+
+      {props.plan.migrations.map((m) => (
+        <div key={m.file} style={{ background: '#0f172a', borderRadius: 10, padding: 10, display: 'grid', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <code style={{ flex: 1, color: '#e2e8f0', fontSize: 12, fontWeight: 700, wordBreak: 'break-all' }}>📄 {m.file}</code>
+            <button
+              type="button"
+              onClick={() => copySql(m.file, m.sql)}
+              style={{
+                background: copiedFile === m.file ? '#10b981' : '#16a34a',
+                color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px',
+                fontSize: 13, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              {copiedFile === m.file ? '✓ Copied SQL' : 'Copy SQL'}
+            </button>
+          </div>
+          <pre style={{ margin: 0, maxHeight: 220, overflow: 'auto', color: '#a5f3fc', fontSize: 11.5, lineHeight: 1.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', whiteSpace: 'pre', background: '#020617', borderRadius: 8, padding: '10px 12px' }}>{m.sql}</pre>
+        </div>
+      ))}
+
+      <p style={{ fontSize: 12.5, color: t.sub, margin: 0, lineHeight: 1.5 }}>✓ {props.plan.verify}</p>
+      <p style={{ fontSize: 12.5, color: t.sub, margin: 0, lineHeight: 1.5 }}>💡 {props.plan.cli}</p>
+    </div>
+  );
+}
+
 const STEPS = [
   { id: 1, label: 'Primary data store' },
   { id: 2, label: 'Master admin account' },
@@ -572,6 +630,7 @@ export default function SetupPage() {
   const [notice, setNotice] = useState('');
   const [warning, setWarning] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [schemaError, setSchemaError] = useState<SchemaFixPlan | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.search.includes('reconfigure=1')) {
@@ -642,6 +701,7 @@ export default function SetupPage() {
     setBusy(true);
     setError('');
     setErrorStage(null);
+    setSchemaError(null);
     setNotice('');
     setWarning('');
     try {
@@ -661,7 +721,7 @@ export default function SetupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string; warning?: string };
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string; warning?: string; schemaError?: SchemaFixPlan };
       if (!res.ok || !data.ok) {
         // A 401/403 on an already-configured platform means the operator hasn't
         // authenticated yet. Surface the exact reason and make sure the
@@ -676,6 +736,7 @@ export default function SetupPage() {
         }
         setError(String(data.error || 'Setup could not be completed.'));
         setErrorStage(data.stage || null);
+        setSchemaError(data.schemaError ?? null);
         return;
       }
       await load();
@@ -836,6 +897,7 @@ export default function SetupPage() {
       setBusy(true);
       setError('');
       setErrorStage(null);
+      setSchemaError(null);
       try {
         const res = await fetch('/api/admin/setup', {
           method: 'POST',
@@ -848,15 +910,17 @@ export default function SetupPage() {
             probe: 'storage',
           }),
         });
-        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string };
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string; schemaError?: SchemaFixPlan };
         if (!res.ok || !data.ok) {
           setError(String(data.error || 'The data store connection failed.'));
           setErrorStage(data.stage || 'storage_init');
+          setSchemaError(data.schemaError ?? null);
           return;
         }
       } catch {
         setError('The data store connection failed. Check your connection.');
         setErrorStage('storage_init');
+        setSchemaError(null);
         return;
       } finally {
         setBusy(false);
@@ -1001,21 +1065,7 @@ export default function SetupPage() {
             )}
 
             {status?.supabaseSchemaError && (
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>Supabase schema not applied yet</div>
-                <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-                  Your Supabase database is missing part of its schema, so saving will fail. Fix it in about a minute:{'\n'}
-                  1. Open https://supabase.com/dashboard and click your project.{'\n'}
-                  2. Click “SQL Editor” in the left sidebar, then “New query”.{'\n'}
-                  3. For each file below, copy ALL of its contents, paste it into the query box, and click “Run” — in order:{'\n'}
-                     supabase/migrations/00001_init.sql{'\n'}
-                     supabase/migrations/00002_setup_operational.sql{'\n'}
-                     supabase/migrations/00003_tenant_routing.sql{'\n'}
-                     supabase/migrations/00004_ai_secondary.sql{'\n'}
-                     (If you have the Supabase CLI, run <code>supabase db push</code> instead — it applies all four at once.){'\n'}
-                  4. Then click “Continue” again.
-                </p>
-              </div>
+              <SchemaFixCard plan={buildSchemaFixPlan(status.supabaseSchemaError)} tone="yellow" />
             )}
 
             {step === 1 && (
@@ -1107,23 +1157,27 @@ export default function SetupPage() {
               </Section>
             )}
 
-            {error && (
-              <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ color: '#b91c1c', fontSize: 15, fontWeight: 800 }}>{errorContext ? errorContext.title : 'Setup failed'}</span>
-                  {errorContext && (
-                    <button
-                      type="button"
-                      onClick={() => { setStep(errorContext.step); setError(''); setErrorStage(null); }}
-                      style={{ marginLeft: 'auto', background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                    >
-                      Go to step {errorContext.step + 1}
-                    </button>
-                  )}
+            {schemaError ? (
+              <SchemaFixCard plan={schemaError} />
+            ) : (
+              error && (
+                <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#b91c1c', fontSize: 15, fontWeight: 800 }}>{errorContext ? errorContext.title : 'Setup failed'}</span>
+                    {errorContext && (
+                      <button
+                        type="button"
+                        onClick={() => { setStep(errorContext.step); setError(''); setErrorStage(null); setSchemaError(null); }}
+                        style={{ marginLeft: 'auto', background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Go to step {errorContext.step + 1}
+                      </button>
+                    )}
+                  </div>
+                  {errorContext && <p style={{ color: '#7f1d1d', fontSize: 13, margin: 0, lineHeight: 1.5 }}>{errorContext.message}</p>}
+                  <p style={{ color: '#b91c1c', fontSize: 13, margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-word', whiteSpace: 'pre-line', lineHeight: 1.6 }}>{error}</p>
                 </div>
-                {errorContext && <p style={{ color: '#7f1d1d', fontSize: 13, margin: 0, lineHeight: 1.5 }}>{errorContext.message}</p>}
-                <p style={{ color: '#b91c1c', fontSize: 13, margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-word', whiteSpace: 'pre-line', lineHeight: 1.6 }}>{error}</p>
-              </div>
+              )
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
