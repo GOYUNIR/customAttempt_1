@@ -391,7 +391,12 @@ export async function POST(request: Request) {
     // ── re-configuration guard ───────────────────────────────────────────────
     const alreadyConfigured = (await isPlatformConfigured()) === true;
     const superAdminSession = await isSuperAdminSession(request);
-    const basicAuthOk = adminRequestAuthorized(request, adminPassword);
+    // Accept EITHER the master admin password (step 2) or the dedicated
+    // ADMIN_BASIC_AUTH_PASSWORD field (step 4) as the supplied Basic-Auth secret.
+    const basicAuthOk = adminRequestAuthorized(
+      request,
+      String(body.admin_basic_auth_password || adminPassword),
+    );
 
     // Beyond the Basic-Auth password and a valid super-admin device session, the
     // Supabase SERVICE-ROLE key is accepted as authorization: it is the master
@@ -408,7 +413,10 @@ export async function POST(request: Request) {
 
     if (alreadyConfigured && !basicAuthOk && !superAdminSession && !serviceRoleAuthorized) {
       return NextResponse.json(
-        { error: 'The platform is already configured. Enter the admin password or sign in as admin to update providers.' },
+        {
+          error:
+            'This store is already configured. To update it, authenticate first: sign in as the master admin above, or set ADMIN_BASIC_AUTH_PASSWORD and use Basic Auth, or set SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY as environment variables on your host (Cloudflare: npx wrangler secret put …) so the service-role key can authorize the save.',
+        },
         { status: 403 },
       );
     }

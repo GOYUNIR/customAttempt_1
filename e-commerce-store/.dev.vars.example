@@ -1,65 +1,91 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# .dev.vars.example — local development environment template.
+# ============================================================================
+# .dev.vars.example - environment template for Cloudflare Workers local dev.
 #
-# Copy to `.dev.vars` (Cloudflare Workers) or `.env.local` (Next.js) and fill in
-# real values. NEVER commit real secrets. For production, set these in your
-# platform dashboard or via `npx wrangler secret put NAME`.
-# ─────────────────────────────────────────────────────────────────────────────
+#   Copy this to `.dev.vars` (for `wrangler dev`) or `.env.local` (Next.js)
+#   and replace EVERY example value with your own. NEVER commit real secrets.
+#
+#   Production on Cloudflare: set these in the dashboard instead -
+#     Workers & Pages -> [project] -> Settings -> Variables and Secrets
+#   (or `npx wrangler secret put NAME`).
+#
+# WHERE each value lives:
+#   (NECESSARY HERE) = the SERVER reads it straight from the environment, so it
+#                      MUST be set here / in the Cloudflare dashboard. The site
+#                      cannot stand in for it.
+#   (USE SITE)       = set it on the SITE instead (admin portal, or the
+#                      /admin/setup wizard). The environment is only a fallback.
+# ============================================================================
 
-# ── Primary data store: Supabase (default) ───────────────────────────────────
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+# --- PRIMARY DATA STORE - Supabase (default) -------------------------------
+# (NECESSARY HERE) Postgres + Auth + config. Replace with your project values.
+SUPABASE_URL=https://abcdefghijklm.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-# ── Alternative / fallback data stores ───────────────────────────────────────
-# STORAGE_PROVIDER=supabase | upstash | cloudflare-kv
+# --- ALTERNATIVE / FALLBACK DATA STORES -------------------------------------
+# (NECESSARY HERE - only if you override the default) one of: supabase | upstash | cloudflare-kv
 STORAGE_PROVIDER=supabase
-UPSTASH_REDIS_REST_URL=
-UPSTASH_REDIS_REST_TOKEN=
+# (NECESSARY HERE - only for Upstash Redis)
+UPSTASH_REDIS_REST_URL=https://eu1-brave-falcon-12345.upstash.io
+UPSTASH_REDIS_REST_TOKEN=AX3rASFh...
 
-# ── Licensing gatekeeper ─────────────────────────────────────────────────────
-CLIENT_LICENSE_KEY=
-# LICENSE_KEY=            # legacy alias of CLIENT_LICENSE_KEY
-LICENSE_SERVER_URL=
-# LICENSE_ENFORCED=true   # force enforcement even without a key/server
+# --- ADMIN PORTAL (email + password sign-in) --------------------------------
+# The Basic Auth "username" is the admin EMAIL (ADMIN_VERIFY_EMAIL); there is
+# no separate username anymore.
+# (NECESSARY HERE) the email you sign into /admin with + the inbox that gets the
+# 6-digit two-step code.
+ADMIN_VERIFY_EMAIL=you@example.com
+# (NECESSARY HERE) the /admin Basic Auth password. Only needed if you are NOT
+# using the master admin account created by the Setup Wizard.
+ADMIN_BASIC_AUTH_PASSWORD=your-strong-password
 
-# ── Admin portal (HTTP Basic Auth + two-step verification) ───────────────────
-# The admin signs in with their EMAIL (the Basic Auth "username" field is the
-# admin email, resolved from ADMIN_VERIFY_EMAIL → SUPPORT_EMAIL → REPLY_TO_EMAIL).
-ADMIN_BASIC_AUTH_PASSWORD=
-ADMIN_VERIFY_EMAIL=
+# --- PAYMENTS - Stripe (keeps raffle card-save + webhooks) ------------------
+# (USE SITE) /admin/setup wizard step 3 - env is only a fallback.
+STRIPE_SECRET_KEY=sk_live_51AbCdEf...
+STRIPE_WEBHOOK_SECRET=whsec_AbCdEf...
+# (USE SITE) optional default price; per-product price IDs always win.
+STRIPE_PRODUCT_ID=price_1AbCdEf...
 
-# ── Payments (Stripe keeps raffle card-save + webhooks) ──────────────────────
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRODUCT_ID=
+# --- EMAIL - Resend (default) ----------------------------------------------
+# (USE SITE) /admin/setup wizard step 3.
+RESEND_API_KEY=re_AbCdEfG...
+# (NECESSARY HERE) the "from" address; also settable on the site.
+RESEND_FROM=Acme <onboarding@resend.dev>
 
-# ── Email (Resend default) ───────────────────────────────────────────────────
-RESEND_API_KEY=
-RESEND_FROM=
-# EMAIL_FROM=
+# --- MAPS ------------------------------------------------------------------
+# (NECESSARY HERE - BUILD TIME on Cloudflare) set in your shell BEFORE
+# `npm run build:cloudflare`; it CANNOT be set in the dashboard.
+NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1Ijoi...
 
-# ── Maps ─────────────────────────────────────────────────────────────────────
-NEXT_PUBLIC_MAPBOX_TOKEN=
+# --- UNIVERSAL AI ENGINE ----------------------------------------------------
+# (USE SITE) /admin/setup wizard step 5. Workers AI needs NO key (native binding).
+DEEPSEEK_API_KEY=sk-abcd...
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-api03-...
+REPLICATE_API_TOKEN=r8_AbCdEf...
+OPENROUTER_API_KEY=sk-or-v1-...
+GROQ_API_KEY=gsk_AbCdEf...
+MISTRAL_API_KEY=AbCdEfGh...
+GOOGLE_GEMINI_API_KEY=AIzaSy...
 
-# ── Universal AI engine ──────────────────────────────────────────────────────
-DEEPSEEK_API_KEY=
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-REPLICATE_API_TOKEN=
-OPENROUTER_API_KEY=
-GROQ_API_KEY=
-MISTRAL_API_KEY=
-GOOGLE_GEMINI_API_KEY=
-# Workers AI needs no key — it uses the native Cloudflare `AI` binding.
+# --- CRON SAFETY NET --------------------------------------------------------
+# (NECESSARY HERE) authenticates the scheduled draw safety net.
+CRON_SECRET=a-long-random-string
 
-# ── Cron safety net ──────────────────────────────────────────────────────────
-CRON_SECRET=
+# --- SITE IDENTITY ----------------------------------------------------------
+# (NECESSARY HERE - BUILD TIME on Cloudflare) canonical/OG/email URL.
+NEXT_PUBLIC_URL=https://www.yourstore.com
+# (USE SITE) /admin -> Settings -> Branding & Share. Env is a fallback.
+BRAND_NAME=Acme
+# (USE SITE) /admin -> Settings -> Footer. Env is a fallback.
+SUPPORT_EMAIL=help@example.com
 
-# ── Site identity ────────────────────────────────────────────────────────────
-NEXT_PUBLIC_URL=
-BRAND_NAME=
-SUPPORT_EMAIL=
+# --- LICENSING (optional) ---------------------------------------------------
+# (NECESSARY HERE) only if you use the licensing gatekeeper.
+CLIENT_LICENSE_KEY=LIC-...
+# LICENSE_KEY=...                       # legacy alias of CLIENT_LICENSE_KEY
+# LICENSE_SERVER_URL=https://license.example.com/check
+# LICENSE_ENFORCED=true
 
-# ── Operations ───────────────────────────────────────────────────────────────
-# MAINTENANCE_MODE=true  # show the maintenance screen to unauthenticated visitors
+# --- OPERATIONS -------------------------------------------------------------
+# MAINTENANCE_MODE=true   (NECESSARY HERE) show the maintenance screen.

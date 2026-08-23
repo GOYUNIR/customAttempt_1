@@ -189,6 +189,15 @@ export async function middleware(request: NextRequest) {
   // opens the read-only status probe, never a write path.
   const isSetupRead = isSetupPath && request.method.toUpperCase() === 'GET';
 
+  // The setup API (GET + POST) must reach the route's OWN auth guard — the
+  // route re-checks Basic Auth, a super-admin session AND proof of the Supabase
+  // service-role key (the master write credential). The middleware's Basic-Auth
+  // gate below otherwise blocks the reconfigure SAVE before the route's
+  // service-role fallback can run — the exact "Sign in first" deadlock on an
+  // already-configured store.
+  const isSetupApi =
+    pathname === '/api/admin/setup' || pathname.startsWith('/api/admin/setup');
+
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     // Deprecated: /admin/setup-status was folded into the unified /admin/setup
     // dashboard. Redirect direct traffic (page or API) so old bookmarks and any
@@ -269,7 +278,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !ADMIN_PASSWORD) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !ADMIN_PASSWORD) {
       return new NextResponse('Admin not configured', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
@@ -281,7 +290,7 @@ export async function middleware(request: NextRequest) {
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
     const authHeader = request.headers.get('authorization');
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !verifyBasicAuth(authHeader)) {
+    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !verifyBasicAuth(authHeader)) {
       return new NextResponse('Authentication required', {
         status: 401,
         headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
@@ -295,7 +304,7 @@ export async function middleware(request: NextRequest) {
       pathname === '/admin' ||
       pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
-    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead) {
+    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi) {
       const token = adminDeviceTokenFromRequest(request);
       const redis = createStorageClient();
       let verified = false;

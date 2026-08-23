@@ -683,6 +683,56 @@ export default function SetupPage() {
     }
   }
 
+  async function saveToServer(): Promise<{
+    status: number;
+    ok: boolean;
+    error?: string;
+    stage?: string;
+    warning?: string;
+    schemaError?: SchemaFixPlan;
+  }> {
+    const body: Record<string, unknown> = {
+      ...form,
+      adminEmail,
+      adminPassword,
+      supabaseUrl: form.supabase_url,
+      supabaseAnonKey: form.supabase_anon_key,
+      supabaseServiceRoleKey: form.supabase_service_role_key,
+      ai_provider: form.ai_provider === 'none' ? '' : form.ai_provider,
+      ai_provider_secondary: form.ai_provider_secondary === 'none' ? '' : form.ai_provider_secondary,
+      payment_provider: form.payment_provider === 'none' ? '' : form.payment_provider,
+    };
+    const res = await fetch('/api/admin/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      stage?: string;
+      warning?: string;
+      schemaError?: SchemaFixPlan;
+    };
+    return { status: res.status, ok: Boolean(data.ok), ...data };
+  }
+
+  /** Sign in as the master admin (sets the super-admin device cookie). Returns
+   *  true on success; on failure it surfaces the reason via setError(). */
+  async function trySuperLogin(): Promise<boolean> {
+    const res = await fetch('/api/admin/super-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      setError(String(data.error || 'Admin sign-in failed.'));
+      return false;
+    }
+    return true;
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
 
@@ -705,43 +755,46 @@ export default function SetupPage() {
     setNotice('');
     setWarning('');
     try {
-      const body: Record<string, unknown> = {
-        ...form,
-        adminEmail,
-        adminPassword,
-        supabaseUrl: form.supabase_url,
-        supabaseAnonKey: form.supabase_anon_key,
-        supabaseServiceRoleKey: form.supabase_service_role_key,
-        ai_provider: form.ai_provider === 'none' ? '' : form.ai_provider,
-        ai_provider_secondary: form.ai_provider_secondary === 'none' ? '' : form.ai_provider_secondary,
-        payment_provider: form.payment_provider === 'none' ? '' : form.payment_provider,
-      };
-      const res = await fetch('/api/admin/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; stage?: string; warning?: string; schemaError?: SchemaFixPlan };
-      if (!res.ok || !data.ok) {
-        // A 401/403 on an already-configured platform means the operator hasn't
-        // authenticated yet. Surface the exact reason and make sure the
-        // "sign in as super-admin" panel is visible instead of a generic error.
-        if (res.status === 401 || res.status === 403) {
-          setReconfigure(true);
+      let result = await saveToServer();
+
+      // On an already-configured store the server requires authorization (a
+      // Basic-Auth password, a super-admin session, or the Supabase service-role
+      // key). If we got a 401/403, sign in as the master admin with the
+      // credentials ALREADY typed above, then retry the save ONCE — so "enter
+      // email + password + Save" works without hunting for a separate Sign-in
+      // button.
+      if ((result.status === 401 || result.status === 403) && adminEmail && adminPassword) {
+        setReconfigure(true);
+        if (await trySuperLogin()) {
+          result = await saveToServer();
+        } else {
           setError(
-            data.error ||
+            result.error ||
               'Sign in first: use the "Sign in as admin" panel above (master account) or authenticate with the admin Basic Auth password, then save again.',
           );
           return;
         }
-        setError(String(data.error || 'Setup could not be completed.'));
-        setErrorStage(data.stage || null);
-        setSchemaError(data.schemaError ?? null);
+      }
+
+      if (result.status === 401 || result.status === 403) {
+        setReconfigure(true);
+        setError(
+          result.error ||
+            'Sign in first: use the "Sign in as admin" panel above (master account) or authenticate with the admin Basic Auth password, then save again.',
+        );
         return;
       }
+
+      if (!result.ok) {
+        setError(String(result.error || 'Setup could not be completed.'));
+        setErrorStage(result.stage || null);
+        setSchemaError(result.schemaError ?? null);
+        return;
+      }
+
       await load();
       setNotice('saved');
-      setWarning(typeof data.warning === 'string' ? data.warning : '');
+      setWarning(typeof result.warning === 'string' ? result.warning : '');
     } catch {
       setError('Setup could not be completed. Check your connection.');
     } finally {
@@ -753,16 +806,8 @@ export default function SetupPage() {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/super-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !data.ok) {
-        setError(String(data.error || 'Admin sign-in failed.'));
-        return;
-      }
+      const ok = await trySuperLogin();
+      if (!ok) return;
       setError('');
       setNotice('signed-in');
       // Refresh the readiness/configured status now that the super-admin device
