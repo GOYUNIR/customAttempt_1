@@ -123,11 +123,14 @@
   //   STRIPE_WEBHOOK_SECRET      [REQUIRED for payments]  "whsec_AbCdEf…"        (USE SITE) (SETUP WIZARD step 3)
   //   STRIPE_PRODUCT_ID          [OPTIONAL] default price "price_1AbCdEf…"       (USE SITE) (SETUP WIZARD step 3)
   //   LEMONSQUEEZY_API_KEY       [OPTIONAL alt payments]  "eyJ0eXAiOiJKV1Qi…"    (USE SITE) (SETUP WIZARD step 3)
+  //   LEMONSQUEEZY_STORE_ID      [OPTIONAL alt payments]  "12345"                (USE SITE) (SETUP WIZARD step 3)
+  //   LEMONSQUEEZY_VARIANT_ID    [OPTIONAL alt payments]  "67890"                (USE SITE) (SETUP WIZARD step 3)
   //   PADDLE_API_KEY             [OPTIONAL alt payments]  "pdl_live_AbCdEf…"     (USE SITE) (SETUP WIZARD step 3)
   //
   // ── EMAIL ──────────────────────────────────────────────────────────────────
   //   RESEND_API_KEY             [REQUIRED for email]     "re_AbCdEfG…"          (USE SITE) (SETUP WIZARD step 3)
   //   RESEND_FROM                [RECOMMENDED]            "Acme <onboarding@resend.dev>" (NECESSARY HERE) (SETUP WIZARD step 3)
+  //   EMAIL_FROM                 [OPTIONAL alias]         same as RESEND_FROM above (takes priority when both set)
   //   POSTMARK_API_KEY           [OPTIONAL alt email]     "9f4a2c1e…"            (USE SITE) (SETUP WIZARD step 3)
   //   SENDGRID_API_KEY           [OPTIONAL alt email]     "SG.AbCdEfG…"          (USE SITE) (SETUP WIZARD step 3)
   //
@@ -142,7 +145,7 @@
   //   OPENROUTER_API_KEY         [OPTIONAL]               "sk-or-v1-…"           (USE SITE) (SETUP WIZARD step 5)
   //   GROQ_API_KEY               [OPTIONAL]               "gsk_AbCdEf…"          (USE SITE) (SETUP WIZARD step 5)
   //   MISTRAL_API_KEY            [OPTIONAL]               "AbCdEfGh…"            (USE SITE) (SETUP WIZARD step 5)
-  //   GOOGLE_GEMINI_API_KEY      [OPTIONAL]               "AIzaSy…"              (USE SITE) (SETUP WIZARD step 5)
+  //   GEMINI_API_KEY             [OPTIONAL]               "AIzaSy…"              (USE SITE) (SETUP WIZARD step 5)  (NOT "GOOGLE_GEMINI_API_KEY")
   //   (Workers AI needs NO key — it uses the native Cloudflare `AI` binding.)
   //
   // ── LICENSING (optional) ───────────────────────────────────────────────────
@@ -157,4 +160,8 @@
   //   NEXT_PUBLIC_SITE_NAME      [OPTIONAL]               "Acme"     (alias: BRAND_NAME) (USE SITE)
   //   NEXT_PUBLIC_MAPBOX_TOKEN   [OPTIONAL maps]          "pk.eyJ1Ijoi…"          (NECESSARY HERE — build shell) (SETUP WIZARD step 3)
   //   GOOGLE_MAPS_API_KEY        [OPTIONAL alt maps]      "AIzaSy…"               (NECESSARY HERE — build shell) (SETUP WIZARD step 3)
+  //   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY  [alias of the above]
+  //
+  // ── LOCAL DEVELOPMENT ONLY (never set in production) ────────────────────────
+  //   DEV_WEBHOOK_BYPASS         [DEV ONLY]               "1"                     (NECESSARY HERE — dev; lets /api/stripe/webhook accept unsigned events in non-production)
 }

@@ -235,6 +235,11 @@ cd ..
 
 ### Required environment variables
 
+> **📄 `/.env.example` is the complete, copy-paste template** with a realistic
+> example value + annotation for EVERY variable this app reads (Vercel, Netlify,
+> Node and local dev). For Cloudflare Workers use `/.dev.vars.example` (local)
+> and the `wrangler.jsonc` reference. The tables below summarize the same list.
+
 
 | Variable                                                 | Purpose                                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -261,6 +266,22 @@ cd ..
 | `NEXT_PUBLIC_MAPBOX_TOKEN`              | Mapbox Address Autofill (public `pk.*` token). Without it, customers just type addresses manually. Set it in the SAME environment you deploy, then redeploy.                                                                                                          |
 | `BRAND_NAME` or `NEXT_PUBLIC_SITE_NAME` | Brand name used in email "from" and templates.                                                                                                                                                                                                                        |
 | `SUPPORT_EMAIL`, `REPLY_TO_EMAIL`       | Support inbox used in emails.                                                                                                                                                                                                                                         |
+
+
+### Optional / feature-specific environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `LEMONSQUEEZY_API_KEY`, `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_VARIANT_ID` | Lemon Squeezy alternative payment provider (API key + numeric store id + checkout variant id). |
+| `PADDLE_API_KEY` | Paddle alternative payment provider. |
+| `POSTMARK_API_KEY`, `SENDGRID_API_KEY` | Alternative email providers (Postmark / SendGrid). |
+| `EMAIL_FROM` | "From" address alias — takes priority over `RESEND_FROM` when both are set. |
+| `GOOGLE_MAPS_API_KEY` (alias `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`) | Google Maps Places alternative to Mapbox. Build-time when using the `NEXT_PUBLIC_*` alias. |
+| `DEEPSEEK_API_KEY` | Universal AI engine primary provider (default). |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `GEMINI_API_KEY` | Optional AI providers (fallbacks). **Note:** the Google Gemini key is `GEMINI_API_KEY` (the provider enum is `google_gemini`, but there is no `GOOGLE_GEMINI_API_KEY`). Cloudflare Workers AI needs no key. |
+| `CLIENT_LICENSE_KEY` (alias `LICENSE_KEY`), `LICENSE_SERVER_URL`, `LICENSE_ENFORCED` | Optional licensing gatekeeper. Enforcement is OFF unless a key/server/`LICENSE_ENFORCED` is set. |
+| `MAINTENANCE_MODE` | Set to `true` to show the maintenance screen. |
+| `DEV_WEBHOOK_BYPASS` | **Dev only** — `1` lets `/api/stripe/webhook` accept unsigned events in non-production (for `stripe listen`). Never set in production. |
 
 
 ---

@@ -546,6 +546,13 @@ input like `123 realstreet` can never be saved.
 
 ## Environment Variables (set in your hosting platform — Vercel, Netlify, Cloudflare, anywhere)
 
+> **📄 `/.env.example` is the COMPLETE, copy-paste template** — every variable
+> below plus the feature-specific ones, each with a realistic example value and
+> a `[REQUIRED]/[RECOMMENDED]/[OPTIONAL]` + `(NECESSARY HERE)/(USE SITE)` note.
+> Cloudflare Workers uses `/.dev.vars.example` (local) + the `wrangler.jsonc`
+> reference. This table is a summary; when in doubt, `.env.example` is the
+> source of truth.
+
 | Variable | Purpose |
 | --- | --- |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Redis (source of truth). REST-protocol pair — any platform works. Aliases: `KV_REST_API_URL`/`KV_REST_API_TOKEN`, `REDIS_REST_URL`/`REDIS_REST_TOKEN`, `REDIS_URL`/`REDIS_TOKEN` (REST-only: `redis://` wire-protocol URLs are skipped in `lib/storage/upstash.ts`). |
@@ -562,6 +569,15 @@ input like `123 realstreet` can never be saved.
 | `NEXT_PUBLIC_URL` / `NEXT_PUBLIC_SITE_URL` / `SITE_URL` | Canonical/OG/email URLs (no hardcoded domain). All three aliases resolve via `lib/env.ts`. When none are set, the platform's system variables are used as a final fallback so a deployed store always tags its REAL domain: Vercel `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL`, Netlify `URL` → `DEPLOY_URL`, Cloudflare Pages `CF_PAGES_URL`. |
 | `BRAND_NAME` / `NEXT_PUBLIC_SITE_NAME` (optional) | Email send-from brand |
 | `SUPPORT_EMAIL` / `REPLY_TO_EMAIL` (optional) | Support address in emails |
+| `LEMONSQUEEZY_API_KEY` / `LEMONSQUEEZY_STORE_ID` / `LEMONSQUEEZY_VARIANT_ID` (optional) | Lemon Squeezy alternative payment provider (API key + numeric store id + checkout variant id). |
+| `PADDLE_API_KEY` (optional) | Paddle alternative payment provider. |
+| `POSTMARK_API_KEY` / `SENDGRID_API_KEY` (optional) | Alternative email providers (Postmark / SendGrid). |
+| `EMAIL_FROM` (optional) | "From" alias — takes priority over `RESEND_FROM` when both are set. |
+| `GOOGLE_MAPS_API_KEY` (alias `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`) (optional) | Google Maps Places alternative to Mapbox. |
+| `DEEPSEEK_API_KEY` (recommended primary) + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `REPLICATE_API_TOKEN` / `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `MISTRAL_API_KEY` / `GEMINI_API_KEY` (optional) | Universal AI engine. **The Google Gemini key is `GEMINI_API_KEY`** (the provider enum is `google_gemini`, but there is NO `GOOGLE_GEMINI_API_KEY`). Cloudflare Workers AI needs no key. |
+| `CLIENT_LICENSE_KEY` (alias `LICENSE_KEY`) / `LICENSE_SERVER_URL` / `LICENSE_ENFORCED` (optional) | Licensing gatekeeper (enforcement is OFF unless a key/server/`LICENSE_ENFORCED` is set). |
+| `MAINTENANCE_MODE` (optional) | `true` shows the maintenance screen. |
+| `DEV_WEBHOOK_BYPASS` (**DEV ONLY**) | `1` accepts unsigned webhooks in non-production (for `stripe listen`). Never set in production. |
 
 ## Multi-platform deployment (beyond Vercel)
 
@@ -626,6 +642,12 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+- **2026-08-23 — COMPLETE environment-variable reference with prefilled examples (`.env.example` + Cloudflare fixes) (`env-example-complete`):**
+  - **📄 Created `/.env.example`** — a single, COMPLETE, copy-paste template for Vercel, Netlify, Node hosts and local dev. Every variable the app reads is present, organized into 11 sections, with a REALISTIC example value and a `[REQUIRED]/[RECOMMENDED]/[OPTIONAL]` + `(NECESSARY HERE)/(USE SITE)/(BUILD-TIME)` annotation per line. This was previously MISSING entirely (only the Cloudflare-specific `.dev.vars.example` existed), which is why buyers on Vercel/Netlify/Node had nothing to copy from.
+  - **🐛 FIXED the Gemini env-var name.** The code reads `GEMINI_API_KEY` (`services/ai/factory.ts` → `process.env.GEMINI_API_KEY`), but `.dev.vars.example` and `wrangler.jsonc` both documented a nonexistent `GOOGLE_GEMINI_API_KEY` — so Gemini could never be wired up from the docs. Both now say `GEMINI_API_KEY` (with an explicit "NOT GOOGLE_GEMINI_API_KEY" note). The provider ENUM value `google_gemini` and the Supabase setting key `google_gemini_api_key` are separate and unchanged.
+  - **➕ Added the missing vars to every doc** (`.env.example`, `.dev.vars.example`, `wrangler.jsonc`, README, this table): `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_VARIANT_ID`, `PADDLE_API_KEY`, `POSTMARK_API_KEY`, `SENDGRID_API_KEY`, `EMAIL_FROM` (Resend `from` alias), `GOOGLE_MAPS_API_KEY`/`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, the full AI key list (`DEEPSEEK/OPENAI/ANTHROPIC/REPLICATE/OPENROUTER/GROQ/MISTRAL/GEMINI`), the licensing vars (`CLIENT_LICENSE_KEY`/`LICENSE_KEY`/`LICENSE_SERVER_URL`/`LICENSE_ENFORCED`), `MAINTENANCE_MODE`, and `DEV_WEBHOOK_BYPASS` (dev-only), plus the Redis/Supabase alias keys.
+  - **🔓 `.gitignore` now allows `!.env.example`** (and `!.env.local.example`) so the template can actually be committed — previously the blanket `.env*` rule would have silently ignored it.
+  - **🧪 Verified:** `wrangler.jsonc` re-parses as valid JSONC; `.env.example` has no leftover markers; `git check-ignore .env.example` reports not-ignored. No Redis keys or runtime code changed (docs/config only).
 - **2026-08-22 — Setup wizard reconfigure "Sign in first" deadlock FIXED + `.dev.vars.example` examples (`setup-signin-first-fix`):**
   - **🐛 Root cause of the "Sign in first" failure at the end of the wizard.** Once the platform was `is_configured = true`, `middleware.ts` blocked `POST /api/admin/setup` with a plain-text `401` (Basic-Auth challenge) *before* the route ran — because `ADMIN_BASIC_AUTH_PASSWORD` was unset and there was no super-admin device cookie. The browser popped the native Basic-Auth dialog, the client got a 401 with NO JSON `error` (so it showed the generic "Sign in first" fallback), and the route's smarter reconfigure guard — which also accepts the **Supabase service-role key** as proof of ownership — never got a chance to run.
   - **🔧 Fixes.**
