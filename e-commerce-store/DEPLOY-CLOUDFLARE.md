@@ -26,9 +26,9 @@ Deploying to Cloudflare means two pieces:
 - [ ] A **Cloudflare account** (free plan works; the **Workers Paid** plan
   ($5/mo) removes CPU/scheduling limits and is recommended once the store has
   real traffic).
-- [ ] An **Upstash Redis database** with its REST URL + token handy (create one
-  at upstash.com → Console → Create database → copy
-  `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`).
+- [ ] A **Supabase project** (the default data store) with its **Project URL**,
+  **anon key** and **service_role key** handy — supabase.com → New project →
+  Project Settings → API. You'll paste its schema in Step 3.
 - [ ] Your **Stripe** API keys + webhook signing secret handy.
 - [ ] An email address for the admin two-step codes (`ADMIN_VERIFY_EMAIL`).
 - [ ] Log in to Cloudflare from the terminal (opens your browser; pick the
@@ -112,40 +112,89 @@ expects.
 existing worker, so this order matters.
 
 ```bash
-# 1. Create/update the worker (name + assets come from the root wrangler.jsonc)
 npx wrangler deploy
 ```
 
-You should see a success message with a `*.workers.dev` URL at the end. Open it
-— the page will load, but `/api/*` will error until you add the secrets below.
+You should see a success message with a `*.workers.dev` URL. Open it — the page
+will load, but `/api/*` and `/admin` will error until the secrets below are set.
 
-**2. Set the runtime secrets** (each command prompts you; paste the value and
-press Enter):
+### Where each value lives (this is the part people trip on)
+
+The Cloudflare dashboard shows **three separate places** for values — they are
+not all in one list:
+
+| Group | What goes in it | Where you set it |
+| --- | --- | --- |
+| **1. Plaintext variables** | Non-secret runtime values: `STORAGE_PROVIDER`, `ADMIN_VERIFY_EMAIL`, `BRAND_NAME`, `SUPPORT_EMAIL`, `MAINTENANCE_MODE`, `RESEND_FROM`, `LICENSE_ENFORCED` | Auto-created from `wrangler.jsonc` on the first deploy → editable in **Workers → `storefront-app` → Settings → Variables and Secrets → Production** (the "Variables" column) |
+| **2. Secrets** | Everything with a key: Supabase, Stripe, Resend, cron… | The dashboard "Secrets" column, or `npx wrangler secret put NAME` (paste in the dashboard **Workers → `storefront-app` → Settings → Variables and Secrets** works too) |
+| **3. Build-time** | `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_NAME`, `NEXT_PUBLIC_MAPBOX_TOKEN` | In your shell **before** `npm run build:cloudflare` (Step 2) — they **cannot** be set in the dashboard |
+
+> That is why the dashboard only shows a few variables at first: only the
+> plaintext `vars` (group 1) appear automatically. Secrets never appear until
+> you add them yourself.
+
+### Set the secrets (each command prompts; paste the value and press Enter)
+
+**Required — data store + admin (Supabase):**
 
 ```bash
-# REQUIRED — without these nothing works:
-npx wrangler secret put UPSTASH_REDIS_REST_URL
-npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_ANON_KEY
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+```
+
+> Supabase is the default data store AND where the master admin account + all
+> provider settings live. You must apply its schema before `/admin` will open —
+> see "Apply the Supabase schema" below.
+
+**Required — payments (Stripe):**
+
+```bash
 npx wrangler secret put STRIPE_SECRET_KEY
 npx wrangler secret put STRIPE_WEBHOOK_SECRET
-npx wrangler secret put ADMIN_BASIC_AUTH_PASSWORD
-npx wrangler secret put ADMIN_VERIFY_EMAIL
+```
 
-# RECOMMENDED — needed for draws + transactional email:
+**Recommended — daily draw safety net + transactional email:**
+
+```bash
 npx wrangler secret put CRON_SECRET
 npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put RESEND_FROM
+```
 
-# OPTIONAL — brand polish:
+**Optional — alternative data store (skip if you are using Supabase):**
+
+```bash
+npx wrangler secret put UPSTASH_REDIS_REST_URL
+npx wrangler secret put UPSTASH_REDIS_REST_TOKEN
+```
+
+**Optional — brand polish:**
+
+```bash
 npx wrangler secret put SUPPORT_EMAIL
 npx wrangler secret put BRAND_NAME
 npx wrangler secret put STRIPE_PRODUCT_ID
 ```
 
-> Secrets take effect **immediately** — you do NOT need to redeploy after
-> changing one. To change a secret later, re-run `wrangler secret put` or edit
-> it in the dashboard: **Workers → `storefront-app` → Settings → Variables →
-> Edit**.
+> Secrets take effect **immediately** — no redeploy needed. To change one later,
+> re-run `wrangler secret put` or edit it in the dashboard:
+> **Workers → `storefront-app` → Settings → Variables and Secrets → Production**.
+
+### Apply the Supabase schema (required when using Supabase)
+
+Your Supabase project needs the schema in `supabase/migrations/` before the
+admin portal will open. Easiest path: open the Supabase dashboard → **SQL
+Editor** → **New query**, then run each of these **in order** (copy ALL the
+contents of each file into the query box and click **Run**):
+
+1. `supabase/migrations/00001_init.sql`
+2. `supabase/migrations/00002_setup_operational.sql`
+3. `supabase/migrations/00003_tenant_routing.sql`
+4. `supabase/migrations/00004_ai_secondary.sql`
+
+(If you have the Supabase CLI installed: `supabase db push` applies all four at
+once.)
+
 
 ---
 
@@ -199,7 +248,7 @@ Vercel's cron and Netlify's scheduled function — see `lib/cron-auth.ts`).
 2. **Admin security** — `/admin` prompts for Basic Auth + the emailed two-step
    code. Both must work before anything else.
 3. **Site Self-Test** — `/admin → Developer → Site Self-Test` should pass
-   (Redis connected, schema tidy, promos readable).
+   (data store connected, schema tidy, promos readable).
 4. **Edge caching** — `curl -sI https://your-store.com/api/store | grep -i cache`
    should show `cache-control: public, s-maxage=10, stale-while-revalidate=30`
    and `cdn-cache-control: ...`. `/og` and `/media/*` should be `immutable`

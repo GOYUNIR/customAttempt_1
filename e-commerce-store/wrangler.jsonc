@@ -37,9 +37,14 @@
   //
   // ── How secrets vs plaintext vars work on Cloudflare ───────────────────────
   //   • Plaintext (non-secret) variables → the `vars` block at the bottom. The
-  //     first `wrangler deploy` auto-creates them as editable "Variables".
+  //     first `wrangler deploy` auto-creates them as editable "Variables" in the
+  //     dashboard. ONLY these appear automatically — the dashboard will NOT list
+  //     the secrets below until you add them yourself.
   //   • SECRETS → the dashboard "Secrets" column, or `npx wrangler secret put
-  //     NAME`. NEVER commit a real secret in this file.
+  //     NAME`. NEVER commit a real secret in this file. See DEPLOY-CLOUDFLARE.md
+  //     Step 3 for the full copy-paste list.
+  //   • BUILD-TIME (NEXT_PUBLIC_*) → in your shell BEFORE `npm run build:cloudflare`
+  //     (Step 2). They can NOT be set in the dashboard at all.
   // ═══════════════════════════════════════════════════════════════════════════
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storefront-app",
@@ -81,7 +86,17 @@
     // [OPTIONAL] "true" shows the maintenance screen to unauthenticated
     //   visitors. (NECESSARY HERE)
     //   Example: "true" (or empty = off)
-    "MAINTENANCE_MODE": ""
+    "MAINTENANCE_MODE": "",
+
+    // [OPTIONAL] the "from" address for transactional emails when the email
+    //   provider needs one. (NECESSARY HERE — only if the site doesn't set it)
+    //   Example: "Acme <onboarding@resend.dev>"          (SETUP WIZARD step 3)
+    "RESEND_FROM": "",
+
+    // [OPTIONAL] "true" turns ON license enforcement (blocks writes when the
+    //   license key is missing or expired). (NECESSARY HERE)
+    //   Example: "true" (or empty = off)
+    "LICENSE_ENFORCED": ""
   }
   //
   // ── SECRETS — set in the dashboard ("Secrets" column) or via: ──────────────

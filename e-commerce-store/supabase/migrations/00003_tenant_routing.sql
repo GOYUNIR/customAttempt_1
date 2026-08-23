@@ -75,6 +75,9 @@ create table if not exists public.system_locks (
   locked boolean not null default false,
   locked_by uuid,
   step_up_verified_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
 -- ── SECURITY DEFINER role/tenant helpers (avoid RLS recursion in policies) ───
 -- These read public.users with the definer's privileges so policies on other
@@ -150,7 +153,3 @@ create trigger tenant_items_set_updated_at before update on public.tenant_items
 drop trigger if exists system_locks_set_updated_at on public.system_locks;
 create trigger system_locks_set_updated_at before update on public.system_locks
   for each row execute function public.set_updated_at();
-
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);

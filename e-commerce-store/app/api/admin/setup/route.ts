@@ -24,12 +24,46 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const SCHEMA_HINT =
-  ' — The Supabase schema is missing or out of date: run `supabase db push`, or paste the migrations in supabase/migrations/ (00001_init.sql, 00002_setup_operational.sql, 00003_tenant_routing.sql, 00004_ai_secondary.sql) into the Supabase SQL editor, then save again.';
-
 /** Whether an error message looks like a Supabase schema-not-applied problem. */
 function isSchemaError(message: string): boolean {
-  return /could not find the table|could not find the '|schema cache|PGRST204|PGRST205|does not exist/i.test(message);
+  return /could not find the table|could not find the '|schema cache|PGRST204|PGRST205|does not exist|42703|42P01|42704/i.test(message);
+}
+
+/**
+ * A plain-English, numbered fix for a Supabase schema that is missing tables or
+ * columns. Detects WHICH migration is missing so the operator runs only the file
+ * they need (re-running 00001_init.sql on an already-migrated schema can fail on
+ * its non-idempotent `create policy` statements).
+ */
+function schemaFixSteps(errorText: string): string {
+  const isAiSecondary = /ai_provider_secondary|ai_api_key_secondary/i.test(errorText);
+  const open = [
+    '1. Open https://supabase.com/dashboard and click your project.',
+    '2. Click "SQL Editor" in the left sidebar, then "New query".',
+  ];
+  if (isAiSecondary) {
+    return [
+      'Your Supabase database is missing the optional AI-fallback columns.',
+      '',
+      'Fix it in about a minute:',
+      ...open,
+      '3. Open supabase/migrations/00004_ai_secondary.sql in this repo, copy ALL of its contents, paste it into the query box, and click "Run".',
+      '4. Come back here and click "Continue" again.',
+    ].join('\n');
+  }
+  return [
+    'Your Supabase database is missing part of its schema.',
+    '',
+    'Fix it in about a minute — apply the migrations in order:',
+    ...open,
+    '3. For each file below, copy ALL of its contents, paste it into the query box, and click "Run":',
+    '   supabase/migrations/00001_init.sql',
+    '   supabase/migrations/00002_setup_operational.sql',
+    '   supabase/migrations/00003_tenant_routing.sql',
+    '   supabase/migrations/00004_ai_secondary.sql',
+    '   (If you have the Supabase CLI, run `supabase db push` instead — it applies all four at once.)',
+    '4. Come back here and click "Continue" again.',
+  ].join('\n');
 }
 
 /** Quick Upstash REST reachability check (GET /ping → PONG). */
@@ -67,12 +101,13 @@ async function probeStorage(operational: ReturnType<typeof normalizeOperationalS
   } catch (err: unknown) {
     const message = (err as Error)?.message || String(err);
     console.error('[setup] storage probe failed', message);
+    const schemaMissing = isSchemaError(message);
     return NextResponse.json(
       {
         success: false,
-        error: message + (isSchemaError(message) ? SCHEMA_HINT : ''),
+        error: schemaMissing ? schemaFixSteps(message) : message,
         stage: 'storage_init',
-        schemaMissing: isSchemaError(message),
+        schemaMissing,
       },
       { status: 422 },
     );
@@ -483,11 +518,11 @@ export async function POST(request: Request) {
     console.error('[setup] failed', message);
     // The most common Supabase bootstrap failure is a schema that was never
     // applied (PostgREST "Could not find the table/column … in the schema
-    // cache"). Translate it into an actionable next step instead of a raw PGRST
-    // error.
+    // cache"). Translate it into a plain-English, numbered next step instead of
+    // a raw PGRST error.
     const schemaMissing = isSchemaError(message);
     return NextResponse.json(
-      { success: false, error: message + (schemaMissing ? SCHEMA_HINT : ''), stage, schemaMissing },
+      { success: false, error: schemaMissing ? schemaFixSteps(message) : message, stage, schemaMissing },
       { status: 422 },
     );
   }

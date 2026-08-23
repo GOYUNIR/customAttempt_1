@@ -509,7 +509,7 @@ const STAGE_CONTEXT: Record<string, { step: number; title: string; message: stri
   storage_init: {
     step: 0,
     title: 'Data store connection failed',
-    message: 'The primary data store rejected the connection. If you chose Supabase, the most common cause is that the schema has not been fully applied to this project yet — run `supabase db push`, or paste the migrations in supabase/migrations/ (00001_init.sql, 00002_setup_operational.sql, 00003_tenant_routing.sql, 00004_ai_secondary.sql) into the Supabase SQL editor, then save again. Otherwise double-check the Project URL / service role key (or the Upstash REST URL + token) and confirm the project is reachable.',
+    message: 'The data store could not be reached. If you chose Supabase, the usual cause is a missing schema — the step-by-step fix is shown below. Otherwise double-check the Project URL / service-role key (or the Upstash REST URL + token) and confirm the project is reachable.',
   },
   create_admin: {
     step: 1,
@@ -1002,10 +1002,18 @@ export default function SetupPage() {
 
             {status?.supabaseSchemaError && (
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px', display: 'grid', gap: 6 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>Supabase schema not applied</div>
-                <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
-                  The <code>global_platform_settings</code> table (or one of its columns) is missing from your Supabase project, so saving will fail. Run{' '}
-                  <code>supabase db push</code> or paste the migrations in <code>supabase/migrations/</code> (<code>00001_init.sql</code>, <code>00002_setup_operational.sql</code>, <code>00003_tenant_routing.sql</code>, <code>00004_ai_secondary.sql</code>) into the Supabase SQL editor, then continue.
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#92400e' }}>Supabase schema not applied yet</div>
+                <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                  Your Supabase database is missing part of its schema, so saving will fail. Fix it in about a minute:{'\n'}
+                  1. Open https://supabase.com/dashboard and click your project.{'\n'}
+                  2. Click “SQL Editor” in the left sidebar, then “New query”.{'\n'}
+                  3. For each file below, copy ALL of its contents, paste it into the query box, and click “Run” — in order:{'\n'}
+                     supabase/migrations/00001_init.sql{'\n'}
+                     supabase/migrations/00002_setup_operational.sql{'\n'}
+                     supabase/migrations/00003_tenant_routing.sql{'\n'}
+                     supabase/migrations/00004_ai_secondary.sql{'\n'}
+                     (If you have the Supabase CLI, run <code>supabase db push</code> instead — it applies all four at once.){'\n'}
+                  4. Then click “Continue” again.
                 </p>
               </div>
             )}
@@ -1114,7 +1122,7 @@ export default function SetupPage() {
                   )}
                 </div>
                 {errorContext && <p style={{ color: '#7f1d1d', fontSize: 13, margin: 0, lineHeight: 1.5 }}>{errorContext.message}</p>}
-                <p style={{ color: '#b91c1c', fontSize: 13, margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-word', lineHeight: 1.5 }}>{error}</p>
+                <p style={{ color: '#b91c1c', fontSize: 13, margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-word', whiteSpace: 'pre-line', lineHeight: 1.6 }}>{error}</p>
               </div>
             )}
 
