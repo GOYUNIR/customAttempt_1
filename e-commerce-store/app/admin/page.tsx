@@ -5339,7 +5339,7 @@ export default function AdminPortal() {
                 </button>
               </div>
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
-                Shows whether each variable is configured in this deployment. <strong>Values are never shown</strong> — only ✓ set / ✗ missing. Secrets (Redis token, Stripe keys, cron secret, Resend key) must be set in your platform (Vercel) Environment Variables; they are write-only and can never be read back.
+                Every variable this store can read, with its <strong>Cloudflare</strong> location. <strong>Values are never shown</strong> — only ✓ set / ✗ missing. When something is missing you&apos;ll see a realistic <strong>example</strong> value and exactly <strong>where to set it</strong>: the Cloudflare dashboard (<code>{envStatus?.cloudflareVarsPath}</code>), <code>npx wrangler secret put</code>, or your build shell (for NEXT_PUBLIC_*).
               </p>
               {envStatus && (
                 <div style={{ fontSize: 12, marginBottom: 12 }}>
@@ -5355,7 +5355,7 @@ export default function AdminPortal() {
                 {(envStatus?.items || []).map((item: any, index: number) => (
                   <div key={item.key || index} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid #1c1c1e' }}>
                     <span style={{ fontSize: 13, marginTop: 1, color: item.set ? '#34d399' : '#f87171' }}>{item.set ? '✓' : '✗'}</span>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>
                         {item.label}
                         {item.required ? <span style={{ marginLeft: 6, fontSize: 9, color: '#f87171' }}>REQUIRED</span> : <span style={{ marginLeft: 6, fontSize: 9, color: '#888' }}>optional</span>}
@@ -5363,7 +5363,24 @@ export default function AdminPortal() {
                         {item.sensitive && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>secret · write-only</span>}
                       </div>
                       <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{item.hint}</div>
-                      <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>Reads: {item.aliases.join(' → ')}</div>
+                      <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>
+                        Variable: <code style={{ fontSize: 10, color: '#dbeafe' }}>{item.variable}</code>
+                        {item.aliases.length > 0 ? <span> · aliases: <code style={{ fontSize: 10, color: '#6b7280' }}>{item.aliases.join(', ')}</code></span> : null}
+                      </div>
+                      {!item.set && (
+                        <div style={{ marginTop: 4, padding: '6px 8px', background: 'rgba(251,191,36,0.06)', borderRadius: 6, border: '1px solid rgba(251,191,36,0.22)' }}>
+                          <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 600, marginBottom: 2 }}>NOT SET YET</div>
+                          <div style={{ fontSize: 10, color: '#e5e7eb', marginBottom: 2 }}>
+                            Example: <code style={{ fontSize: 10, color: '#a7f3d0' }}>{item.example}</code>
+                          </div>
+                          <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>Where: {item.where}</div>
+                          {item.commands.length > 0 && (
+                            <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                              Run: <code style={{ fontSize: 10, color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>{item.commands[0]}</code>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -5373,7 +5390,7 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Production Launch Checklist</h2>
               <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
-                <p style={{ margin: '6px 0' }}>1. Set the environment variables above in your platform (Vercel) for Production + Preview, then redeploy.</p>
+                <p style={{ margin: '6px 0' }}>1. Set the environment variables above on <strong>Cloudflare</strong>: the dashboard at <strong>Workers &amp; Pages → [your project] → Settings → Variables and Secrets → Production</strong> (secrets via the Secrets column or <code>npx wrangler secret put</code>), then redeploy. Build-time <code>NEXT_PUBLIC_*</code> vars go in your shell before <code>npm run build:cloudflare</code> — never in the dashboard.</p>
                 <p style={{ margin: '6px 0' }}>2. In <strong>/admin → Settings → Branding &amp; Share</strong>: set your brand name, logo, favicon colors, share card, and header mode.</p>
                 <p style={{ margin: '6px 0' }}>3. In <strong>/admin → Settings → Legal &amp; Policies</strong>: replace the company name + support email and review Terms / Privacy / Shipping.</p>
                 <p style={{ margin: '6px 0' }}>4. In <strong>/admin → Products</strong>: set real Stripe price IDs per size, real prices, inventory, and winner tiers. The seeded placeholder prices will refuse to charge until real IDs/prices are set.</p>

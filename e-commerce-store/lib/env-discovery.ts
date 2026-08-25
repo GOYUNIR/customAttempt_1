@@ -45,7 +45,8 @@ export type EnvCheckKind =
   | 'binding'
   | 'license'
   | 'ai'
-  | 'bootstrap';
+  | 'bootstrap'
+  | 'ops';
 
 export type EnvPlatform = 'all' | 'cloudflare' | 'vercel' | 'netlify' | 'node';
 
@@ -75,6 +76,10 @@ export interface EnvCheck {
   platform: EnvPlatform;
   /** Copyable CLI commands to satisfy the check (wrangler / vercel). */
   commands: string[];
+  /** Realistic EXAMPLE value (never a real key) shown when the variable is NOT set. */
+  example: string;
+  /** Plain-English "where to set this on Cloudflare" (dashboard / wrangler / build shell). */
+  where: string;
   /** For `kind: 'binding'` — the exact `wrangler.toml` block to paste. */
   wranglerToml?: string;
 }
@@ -216,6 +221,82 @@ export const CLOUDFLARE_VARS_PATH =
   'Workers & Pages -> [Your Project Name] -> Settings -> Variables and Secrets -> Production';
 
 /**
+ * Where to set a value on CLOUDFLARE, derived from what kind of value it is.
+ * Surfaced verbatim on the SetUp tab so an operator always knows exactly which
+ * dashboard field / shell / config file to use — never a guess.
+ */
+export function cloudflareLocation(check: {
+  buildTime: boolean;
+  secret: boolean;
+  wranglerToml?: string;
+}): string {
+  if (check.wranglerToml) {
+    return 'A Cloudflare binding — add the wrangler.jsonc block shown on this card (NOT a plaintext variable or secret).';
+  }
+  if (check.buildTime) {
+    return 'Your build shell — set it BEFORE `npm run build:cloudflare` (NEXT_PUBLIC_* is inlined at build time and CANNOT be set in the Cloudflare dashboard).';
+  }
+  if (check.secret) {
+    return 'Cloudflare dashboard → Workers & Pages → [your project] → Settings → Variables and Secrets → Production → Secrets. Or run: npx wrangler secret put <NAME>.';
+  }
+  return 'Cloudflare dashboard → Workers & Pages → [your project] → Settings → Variables and Secrets → Production → Variables. Or the `vars` block in wrangler.jsonc.';
+}
+
+/**
+ * Realistic EXAMPLE values for every check — surfaced by the SetUp tab when a
+ * variable is NOT set yet, so an operator can see EXACTLY what shape to paste.
+ * These are NEVER real keys; every value is a fake placeholder to swap out.
+ */
+const EXAMPLES: Record<string, string> = {
+  'supabase-storage': 'https://abcdefghijklm.supabase.co',
+  'storage-provider': 'supabase',
+  'cloudflare-storage': 'cloudflare-kv',
+  'redis-url': 'https://eu1-brave-falcon-12345.upstash.io',
+  'redis-token': 'AX3rASFh...',
+  'admin-password': 'a-long-random-password',
+  'admin-verify-email': 'you@example.com',
+  'stripe-secret': 'sk_live_51AbCdEf...',
+  'stripe-webhook': 'whsec_AbCdEf...',
+  'stripe-product-id': 'price_1AbCdEf...',
+  'lemonsqueezy': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+  'lemonsqueezy-store': '12345',
+  'lemonsqueezy-variant': '67890',
+  'paddle': 'pdl_live_AbCdEf...',
+  'resend': 're_AbCdEfG...',
+  'resend-from': 'Acme <onboarding@resend.dev>',
+  'email-from': 'Acme <onboarding@resend.dev>',
+  'postmark': '9f4a2c1e-...',
+  'sendgrid': 'SG.AbCdEfG...',
+  'mapbox': 'pk.eyJ1Ijoi...',
+  'google-maps': 'AIzaSy...',
+  'cron-secret': 'a-long-random-string',
+  'site-url': 'https://www.yourstore.com',
+  'brand-name': 'Acme',
+  'support-email': 'help@example.com',
+  'maintenance-mode': 'true',
+  'supabase-url': 'https://abcdefghijklm.supabase.co',
+  'supabase-anon': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  'supabase-service': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  'binding-d1': 'my-store-db',
+  'binding-r2': 'my-store-bucket',
+  'binding-kv': 'KV',
+  'binding-ai': 'AI',
+  'license-key': 'LIC-1234-ABCD-5678-EFGH',
+  'license-server': 'https://license.example.com/check',
+  'license-enforced': 'true',
+  'ai-deepseek': 'sk-abcd...',
+  'ai-openai': 'sk-proj-...',
+  'ai-anthropic': 'sk-ant-api03-...',
+  'ai-replicate': 'r8_AbCdEf...',
+  'ai-openrouter': 'sk-or-v1-...',
+  'ai-groq': 'gsk_AbCdEf...',
+  'ai-mistral': 'AbCdEfGh...',
+  'ai-google-gemini': 'AIzaSy...',
+  'initial-admin-email': 'you@example.com',
+  'dev-webhook-bypass': '1',
+};
+
+/**
  * Build the full registry against a given env object. Called fresh each time so
  * `present` always reflects the CURRENT environment (the middleware re-runs it
  * per request; the /api/admin/setup route calls it once per GET).
@@ -223,8 +304,13 @@ export const CLOUDFLARE_VARS_PATH =
 export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryResult {
   const checks: EnvCheck[] = [];
 
-  const add = (check: Omit<EnvCheck, 'present'>): void => {
-    checks.push({ ...check, present: has(env, check.variable, ...check.aliases) });
+  const add = (check: Omit<EnvCheck, 'present' | 'example' | 'where'>): void => {
+    checks.push({
+      ...check,
+      present: has(env, check.variable, ...check.aliases),
+      example: EXAMPLES[check.id] ?? '',
+      where: cloudflareLocation(check),
+    });
   };
 
   // ── Storage (any ONE driver unlocks the store — none is mandatory) ──────────
@@ -388,6 +474,64 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     commands: [WRANGLER_SECRET('STRIPE_PRODUCT_ID')],
   });
 
+  // ── Alternative payment providers (optional — Stripe is the default) ────────
+  add({
+    id: 'lemonsqueezy',
+    name: 'Lemon Squeezy API key (optional)',
+    purpose: 'Alternative payment provider. Only needed if you switch the payment provider to Lemon Squeezy in the Setup Wizard (step 3).',
+    variable: 'LEMONSQUEEZY_API_KEY',
+    aliases: [],
+    kind: 'payment',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('LEMONSQUEEZY_API_KEY')],
+  });
+  add({
+    id: 'lemonsqueezy-store',
+    name: 'Lemon Squeezy store id (optional)',
+    purpose: 'The numeric store id for Lemon Squeezy checkout links.',
+    variable: 'LEMONSQUEEZY_STORE_ID',
+    aliases: [],
+    kind: 'payment',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('LEMONSQUEEZY_STORE_ID')],
+  });
+  add({
+    id: 'lemonsqueezy-variant',
+    name: 'Lemon Squeezy variant id (optional)',
+    purpose: 'The checkout variant id for Lemon Squeezy.',
+    variable: 'LEMONSQUEEZY_VARIANT_ID',
+    aliases: [],
+    kind: 'payment',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('LEMONSQUEEZY_VARIANT_ID')],
+  });
+  add({
+    id: 'paddle',
+    name: 'Paddle API key (optional)',
+    purpose: 'Alternative payment provider. Only needed if you switch the payment provider to Paddle in the Setup Wizard (step 3).',
+    variable: 'PADDLE_API_KEY',
+    aliases: [],
+    kind: 'payment',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('PADDLE_API_KEY')],
+  });
+
   // ── Email ───────────────────────────────────────────────────────────────────
   add({
     id: 'resend',
@@ -407,6 +551,64 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     ],
   });
 
+  // ── Email "from" address + alternative providers ─────────────────────────────
+  add({
+    id: 'resend-from',
+    name: 'Email from address',
+    purpose: 'The "from" line for transactional emails (e.g. "Acme <onboarding@resend.dev>"). Falls back to REPLY_TO_EMAIL / a neutral placeholder when unset.',
+    variable: 'RESEND_FROM',
+    aliases: ['REPLY_TO_EMAIL'],
+    kind: 'email',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('RESEND_FROM')],
+  });
+  add({
+    id: 'email-from',
+    name: 'Email from alias',
+    purpose: 'Optional "From" alias — takes priority over RESEND_FROM when both are set.',
+    variable: 'EMAIL_FROM',
+    aliases: [],
+    kind: 'email',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('EMAIL_FROM')],
+  });
+  add({
+    id: 'postmark',
+    name: 'Postmark API key (optional)',
+    purpose: 'Alternative transactional email provider (Postmark). Only needed if you switch the email provider in the Setup Wizard (step 3).',
+    variable: 'POSTMARK_API_KEY',
+    aliases: [],
+    kind: 'email',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('POSTMARK_API_KEY')],
+  });
+  add({
+    id: 'sendgrid',
+    name: 'SendGrid API key (optional)',
+    purpose: 'Alternative transactional email provider (SendGrid). Only needed if you switch the email provider in the Setup Wizard (step 3).',
+    variable: 'SENDGRID_API_KEY',
+    aliases: [],
+    kind: 'email',
+    required: false,
+    blocking: false,
+    secret: true,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('SENDGRID_API_KEY')],
+  });
+
   // ── Maps ────────────────────────────────────────────────────────────────────
   add({
     id: 'mapbox',
@@ -421,6 +623,22 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: true,
     platform: 'all',
     commands: ['npx wrangler secret put NEXT_PUBLIC_MAPBOX_TOKEN   # then rebuild (NEXT_PUBLIC_* is build-time)'],
+  });
+
+  // ── Alternative maps provider ────────────────────────────────────────────────
+  add({
+    id: 'google-maps',
+    name: 'Google Maps Places API key (optional)',
+    purpose: 'Alternative address-autofill provider (Google Maps Places). Only needed if you switch the maps provider in the Setup Wizard (step 3).',
+    variable: 'GOOGLE_MAPS_API_KEY',
+    aliases: ['NEXT_PUBLIC_GOOGLE_MAPS_API_KEY'],
+    kind: 'maps',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: true,
+    platform: 'all',
+    commands: ['npx wrangler secret put GOOGLE_MAPS_API_KEY   # then rebuild (NEXT_PUBLIC_* is build-time)'],
   });
 
   // ── Security ────────────────────────────────────────────────────────────────
@@ -635,6 +853,21 @@ binding = "AI"`,
     commands: [WRANGLER_SECRET('LICENSE_SERVER_URL')],
   });
 
+  add({
+    id: 'license-enforced',
+    name: 'License enforcement',
+    purpose: 'Set "true" to turn ON enforcement — write routes are blocked when the license key is missing or expired. Empty = off (a legacy storefront keeps full writes).',
+    variable: 'LICENSE_ENFORCED',
+    aliases: [],
+    kind: 'license',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('LICENSE_ENFORCED')],
+  });
+
   // ── AI providers (universal AI engine — services/ai) ───────────────────────
   add({
     id: 'ai-deepseek',
@@ -766,6 +999,36 @@ binding = "AI"`,
     commands: [WRANGLER_SECRET('INITIAL_ADMIN_EMAIL')],
   });
 
+  // ── Operations ───────────────────────────────────────────────────────────────
+  add({
+    id: 'maintenance-mode',
+    name: 'Maintenance mode',
+    purpose: 'Set "true" to show the maintenance screen to unauthenticated visitors while you work on the store. Empty = off.',
+    variable: 'MAINTENANCE_MODE',
+    aliases: [],
+    kind: 'ops',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('MAINTENANCE_MODE')],
+  });
+  add({
+    id: 'dev-webhook-bypass',
+    name: 'Dev webhook bypass (DEV ONLY)',
+    purpose: 'Set "1" to let /api/stripe/webhook accept unsigned events in NON-production (for `stripe listen --forward-to`). NEVER set this in production.',
+    variable: 'DEV_WEBHOOK_BYPASS',
+    aliases: [],
+    kind: 'ops',
+    required: false,
+    blocking: false,
+    secret: false,
+    buildTime: false,
+    platform: 'all',
+    commands: [WRANGLER_SECRET('DEV_WEBHOOK_BYPASS')],
+  });
+
   // ── Group the checks ────────────────────────────────────────────────────────
   const byKind = (kind: EnvCheckKind): EnvCheck[] => checks.filter((c) => c.kind === kind);
   const groups: EnvGroup[] = [
@@ -781,6 +1044,7 @@ binding = "AI"`,
     { title: 'Licensing', subtitle: 'Optional — enforced when a key/server is configured.', kind: 'license', checks: byKind('license') },
     { title: 'AI providers', subtitle: 'Universal AI engine (image-to-animation + SVG).', kind: 'ai', checks: byKind('ai') },
     { title: 'First-run bootstrap', subtitle: 'Optional hints for the initial operator.', kind: 'bootstrap', checks: byKind('bootstrap') },
+    { title: 'Operations', subtitle: 'Maintenance + local-dev-only toggles.', kind: 'ops', checks: byKind('ops') },
   ];
 
   // Blocking state is GROUP-level: the store needs ANY ONE storage driver and

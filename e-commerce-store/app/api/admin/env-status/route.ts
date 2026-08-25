@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminRequestAuthorized } from '@/lib/server-config';
-import { detectStorageProvider } from '@/lib/env-discovery';
+import { detectStorageProvider, discoverEnvironment, CLOUDFLARE_VARS_PATH } from '@/lib/env-discovery';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
@@ -10,25 +10,31 @@ export const dynamic = 'force-dynamic';
 /**
  * Environment-variable status dashboard for the admin → SetUp tab.
  *
- * Returns ONLY presence + metadata for each variable (never values) so the
- * admin can verify an installation at a glance without leaking secrets.
- * Defense-in-depth: requires admin authorization IN the route (on top of the
- * proxy.ts Basic-Auth + device-cookie gates) so a misconfiguration that ever
- * exposes this handler can never be read unauthenticated.
+ * Returns EVERY variable the storefront can read — with ONLY presence +
+ * metadata (never values), plus a realistic EXAMPLE value and the exact
+ * Cloudflare location to set each one — so an operator can wire up a deployment
+ * without guessing. Defense-in-depth: requires admin authorization IN the route
+ * (on top of the proxy.ts Basic-Auth + device-cookie gates) so a
+ * misconfiguration that ever exposes this handler can never be read
+ * unauthenticated.
  */
 type EnvStatusItem = {
   key: string;
   label: string;
+  name: string;
+  purpose: string;
+  variable: string;
+  aliases: string[];
+  kind: string;
   required: boolean;
   set: boolean;
-  aliases: string[];
   buildTime: boolean;
   sensitive: boolean;
+  example: string;
+  where: string;
+  commands: string[];
   hint: string;
 };
-
-const has = (...names: string[]): boolean =>
-  names.some((name) => Boolean(process.env[name] && String(process.env[name]).trim()));
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -43,205 +49,43 @@ export async function GET(request: Request) {
   const platformSettings = await getPlatformSettings();
   const platformProviders = toPublicSummary(platformSettings);
 
-  const items: EnvStatusItem[] = [
-    {
-      key: 'Supabase URL',
-      label: 'Supabase project URL (platform settings)',
-      required: false,
-      set: supabase.url,
-      aliases: ['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'Supabase is the source of truth for global_platform_settings (provider keys + the Setup Wizard gate).',
-    },
-    {
-      key: 'Supabase anon key',
-      label: 'Supabase anon key',
-      required: false,
-      set: supabase.anonKey,
-      aliases: ['SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Public anon key — used for the is_platform_configured RPC and the super-admin password grant.',
-    },
-    {
-      key: 'Supabase service role key',
-      label: 'Supabase service role key',
-      required: false,
-      set: supabase.serviceRoleKey,
-      aliases: ['SUPABASE_SERVICE_ROLE_KEY'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Server-only trusted writer — the Setup Wizard uses it to persist provider keys + create the master super-admin.',
-    },
-    {
-      key: 'Platform providers',
-      label: 'Platform providers (Setup Wizard)',
-      required: false,
-      set: configured,
-      aliases: [],
-      buildTime: false,
-      sensitive: false,
-      hint: configured
-        ? `Email: ${platformProviders.mail_provider || 'unset'} · Payment: ${platformProviders.payment_provider || 'unset'} · Maps: ${platformProviders.map_provider || 'unset'}`
-        : 'Not configured — the Setup Wizard (/admin/setup) runs on first visit.',
-    },
-    {
-      key: 'Storage provider',
-      label: 'Data backend (storage provider)',
-      required: false,
-      set: true,
-      aliases: ['STORAGE_PROVIDER'],
-      buildTime: false,
-      sensitive: false,
-      hint:
-        provider === 'cloudflare-kv'
-          ? 'STORAGE_PROVIDER=cloudflare-kv — running on the Workers KV adapter. See lib/storage/cloudflare-kv.ts for the concurrency caveats before routing payment/raffle writes at it.'
-          : provider === 'supabase'
-            ? 'Supabase is the active data store (default). Set STORAGE_PROVIDER=cloudflare-kv or =upstash to switch drivers.'
-            : 'Upstash Redis is the active data store. Set STORAGE_PROVIDER=supabase or =cloudflare-kv to switch drivers.',
-    },
-    {
-      key: 'Redis',
-      label: 'Redis (optional data store)',
-      required: false,
-      set: has('UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_URL', 'KV_URL'),
-      aliases: ['UPSTASH_REDIS_REST_URL', 'KV_REST_API_URL', 'REDIS_URL', 'KV_URL'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or the KV_REST_API_URL / KV_REST_API_TOKEN pair — any platform works, see README).',
-    },
-    {
-      key: 'Redis token',
-      label: 'Redis access token',
-      required: false,
-      set: has('UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'),
-      aliases: ['UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_TOKEN', 'REDIS_REST_TOKEN', 'REDIS_TOKEN'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Secret — set in the platform, never paste into a public file.',
-    },
-    {
-      key: 'Stripe secret key',
-      label: 'Stripe secret key (sk_…)',
-      required: true,
-      set: has('STRIPE_SECRET_KEY'),
-      aliases: ['STRIPE_SECRET_KEY'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Secret — set in the platform (Vercel, Netlify, Cloudflare…). The storefront will not charge without it.',
-    },
-    {
-      key: 'Stripe webhook secret',
-      label: 'Stripe webhook secret (whsec_…)',
-      required: true,
-      set: has('STRIPE_WEBHOOK_SECRET'),
-      aliases: ['STRIPE_WEBHOOK_SECRET'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Secret — required for the /api/stripe/webhook signature check. In development ALLOW_UNVERIFIED_WEBHOOKS=true can bypass it, but never in production.',
-    },
-  ];
-  items.push(
-    {
-      key: 'Stripe product id',
-      label: 'Default Stripe price ID',
-      required: false,
-      set: has('STRIPE_PRODUCT_ID'),
-      aliases: ['STRIPE_PRODUCT_ID'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'Optional global fallback price ID. Per-product/per-size IDs set in /admin → Products always win.',
-    },
-    {
-      key: 'Admin auth',
-      label: 'Admin portal Basic Auth',
-      required: true,
-      set: has('ADMIN_BASIC_AUTH_PASSWORD'),
-      aliases: ['ADMIN_BASIC_AUTH_PASSWORD'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'The /admin password. The Basic Auth "username" is the admin EMAIL (ADMIN_VERIFY_EMAIL). Set ADMIN_BASIC_AUTH_PASSWORD to enable the legacy gate, or use the master admin account created by the Setup Wizard.',
-    },
-    {
-      key: 'Admin verify email',
-      label: 'Admin two-step inbox',
-      required: true,
-      set: has('ADMIN_VERIFY_EMAIL', 'SUPPORT_EMAIL', 'REPLY_TO_EMAIL'),
-      aliases: ['ADMIN_VERIFY_EMAIL', 'SUPPORT_EMAIL', 'REPLY_TO_EMAIL'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'Inbox that receives the /admin two-step verification code (ADMIN_VERIFY_EMAIL, falling back to SUPPORT_EMAIL). Without one the portal locks behind the code step.',
-    },
-    {
-      key: 'Cron secret',
-      label: 'Cron endpoint secret',
-      required: true,
-      set: has('CRON_SECRET'),
-      aliases: ['CRON_SECRET'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'Secret — guards the /api/checkout/cron-draw + /api/cron/* safety net. Schedulers (vercel.json cron, Netlify scheduled function, Cloudflare cron worker, cron-job.org…) authenticate with `Authorization: Bearer $CRON_SECRET`.',
-    },
-    {
-      key: 'Resend',
-      label: 'Transactional email (Resend)',
-      required: false,
-      set: has('RESEND_API_KEY'),
-      aliases: ['RESEND_API_KEY', 'RESEND_FROM'],
-      buildTime: false,
-      sensitive: true,
-      hint: 'RESEND_API_KEY enables entry/welcome/winner emails. RESEND_FROM sets the from address (e.g. "Brand <onboarding@resend.dev>").',
-    },
-    {
-      key: 'Site URL',
-      label: 'Canonical site URL',
-      required: true,
-      set: has('NEXT_PUBLIC_URL', 'NEXT_PUBLIC_SITE_URL', 'SITE_URL'),
-      aliases: ['NEXT_PUBLIC_URL', 'NEXT_PUBLIC_SITE_URL', 'SITE_URL'],
-      buildTime: true,
-      sensitive: false,
-      hint: 'Used in emails, OG/social cards and canonical links. NEXT_PUBLIC_* values are baked at build time — set in the same environment and redeploy. If unset, the platform\'s own URL variables are used automatically (Vercel VERCEL_PROJECT_PRODUCTION_URL/VERCEL_URL, Netlify URL/DEPLOY_URL, Cloudflare CF_PAGES_URL).',
-    },
-    {
-      key: 'Brand name',
-      label: 'Email brand name',
-      required: false,
-      set: has('BRAND_NAME', 'NEXT_PUBLIC_SITE_NAME'),
-      aliases: ['BRAND_NAME', 'NEXT_PUBLIC_SITE_NAME'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'Brand shown in emails. The storefront brand itself is set in /admin → Settings → Branding & Share (no env var needed).',
-    },
-    {
-      key: 'Support email',
-      label: 'Support inbox',
-      required: false,
-      set: has('SUPPORT_EMAIL', 'REPLY_TO_EMAIL'),
-      aliases: ['SUPPORT_EMAIL', 'REPLY_TO_EMAIL'],
-      buildTime: false,
-      sensitive: false,
-      hint: 'Used in emails and policy pages. Can also be set per-buyer in /admin → Settings → Legal & Policies.',
-    },
-    {
-      key: 'Mapbox token',
-      label: 'Mapbox Address Autofill',
-      required: false,
-      set: has('NEXT_PUBLIC_MAPBOX_TOKEN', 'NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN'),
-      aliases: ['NEXT_PUBLIC_MAPBOX_TOKEN', 'NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN'],
-      buildTime: true,
-      sensitive: false,
-      hint: 'Public pk.* token that powers the full-address dropdown. Without it customers type addresses manually. NEXT_PUBLIC_* is baked at build time — redeploy after setting.',
-    }
-  );
+  // Single source of truth — the full env registry (every variable, with a
+  // realistic EXAMPLE value + where to set it on Cloudflare), so the SetUp tab
+  // can never drift from middleware.ts / the Setup Wizard.
+  const discovery = discoverEnvironment();
+
+  const items: EnvStatusItem[] = discovery.all.map((c) => ({
+    key: c.id,
+    label: c.name,
+    name: c.name,
+    purpose: c.purpose,
+    variable: c.variable,
+    aliases: c.aliases,
+    kind: c.kind,
+    required: c.required,
+    set: c.present,
+    buildTime: c.buildTime,
+    sensitive: c.secret,
+    example: c.example,
+    where: c.where,
+    commands: c.commands,
+    hint: c.purpose,
+  }));
 
   return NextResponse.json({
     ok: true,
     items,
+    groups: discovery.groups.map((g) => ({
+      title: g.title,
+      subtitle: g.subtitle,
+      kind: g.kind,
+      checks: g.checks.map((c) => c.id),
+    })),
     storageProvider: provider,
     supabase,
     platformConfigured: configured,
     platformProviders,
+    cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
     environment: process.env.NODE_ENV || 'development',
     summary: {
       configured: items.filter((i) => i.set).length,
