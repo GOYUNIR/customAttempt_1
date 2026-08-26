@@ -266,9 +266,9 @@ const AI_SECONDARY_OPTIONS: ProviderSpec[] = [
 ];
 
 const SECURITY_FIELDS: FieldSpec[] = [
-  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, placeholder: '••••••••••••', hint: 'HTTP Basic Auth password for /admin (any strong password). Required if you are not using the master admin account.' },
-  { key: 'admin_verify_email', label: 'Admin two-step inbox', envVar: 'ADMIN_VERIFY_EMAIL', placeholder: 'admin@yourstore.com', hint: 'Inbox that receives the 6-digit /admin sign-in code (falls back to SUPPORT_EMAIL).' },
-  { key: 'cron_secret', label: 'Cron secret', envVar: 'CRON_SECRET', secret: true, placeholder: 'a-long-random-string', hint: 'Authenticates the scheduled draw safety net (Authorization: Bearer $CRON_SECRET) — use a long random string.' },
+  { key: 'admin_basic_auth_password', label: 'Admin Basic Auth password (optional)', envVar: 'ADMIN_BASIC_AUTH_PASSWORD', secret: true, optional: true, placeholder: '••••••••••••', hint: 'Optional fallback sign-in for /admin. You do NOT need this — the master admin account you create in step 2 signs you in. If you set it, also add it to Cloudflare (npx wrangler secret put ADMIN_BASIC_AUTH_PASSWORD) or it will not take effect.' },
+  { key: 'admin_verify_email', label: 'Admin two-step inbox (optional)', envVar: 'ADMIN_VERIFY_EMAIL', optional: true, placeholder: 'admin@yourstore.com', hint: 'Optional inbox for the Basic-Auth 6-digit code (falls back to SUPPORT_EMAIL). Only matters with the Basic-Auth sign-in above — set it in Cloudflare to take effect.' },
+  { key: 'cron_secret', label: 'Cron secret (optional)', envVar: 'CRON_SECRET', secret: true, optional: true, placeholder: 'a-long-random-string', hint: 'Optional scheduled-draw safety net. Draws already fire automatically when a countdown hits zero — this only adds a daily backup. If you set it, add it to Cloudflare (npx wrangler secret put CRON_SECRET).' },
 ];
 
 const IDENTITY_FIELDS: FieldSpec[] = [
@@ -295,7 +295,8 @@ type Status = {
     label: string;
     variable: string;
     secret: boolean;
-    mandated: boolean;
+    required: boolean;
+    savedByWizard: boolean;
     present: boolean;
     example: string;
     where: string;
@@ -599,11 +600,6 @@ const STAGE_CONTEXT: Record<string, { step: number; title: string; message: stri
     step: 4,
     title: 'Finalizing configuration failed',
     message: 'Provider settings were saved, but the final configuration flag could not be written. Re-save to retry.',
-  },
-  cloudflare_secrets: {
-    step: 0,
-    title: 'Set these secrets as Cloudflare environment variables',
-    message: 'Server-only secrets must be set on your hosting platform (not in this panel). Set each one in the Cloudflare dashboard / `npx wrangler secret put`, then reload this page so the server can read them from the environment.',
   },
 };
 
@@ -1085,31 +1081,63 @@ export default function SetupPage() {
 
         {status?.cloudflare && status.cloudflare.length > 0 && (
           <div style={{ background: '#fff', borderRadius: 16, padding: '18px 20px', boxShadow: '0 12px 30px rgba(0,0,0,0.08)', display: 'grid', gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#111' }}>Cloudflare environment variables (mandatory)</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#111' }}>Where your keys go — 2 places</div>
             <p style={{ fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.5 }}>
-              These server-side values must be set in the Cloudflare dashboard (<code>{status?.cloudflareVarsPath}</code>) or via <code>npx wrangler secret put</code> — <strong>not</strong> typed into this wizard. Secrets marked <strong style={{ color: '#b45309' }}>MANDATORY</strong> are enforced before you can save.
+              Only the <strong>Supabase connection</strong> must be set in Cloudflare — the server needs it on every request to reach your database. Everything else you type into this wizard is saved <strong>securely in your database</strong>, so you do not need to touch Cloudflare for those.
             </p>
-            <div style={{ display: 'grid', gap: 6 }}>
-              {status.cloudflare.map((c) => (
-                <div key={c.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: '#f9fafb', borderRadius: 8, border: c.mandated && !c.present ? '1px solid #fca5a5' : '1px solid #e5e7eb' }}>
-                  <span style={{ fontSize: 13, marginTop: 1, color: c.present ? '#16a34a' : '#dc2626' }}>{c.present ? '✓' : '✗'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>
-                      {c.label}
-                      {c.mandated && <span style={{ marginLeft: 6, fontSize: 9, color: '#b45309' }}>MANDATORY</span>}
-                      {c.secret && <span style={{ marginLeft: 6, fontSize: 9, color: '#6b7280' }}>secret</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}><code>{c.variable}</code></div>
-                    {!c.present && (
-                      <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
-                        {c.mandated ? 'NOT SET — set it before you can save: ' : 'Optional — '}
-                        <code style={{ fontSize: 11, color: '#92400e', whiteSpace: 'pre-wrap' }}>{c.commands[0]}</code>
+            {(() => {
+              const cf = status.cloudflare;
+              if (!cf) return null;
+              const required = cf.filter((c) => c.required);
+              const wizardSaved = cf.filter((c) => c.savedByWizard);
+              const optional = cf.filter((c) => !c.required && !c.savedByWizard);
+              const rows = (items: typeof cf) => (
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {items.map((c) => (
+                    <div key={c.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+                      <span style={{ fontSize: 13, marginTop: 1, color: c.present ? '#16a34a' : '#dc2626' }}>{c.present ? '✓' : '✗'}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>
+                          {c.label}
+                          {c.secret && <span style={{ marginLeft: 6, fontSize: 9, color: '#6b7280' }}>secret</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}><code>{c.variable}</code></div>
+                        {!c.present && c.commands.length > 0 && (
+                          <div style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>
+                            <code style={{ fontSize: 11, color: '#92400e', whiteSpace: 'pre-wrap' }}>{c.commands[0]}</code>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+              return (
+                <>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#b45309', marginBottom: 4 }}>🔒 Required in Cloudflare ({required.length})</div>
+                    <p style={{ fontSize: 11.5, color: '#6b7280', margin: '0 0 6px', lineHeight: 1.4 }}>
+                      Set these in the Cloudflare dashboard (<code>{status.cloudflareVarsPath}</code>) or via <code>npx wrangler secret put</code>. The server cannot reach your database without them.
+                    </p>
+                    {rows(required)}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#047857', marginBottom: 4 }}>✓ Saved by this wizard ({wizardSaved.length})</div>
+                    <p style={{ fontSize: 11.5, color: '#6b7280', margin: '0 0 6px', lineHeight: 1.4 }}>
+                      Type these into the steps below — they are stored securely in your database. No Cloudflare setup needed.
+                    </p>
+                    {rows(wizardSaved)}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#4b5563', marginBottom: 4 }}>Optional ({optional.length})</div>
+                    <p style={{ fontSize: 11.5, color: '#6b7280', margin: '0 0 6px', lineHeight: 1.4 }}>
+                      Only set these in Cloudflare if you want the extra Basic-Auth fallback and the scheduled-draw safety net. The master admin account and the live countdown trigger cover you without them.
+                    </p>
+                    {rows(optional)}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 

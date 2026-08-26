@@ -253,35 +253,51 @@ export function cloudflareLocation(check: {
  * These are NEVER real keys; every value is a fake placeholder to swap out.
  */
 /**
- * The necessary CLOUDFLARE environment variables — the server-side runtime
- * values that must be set in the Cloudflare dashboard / `wrangler secret put`
- * (NOT typed into the Setup Wizard). Surfaced as a dedicated section on the
- * admin SetUp tab and enforced by the Setup Wizard before it finalizes.
+ * The CLOUDFLARE environment variables — the server-side runtime values that
+ * live in the Cloudflare dashboard / `wrangler secret put`. Surfaced as a
+ * dedicated section on the admin SetUp tab + the Setup Wizard so an operator
+ * can see exactly which values the server reads from its environment.
+ *
+ * IMPORTANT — most of these do NOT need to be set in Cloudflare. Stripe /
+ * Resend / Map / AI keys are typed into the Setup Wizard and persisted to
+ * Supabase `global_platform_settings` (read back by the driver factories at
+ * runtime). The ONLY values that genuinely MUST live in the hosting platform
+ * are the Supabase connection (URL + anon + service-role key) — because the
+ * server needs them on every request just to reach the database where the
+ * other keys are stored. See cloudflareRequiredChecks().
  */
 export function cloudflareEnvVarChecks(env: EnvObject = process.env): EnvCheck[] {
   return discoverEnvironment(env).all.filter((c) => c.cloudflareEnvVar === true);
 }
 
 /**
- * The SUBSET of the Cloudflare env vars that are SERVER-ONLY SECRETS — "not
- * wise to have in the Setup Wizard panel" — which the wizard mandates must be
- * set as real environment variables on the hosting platform (Cloudflare
- * dashboard / `wrangler secret put`), never typed into the web form.
- *
- * The Supabase anon key is intentionally EXCLUDED (it is a public key that the
- * wizard legitimately collects), as is the admin Basic-Auth password (the
- * master admin account is its alternative).
+ * The SUBSET that MUST be set as real environment variables on the hosting
+ * platform for a durable deployment: the Supabase connection. This is the
+ * "lock on the vault" — the server needs these on every request to reach the
+ * database where the wizard stores every other key. There is no alternative
+ * (unlike the admin Basic-Auth password, whose alternative is the master admin
+ * account created by the wizard).
  */
-export const CLOUDFLARE_MANDATED_SECRET_IDS: string[] = [
+export const CLOUDFLARE_REQUIRED_IDS: string[] = [
+  'supabase-url',
+  'supabase-anon',
   'supabase-service',
+];
+
+/** The subset the Setup Wizard saves to Supabase (no Cloudflare setup needed). */
+export const CLOUDFLARE_WIZARD_SAVED_IDS: string[] = [
   'stripe-secret',
   'stripe-webhook',
   'resend',
-  'cron-secret',
 ];
 
-export function cloudflareMandatedSecretChecks(env: EnvObject = process.env): EnvCheck[] {
-  const ids = new Set(CLOUDFLARE_MANDATED_SECRET_IDS);
+export function cloudflareRequiredChecks(env: EnvObject = process.env): EnvCheck[] {
+  const ids = new Set(CLOUDFLARE_REQUIRED_IDS);
+  return cloudflareEnvVarChecks(env).filter((c) => ids.has(c.id));
+}
+
+export function cloudflareWizardSavedChecks(env: EnvObject = process.env): EnvCheck[] {
+  const ids = new Set(CLOUDFLARE_WIZARD_SAVED_IDS);
   return cloudflareEnvVarChecks(env).filter((c) => ids.has(c.id));
 }
 

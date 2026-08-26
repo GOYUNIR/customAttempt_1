@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareMandatedSecretChecks, CLOUDFLARE_MANDATED_SECRET_IDS } from '../lib/env-discovery.ts';
+import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareRequiredChecks, cloudflareWizardSavedChecks, CLOUDFLARE_REQUIRED_IDS, CLOUDFLARE_WIZARD_SAVED_IDS } from '../lib/env-discovery.ts';
 
 test('empty environment reports storage + admin as the blocking groups', () => {
   const result = discoverEnvironment({});
@@ -146,21 +146,33 @@ test('cloudflareEnvVarChecks surfaces the necessary Cloudflare env vars', () => 
   );
 });
 
-test('cloudflareMandatedSecretChecks returns only the server-only secrets (excludes anon key + Basic Auth password)', () => {
-  const mandated = cloudflareMandatedSecretChecks({});
+test('cloudflareRequiredChecks returns ONLY the Supabase connection (the one thing that must live in Cloudflare)', () => {
+  const required = cloudflareRequiredChecks({});
   assert.deepEqual(
-    new Set(mandated.map((c) => c.id)),
-    new Set(['supabase-service', 'stripe-secret', 'stripe-webhook', 'resend', 'cron-secret']),
+    new Set(required.map((c) => c.id)),
+    new Set(['supabase-url', 'supabase-anon', 'supabase-service']),
   );
-  assert.equal(mandated.every((c) => c.present === false), true);
-  assert.equal(mandated.every((c) => c.commands.some((cmd) => cmd.includes('wrangler secret put'))), true);
+  assert.equal(required.every((c) => c.present === false), true);
+  assert.equal(required.every((c) => c.commands.some((cmd) => cmd.includes('wrangler secret put'))), true);
 });
 
-test('CLOUDFLARE_MANDATED_SECRET_IDS is a subset of the secret Cloudflare env vars', () => {
-  const secretCloudflare = cloudflareEnvVarChecks({}).filter((c) => c.secret === true).map((c) => c.id);
-  assert.equal(CLOUDFLARE_MANDATED_SECRET_IDS.includes('admin-password'), false);
-  assert.equal(CLOUDFLARE_MANDATED_SECRET_IDS.includes('supabase-anon'), false);
-  for (const id of CLOUDFLARE_MANDATED_SECRET_IDS) {
-    assert.ok(secretCloudflare.includes(id), `mandated id ${id} must be a secret Cloudflare env var`);
+test('cloudflareWizardSavedChecks returns the keys the wizard persists to Supabase (Stripe + email)', () => {
+  const saved = cloudflareWizardSavedChecks({});
+  assert.deepEqual(
+    new Set(saved.map((c) => c.id)),
+    new Set(['stripe-secret', 'stripe-webhook', 'resend']),
+  );
+});
+
+test('CLOUDFLARE_REQUIRED_IDS is a subset of the Cloudflare env vars and excludes wizard-saved + optional values', () => {
+  const cloudflareIds = cloudflareEnvVarChecks({}).map((c) => c.id);
+  assert.equal(CLOUDFLARE_REQUIRED_IDS.includes('stripe-secret'), false);
+  assert.equal(CLOUDFLARE_REQUIRED_IDS.includes('cron-secret'), false);
+  assert.equal(CLOUDFLARE_REQUIRED_IDS.includes('admin-password'), false);
+  for (const id of CLOUDFLARE_REQUIRED_IDS) {
+    assert.ok(cloudflareIds.includes(id), `required id ${id} must be a Cloudflare env var`);
+  }
+  for (const id of CLOUDFLARE_WIZARD_SAVED_IDS) {
+    assert.ok(cloudflareIds.includes(id), `wizard-saved id ${id} must be a Cloudflare env var`);
   }
 });

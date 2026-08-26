@@ -5332,9 +5332,9 @@ export default function AdminPortal() {
         {tab === 'setup' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Cloudflare Environment Variables</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Cloudflare Variables &amp; Secrets</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
-                These are the <strong>server-side values that must be set on Cloudflare</strong> — in the dashboard at <code>{envStatus?.cloudflareVarsPath}</code> or via <code>npx wrangler secret put</code> — <strong>not</strong> typed into the Setup Wizard panel. Values are never shown; only ✓ set / ✗ missing.
+                The <strong>Supabase connection</strong> (Project URL + anon + service-role key) is the one thing that must be set in Cloudflare — in the dashboard at <code>{envStatus?.cloudflareVarsPath}</code> or via <code>npx wrangler secret put</code>. Stripe, email and AI keys are instead typed into the Setup Wizard and saved to your database. Values are never shown; only ✓ set / ✗ missing.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {(envStatus?.cloudflare || []).map((item: any, index: number) => (
@@ -5343,7 +5343,7 @@ export default function AdminPortal() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>
                         {item.label}
-                        {item.sensitive && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>secret · must be in Cloudflare</span>}
+                        {item.sensitive && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>secret</span>}
                       </div>
                       <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>
                         <code style={{ fontSize: 10, color: '#dbeafe' }}>{item.variable}</code>

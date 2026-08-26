@@ -524,7 +524,7 @@ the password field shows a fixed mask (never the real length) so you can
 safely share the portal on a livestream (draw reveals, winner announcements).
 Turn it off only when you need to work on live data.
 - **SetUp tab**: environment-variable status dashboard (✓ set / ✗ missing, never
-the values) plus a production launch checklist. It leads with a dedicated **Cloudflare Environment Variables** card - the server-side values that must be set in the Cloudflare dashboard / `npx wrangler secret put` (not typed into the Setup Wizard), each with its example value, location and copy command.
+the values) plus a production launch checklist. It leads with a dedicated **Cloudflare Variables & Secrets** card — the Supabase connection (Project URL + anon + service-role key) is the one thing that must be set in the Cloudflare dashboard / `npx wrangler secret put`, while Stripe, email and AI keys are typed into the Setup Wizard and saved to your database instead — each with its example value, location and copy command.
 - **System → Wipe & Rebuild Redis**: destructive full wipe with **two-step
 confirmation** (admin password + typing `WIPE`), optionally rebuilding the
 seeded defaults. Use it to reset a demo or hand a clean slate to a new buyer.
