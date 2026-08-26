@@ -23,6 +23,8 @@ import {
   cloudflareEnvVarChecks,
   CLOUDFLARE_REQUIRED_IDS,
   CLOUDFLARE_WIZARD_SAVED_IDS,
+  dataStoreSummary,
+  supabaseEnvFullySet,
 } from '@/lib/env-discovery';
 import { isSchemaError, buildSchemaFixPlan, schemaFixPlanToText } from '@/lib/setup-schema-guide';
 
@@ -326,6 +328,9 @@ export async function GET(request: Request) {
       commands: c.commands,
     })),
     supabaseSchemaError,
+    supabaseEnvReady: supabaseEnvFullySet(),
+    isProduction: process.env.NODE_ENV === 'production',
+    dataStores: dataStoreSummary(),
   });
 }
 
@@ -340,6 +345,29 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
     }
+
+    // ── THE LOCK ON THE VAULT (production only) ─────────────────────────────────
+    // The 3 Supabase credentials (URL + anon + service-role key) MUST be set as
+    // REAL environment variables on the hosting platform before the wizard can
+    // persist anything. Why: inline credentials entered below are VOLATILE —
+    // they survive only the current server process and are lost on every cold
+    // start / serverless instance — which would lock the buyer out of their own
+    // admin portal after a redeploy. Local development is exempt so a developer
+    // can test end-to-end without wiring up a platform.
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction && !supabaseEnvFullySet()) {
+      return NextResponse.json(
+        {
+          error:
+            'Connect Supabase first. Set the 3 Supabase secrets in Cloudflare (or your hosting platform) before continuing — they are the lock on your vault, and the server cannot reach your database without them.',
+          stage: 'storage_init',
+          code: 'cloudflare_supabase_required',
+          dataStores: dataStoreSummary(),
+        },
+        { status: 422 },
+      );
+    }
+
 
     // ── Supabase credentials (inline entry when the env is missing) ──────────
     // Operators can paste SUPABASE_URL / ANON_KEY / SERVICE_ROLE_KEY directly.

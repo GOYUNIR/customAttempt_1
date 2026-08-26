@@ -118,6 +118,23 @@ export type StorageProvider = 'supabase' | 'upstash' | 'cloudflare-kv';
 /** The env var name that selects the backend provider. */
 export const STORAGE_PROVIDER_ENV = 'STORAGE_PROVIDER';
 
+/** The env var name for write-through mirror providers (comma-separated). */
+export const STORAGE_REPLICAS_ENV = 'STORAGE_REPLICAS';
+
+/** Map a raw provider token (env value) to a canonical StorageProvider. */
+export function normalizeStorageProvider(token: string): StorageProvider | null {
+  const raw = String(token || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '');
+  if (raw === 'supabase' || raw === 'postgres' || raw === 'pg') return 'supabase';
+  if (raw === 'cloudflare-kv' || raw === 'cloudflare' || raw === 'kv' || raw === 'd1' || raw === 'workers-kv') {
+    return 'cloudflare-kv';
+  }
+  if (raw === 'upstash' || raw === 'redis') return 'upstash';
+  return null;
+}
+
 /**
  * Resolve the active storage backend.
  *
@@ -133,17 +150,30 @@ export const STORAGE_PROVIDER_ENV = 'STORAGE_PROVIDER';
  * (which drivers are acceptable) lives in lib/env-discovery.ts → detectStorageDrivers().
  */
 export function resolveStorageProvider(): StorageProvider {
-  const raw = String(process.env[STORAGE_PROVIDER_ENV] || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '');
-  if (raw === 'supabase' || raw === 'postgres' || raw === 'pg') return 'supabase';
-  if (raw === 'cloudflare-kv' || raw === 'cloudflare' || raw === 'kv' || raw === 'd1' || raw === 'workers-kv') {
-    return 'cloudflare-kv';
-  }
-  if (raw === 'upstash' || raw === 'redis') return 'upstash';
+  return normalizeStorageProvider(process.env[STORAGE_PROVIDER_ENV] || '') ?? detectDefaultProvider();
+}
+
+function detectDefaultProvider(): StorageProvider {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
   if (url && key) return 'supabase';
   return 'supabase';
+}
+
+/**
+ * Resolve the write-through MIRROR providers from `STORAGE_REPLICAS`
+ * (comma/space separated, e.g. `upstash` or `supabase,upstash`). Each entry is
+ * normalized + deduped; unknown tokens are dropped. Mirrors are INDEPENDENT
+ * vendors that receive a copy of every write so a single-vendor outage or data
+ * loss never takes the store down with it.
+ */
+export function resolveReplicaProviders(): StorageProvider[] {
+  const raw = String(process.env[STORAGE_REPLICAS_ENV] || '');
+  if (!raw.trim()) return [];
+  const out: StorageProvider[] = [];
+  for (const part of raw.split(/[,\s]+/)) {
+    const provider = normalizeStorageProvider(part);
+    if (provider) out.push(provider);
+  }
+  return [...new Set(out)];
 }

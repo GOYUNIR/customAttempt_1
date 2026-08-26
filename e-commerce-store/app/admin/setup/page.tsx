@@ -278,6 +278,13 @@ const IDENTITY_FIELDS: FieldSpec[] = [
 ];
 
 // ── status + form types ───────────────────────────────────────────────────────
+type DataStoreStatus = {
+  key: 'supabase' | 'upstash' | 'cloudflare-kv';
+  label: string;
+  configured: boolean;
+  missing: { id: string; name: string; variable: string; secret: boolean; command: string; example: string }[];
+};
+
 type Status = {
   configured: boolean;
   ready: boolean;
@@ -304,6 +311,10 @@ type Status = {
   }[];
   /** Raw Supabase schema/connection error from the status endpoint (e.g. a missing table). */
   supabaseSchemaError?: string;
+  /** The 3 Supabase credentials are set as REAL env vars (the durable requirement). */
+  supabaseEnvReady?: boolean;
+  isProduction?: boolean;
+  dataStores?: DataStoreStatus[];
 };
 
 const DEFAULT_FORM: Record<string, string> = {
@@ -504,6 +515,141 @@ function CopyCommand(props: { text: string; copied: string; onCopy: (t: string) 
       <button type="button" onClick={() => props.onCopy(props.text)} style={{ background: props.copied === props.text ? '#10b981' : '#fff', color: props.copied === props.text ? '#fff' : '#111', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
         {props.copied === props.text ? 'Copied ✓' : 'Copy'}
       </button>
+    </div>
+  );
+}
+
+/** A collapsible "how do I do this?" drop-down — every setup instruction gets
+ *  one so the page stays clean while a non-technical operator can still drill
+ *  into the exact click-path, links and copy-paste commands they need. */
+function HelpToggle(props: { title: string; children: ReactNode }) {
+  return (
+    <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb' }}>
+      <summary style={{ cursor: 'pointer', padding: '10px 14px', fontSize: 13, fontWeight: 700, color: '#374151', listStyle: 'none' }}>
+        <span style={{ marginRight: 6 }}>▸</span>
+        {props.title}
+      </summary>
+      <div style={{ padding: '2px 14px 12px', fontSize: 12.5, color: '#6b7280', lineHeight: 1.65, display: 'grid', gap: 6 }}>{props.children}</div>
+    </details>
+  );
+}
+
+/** External help links, each rendered as a copy-paste-friendly anchor. */
+function HelpLink(props: { href: string; children: ReactNode }) {
+  return (
+    <a href={props.href} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontWeight: 600 }}>
+      {props.children}
+    </a>
+  );
+}
+
+/** The step-1 "connect Supabase" gate. In production it BLOCKS until the 3
+ *  Supabase secrets are real Cloudflare env vars, with a numbered walkthrough. */
+function SupabaseGate(props: {
+  supabaseEnvReady: boolean;
+  inProduction: boolean;
+  busy: boolean;
+  copied: string;
+  onCopy: (t: string) => void;
+  onRefresh: () => void;
+}) {
+  const connected = props.supabaseEnvReady;
+  return (
+    <div style={{ background: connected ? '#f0fdf4' : '#fffbeb', border: `1px solid ${connected ? '#bbf7d0' : '#fde68a'}`, borderRadius: 14, padding: 16, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: '#111' }}>Supabase (required)</span>
+        {connected ? (
+          <span style={{ background: '#16a34a', color: '#fff', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 800 }}>✓ Connected</span>
+        ) : (
+          <span style={{ background: '#dc2626', color: '#fff', borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 800 }}>✗ Not connected yet</span>
+        )}
+        <button type="button" onClick={props.onRefresh} disabled={props.busy} style={{ marginLeft: 'auto', background: '#fff', color: '#111', border: '1px solid #d1d5db', borderRadius: 999, padding: '8px 14px', fontSize: 12.5, fontWeight: 700, cursor: props.busy ? 'default' : 'pointer', opacity: props.busy ? 0.6 : 1 }}>
+          {props.busy ? 'Checking…' : '⟳ Check again'}
+        </button>
+      </div>
+
+      <p style={{ fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.6 }}>
+        Supabase is your <strong>database</strong> — products, customers, entries, orders, settings and your master admin account live here. It is free to start. You add 3 keys to Cloudflare <strong>once</strong>, then never touch them again.
+      </p>
+
+      {props.inProduction && !connected && (
+        <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#b45309', marginBottom: 6 }}>🔒 Do these 3 things, in order:</div>
+          <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 10, fontSize: 13, color: '#374151' }}>
+            <li>
+              Create a free project: <HelpLink href="https://supabase.com/dashboard">supabase.com/dashboard</HelpLink> → <strong>New project</strong> (~1 minute).
+              <div style={{ marginTop: 6 }}>
+                <HelpToggle title="How do I create a Supabase project? (click)">
+                  <span>1. Go to <HelpLink href="https://supabase.com/dashboard">supabase.com/dashboard</HelpLink> and sign up / sign in (GitHub login works).</span>
+                  <span>2. Click <strong>New project</strong> → pick a name → choose a region → create a database password.</span>
+                  <span>3. Wait ~1 minute, then open <strong>Project Settings → API</strong> to find your keys.</span>
+                </HelpToggle>
+              </div>
+            </li>
+            <li>
+              Copy your <strong>Project URL</strong>, <strong>anon public key</strong> and <strong>service_role key</strong> from <HelpLink href="https://supabase.com/dashboard">Project Settings → API</HelpLink>.
+              <div style={{ marginTop: 6 }}>
+                <HelpToggle title="Where exactly are these 3 keys? (click)">
+                  <span><strong>Project URL</strong> → Project Settings → API → “Project URL” (looks like <code>https://abcdefgh.supabase.co</code>).</span>
+                  <span><strong>anon public key</strong> → Project Settings → API → “anon public” (a long string starting <code>eyJhbGciOi…</code>).</span>
+                  <span><strong>service_role key</strong> → Project Settings → API → “service_role” (a long string starting <code>eyJhbGciOi…</code>).</span>
+                </HelpToggle>
+              </div>
+            </li>
+            <li>
+              Add the 3 keys to Cloudflare by running these in your terminal, then press <strong>⟳ Check again</strong>:
+              <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                <CopyCommand text="npx wrangler secret put SUPABASE_URL" copied={props.copied} onCopy={props.onCopy} />
+                <CopyCommand text="npx wrangler secret put SUPABASE_ANON_KEY" copied={props.copied} onCopy={props.onCopy} />
+                <CopyCommand text="npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY" copied={props.copied} onCopy={props.onCopy} />
+              </div>
+            </li>
+          </ol>
+        </div>
+      )}
+
+      {!props.inProduction && !connected && (
+        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#075985' }}>🧪 Local development mode</div>
+          <p style={{ fontSize: 12.5, color: '#075985', margin: '6px 0 0', lineHeight: 1.5 }}>
+            Running locally — enter the 3 Supabase keys directly in the “Advanced” section below to test without Cloudflare. On a live site these MUST be set as Cloudflare secrets.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The optional safety-mirror card — a second, independent database mirrors every
+ *  write so a single vendor losing data can never take the store down. */
+function RedundancyGate(props: { upstashStore?: DataStoreStatus; copied: string; onCopy: (t: string) => void }) {
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>🛡 Add a safety mirror (optional, recommended)</div>
+      <p style={{ fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.6 }}>
+        A mirror keeps a <strong>second copy of everything</strong> in a different company’s database. If one company ever loses your data, the other still has it — so the years of customer accounts, entries and orders you build can never disappear.
+      </p>
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>Upstash Redis mirror</span>
+          {props.upstashStore?.configured ? (
+            <span style={{ background: '#16a34a', color: '#fff', borderRadius: 999, padding: '3px 10px', fontSize: 11.5, fontWeight: 800 }}>✓ Connected</span>
+          ) : (
+            <span style={{ background: '#9ca3af', color: '#fff', borderRadius: 999, padding: '3px 10px', fontSize: 11.5, fontWeight: 800 }}>not set up</span>
+          )}
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7280', margin: 0, lineHeight: 1.5 }}>A free, separate Redis database that mirrors every write. Takes ~2 minutes.</p>
+        <HelpToggle title="How do I set up the mirror? (click)">
+          <span>1. Create a free database at <HelpLink href="https://upstash.com">upstash.com</HelpLink> → <strong>Create Database</strong> (choose REST API).</span>
+          <span>2. Copy the <strong>UPSTASH_REDIS_REST_URL</strong> and <strong>UPSTASH_REDIS_REST_TOKEN</strong>.</span>
+          <span>3. Add them to Cloudflare (same place as the Supabase keys):</span>
+          <CopyCommand text="npx wrangler secret put UPSTASH_REDIS_REST_URL" copied={props.copied} onCopy={props.onCopy} />
+          <CopyCommand text="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" copied={props.copied} onCopy={props.onCopy} />
+          <span>4. Turn the mirror ON by adding this <strong>plaintext Variable</strong> (NOT a secret) in the Cloudflare dashboard:</span>
+          <CopyCommand text="STORAGE_REPLICAS=upstash" copied={props.copied} onCopy={props.onCopy} />
+          <span>5. Come back here and press <strong>⟳ Check again</strong>.</span>
+        </HelpToggle>
+      </div>
     </div>
   );
 }
@@ -834,6 +980,13 @@ export default function SetupPage() {
 
   const ready = status?.ready === true;
   const configured = status?.configured === true;
+  // The durable Supabase connection (the "lock on the vault"). In production the
+  // wizard blocks step 1 until this is true — the 3 Supabase secrets must be set
+  // as REAL environment variables in Cloudflare (not just typed inline).
+  const inProduction = status?.isProduction === true;
+  const supabaseEnvReady = status?.supabaseEnvReady === true;
+  const dataStores = status?.dataStores || [];
+  const upstashStore = dataStores.find((d) => d.key === 'upstash');
   const activeStorage = STORAGE_OPTIONS.find((o) => o.value === form.storage_provider) || STORAGE_OPTIONS[0];
   const activePayment = PAYMENT_OPTIONS.find((o) => o.value === form.payment_provider) || PAYMENT_OPTIONS[0];
   const activeEmail = EMAIL_OPTIONS.find((o) => o.value === form.mail_provider) || EMAIL_OPTIONS[0];
@@ -866,6 +1019,11 @@ export default function SetupPage() {
       else if (adminPassword.length < 6 || adminPassword.length > 128) errs.adminPassword = 'Password must be 6–128 characters.';
     }
     if (step === 0) {
+      // THE hard gate: in production, the 3 Supabase secrets must be real env
+      // vars before anything else can proceed. Block here with a clear nudge.
+      if (inProduction && !supabaseEnvReady) {
+        errs.supabaseConnection = 'Connect Supabase in Cloudflare first, then press "Check again".';
+      }
       for (const f of activeStorage.fields) {
         if (f.optional) continue;
         if (!(form[f.key] || '').trim()) errs[f.key] = `${f.label} is required.`;
@@ -951,6 +1109,11 @@ export default function SetupPage() {
     // operator learns about a broken data store immediately instead of after
     // filling every other step and hitting the final save.
     if (step === 0) {
+      // Production hard gate (defense in depth — the server also rejects this).
+      if (inProduction && !supabaseEnvReady) {
+        setErrors({ supabaseConnection: 'Connect Supabase in Cloudflare first, then press "Check again".' });
+        return;
+      }
       setBusy(true);
       setError('');
       setErrorStage(null);
@@ -1208,16 +1371,40 @@ export default function SetupPage() {
             )}
 
             {step === 0 && (
-              <Section title="1 · Primary data store" subtitle="Set up the data store first — products, carts, entries and configuration live here, and the master admin account is created on it. Enter only the chosen backend's keys.">
-                <StoragePicker value={form.storage_provider} options={STORAGE_OPTIONS} onChange={(v) => set('storage_provider', v)} />
-                <ProviderFields fields={activeStorage.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
-                {form.storage_provider !== 'supabase' && (
-                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#075985' }}>Supabase credentials (still required)</div>
-                    <p style={{ fontSize: 12, color: '#075985', margin: 0, lineHeight: 1.5 }}>
-                      Your master admin account and provider settings live in Supabase, so Supabase credentials are required even when the storefront data lives in {activeStorage.label}. Enter them here.
+              <Section title="1 · Connect your database" subtitle="Everything — products, carts, entries, orders, accounts and settings — lives in your database. Connect Supabase first (it is required), then optionally add a second store as a safety mirror.">
+                <SupabaseGate
+                  supabaseEnvReady={supabaseEnvReady}
+                  inProduction={inProduction}
+                  busy={busy}
+                  copied={copied}
+                  onCopy={copy}
+                  onRefresh={() => { setBusy(true); void load().finally(() => setBusy(false)); }}
+                />
+
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#111' }}>Where should the storefront data live?</div>
+                  <StoragePicker value={form.storage_provider} options={STORAGE_OPTIONS} onChange={(v) => set('storage_provider', v)} />
+                  {form.storage_provider !== 'supabase' && (
+                    <p style={noteStyle}>
+                      You chose <strong>{activeStorage.label}</strong> for the storefront data. Supabase is still required above — it holds your master admin account and settings, and every write is mirrored there as a safety net.
                     </p>
-                    <ProviderFields fields={STORAGE_OPTIONS[0].fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+                  )}
+                </div>
+
+                <HelpToggle title="Advanced: enter the database keys directly (local development, or paste instead of the terminal)">
+                  <ProviderFields fields={activeStorage.fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+                  {form.storage_provider !== 'supabase' && (
+                    <div style={{ marginTop: 8 }}>
+                      <ProviderFields fields={STORAGE_OPTIONS[0].fields} values={form} onChange={set} copied={copied} onCopy={copy} errors={errors} />
+                    </div>
+                  )}
+                </HelpToggle>
+
+                <RedundancyGate upstashStore={upstashStore} copied={copied} onCopy={copy} />
+
+                {errors.supabaseConnection && (
+                  <div style={{ background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px', color: '#b91c1c', fontSize: 13, fontWeight: 700 }}>
+                    {errors.supabaseConnection}
                   </div>
                 )}
               </Section>
@@ -1304,8 +1491,17 @@ export default function SetupPage() {
                 ← Back
               </button>
               {step < 4 ? (
-                <button type="button" onClick={handleNext} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }}>
-                  {busy && step === 0 ? 'Verifying data store…' : 'Continue →'}
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={busy || (step === 0 && inProduction && !supabaseEnvReady)}
+                  style={{ ...primaryBtn, opacity: busy || (step === 0 && inProduction && !supabaseEnvReady) ? 0.5 : 1, cursor: busy || (step === 0 && inProduction && !supabaseEnvReady) ? 'default' : 'pointer' }}
+                >
+                  {busy && step === 0
+                    ? 'Verifying data store…'
+                    : step === 0 && inProduction && !supabaseEnvReady
+                      ? '🔒 Connect Supabase to continue'
+                      : 'Continue →'}
                 </button>
               ) : (
                 <button type="submit" disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }}>

@@ -63,40 +63,9 @@
   // values safe to keep as plaintext (they are not credentials).
   "vars": {
     // [OPTIONAL] force a data store. One of: "supabase" (default) | "upstash" |
-    //   "cloudflare-kv". (NECESSARY HERE — only if you override the default)
-    //   Example: "supabase"                              (SETUP WIZARD step 1)
-    "STORAGE_PROVIDER": "supabase",
-
-    // [RECOMMENDED] the ADMIN EMAIL — this is the email you sign into /admin
-    //   with (there is NO separate "username" anymore) and the inbox that
-    //   receives the 6-digit /admin two-step code. (NECESSARY HERE)
-    //   Example: "you@example.com"                       (SETUP WIZARD step 4)
-    "ADMIN_VERIFY_EMAIL": "",
-
-    // [OPTIONAL] brand name used in emails + templates. (USE SITE)
-    //   Prefer /admin → Settings → Branding & Share (brandName) — this env is
-    //   only a fallback.  Example: "Acme"                 (SETUP WIZARD step 4)
-    "BRAND_NAME": "",
-
-    // [OPTIONAL] support inbox shown in the footer + used for customer emails.
-    //   (USE SITE) Prefer /admin → Settings → Footer — this env is only a
-    //   fallback.  Example: "help@example.com"            (SETUP WIZARD step 4)
-    "SUPPORT_EMAIL": "",
-
-    // [OPTIONAL] "true" shows the maintenance screen to unauthenticated
-    //   visitors. (NECESSARY HERE)
-    //   Example: "true" (or empty = off)
-    "MAINTENANCE_MODE": "",
-
-    // [OPTIONAL] the "from" address for transactional emails when the email
-    //   provider needs one. (NECESSARY HERE — only if the site doesn't set it)
-    //   Example: "Acme <onboarding@resend.dev>"          (SETUP WIZARD step 3)
-    "RESEND_FROM": "",
-
-    // [OPTIONAL] "true" turns ON license enforcement (blocks writes when the
-    //   license key is missing or expired). (NECESSARY HERE)
-    //   Example: "true" (or empty = off)
-    "LICENSE_ENFORCED": ""
+    //   "cloudflare-kv". Leave "supabase" unless you picked a different primary
+    //   store in the Setup Wizard. (NECESSARY HERE — only to override)
+    "STORAGE_PROVIDER": "supabase"
   }
   //
   // ── SECRETS — set in the dashboard ("Secrets" column) or via: ──────────────
@@ -109,6 +78,11 @@
   //   SUPABASE_SERVICE_ROLE_KEY  [REQUIRED for Supabase]  "eyJhbGciOiJIUzI1NiIs…" (server-only) (NECESSARY HERE) (SETUP WIZARD step 1)
   //   UPSTASH_REDIS_REST_URL     [OPTIONAL alt store]     "https://fast-swan-12345.upstash.io" (NECESSARY HERE) (SETUP WIZARD step 1)
   //   UPSTASH_REDIS_REST_TOKEN   [OPTIONAL alt store]     "AX3rASFh…"             (NECESSARY HERE) (SETUP WIZARD step 1)
+  //   STORAGE_REPLICAS           [OPTIONAL redundancy]    "upstash"               (NECESSARY HERE) (SETUP WIZARD step 1)
+  //     Comma-separated list of EXTRA stores that mirror every write, so a single
+  //     vendor losing data never takes the store down. Set it as a plaintext
+  //     "Variable" in the dashboard (NOT a secret). Example: "upstash" mirrors
+  //     Supabase → Upstash.
   //
   // ── ADMIN ──────────────────────────────────────────────────────────────────
   //   ADMIN_BASIC_AUTH_PASSWORD  [RECOMMENDED] the /admin HTTP Basic Auth password.

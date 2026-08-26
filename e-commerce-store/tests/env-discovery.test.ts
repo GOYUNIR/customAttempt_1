@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareRequiredChecks, cloudflareWizardSavedChecks, CLOUDFLARE_REQUIRED_IDS, CLOUDFLARE_WIZARD_SAVED_IDS } from '../lib/env-discovery.ts';
+import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareRequiredChecks, cloudflareWizardSavedChecks, CLOUDFLARE_REQUIRED_IDS, CLOUDFLARE_WIZARD_SAVED_IDS, dataStoreSummary, supabaseEnvFullySet } from '../lib/env-discovery.ts';
 
 test('empty environment reports storage + admin as the blocking groups', () => {
   const result = discoverEnvironment({});
@@ -175,4 +175,40 @@ test('CLOUDFLARE_REQUIRED_IDS is a subset of the Cloudflare env vars and exclude
   for (const id of CLOUDFLARE_WIZARD_SAVED_IDS) {
     assert.ok(cloudflareIds.includes(id), `wizard-saved id ${id} must be a Cloudflare env var`);
   }
+});
+
+test('supabaseEnvFullySet requires all three Supabase creds (and ignores inline overrides by design)', () => {
+  assert.equal(supabaseEnvFullySet({}), false);
+  assert.equal(
+    supabaseEnvFullySet({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_ROLE_KEY: 's' }),
+    true,
+  );
+  assert.equal(supabaseEnvFullySet({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'a' }), false);
+});
+
+test('dataStoreSummary reports per-store reachability + the exact missing Supabase keys', () => {
+  const summary = dataStoreSummary({});
+  const supabase = summary.find((s) => s.key === 'supabase');
+  const upstash = summary.find((s) => s.key === 'upstash');
+  assert.equal(supabase?.configured, false);
+  assert.equal(upstash?.configured, false);
+  assert.deepEqual(
+    new Set(supabase?.missing.map((m) => m.variable)),
+    new Set(['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']),
+  );
+  // Every missing entry carries a copyable wrangler command + a placeholder example.
+  for (const m of supabase?.missing || []) {
+    assert.match(m.command, /wrangler secret put/);
+    assert.ok(m.example.length > 0);
+  }
+
+  const full = dataStoreSummary({
+    SUPABASE_URL: 'https://x.supabase.co',
+    SUPABASE_ANON_KEY: 'a',
+    SUPABASE_SERVICE_ROLE_KEY: 's',
+    UPSTASH_REDIS_REST_URL: 'https://x.upstash.io',
+    UPSTASH_REDIS_REST_TOKEN: 't',
+  });
+  assert.equal(full.find((s) => s.key === 'supabase')?.configured, true);
+  assert.equal(full.find((s) => s.key === 'upstash')?.configured, true);
 });

@@ -301,6 +301,87 @@ export function cloudflareWizardSavedChecks(env: EnvObject = process.env): EnvCh
   return cloudflareEnvVarChecks(env).filter((c) => ids.has(c.id));
 }
 
+/**
+ * One missing data-store credential, in the shape the Setup Wizard renders:
+ * name + env-var + copy-paste command + realistic example (never a real key).
+ */
+export interface DataStoreMissing {
+  id: string;
+  name: string;
+  variable: string;
+  secret: boolean;
+  command: string;
+  example: string;
+}
+
+/** Per-store status: is it reachable, and what (if anything) is still missing. */
+export interface DataStoreStatus {
+  key: 'supabase' | 'upstash' | 'cloudflare-kv';
+  label: string;
+  configured: boolean;
+  missing: DataStoreMissing[];
+}
+
+/**
+ * The data-store checklist for the Setup Wizard's step 1 — one row per backend
+ * with its reachability and the exact credentials still missing. Reuses the
+ * same detection (`detectStorageDrivers`) and check registry
+ * (`discoverEnvironment`) as everything else so the wizard can never drift from
+ * the middleware / SetUp tab.
+ */
+export function dataStoreSummary(env: EnvObject = process.env): DataStoreStatus[] {
+  const drivers = detectStorageDrivers(env);
+  const all = discoverEnvironment(env).all;
+  const find = (id: string) => all.find((c) => c.id === id);
+
+  const toMissing = (check: EnvCheck | undefined): DataStoreMissing | null =>
+    check && !check.present
+      ? {
+          id: check.id,
+          name: check.name,
+          variable: check.variable,
+          secret: check.secret,
+          command: check.commands[0] || '',
+          example: check.example || '',
+        }
+      : null;
+
+  const supabaseMissing = [find('supabase-url'), find('supabase-anon'), find('supabase-service')]
+    .map(toMissing)
+    .filter((m): m is DataStoreMissing => m !== null);
+
+  const upstashMissing = [find('redis-url'), find('redis-token')]
+    .map(toMissing)
+    .filter((m): m is DataStoreMissing => m !== null);
+
+  return [
+    {
+      key: 'supabase',
+      label: 'Supabase (recommended)',
+      configured: drivers.supabase,
+      missing: supabaseMissing,
+    },
+    {
+      key: 'upstash',
+      label: 'Upstash Redis',
+      configured: drivers.redis,
+      missing: upstashMissing,
+    },
+    {
+      key: 'cloudflare-kv',
+      label: 'Cloudflare KV / D1',
+      configured: drivers.cloudflare,
+      missing: [],
+    },
+  ];
+}
+
+/** True when the 3 Supabase credentials are present as REAL env vars (the
+ *  durable requirement) — not the wizard's inline runtime override. */
+export function supabaseEnvFullySet(env: EnvObject = process.env): boolean {
+  return detectStorageDrivers(env).supabase;
+}
+
 const EXAMPLES: Record<string, string> = {
   'supabase-storage': 'https://abcdefghijklm.supabase.co',
   'storage-provider': 'supabase',
