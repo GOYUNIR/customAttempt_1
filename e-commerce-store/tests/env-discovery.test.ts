@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareRequiredChecks, cloudflareWizardSavedChecks, CLOUDFLARE_REQUIRED_IDS, CLOUDFLARE_WIZARD_SAVED_IDS, dataStoreSummary, supabaseEnvFullySet } from '../lib/env-discovery.ts';
+import { discoverEnvironment, computeAdminReady, detectStorageDrivers, detectStorageProvider, cloudflareEnvVarChecks, cloudflareRequiredChecks, cloudflareWizardSavedChecks, CLOUDFLARE_REQUIRED_IDS, CLOUDFLARE_WIZARD_SAVED_IDS, CLOUDFLARE_DASHBOARD_URL, dataStoreSummary, supabaseEnvFullySet } from '../lib/env-discovery.ts';
 
 test('empty environment reports storage + admin as the blocking groups', () => {
   const result = discoverEnvironment({});
@@ -186,6 +186,10 @@ test('supabaseEnvFullySet requires all three Supabase creds (and ignores inline 
   assert.equal(supabaseEnvFullySet({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'a' }), false);
 });
 
+test('CLOUDFLARE_DASHBOARD_URL is a real dashboard deep-link (no terminal required)', () => {
+  assert.match(CLOUDFLARE_DASHBOARD_URL, /^https:\/\/dash\.cloudflare\.com\//);
+});
+
 test('dataStoreSummary reports per-store reachability + the exact missing Supabase keys', () => {
   const summary = dataStoreSummary({});
   const supabase = summary.find((s) => s.key === 'supabase');
@@ -196,10 +200,12 @@ test('dataStoreSummary reports per-store reachability + the exact missing Supaba
     new Set(supabase?.missing.map((m) => m.variable)),
     new Set(['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']),
   );
-  // Every missing entry carries a copyable wrangler command + a placeholder example.
+  // Every missing entry carries a copyable wrangler command, a placeholder
+  // example, AND a plain-English "where to paste it in the dashboard" note.
   for (const m of supabase?.missing || []) {
     assert.match(m.command, /wrangler secret put/);
     assert.ok(m.example.length > 0);
+    assert.ok(m.where.length > 0, `missing ${m.variable} should include a "where" note`);
   }
 
   const full = dataStoreSummary({

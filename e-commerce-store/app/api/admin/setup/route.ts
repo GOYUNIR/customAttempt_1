@@ -13,13 +13,14 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess, probePlatformSettingsSchema } from '@/services/config/supabase-client';
+import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess, probePlatformSettingsSchema } from '@/services/config/supabase-client';
 import {
   discoverEnvironment,
   computeAdminReady,
   detectStorageDrivers,
   detectStorageProvider,
   CLOUDFLARE_VARS_PATH,
+  CLOUDFLARE_DASHBOARD_URL,
   cloudflareEnvVarChecks,
   CLOUDFLARE_REQUIRED_IDS,
   CLOUDFLARE_WIZARD_SAVED_IDS,
@@ -257,6 +258,64 @@ async function probeAi(body: Record<string, unknown>): Promise<NextResponse> {
  *       Basic Auth exists, so the FIRST save needs no credentials; a RE-save on
  *       an already-configured platform requires the admin password.
  */
+/**
+ * Live Supabase connection probe — the "Test connection" button on step 1.
+ * Reads the 3 credentials from the request body (or falls back to the current
+ * environment) and verifies them against the REAL Supabase project:
+ *   - reports exactly WHICH of the 3 are still missing (with their env-var name);
+ *   - once all 3 are present, hits `${url}/rest/v1/` with the service-role key
+ *     to confirm the project is reachable AND the key is accepted.
+ * Values are NEVER echoed back — only presence booleans + a generic result.
+ */
+async function probeSupabase(body: Record<string, unknown>) {
+  const env = readSupabaseEnv();
+  const url = String(body.supabaseUrl || body.supabase_url || env.url || '').trim().replace(/\/+$/, '');
+  const anonKey = String(body.supabaseAnonKey || body.supabase_anon_key || env.anonKey || '').trim();
+  const serviceRoleKey = String(body.supabaseServiceRoleKey || body.supabase_service_role_key || env.serviceRoleKey || '').trim();
+
+  const missing: Array<{ variable: string; name: string }> = [];
+  if (!url) missing.push({ variable: 'SUPABASE_URL', name: 'Supabase project URL' });
+  if (!anonKey) missing.push({ variable: 'SUPABASE_ANON_KEY', name: 'Supabase anon key' });
+  if (!serviceRoleKey) missing.push({ variable: 'SUPABASE_SERVICE_ROLE_KEY', name: 'Supabase service-role key' });
+
+  if (missing.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      connected: false,
+      missing,
+      error: `Still missing ${missing.map((m) => m.variable).join(', ')}.`,
+      dataStores: dataStoreSummary(),
+    });
+  }
+
+  if (!/^https?:\/\//i.test(url)) {
+    return NextResponse.json({ ok: false, connected: false, error: 'Enter a valid Supabase project URL (starting with https://).' });
+  }
+
+  try {
+    // PostgREST root returns the OpenAPI spec (200) for a valid key, 401/403 for
+    // a rejected key — schema-independent, so it works before migrations run.
+    const res = await fetch(`${url}/rest/v1/`, {
+      method: 'GET',
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 401 || res.status === 403) {
+      return NextResponse.json({
+        ok: false,
+        connected: false,
+        error: `Supabase rejected the service-role key (HTTP ${res.status}). Make sure you pasted the SERVICE ROLE key, not the anon key.`,
+      });
+    }
+    if (!res.ok) {
+      return NextResponse.json({ ok: false, connected: false, error: `Supabase is unreachable (HTTP ${res.status}).` });
+    }
+    return NextResponse.json({ ok: true, connected: true, error: '', dataStores: dataStoreSummary() });
+  } catch {
+    return NextResponse.json({ ok: false, connected: false, error: `Could not reach ${url} — check the project URL and your network.` });
+  }
+}
+
 export async function GET(request: Request) {
   let settings: Awaited<ReturnType<typeof getPlatformSettings>> = null;
   let configured: Awaited<ReturnType<typeof isPlatformConfigured>> = null;
@@ -331,6 +390,7 @@ export async function GET(request: Request) {
     supabaseEnvReady: supabaseEnvFullySet(),
     isProduction: process.env.NODE_ENV === 'production',
     dataStores: dataStoreSummary(),
+    dashboardUrl: CLOUDFLARE_DASHBOARD_URL,
   });
 }
 
@@ -344,6 +404,12 @@ export async function POST(request: Request) {
       body = (await request.json()) as Record<string, unknown>;
     } catch {
       return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+    }
+
+    // ── live Supabase probe ("Test connection") — runs BEFORE the gate so the
+    // ── operator can verify inline credentials without env vars being set yet.
+    if (String(body.probe || '').trim() === 'supabase') {
+      return probeSupabase(body);
     }
 
     // ── THE LOCK ON THE VAULT (production only) ─────────────────────────────────
@@ -363,6 +429,7 @@ export async function POST(request: Request) {
           stage: 'storage_init',
           code: 'cloudflare_supabase_required',
           dataStores: dataStoreSummary(),
+          dashboardUrl: CLOUDFLARE_DASHBOARD_URL,
         },
         { status: 422 },
       );

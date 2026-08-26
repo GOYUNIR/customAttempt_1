@@ -225,6 +225,12 @@ const WRANGLER_SECRET = (name: string) => `npx wrangler secret put ${name}`;
 export const CLOUDFLARE_VARS_PATH =
   'Workers & Pages -> [Your Project Name] -> Settings -> Variables and Secrets -> Production';
 
+
+/** Direct link to the Cloudflare dashboard, where operators paste variables +
+ *  secrets by hand (no terminal needed). Surfaced by the Setup Wizard so a
+ *  non-technical buyer is never forced to use `wrangler`. */
+export const CLOUDFLARE_DASHBOARD_URL = 'https://dash.cloudflare.com/';
+
 /**
  * Where to set a value on CLOUDFLARE, derived from what kind of value it is.
  * Surfaced verbatim on the SetUp tab so an operator always knows exactly which
@@ -312,6 +318,8 @@ export interface DataStoreMissing {
   secret: boolean;
   command: string;
   example: string;
+  /** Plain-English "where to paste this in the Cloudflare dashboard". */
+  where: string;
 }
 
 /** Per-store status: is it reachable, and what (if anything) is still missing. */
@@ -343,6 +351,7 @@ export function dataStoreSummary(env: EnvObject = process.env): DataStoreStatus[
           secret: check.secret,
           command: check.commands[0] || '',
           example: check.example || '',
+          where: check.where || '',
         }
       : null;
 

@@ -22,15 +22,20 @@ const inputStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid 
 const selectStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
 const labelStyle = { fontSize: 13, fontWeight: 700, color: '#374151' } as const;
 const hintStyle = { fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.55 } as const;
+const copyBtnStyle = { background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' } as const;
+// Public Cloudflare dashboard URL — where a non-technical buyer pastes the 3
+// Supabase values by hand (no terminal needed). Not a secret.
+const CLOUDFLARE_DASHBOARD = 'https://dash.cloudflare.com/';
 
 // ── types ─────────────────────────────────────────────────────────────────────
-type MissingCred = { variable: string; command: string; example: string };
+type MissingCred = { variable: string; command: string; example: string; where?: string; name?: string };
 type DataStoreStatus = { key: string; label: string; configured: boolean; missing: MissingCred[] };
 type Status = {
   configured?: boolean;
   isProduction?: boolean;
   supabaseEnvReady?: boolean;
   dataStores?: DataStoreStatus[];
+  dashboardUrl?: string;
 };
 
 // ── provider options (each defaults to "Skip for now") ────────────────────────
@@ -144,6 +149,19 @@ function Select(props: { value: string; onChange: (v: string) => void; options: 
   );
 }
 
+/** An environment-variable name with a one-tap copy button — so a buyer can
+ *  paste the exact name into Cloudflare without ever typing it. */
+function EnvNameChip(props: { name: string; copied: string; onCopy: (t: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, fontWeight: 800, color: '#3730a3', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 10px' }}>{props.name}</code>
+      <button type="button" onClick={() => props.onCopy(props.name)} style={copyBtnStyle}>
+        {props.copied === props.name ? 'copied ✓' : 'copy name'}
+      </button>
+    </div>
+  );
+}
+
 // ── the page ──────────────────────────────────────────────────────────────────
 export default function SetupPage() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -155,7 +173,10 @@ export default function SetupPage() {
   const [warning, setWarning] = useState('');
   const [notice, setNotice] = useState('');
   const [showOptional, setShowOptional] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showMirror, setShowMirror] = useState(false);
   const [copied, setCopied] = useState('');
+  const [probe, setProbe] = useState<{ state: 'idle' | 'busy' | 'ok' | 'fail'; message: string }>({ state: 'idle', message: '' });
 
   const load = useCallback(async () => {
     try {
@@ -191,6 +212,30 @@ export default function SetupPage() {
       window.setTimeout(() => setCopied(''), 1600);
     } catch {
       /* clipboard unavailable — ignore */
+    }
+  }
+
+  async function testConnection() {
+    setProbe({ state: 'busy', message: 'Testing…' });
+    try {
+      const res = await fetch('/api/admin/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          probe: 'supabase',
+          supabase_url: form.supabase_url,
+          supabase_anon_key: form.supabase_anon_key,
+          supabase_service_role_key: form.supabase_service_role_key,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; connected?: boolean; error?: string };
+      if (data.connected) {
+        setProbe({ state: 'ok', message: '✓ Connected — Supabase accepted your keys.' });
+      } else {
+        setProbe({ state: 'fail', message: String(data.error || 'Connection failed.') });
+      }
+    } catch {
+      setProbe({ state: 'fail', message: 'Could not test the connection — check your network.' });
     }
   }
 
@@ -288,21 +333,48 @@ export default function SetupPage() {
         </header>
 
         {inProduction && !supabaseEnvReady && (
-          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#92400e' }}>First, set your 3 Supabase keys</div>
-            <p style={hintStyle}>In production these must be set as secrets on your host. Add each one, then press Check again.</p>
-            {missingSupabase.map((m) => (
-              <button
-                key={m.variable}
-                type="button"
-                onClick={() => copy(m.command)}
-                style={{ textAlign: 'left', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, background: '#0f172a', color: copied === m.command ? '#4ade80' : '#e2e8f0', border: 'none', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', wordBreak: 'break-all' }}
-              >
-                {copied === m.command ? 'copied' : m.command}
-              </button>
-            ))}
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: '18px', display: 'grid', gap: 12 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>🔒 Connect Supabase to continue</div>
+            <p style={hintStyle}>
+              The server needs these 3 values before it can reach your database. Add them by hand in the Cloudflare dashboard (no terminal needed) or run one command each, then press <strong>Check again</strong>.
+            </p>
+
+            <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>
+              Open the Cloudflare dashboard →
+            </a>
+            <p style={hintStyle}>
+              Path: Workers &amp; Pages → [your project] → Settings → <strong>Variables and Secrets</strong> → Production. Add each value as a <strong>Secret</strong> (encrypted) — the URL can also be a plaintext Variable.
+            </p>
+
+            {missingSupabase.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#065f46', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '10px 12px' }}>
+                ✓ All 3 keys detected. Press “Check again” to refresh the gate.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {missingSupabase.map((m) => (
+                  <div key={m.variable} style={{ display: 'grid', gap: 6, background: '#fff', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5, fontWeight: 800, color: '#0f172a' }}>{m.variable}</code>
+                      <button type="button" onClick={() => copy(m.variable)} style={{ ...copyBtnStyle, flexShrink: 0 }}>
+                        {copied === m.variable ? 'copied ✓' : 'copy name'}
+                      </button>
+                    </div>
+                    {m.where ? <p style={hintStyle}>{m.where}</p> : null}
+                    <button
+                      type="button"
+                      onClick={() => copy(m.command)}
+                      style={{ textAlign: 'left', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, background: '#0f172a', color: copied === m.command ? '#4ade80' : '#e2e8f0', border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer', wordBreak: 'break-all' }}
+                    >
+                      {copied === m.command ? 'copied ✓' : m.command}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <button type="button" onClick={() => void load()} style={{ justifySelf: 'start', background: '#fff', color: '#92400e', border: '1px solid #fde68a', borderRadius: 999, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              Check again
+              ⟳ Check again
             </button>
           </div>
         )}
@@ -310,15 +382,56 @@ export default function SetupPage() {
         <form onSubmit={submit} style={{ display: 'grid', gap: 20 }}>
           <Card>
             <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>1 · Connect your database</h2>
+            <p style={hintStyle}>
+              Paste the 3 values from Supabase (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value.
+            </p>
+
             <Field label="Supabase project URL" hint="Looks like https://abcdefghijklm.supabase.co">
+              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                <EnvNameChip name="SUPABASE_URL" copied={copied} onCopy={copy} />
+              </div>
               <TextInput value={form.supabase_url} onChange={(v) => set('supabase_url', v)} placeholder="https://your-project.supabase.co" />
             </Field>
+
             <Field label="Anon public key" hint="A long JWT starting with eyJ...">
+              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                <EnvNameChip name="SUPABASE_ANON_KEY" copied={copied} onCopy={copy} />
+              </div>
               <SecretInput value={form.supabase_anon_key} onChange={(v) => set('supabase_anon_key', v)} placeholder="eyJ..." />
             </Field>
+
             <Field label="Service-role key (secret)" hint="Never expose this one. It also starts with eyJ...">
+              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                <EnvNameChip name="SUPABASE_SERVICE_ROLE_KEY" copied={copied} onCopy={copy} />
+              </div>
               <SecretInput value={form.supabase_service_role_key} onChange={(v) => set('supabase_service_role_key', v)} placeholder="eyJ..." />
             </Field>
+
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => void testConnection()} disabled={probe.state === 'busy'} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: probe.state === 'busy' ? 'default' : 'pointer', opacity: probe.state === 'busy' ? 0.6 : 1 }}>
+                {probe.state === 'busy' ? 'Testing…' : 'Test connection'}
+              </button>
+              {probe.state === 'ok' && <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>{probe.message}</span>}
+              {probe.state === 'fail' && <span style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c' }}>{probe.message}</span>}
+            </div>
+
+            <div style={{ display: 'grid', gap: 8 }}>
+              <button type="button" onClick={() => setShowHelp((s) => !s)} style={{ justifySelf: 'start', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
+                {showHelp ? 'Hide' : 'Where do I find these values?'} {showHelp ? '−' : '+'}
+              </button>
+              {showHelp && (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 8 }}>
+                  <p style={hintStyle}>
+                    1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>supabase.com/dashboard</a> → open your project → <strong>Project Settings → API</strong>.
+                  </p>
+                  <p style={hintStyle}>2. Copy the <strong>Project URL</strong>, the <strong>anon public</strong> key, and the <strong>service_role</strong> key.</p>
+                  <p style={hintStyle}>
+                    3. Add them in Cloudflare — by hand in the <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>dashboard</a> (Workers &amp; Pages → [project] → Settings → Variables and Secrets → Production → <strong>Secrets</strong>), or with the copy-paste commands above.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <p style={hintStyle}>
               No account yet? Create a free project at supabase.com, then grab these three values under Project Settings, API.
             </p>
@@ -333,6 +446,32 @@ export default function SetupPage() {
               <SecretInput value={adminPassword} onChange={(v) => setAdminPassword(v)} placeholder="password" />
             </Field>
           </Card>
+
+          <Card>
+            <button
+              type="button"
+              onClick={() => setShowMirror((s) => !s)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, width: '100%', color: '#111' }}
+            >
+              <span style={{ fontSize: 15, fontWeight: 800 }}>Optional: add a safety mirror (redundancy)</span>
+              <span style={{ fontSize: 18, color: '#6b7280' }}>{showMirror ? '−' : '+'}</span>
+            </button>
+            <p style={hintStyle}>
+              Mirror every write to a second independent database (e.g. Upstash Redis) so if one provider ever goes down or loses data, the store keeps a full copy. Add these in Cloudflare the same way as above, then redeploy.
+            </p>
+            {showMirror && (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <EnvNameChip name="STORAGE_REPLICAS" copied={copied} onCopy={copy} />
+                <p style={hintStyle}>Set this to <code>upstash</code> (or a comma-separated list for 2–3 mirrors).</p>
+                <EnvNameChip name="UPSTASH_REDIS_REST_URL" copied={copied} onCopy={copy} />
+                <EnvNameChip name="UPSTASH_REDIS_REST_TOKEN" copied={copied} onCopy={copy} />
+                <p style={hintStyle}>
+                  The store then writes to both automatically and reads from the primary with failover. Set the token as a Secret; STORAGE_REPLICAS and the URL can be plaintext Variables.
+                </p>
+              </div>
+            )}
+          </Card>
+
 
           <Card>
             <button
