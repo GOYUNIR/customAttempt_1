@@ -1,6 +1,7 @@
 /**
- * Setup wizard normalization — the AI engine is MANDATORY (primary) with an
- * OPTIONAL secondary fallback.
+ * Setup wizard normalization — payments, email, maps and the AI engine are all
+ * OPTIONAL (skippable); only the Supabase connection + admin account are
+ * mandatory.
  *
  * `node --test` loads this with plain relative imports (no `@/` alias), the
  * same way `drivers.test.ts` does. The `platform-settings.ts` module it
@@ -20,15 +21,38 @@ const BASE = {
   ai_api_key: 'x',
 };
 
-test('AI is mandatory — a missing / blank / "none" primary provider is rejected', () => {
+test('AI is optional — a missing / blank / "none" primary provider means "skip"', () => {
   const omitted = normalizePlatformSettingsInput({ ...BASE, ai_provider: undefined, ai_api_key: undefined });
-  assert.equal(omitted.ok, false);
+  assert.ok(omitted.ok);
+  if (omitted.ok) assert.equal(omitted.input.ai_provider, null);
 
   const explicitNone = normalizePlatformSettingsInput({ ...BASE, ai_provider: 'none', ai_api_key: '' });
-  assert.equal(explicitNone.ok, false);
+  assert.ok(explicitNone.ok);
+  if (explicitNone.ok) assert.equal(explicitNone.input.ai_provider, null);
 
   const blank = normalizePlatformSettingsInput({ ...BASE, ai_provider: '', ai_api_key: '' });
-  assert.equal(blank.ok, false);
+  assert.ok(blank.ok);
+  if (blank.ok) assert.equal(blank.input.ai_provider, null);
+});
+
+test('Email is optional — a missing / blank / "none" provider means "skip"', () => {
+  const omitted = normalizePlatformSettingsInput({ ...BASE, mail_provider: undefined, mail_api_key: undefined });
+  assert.ok(omitted.ok);
+  if (omitted.ok) assert.equal(omitted.input.mail_provider, null);
+
+  const explicitNone = normalizePlatformSettingsInput({ ...BASE, mail_provider: 'none', mail_api_key: '' });
+  assert.ok(explicitNone.ok);
+  if (explicitNone.ok) assert.equal(explicitNone.input.mail_provider, null);
+});
+
+test('Maps are optional — a missing / blank / "none" provider means "skip"', () => {
+  const omitted = normalizePlatformSettingsInput({ ...BASE, map_provider: undefined, map_api_key: undefined });
+  assert.ok(omitted.ok);
+  if (omitted.ok) assert.equal(omitted.input.map_provider, null);
+
+  const explicitNone = normalizePlatformSettingsInput({ ...BASE, map_provider: 'none', map_api_key: '' });
+  assert.ok(explicitNone.ok);
+  if (explicitNone.ok) assert.equal(explicitNone.input.map_provider, null);
 });
 
 test('AI primary still requires a key when a real provider is selected', () => {

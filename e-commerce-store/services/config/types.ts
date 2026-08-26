@@ -90,17 +90,17 @@ export interface GlobalPlatformSettings {
 
 /** The payload the Setup Wizard POSTs. Provider + key triples per category. */
 export interface PlatformSettingsInput {
-  mail_provider: MailProvider;
-  mail_api_key: string;
+  mail_provider: MailProvider | null;
+  mail_api_key: string | null;
   /** `null` = payments skipped for now (no payment provider configured yet). */
   payment_provider: PaymentProvider | null;
   payment_api_key: string | null;
   payment_webhook_secret?: string;
-  map_provider: MapProvider;
+  map_provider: MapProvider | null;
   map_api_key?: string;
-  /** The PRIMARY AI provider (mandatory — the engine falls back to the secondary when this fails). */
-  ai_provider: AiProvider;
-  ai_api_key: string;
+  /** The PRIMARY AI provider (optional — the storefront uses built-in CSS/SVG presets when null). */
+  ai_provider: AiProvider | null;
+  ai_api_key: string | null;
   /** Optional secondary fallback AI provider (tried when the primary fails). */
   ai_provider_secondary: AiProvider | null;
   ai_api_key_secondary?: string;

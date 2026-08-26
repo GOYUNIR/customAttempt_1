@@ -82,10 +82,14 @@ export async function isPlatformConfigured(opts?: { force?: boolean }): Promise<
 export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   | { ok: true; input: PlatformSettingsInput }
   | { ok: false; error: string } {
-  const mailProvider = sanitizeMailProvider(raw.mail_provider);
-  if (!mailProvider) return { ok: false, error: 'Choose a valid email provider.' };
-  const mailApiKey = String(raw.mail_api_key || '').trim();
-  if (!mailApiKey) return { ok: false, error: 'Enter an email provider API key.' };
+  // Email is OPTIONAL - a missing / blank / 'none' provider means "skip for
+  // now": the store sends no transactional email until one is configured later.
+  const mailRaw = String(raw.mail_provider ?? '').trim();
+  const isMailSkip = !mailRaw || mailRaw.toLowerCase() === 'none';
+  const mailProvider = isMailSkip ? null : sanitizeMailProvider(raw.mail_provider);
+  if (!isMailSkip && !mailProvider) return { ok: false, error: 'Choose a valid email provider.' };
+  const mailApiKey = isMailSkip ? null : String(raw.mail_api_key || '').trim();
+  if (mailProvider && !mailApiKey) return { ok: false, error: 'Enter an email provider API key.' };
 
   // Payments are OPTIONAL. A missing / blank / 'none' provider means "skip
   // payments for now" — checkout simply won't run until one is configured.
@@ -97,19 +101,26 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   if (paymentProvider && !paymentApiKey) return { ok: false, error: 'Enter a payment provider API key.' };
   const paymentWebhookSecret = String(raw.payment_webhook_secret || '').trim();
 
-  const mapProvider = sanitizeMapProvider(raw.map_provider);
-  if (!mapProvider) return { ok: false, error: 'Choose a valid map provider.' };
+  // Maps are OPTIONAL - a missing / blank / 'none' provider means "skip for
+  // now": address autofill is simply disabled until one is configured.
+  const mapRaw = String(raw.map_provider ?? '').trim();
+  const isMapSkip = !mapRaw || mapRaw.toLowerCase() === 'none';
+  const mapProvider = isMapSkip ? null : sanitizeMapProvider(raw.map_provider);
+  if (!isMapSkip && !mapProvider) return { ok: false, error: 'Choose a valid map provider.' };
   const mapApiKey = String(raw.map_api_key || '').trim();
-  if (mapProvider !== 'open_street_map' && !mapApiKey) {
+  if (mapProvider && mapProvider !== 'open_street_map' && !mapApiKey) {
     return { ok: false, error: 'Enter a map provider API key.' };
   }
 
-  // AI is now MANDATORY (primary). The engine only falls back to the built-in
-  // CSS/SVG presets when the primary call fails AND no secondary is configured.
-  const aiProvider = sanitizeAiProvider(raw.ai_provider);
-  if (!aiProvider) return { ok: false, error: 'Choose a valid AI provider (the AI engine is required).' };
+  // AI is OPTIONAL - a missing / blank / 'none' provider means "skip for now":
+  // the storefront falls back to the built-in CSS/SVG animation presets until
+  // an AI provider is configured.
+  const aiRaw = String(raw.ai_provider ?? '').trim();
+  const isAiSkip = !aiRaw || aiRaw.toLowerCase() === 'none';
+  const aiProvider = isAiSkip ? null : sanitizeAiProvider(raw.ai_provider);
+  if (!isAiSkip && !aiProvider) return { ok: false, error: 'Choose a valid AI provider.' };
   const aiApiKey = String(raw.ai_api_key || '').trim();
-  if (aiProvider !== 'workers_ai' && !aiApiKey) {
+  if (aiProvider && aiProvider !== 'workers_ai' && !aiApiKey) {
     return { ok: false, error: 'Enter an AI provider API key (Workers AI needs none).' };
   }
 
@@ -137,14 +148,14 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
     ok: true,
     input: {
       mail_provider: mailProvider,
-      mail_api_key: mailApiKey,
+      mail_api_key: mailProvider ? mailApiKey : null,
       payment_provider: paymentProvider,
       payment_api_key: paymentProvider ? paymentApiKey : null,
       payment_webhook_secret: paymentWebhookSecret || undefined,
       map_provider: mapProvider,
-      map_api_key: mapApiKey || undefined,
+      map_api_key: mapProvider ? mapApiKey || undefined : undefined,
       ai_provider: aiProvider,
-      ai_api_key: aiApiKey,
+      ai_api_key: aiProvider ? aiApiKey : null,
       ai_provider_secondary: aiProviderSecondary,
       ai_api_key_secondary: aiProviderSecondary && aiApiKeySecondary ? aiApiKeySecondary : undefined,
     },
