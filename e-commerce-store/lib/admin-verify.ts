@@ -18,8 +18,10 @@ import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
 import {
   ADMIN_DEVICES_KEY,
   adminVerifyKey,
+  adminAuthKey,
+  ADMIN_AUTH_COOKIE,
 } from '@/lib/redis-keys';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, getAdminVerifyEmail, adminRequestAuthorized } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
 
 const CODE_TTL_SECONDS = 10 * 60; // 10 minutes
@@ -261,6 +263,86 @@ export async function isSuperAdminSession(request: Request): Promise<boolean> {
   const token = adminDeviceTokenFromRequest(request);
   const record = await readAdminDevice(redis, token);
   return record?.superAdmin === true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin login sessions (in-site /admin/login form).
+//
+// The native browser Basic-Auth dialog was replaced by a neat in-site login
+// form. After the email + password are verified, `issueAdminAuthSession()` mints
+// a short-lived token stored as a TTL string (`admin:auth:<token>` = the email)
+// and carried in the `goyunir_admin_auth` cookie. That cookie is the "password
+// passed" layer; the operator must STILL confirm the emailed 2FA code (which
+// issues the long-lived device cookie) before the portal unlocks.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AUTH_SESSION_TTL_SECONDS = 15 * 60; // 15 minutes
+
+/** Extract the login-session token from the request's Cookie header. */
+export function adminAuthTokenFromRequest(request: Request): string {
+  const cookie = request.headers.get('cookie') || '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${ADMIN_AUTH_COOKIE}=([^;]+)`));
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+/** Mint a fresh in-site login session for `email` and return its token. */
+export async function issueAdminAuthSession(
+  redis: any,
+  email: string,
+): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  const normalized = String(email || '').trim().toLowerCase();
+  await redis.setex(
+    adminAuthKey(token),
+    AUTH_SESSION_TTL_SECONDS,
+    JSON.stringify({ email: normalized, createdAt: Date.now() }),
+  );
+  return token;
+}
+
+/** Read + validate a login-session token. Returns the verified email, or null
+ *  when the token is missing / unknown / expired. The value is a TTL string so
+ *  expired sessions vanish on their own — no lazy cleanup required. */
+export async function consumeAdminAuthSession(
+  redis: any,
+  token: string,
+): Promise<{ email: string } | null> {
+  if (!token) return null;
+  const raw = await redis.get(adminAuthKey(token)).catch(() => null);
+  if (!raw) return null;
+  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw);
+  const email = String(parsed?.email || '').trim().toLowerCase();
+  if (!email) return null;
+  return { email };
+}
+
+/** Resolve the verified admin email for the 2FA step: prefer the in-site login
+ *  session's email, then fall back to ADMIN_VERIFY_EMAIL / SUPPORT_EMAIL (the
+ *  legacy env-driven inbox). */
+export async function resolveAdminLoginEmail(request: Request): Promise<string> {
+  const redis = createRedisClient();
+  const token = adminAuthTokenFromRequest(request);
+  if (redis && token) {
+    const session = await consumeAdminAuthSession(redis, token);
+    if (session?.email) return session.email;
+  }
+  return getAdminVerifyEmail();
+}
+
+/** Authorize the admin 2FA step: either the legacy Basic-Auth header/password OR
+ *  a valid in-site login-session cookie. This is what the verify-* routes use on
+ *  top of the middleware's own gate (defense-in-depth). */
+export async function adminLoginAuthorized(
+  request: Request,
+  suppliedPassword?: string,
+): Promise<boolean> {
+  if (adminRequestAuthorized(request, suppliedPassword)) return true;
+  const redis = createRedisClient();
+  if (!redis) return false;
+  const token = adminAuthTokenFromRequest(request);
+  if (!token) return false;
+  const session = await consumeAdminAuthSession(redis, token);
+  return Boolean(session?.email);
 }
 
 

@@ -225,6 +225,22 @@ export const ADMIN_DEVICES_KEY = 'admin:devices';
 /** Name of the httpOnly admin 2FA device cookie set after a successful code. */
 export const ADMIN_DEVICE_COOKIE = 'goyunir_admin_device';
 
+// Admin login sessions (the in-site /admin/login form replaces the native
+// browser Basic-Auth dialog). After the operator's email + password are
+// verified, a SHORT-LIVED login session is stored under `admin:auth:<token>`
+// (TTL string) and carried in the `goyunir_admin_auth` cookie. That session is
+// the "password passed" layer — the operator still has to clear the emailed 2FA
+// code (which issues the long-lived `ADMIN_DEVICE_COOKIE`) before the portal
+// unlocks. Keeping login sessions as TTL strings (not hash fields) means they
+// self-expire without any lazy-cleanup sweep.
+export const ADMIN_AUTH_PREFIX = 'admin:auth';
+/** String w/ TTL — an in-site admin login session (`admin:auth:<token>`). */
+export function adminAuthKey(token: string): string {
+  return `${ADMIN_AUTH_PREFIX}:${token}`;
+}
+/** Name of the httpOnly admin LOGIN-SESSION cookie (proves email+password passed). */
+export const ADMIN_AUTH_COOKIE = 'goyunir_admin_auth';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Analytics (social proof counters + online visitors)
 // ────────────────────────────────────────────────────────────────────────────

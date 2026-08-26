@@ -2883,7 +2883,7 @@ export default function AdminPortal() {
           </div>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 8px' }}>Confirm it&apos;s really you</h1>
           <p style={{ fontSize: 12, color: '#a1a1aa', lineHeight: 1.6, margin: '0 0 16px' }}>
-            Your password was accepted. To protect the admin portal, a one-time code is emailed to your admin inbox before the portal unlocks.
+            Your password was accepted. <strong style={{ color: '#f7f7f7' }}>Two-step verification keeps the admin portal safe</strong> — even if your password ever leaks, a one-time code must also arrive in your email before the portal unlocks.
             {verifyMsg && verifyMsg.toLowerCase().includes('sent') && verifyEmail && <span> Sending to <strong style={{ color: '#f7f7f7' }}>{verifyEmail}</strong>.</span>}
           </p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
@@ -2953,7 +2953,10 @@ export default function AdminPortal() {
           </div>
           {verifyMsg && <p style={{ marginTop: 12, fontSize: 12, color: verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', lineHeight: 1.5 }}>{verifyMsg}</p>}
           <p style={{ marginTop: 14, fontSize: 10, color: '#666', lineHeight: 1.5 }}>
-            The code is in the email <strong style={{ color: '#999' }}>subject line</strong>, so it shows right in your phone&apos;s notification — no need to open the email. On iOS/Android it also appears as a one-tap autofill above this field, and it verifies automatically the moment all 6 digits are in. Set <code style={{ color: '#999' }}>ADMIN_VERIFY_EMAIL</code> (or <code style={{ color: '#999' }}>SUPPORT_EMAIL</code>) in the platform environment to choose where these codes are delivered. Codes expire in 10 minutes; wrong codes lock the email for 15 minutes after 5 tries.
+            The code is in the email <strong style={{ color: '#999' }}>subject line</strong>, so it shows right in your phone&apos;s notification — no need to open the email. On iOS/Android it also appears as a one-tap autofill above this field, and it verifies automatically the moment all 6 digits are in. Codes expire in 10 minutes; wrong codes lock the email for 15 minutes after 5 tries.
+          </p>
+          <p style={{ marginTop: 8, fontSize: 10, color: '#666', lineHeight: 1.5 }}>
+            <strong style={{ color: '#999' }}>Not receiving codes?</strong> Set up a transactional email provider (Resend, Postmark or SendGrid) in <Link href="/admin/setup?reconfigure=1" prefetch={false} style={{ color: '#999', textDecoration: 'underline' }}>Setup</Link> or in the portal&apos;s Settings, and make sure <code style={{ color: '#999' }}>ADMIN_VERIFY_EMAIL</code> (or <code style={{ color: '#999' }}>SUPPORT_EMAIL</code>) is set to the inbox where you want these codes delivered.
           </p>
         </div>
       </main>

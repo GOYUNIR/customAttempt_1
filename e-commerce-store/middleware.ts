@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createStorageClient } from '@/lib/storage';
-import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
+import { ADMIN_DEVICES_KEY, ADMIN_AUTH_PREFIX } from '@/lib/redis-keys';
 import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/edge';
 import { computeAdminReady, detectStorageDrivers } from '@/lib/env-discovery';
 import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
@@ -162,6 +162,40 @@ async function adminDeviceIsSuperAdmin(redis: any, token: string): Promise<boole
   return parsed.superAdmin === true;
 }
 
+/** Extract the in-site login-session token from the Cookie header. Mirrors
+ *  `adminAuthTokenFromRequest()` in lib/admin-verify.ts (inlined edge-safe). */
+function adminAuthTokenFromRequest(request: NextRequest): string {
+  const cookie = request.headers.get('cookie') || '';
+  const match = cookie.match(/(?:^|;\s*)goyunir_admin_auth=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+/** Whether an in-site login-session token is valid. Returns the verified admin
+ *  email, or null when missing/unknown/expired. Login sessions are TTL strings
+ *  (`admin:auth:<token>`), so they self-expire without any lazy-cleanup sweep. */
+async function adminAuthValid(redis: any, token: string): Promise<string | null> {
+  if (!token) return null;
+  const raw = await redis.get(`${ADMIN_AUTH_PREFIX}:${token}`).catch(() => null);
+  if (!raw) return null;
+  const parsed = parseStoredValue(raw) as { email?: string; createdAt?: number } | null;
+  const email = String(parsed?.email || '').trim().toLowerCase();
+  return email || null;
+}
+
+/** The in-site /admin/login form + its API replace the native Basic-Auth dialog. */
+function adminAuthRequired(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith('/api/admin')) {
+    return NextResponse.json(
+      { error: 'AUTH_REQUIRED', redirect: '/admin/login' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+  const url = request.nextUrl.clone();
+  url.pathname = '/admin/login';
+  url.search = '';
+  return NextResponse.redirect(url);
+}
+
 export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
@@ -197,6 +231,14 @@ export async function middleware(request: NextRequest) {
   // already-configured store.
   const isSetupApi =
     pathname === '/api/admin/setup' || pathname.startsWith('/api/admin/setup');
+
+  // The in-site login form (page + API) must stay reachable before ANY auth
+  // exists — it is the replacement for the native Basic-Auth dialog.
+  const isLoginPath =
+    pathname === '/admin/login' ||
+    pathname.startsWith('/admin/login') ||
+    pathname === '/api/admin/login' ||
+    pathname.startsWith('/api/admin/login');
 
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     // Deprecated: /admin/setup-status was folded into the unified /admin/setup
@@ -278,11 +320,8 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !ADMIN_PASSWORD) {
-      return new NextResponse('Admin not configured', {
-        status: 401,
-        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
-      });
+    if (!superAdminOk && !isLoginPath && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !ADMIN_PASSWORD) {
+      return adminAuthRequired(request);
     }
 
     // Gate 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â HTTP Basic Auth on EVERY admin path (page + all APIs). There is
@@ -290,11 +329,29 @@ export async function middleware(request: NextRequest) {
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
     const authHeader = request.headers.get('authorization');
-    if (!superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !verifyBasicAuth(authHeader)) {
-      return new NextResponse('Authentication required', {
-        status: 401,
-        headers: { 'WWW-Authenticate': 'Basic realm="Admin Portal — email + password"' },
-      });
+    const authCookieToken = adminAuthTokenFromRequest(request);
+    let authCookieOk = false;
+    let deviceCookieValid = false;
+    if (storage) {
+      try {
+        if (authCookieToken) authCookieOk = (await adminAuthValid(storage, authCookieToken)) !== null;
+        if (deviceToken) deviceCookieValid = await adminDeviceValid(storage, deviceToken);
+      } catch {
+        /* fail closed */
+      }
+    }
+    const passwordPassed =
+      superAdminOk ||
+      isLoginPath ||
+      isSuperLoginPath ||
+      isSetupReconfigure ||
+      isSetupRead ||
+      isSetupApi ||
+      verifyBasicAuth(authHeader) ||
+      authCookieOk ||
+      deviceCookieValid;
+    if (!passwordPassed) {
+      return adminAuthRequired(request);
     }
 
     // Gate 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â two-step email verification. The /admin page itself and the

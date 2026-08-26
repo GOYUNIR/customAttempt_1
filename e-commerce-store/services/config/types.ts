@@ -146,6 +146,7 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
  */
 export interface OperationalSettings {
   storage_provider?: string;
+  storage_replicas?: string;
   supabase_url?: string;
   supabase_anon_key?: string;
   supabase_service_role_key?: string;
@@ -178,6 +179,7 @@ export interface OperationalSettings {
 /** The whitelisted operational keys the wizard may persist (never arbitrary). */
 export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
   'storage_provider',
+  'storage_replicas',
   'supabase_url',
   'supabase_anon_key',
   'supabase_service_role_key',

@@ -1,23 +1,23 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminVerifyEmail, adminRequestAuthorized } from '@/lib/server-config';
-import { issueAdminCode } from '@/lib/admin-verify';
+import { createRedisClient } from '@/lib/server-config';
+import { issueAdminCode, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Step 1 of admin two-step sign-in: the operator has already passed Basic Auth
- * in the browser (proxy.ts), and this endpoint re-verifies the admin password
- * (body or the browser's cached Basic header), then emails a 6-digit code.
+ * Step 1 of admin two-step sign-in: the operator has already passed either
+ * Basic Auth or the in-site login form (/admin/login), and this endpoint
+ * re-verifies that, then emails a 6-digit code to the verified admin email.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const password = String(body?.password || '');
-    if (!adminRequestAuthorized(request, password)) {
+    if (!(await adminLoginAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    const adminEmail = getAdminVerifyEmail();
+    const adminEmail = await resolveAdminLoginEmail(request);
     if (!adminEmail) {
       return NextResponse.json({
         error: 'No admin verification inbox configured. Set ADMIN_VERIFY_EMAIL (or SUPPORT_EMAIL) in the platform environment.',

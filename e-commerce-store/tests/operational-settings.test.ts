@@ -62,6 +62,7 @@ test('normalizeOperationalSettingsInput round-trips a wizard payload', () => {
 test('OPERATIONAL_SETTING_KEYS covers the full provider matrix', () => {
   const required = [
     'storage_provider',
+    'storage_replicas',
     'supabase_url',
     'upstash_redis_rest_url',
     'cloudflare_kv_binding',

@@ -13,7 +13,7 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess, probePlatformSettingsSchema } from '@/services/config/supabase-client';
+import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess, verifySuperAdminSignIn, probePlatformSettingsSchema } from '@/services/config/supabase-client';
 import {
   discoverEnvironment,
   computeAdminReady,
@@ -412,6 +412,9 @@ export async function POST(request: Request) {
       return probeSupabase(body);
     }
 
+    // ── already configured? (controls the re-save guard + the env gate) ────────
+    const alreadyConfigured = (await isPlatformConfigured()) === true;
+
     // ── THE LOCK ON THE VAULT (production only) ─────────────────────────────────
     // The 3 Supabase credentials (URL + anon + service-role key) MUST be set as
     // REAL environment variables on the hosting platform before the wizard can
@@ -421,7 +424,10 @@ export async function POST(request: Request) {
     // admin portal after a redeploy. Local development is exempt so a developer
     // can test end-to-end without wiring up a platform.
     const isProduction = process.env.NODE_ENV === 'production';
-    if (isProduction && !supabaseEnvFullySet()) {
+    // Re-saving an ALREADY-CONFIGURED store skips this gate: the vault is already
+    // set up, so re-entering the master admin credentials must not re-demand the
+    // Supabase env vars (which may now live only as persisted platform settings).
+    if (isProduction && !alreadyConfigured && !supabaseEnvFullySet()) {
       return NextResponse.json(
         {
           error:
@@ -507,7 +513,6 @@ export async function POST(request: Request) {
     }
 
     // ── re-configuration guard ───────────────────────────────────────────────
-    const alreadyConfigured = (await isPlatformConfigured()) === true;
     const superAdminSession = await isSuperAdminSession(request);
     // Accept EITHER the master admin password (step 2) or the dedicated
     // ADMIN_BASIC_AUTH_PASSWORD field (step 4) as the supplied Basic-Auth secret.
@@ -517,23 +522,37 @@ export async function POST(request: Request) {
     );
 
     // Beyond the Basic-Auth password and a valid super-admin device session, the
-    // Supabase SERVICE-ROLE key is accepted as authorization: it is the master
-    // write credential for `global_platform_settings`, so proving it (a successful
-    // authenticated read) is equivalent to super-admin. This unblocks the deadlock
-    // where the platform is already configured but the Supabase env was never set
-    // (inline wizard credentials are volatile and lost on a cold start) — the
-    // operator can re-enter their credentials and save again instead of being met
-    // with a 403 they can't resolve.
+    // operator can re-save by re-entering their MASTER ADMIN credentials (the
+    // email + password from step 2) — this is the fix for the "I already set up,
+    // re-entered my admin account and got locked out" deadlock. The Supabase
+    // SERVICE-ROLE key is also accepted as authorization: it is the master write
+    // credential for `global_platform_settings`, so proving it (a successful
+    // authenticated read) is equivalent to super-admin. These two extra paths
+    // unblock the deadlock where the platform is already configured but the
+    // Supabase env was never set (inline wizard credentials are volatile and lost
+    // on a cold start).
+    let masterCredentialOk = false;
     let serviceRoleAuthorized = false;
     if (alreadyConfigured && !basicAuthOk && !superAdminSession) {
-      serviceRoleAuthorized = await verifyServiceRoleAccess();
+      if (adminEmail && adminPassword) {
+        masterCredentialOk = (await verifySuperAdminSignIn(adminEmail, adminPassword)) !== null;
+      }
+      if (!masterCredentialOk) {
+        serviceRoleAuthorized = await verifyServiceRoleAccess();
+      }
     }
 
-    if (alreadyConfigured && !basicAuthOk && !superAdminSession && !serviceRoleAuthorized) {
+    if (
+      alreadyConfigured &&
+      !basicAuthOk &&
+      !superAdminSession &&
+      !masterCredentialOk &&
+      !serviceRoleAuthorized
+    ) {
       return NextResponse.json(
         {
           error:
-            'This store is already configured. To update it, authenticate first: sign in as the master admin above, or set ADMIN_BASIC_AUTH_PASSWORD and use Basic Auth, or set SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY as environment variables on your host (Cloudflare: npx wrangler secret put …) so the service-role key can authorize the save.',
+            'This store is already configured. To update it, enter the SAME master admin email + password you created during setup above, or set ADMIN_BASIC_AUTH_PASSWORD and use Basic Auth, or set SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY as environment variables on your host (Cloudflare: npx wrangler secret put …) so the service-role key can authorize the save.',
         },
         { status: 403 },
       );

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminVerifyEmail, adminRequestAuthorized, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
-import { consumeAdminCode, issueAdminDevice } from '@/lib/admin-verify';
+import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { consumeAdminCode, issueAdminDevice, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,11 +14,11 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
     const password = String(body?.password || '');
-    if (!adminRequestAuthorized(request, password)) {
+    if (!(await adminLoginAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
-    const adminEmail = getAdminVerifyEmail();
+    const adminEmail = await resolveAdminLoginEmail(request);
     if (!adminEmail) {
       return NextResponse.json({ error: 'No admin verification inbox configured.' }, { status: 400 });
     }

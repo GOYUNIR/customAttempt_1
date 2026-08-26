@@ -70,6 +70,89 @@ const AI_OPTIONS = [
   { value: 'workers_ai', label: 'Cloudflare Workers AI (no key)' },
 ];
 
+const DB_OPTIONS = [
+  { value: 'supabase', label: 'Supabase (PostgreSQL) — recommended' },
+  { value: 'upstash', label: 'Upstash Redis' },
+  { value: 'cloudflare-kv', label: 'Cloudflare KV / D1' },
+];
+
+const MIRROR_OPTIONS = [
+  { value: '', label: 'No mirror (single database)' },
+  { value: 'upstash', label: 'Upstash Redis' },
+  { value: 'supabase', label: 'Supabase' },
+  { value: 'cloudflare-kv', label: 'Cloudflare KV / D1' },
+];
+
+/** One copy-paste env-var row: the variable name + a click-to-copy command. */
+function EnvVarRow(props: { variable: string; command: string; where: string; copied: string; onCopy: (t: string) => void }) {
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <EnvNameChip name={props.variable} copied={props.copied} onCopy={props.onCopy} />
+      <p style={hintStyle}>{props.where}</p>
+      <button
+        type="button"
+        onClick={() => props.onCopy(props.command)}
+        style={{ textAlign: 'left', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, background: '#0f172a', color: props.copied === props.command ? '#4ade80' : '#e2e8f0', border: 'none', borderRadius: 8, padding: '8px 10px', cursor: 'pointer', wordBreak: 'break-all' }}
+      >
+        {props.copied === props.command ? 'copied ✓' : props.command}
+      </button>
+    </div>
+  );
+}
+
+/** The env-var names + copy-paste commands + links for the chosen database(s). */
+function DatabaseInstructions(props: { primary: string; mirror: string; copied: string; onCopy: (t: string) => void }) {
+  const { primary, mirror, copied, onCopy } = props;
+  return (
+    <div style={{ display: 'grid', gap: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
+      {primary === 'upstash' ? (
+        <>
+          <p style={hintStyle}>
+            Your store data (products, orders, entries) will live in <strong>Upstash Redis</strong>. Set these in Cloudflare — the URL and token as <strong>Secrets</strong>, and <code>STORAGE_PROVIDER</code> as a plaintext <strong>Variable</strong> with the value <code>upstash</code>.
+          </p>
+          <EnvVarRow variable="STORAGE_PROVIDER" command="npx wrangler secret put STORAGE_PROVIDER" where="Value: upstash (or set it as a plaintext Variable in the dashboard)." copied={copied} onCopy={onCopy} />
+          <EnvVarRow variable="UPSTASH_REDIS_REST_URL" command="npx wrangler secret put UPSTASH_REDIS_REST_URL" where="Where: console.upstash.com → your database → REST API → copy the REST URL (https://…upstash.io)." copied={copied} onCopy={onCopy} />
+          <EnvVarRow variable="UPSTASH_REDIS_REST_TOKEN" command="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" where="Where: same page → copy the REST token. Never expose it." copied={copied} onCopy={onCopy} />
+          <a href="https://console.upstash.com" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open console.upstash.com →</a>
+        </>
+      ) : primary === 'cloudflare-kv' ? (
+        <>
+          <p style={hintStyle}>
+            Your store data will live in <strong>Cloudflare Workers KV</strong> (no third-party store). Set <code>STORAGE_PROVIDER</code> to <code>cloudflare-kv</code> and add a KV namespace binding. Note: KV is best for admin/config/low-concurrency data — read the concurrency caveats before pointing raffle/payment writes at it.
+          </p>
+          <EnvVarRow variable="STORAGE_PROVIDER" command="npx wrangler secret put STORAGE_PROVIDER" where="Value: cloudflare-kv (plaintext Variable)." copied={copied} onCopy={onCopy} />
+          <p style={hintStyle}>
+            Then bind a KV namespace in <code>wrangler.jsonc</code> (the app auto-detects a KV-shaped binding) — see <a href="https://developers.cloudflare.com/kv/" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>developers.cloudflare.com/kv</a>.
+          </p>
+          <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open the Cloudflare dashboard →</a>
+        </>
+      ) : (
+        <>
+          <p style={hintStyle}>
+            <strong>Supabase (PostgreSQL)</strong> is the recommended all-in-one store — it holds your products, orders and entries AND your admin account + settings. Fill in the three Supabase values in step 2 below; no extra <code>STORAGE_PROVIDER</code> variable is needed (Supabase is the default).
+          </p>
+          <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open supabase.com/dashboard →</a>
+        </>
+      )}
+
+      {mirror && mirror !== primary && (
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10, display: 'grid', gap: 10 }}>
+          <p style={{ ...hintStyle, fontWeight: 700, color: '#0f172a' }}>
+            Safety mirror: every write also copies to <strong>{mirror === 'upstash' ? 'Upstash Redis' : mirror === 'supabase' ? 'Supabase' : 'Cloudflare KV'}</strong> (failover + data-loss protection).
+          </p>
+          <EnvVarRow variable="STORAGE_REPLICAS" command="npx wrangler secret put STORAGE_REPLICAS" where={`Value: ${mirror} (comma-separate 2–3 mirrors). Plaintext Variable.`} copied={copied} onCopy={onCopy} />
+          {mirror === 'upstash' && (
+            <>
+              <EnvVarRow variable="UPSTASH_REDIS_REST_URL" command="npx wrangler secret put UPSTASH_REDIS_REST_URL" where="Mirror: console.upstash.com → REST API → REST URL." copied={copied} onCopy={onCopy} />
+              <EnvVarRow variable="UPSTASH_REDIS_REST_TOKEN" command="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" where="Mirror: REST token (Secret)." copied={copied} onCopy={onCopy} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const DEFAULT_FORM: Record<string, string> = {
   supabase_url: '',
   supabase_anon_key: '',
@@ -85,6 +168,8 @@ const DEFAULT_FORM: Record<string, string> = {
   ai_api_key: '',
   ai_provider_secondary: '',
   ai_api_key_secondary: '',
+  storage_provider: 'supabase',
+  storage_replicas: '',
 };
 
 const needsKey = (provider: string): boolean => provider !== '' && provider !== 'none';
@@ -324,7 +409,7 @@ export default function SetupPage() {
       <div style={{ maxWidth: 560, margin: '0 auto', display: 'grid', gap: 20 }}>
         <header style={{ textAlign: 'center', display: 'grid', gap: 8 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: '#111' }}>Set up your store</h1>
-          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Two things to get started. Everything else can wait.</p>
+          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Choose your database, then create your admin account. Everything else can wait.</p>
           {configured && (
             <p style={{ color: '#92400e', fontSize: 13, margin: 0, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px' }}>
               This store is already set up. Enter your admin email and password to update it.
@@ -381,9 +466,20 @@ export default function SetupPage() {
 
         <form onSubmit={submit} style={{ display: 'grid', gap: 20 }}>
           <Card>
-            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>1 · Connect your database</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>1 · Choose your database</h2>
+            <Field label="Primary database (store data)">
+              <Select value={form.storage_provider} onChange={(v) => set('storage_provider', v)} options={DB_OPTIONS} />
+            </Field>
+            <Field label="Second database (safety mirror, optional)" hint="Mirrors every write to an independent backup so one vendor outage or data loss never takes the store down.">
+              <Select value={form.storage_replicas} onChange={(v) => set('storage_replicas', v)} options={MIRROR_OPTIONS} />
+            </Field>
+            <DatabaseInstructions primary={form.storage_provider} mirror={form.storage_replicas} copied={copied} onCopy={copy} />
+          </Card>
+
+          <Card>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>2 · Connect Supabase (admin &amp; settings)</h2>
             <p style={hintStyle}>
-              Paste the 3 values from Supabase (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value.
+              Your <strong>master admin account and store settings</strong> are saved in Supabase — this is required no matter which store database you chose above. Paste the 3 values (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value.
             </p>
 
             <Field label="Supabase project URL" hint="Looks like https://abcdefghijklm.supabase.co">
@@ -438,7 +534,7 @@ export default function SetupPage() {
           </Card>
 
           <Card>
-            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>2 · Create your admin account</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>3 · Create your admin account</h2>
             <Field label="Email">
               <TextInput value={adminEmail} onChange={(v) => setAdminEmail(v)} placeholder="you@example.com" />
             </Field>
