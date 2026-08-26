@@ -54,7 +54,7 @@ export async function GET(request: Request) {
   // can never drift from middleware.ts / the Setup Wizard.
   const discovery = discoverEnvironment();
 
-  const items: EnvStatusItem[] = discovery.all.map((c) => ({
+  const toItem = (c: (typeof discovery.all)[number]): EnvStatusItem => ({
     key: c.id,
     label: c.name,
     name: c.name,
@@ -70,11 +70,21 @@ export async function GET(request: Request) {
     where: c.where,
     commands: c.commands,
     hint: c.purpose,
-  }));
+  });
+
+  const items: EnvStatusItem[] = discovery.all.map(toItem);
+
+  // The necessary CLOUDFLARE environment variables — a dedicated list so the
+  // SetUp tab can show exactly which values must live in the Cloudflare
+  // dashboard / `wrangler secret put` (not the Setup Wizard).
+  const cloudflare: EnvStatusItem[] = discovery.all
+    .filter((c) => c.cloudflareEnvVar === true)
+    .map(toItem);
 
   return NextResponse.json({
     ok: true,
     items,
+    cloudflare,
     groups: discovery.groups.map((g) => ({
       title: g.title,
       subtitle: g.subtitle,

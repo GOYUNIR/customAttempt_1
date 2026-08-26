@@ -290,6 +290,17 @@ type Status = {
   platformProviders: { mail_provider: string | null; payment_provider: string | null; map_provider: string | null; ai_provider: string | null };
   environment: string;
   cloudflareVarsPath: string;
+  cloudflare?: {
+    key: string;
+    label: string;
+    variable: string;
+    secret: boolean;
+    mandated: boolean;
+    present: boolean;
+    example: string;
+    where: string;
+    commands: string[];
+  }[];
   /** Raw Supabase schema/connection error from the status endpoint (e.g. a missing table). */
   supabaseSchemaError?: string;
 };
@@ -588,6 +599,11 @@ const STAGE_CONTEXT: Record<string, { step: number; title: string; message: stri
     step: 4,
     title: 'Finalizing configuration failed',
     message: 'Provider settings were saved, but the final configuration flag could not be written. Re-save to retry.',
+  },
+  cloudflare_secrets: {
+    step: 0,
+    title: 'Set these secrets as Cloudflare environment variables',
+    message: 'Server-only secrets must be set on your hosting platform (not in this panel). Set each one in the Cloudflare dashboard / `npx wrangler secret put`, then reload this page so the server can read them from the environment.',
   },
 };
 
@@ -1066,6 +1082,36 @@ export default function SetupPage() {
             </p>
           </div>
         </div>
+
+        {status?.cloudflare && status.cloudflare.length > 0 && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: '18px 20px', boxShadow: '0 12px 30px rgba(0,0,0,0.08)', display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#111' }}>Cloudflare environment variables (mandatory)</div>
+            <p style={{ fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.5 }}>
+              These server-side values must be set in the Cloudflare dashboard (<code>{status?.cloudflareVarsPath}</code>) or via <code>npx wrangler secret put</code> — <strong>not</strong> typed into this wizard. Secrets marked <strong style={{ color: '#b45309' }}>MANDATORY</strong> are enforced before you can save.
+            </p>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {status.cloudflare.map((c) => (
+                <div key={c.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: '#f9fafb', borderRadius: 8, border: c.mandated && !c.present ? '1px solid #fca5a5' : '1px solid #e5e7eb' }}>
+                  <span style={{ fontSize: 13, marginTop: 1, color: c.present ? '#16a34a' : '#dc2626' }}>{c.present ? '✓' : '✗'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>
+                      {c.label}
+                      {c.mandated && <span style={{ marginLeft: 6, fontSize: 9, color: '#b45309' }}>MANDATORY</span>}
+                      {c.secret && <span style={{ marginLeft: 6, fontSize: 9, color: '#6b7280' }}>secret</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}><code>{c.variable}</code></div>
+                    {!c.present && (
+                      <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+                        {c.mandated ? 'NOT SET — set it before you can save: ' : 'Optional — '}
+                        <code style={{ fontSize: 11, color: '#92400e', whiteSpace: 'pre-wrap' }}>{c.commands[0]}</code>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {ready && !reconfigure ? (
           <div style={{ background: '#fff', borderRadius: 16, padding: '24px', boxShadow: '0 12px 30px rgba(0,0,0,0.08)', textAlign: 'center' }}>

@@ -82,6 +82,11 @@ export interface EnvCheck {
   where: string;
   /** For `kind: 'binding'` — the exact `wrangler.toml` block to paste. */
   wranglerToml?: string;
+  /** True for the necessary CLOUDFLARE environment variables — the server-side
+   *  runtime values that must be set in the Cloudflare dashboard / `wrangler
+   *  secret put` (NOT typed into the Setup Wizard). Surfaced as a dedicated
+   *  section on the admin SetUp tab and enforced by the Setup Wizard. */
+  cloudflareEnvVar?: boolean;
 }
 
 export interface EnvGroup {
@@ -247,6 +252,39 @@ export function cloudflareLocation(check: {
  * variable is NOT set yet, so an operator can see EXACTLY what shape to paste.
  * These are NEVER real keys; every value is a fake placeholder to swap out.
  */
+/**
+ * The necessary CLOUDFLARE environment variables — the server-side runtime
+ * values that must be set in the Cloudflare dashboard / `wrangler secret put`
+ * (NOT typed into the Setup Wizard). Surfaced as a dedicated section on the
+ * admin SetUp tab and enforced by the Setup Wizard before it finalizes.
+ */
+export function cloudflareEnvVarChecks(env: EnvObject = process.env): EnvCheck[] {
+  return discoverEnvironment(env).all.filter((c) => c.cloudflareEnvVar === true);
+}
+
+/**
+ * The SUBSET of the Cloudflare env vars that are SERVER-ONLY SECRETS — "not
+ * wise to have in the Setup Wizard panel" — which the wizard mandates must be
+ * set as real environment variables on the hosting platform (Cloudflare
+ * dashboard / `wrangler secret put`), never typed into the web form.
+ *
+ * The Supabase anon key is intentionally EXCLUDED (it is a public key that the
+ * wizard legitimately collects), as is the admin Basic-Auth password (the
+ * master admin account is its alternative).
+ */
+export const CLOUDFLARE_MANDATED_SECRET_IDS: string[] = [
+  'supabase-service',
+  'stripe-secret',
+  'stripe-webhook',
+  'resend',
+  'cron-secret',
+];
+
+export function cloudflareMandatedSecretChecks(env: EnvObject = process.env): EnvCheck[] {
+  const ids = new Set(CLOUDFLARE_MANDATED_SECRET_IDS);
+  return cloudflareEnvVarChecks(env).filter((c) => ids.has(c.id));
+}
+
 const EXAMPLES: Record<string, string> = {
   'supabase-storage': 'https://abcdefghijklm.supabase.co',
   'storage-provider': 'supabase',
@@ -310,6 +348,7 @@ export function discoverEnvironment(env: EnvObject = process.env): EnvDiscoveryR
       present: has(env, check.variable, ...check.aliases),
       example: EXAMPLES[check.id] ?? '',
       where: cloudflareLocation(check),
+      cloudflareEnvVar: check.cloudflareEnvVar ?? false,
     });
   };
 
@@ -411,6 +450,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('ADMIN_BASIC_AUTH_PASSWORD')],
+    cloudflareEnvVar: true,
   });
 
   add({
@@ -426,6 +466,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('ADMIN_VERIFY_EMAIL')],
+    cloudflareEnvVar: true,
   });
 
   // ── Payments ────────────────────────────────────────────────────────────────
@@ -442,6 +483,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('STRIPE_SECRET_KEY')],
+    cloudflareEnvVar: true,
   });
 
   add({
@@ -457,6 +499,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('STRIPE_WEBHOOK_SECRET')],
+    cloudflareEnvVar: true,
   });
 
   add({
@@ -538,6 +581,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     name: 'Transactional email (Resend)',
     purpose: 'Sends entry confirmations, winner notices, 2FA codes and waitlist emails.',
     variable: 'RESEND_API_KEY',
+    cloudflareEnvVar: true,
     aliases: ['RESEND_FROM'],
     kind: 'email',
     required: false,
@@ -655,6 +699,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('CRON_SECRET')],
+    cloudflareEnvVar: true,
   });
 
   // ── Site identity ───────────────────────────────────────────────────────────
@@ -717,6 +762,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('SUPABASE_URL')],
+    cloudflareEnvVar: true,
   });
 
   add({
@@ -732,6 +778,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('SUPABASE_ANON_KEY')],
+    cloudflareEnvVar: true,
   });
 
   add({
@@ -747,6 +794,7 @@ id = "<paste from: npx wrangler kv namespace create KV>"`,
     buildTime: false,
     platform: 'all',
     commands: [WRANGLER_SECRET('SUPABASE_SERVICE_ROLE_KEY')],
+    cloudflareEnvVar: true,
   });
 
   // ── Cloudflare bindings (detected, but NOT used by this build) ───────────────

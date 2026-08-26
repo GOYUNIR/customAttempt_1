@@ -5332,6 +5332,42 @@ export default function AdminPortal() {
         {tab === 'setup' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Cloudflare Environment Variables</h2>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
+                These are the <strong>server-side values that must be set on Cloudflare</strong> — in the dashboard at <code>{envStatus?.cloudflareVarsPath}</code> or via <code>npx wrangler secret put</code> — <strong>not</strong> typed into the Setup Wizard panel. Values are never shown; only ✓ set / ✗ missing.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(envStatus?.cloudflare || []).map((item: any, index: number) => (
+                  <div key={item.key || index} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid #1c1c1e' }}>
+                    <span style={{ fontSize: 13, marginTop: 1, color: item.set ? '#34d399' : '#f87171' }}>{item.set ? '✓' : '✗'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>
+                        {item.label}
+                        {item.sensitive && <span style={{ marginLeft: 6, fontSize: 9, color: '#edb210' }}>secret · must be in Cloudflare</span>}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>
+                        <code style={{ fontSize: 10, color: '#dbeafe' }}>{item.variable}</code>
+                        {item.aliases.length > 0 ? <span> · aliases: <code style={{ fontSize: 10, color: '#6b7280' }}>{item.aliases.join(', ')}</code></span> : null}
+                      </div>
+                      {!item.set && (
+                        <div style={{ marginTop: 4, padding: '6px 8px', background: 'rgba(251,191,36,0.06)', borderRadius: 6, border: '1px solid rgba(251,191,36,0.22)' }}>
+                          <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 600, marginBottom: 2 }}>NOT SET YET</div>
+                          <div style={{ fontSize: 10, color: '#e5e7eb', marginBottom: 2 }}>Example: <code style={{ fontSize: 10, color: '#a7f3d0' }}>{item.example}</code></div>
+                          <div style={{ fontSize: 10, color: '#9ca3af', marginBottom: 2 }}>Where: {item.where}</div>
+                          {item.commands.length > 0 && (
+                            <div style={{ fontSize: 10, color: '#9ca3af' }}>
+                              Run: <code style={{ fontSize: 10, color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>{item.commands[0]}</code>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Environment Variables</h2>
                 <button onClick={fetchEnvStatus} disabled={envStatusLoading} style={buttonGhost}>

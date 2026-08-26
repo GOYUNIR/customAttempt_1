@@ -20,6 +20,9 @@ import {
   detectStorageDrivers,
   detectStorageProvider,
   CLOUDFLARE_VARS_PATH,
+  cloudflareEnvVarChecks,
+  cloudflareMandatedSecretChecks,
+  CLOUDFLARE_MANDATED_SECRET_IDS,
 } from '@/lib/env-discovery';
 import { isSchemaError, buildSchemaFixPlan, schemaFixPlanToText } from '@/lib/setup-schema-guide';
 
@@ -310,6 +313,17 @@ export async function GET(request: Request) {
     environment: process.env.NODE_ENV || 'development',
     cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
     discovery: discoverEnvironment(),
+    cloudflare: cloudflareEnvVarChecks().map((c) => ({
+      key: c.id,
+      label: c.name,
+      variable: c.variable,
+      secret: c.secret,
+      mandated: CLOUDFLARE_MANDATED_SECRET_IDS.includes(c.id),
+      present: c.present,
+      example: c.example,
+      where: c.where,
+      commands: c.commands,
+    })),
     supabaseSchemaError,
   });
 }
@@ -317,7 +331,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   // Tracks how far the bootstrap got before an error so the wizard can surface a
   // contextual alert pointing at the exact step (storage → admin → finalize).
-  let stage: 'storage_init' | 'create_admin' | 'finalize' = 'storage_init';
+  let stage: 'storage_init' | 'create_admin' | 'finalize' | 'cloudflare_secrets' = 'storage_init';
   try {
     let body: Record<string, unknown> = {};
     try {
@@ -376,6 +390,38 @@ export async function POST(request: Request) {
     // ── AI probe (Continue on step 5) ──────────────────────────────────────
     if (String(body.probe || '').trim() === 'ai') {
       return probeAi(body);
+    }
+
+    // ── CLOUDFLARE environment-variable MANDATE ──────────────────────────────
+    // Server-only secrets (Supabase service-role key, Stripe secret + webhook,
+    // Resend, cron secret) must be set as real environment variables on the
+    // hosting platform — Cloudflare dashboard / `wrangler secret put` — NOT
+    // typed into this panel. In production we REFUSE to finalize until they are
+    // present in the environment. Development still allows an inline bootstrap
+    // (so a fresh local clone stays usable) — it only logs a warning.
+    if (String(body.probe || '').trim() === '') {
+      const missing = cloudflareMandatedSecretChecks();
+      if (missing.length > 0 && process.env.NODE_ENV === 'production') {
+        const list = missing
+          .map((c) => `  • ${c.variable}  —  ${c.commands[0] || `set it in ${CLOUDFLARE_VARS_PATH}`}`)
+          .join('\n');
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              `These server-only secrets must be set as environment variables on your host — NOT entered in this panel. On Cloudflare, set them at ${CLOUDFLARE_VARS_PATH} (or run the commands below), then reload this page:\n${list}`,
+            stage: 'cloudflare_secrets',
+            cloudflareSecrets: missing.map((c) => c.variable),
+          },
+          { status: 422 },
+        );
+      }
+      if (missing.length > 0) {
+        console.warn(
+          '[setup] cloudflare secrets missing from env (dev-only warning): ' +
+            missing.map((c) => c.variable).join(', '),
+        );
+      }
     }
 
     // ── super-admin account (first setup only) ───────────────────────────────
