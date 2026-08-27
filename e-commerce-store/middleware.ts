@@ -312,15 +312,36 @@ export async function middleware(request: NextRequest) {
     const deviceToken = adminDeviceTokenFromRequest(request);
     const storage = createStorageClient();
     let superAdminOk = false;
+    let authCookieOk = false;
+    let deviceCookieValid = false;
+    const authHeader = request.headers.get('authorization');
+    const authCookieToken = adminAuthTokenFromRequest(request);
     if (storage) {
       try {
         superAdminOk = await adminDeviceIsSuperAdmin(storage, deviceToken);
+        if (authCookieToken) authCookieOk = (await adminAuthValid(storage, authCookieToken)) !== null;
+        if (deviceToken) deviceCookieValid = await adminDeviceValid(storage, deviceToken);
       } catch {
-        superAdminOk = false;
+        /* fail closed */
       }
     }
 
-    if (!superAdminOk && !isLoginPath && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi && !ADMIN_PASSWORD) {
+    // No Basic-Auth password configured: the operator can ONLY reach /admin via
+    // the in-site login form. Any recognized credential (super-admin session,
+    // login-session cookie, or a verified device cookie) must be allowed past
+    // this guard — otherwise the login → 2FA verify flow 401s with AUTH_REQUIRED
+    // before the verify routes' own auth guard (adminLoginAuthorized) can run.
+    if (
+      !superAdminOk &&
+      !authCookieOk &&
+      !deviceCookieValid &&
+      !isLoginPath &&
+      !isSuperLoginPath &&
+      !isSetupReconfigure &&
+      !isSetupRead &&
+      !isSetupApi &&
+      !ADMIN_PASSWORD
+    ) {
       return adminAuthRequired(request);
     }
 
@@ -328,18 +349,6 @@ export async function middleware(request: NextRequest) {
     // no password-in-query bypass anymore: the audit / export / self-test
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
-    const authHeader = request.headers.get('authorization');
-    const authCookieToken = adminAuthTokenFromRequest(request);
-    let authCookieOk = false;
-    let deviceCookieValid = false;
-    if (storage) {
-      try {
-        if (authCookieToken) authCookieOk = (await adminAuthValid(storage, authCookieToken)) !== null;
-        if (deviceToken) deviceCookieValid = await adminDeviceValid(storage, deviceToken);
-      } catch {
-        /* fail closed */
-      }
-    }
     const passwordPassed =
       superAdminOk ||
       isLoginPath ||
