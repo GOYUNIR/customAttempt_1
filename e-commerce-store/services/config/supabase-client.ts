@@ -81,6 +81,41 @@ export function supabaseConfigured(): boolean {
   return Boolean(url && anonKey);
 }
 
+/**
+ * Auth-capable subset of Supabase configuration: the Project URL + anon key are
+ * sufficient to run the GoTrue password grant used to verify an operator's
+ * email+password. The service-role key is NOT needed for login verification —
+ * it is only required for write operations (persisting settings, creating the
+ * admin, syncing profiles). Callers that authenticate users should gate on this
+ * flag (or `supabaseConfigured`, currently an alias for it) and NOT on
+ * `supabaseServiceConfigured()`.
+ */
+export function supabaseAuthConfigured(): boolean {
+  return supabaseConfigured();
+}
+
+/**
+ * A precise, actionable reason why the Supabase auth path is unusable — used by
+ * the in-site admin login routes to return an accurate cold-start message instead
+ * of a misleading "invalid credentials" 401. Returns `null` when url + anon key
+ * (auth) are both present.
+ */
+export function supabaseAuthMissingReason(envOnly = false): string | null {
+  const override = envOnly ? null : readRuntimeCredentials();
+  const url = (override?.url || process.env[SUPABASE_ENV_URL] || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  const anonKey = (override?.anonKey || process.env[SUPABASE_ENV_ANON_KEY] || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  if (!url && !anonKey) {
+    return 'No Supabase credentials are configured at all (SUPABASE_URL and SUPABASE_ANON_KEY are unset).';
+  }
+  if (!url) {
+    return 'SUPABASE_ANON_KEY is set but SUPABASE_URL is missing.';
+  }
+  if (!anonKey) {
+    return 'SUPABASE_URL is set but SUPABASE_ANON_KEY is missing.';
+  }
+  return null;
+}
+
 export function supabaseServiceConfigured(): boolean {
   const { url, serviceRoleKey } = readSupabaseEnv();
   return Boolean(url && serviceRoleKey);

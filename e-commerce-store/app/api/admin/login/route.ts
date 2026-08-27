@@ -1,9 +1,20 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminVerifyEmail, verifyAdminPassword, ADMIN_AUTH_COOKIE } from '@/lib/server-config';
+import { createRedisClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE } from '@/lib/server-config';
 import { issueAdminAuthSession } from '@/lib/admin-verify';
-import { verifySuperAdminSignIn, supabaseConfigured } from '@/services/config/supabase-client';
+import { verifySuperAdminSignIn, supabaseConfigured, supabaseAuthMissingReason } from '@/services/config/supabase-client';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+
+/**
+ * Whether the legacy Basic-Auth fallback can actually accept a login. It needs
+ * BOTH a password to compare against AND an admin email to pair with it — the
+ * email match is what the fallback branch enforces (`verifyAdminPassword` +
+ * `adminEmail === email`). Outside production `getAdminPassword()` returns a
+ * documented local dev fallback, so a fresh clone is never locked out here.
+ */
+function basicAuthLoginUsable(): boolean {
+  return Boolean(getAdminPassword()) && Boolean(getAdminVerifyEmail().trim());
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +45,26 @@ export async function POST(request: Request) {
 
   const limited = await rateLimitedResponse('admin_login', request, 10, 60);
   if (limited) return limited;
+
+  // Readiness gate — only when EVERY login path is unavailable. If Supabase auth
+  // is not configured AND the legacy Basic-Auth fallback is unusable, no set of
+  // credentials can ever succeed, so a 401 "invalid email or password" would be
+  // a lie and trap the operator in the login form. Report the real configuration
+  // gap instead. When ANY method is available we fall through and return 401 for
+  // genuinely wrong credentials.
+  const authReason = supabaseAuthMissingReason();
+  if (authReason && !basicAuthLoginUsable()) {
+    return NextResponse.json(
+      {
+        error:
+          'Admin login is not configured yet. ' +
+          authReason +
+          ' Or set the legacy ADMIN_BASIC_AUTH_PASSWORD + ADMIN_VERIFY_EMAIL environment variables to enable the basic-auth fallback.',
+        code: 'admin_login_not_configured',
+      },
+      { status: 503 },
+    );
+  }
 
   // 1. Master admin — the Supabase super-admin account created by the wizard.
   let authorized = false;

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminDevice, isSuperAdminSession } from '@/lib/admin-verify';
-import { verifySuperAdminSignIn, supabaseConfigured } from '@/services/config/supabase-client';
+import { verifySuperAdminSignIn, supabaseAuthMissingReason, supabaseServiceConfigured } from '@/services/config/supabase-client';
 import { isPlatformConfigured } from '@/services/config/platform-settings';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -36,16 +36,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Enter a valid email and password.' }, { status: 400 });
   }
 
-  if (!supabaseConfigured()) {
+  // Login only needs the Supabase Auth endpoint — URL + anon key. Naming the exact
+  // missing value matters: the service-role key is NOT required to verify a sign-in,
+  // so it must not be listed here or the operator gets a misleading message.
+  const authReason = supabaseAuthMissingReason();
+  if (authReason) {
     return NextResponse.json(
       {
         error:
-          'Supabase is not configured: SUPABASE_URL and SUPABASE_ANON_KEY are not set in the environment, so the super-admin account cannot be verified. Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in your hosting platform (and redeploy), then try again. (Credentials entered inline in the Setup Wizard only last for the current server session.)',
+          'Supabase is not configured for login: ' +
+          authReason.toLowerCase() +
+          '. Set the missing environment variable(s) in your hosting platform and redeploy, then try again. (Credentials entered inline in the Setup Wizard only last for the current server session.) Legacy stores without a Supabase master account should use /api/admin/login with ADMIN_BASIC_AUTH_PASSWORD instead.',
+        code: 'admin_super_login_not_configured',
       },
       { status: 503 },
     );
   }
 
+  // The service-role key is needed for ADMIN WRITES (persisting settings, creating
+  // accounts), not for verifying a sign-in. Missing service-role must NOT block
+  // login — login proceeds and the success response carries `noticed: true` so
+  // the operator knows write operations will fail until the key is set.
   const limited = await rateLimitedResponse('admin_super_login', request, 10, 60);
   if (limited) return limited;
 
@@ -66,7 +77,7 @@ export async function POST(request: Request) {
     superAdmin: true,
   });
 
-  const response = NextResponse.json({ ok: true, email: account.email, remember });
+  const response = NextResponse.json({ ok: true, email: account.email, remember, noticed: !supabaseServiceConfigured() });
   response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
