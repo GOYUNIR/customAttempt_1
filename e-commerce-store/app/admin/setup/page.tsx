@@ -11,7 +11,8 @@
  * tucked into one collapsed section — the storefront runs without them (no
  * checkout / no emails / no autofill / CSS fallback animations) and each can be
  * added later in the admin portal. This is the "less is more" setup: one page,
- * two cards, one button.
+ * two required cards (connect database + admin account), two collapsed optional
+ * cards (safety mirror + payments/email/maps/AI), one button.
  */
 
 import Link from 'next/link';

@@ -48,10 +48,11 @@ async function pingUpstash(url: string, token: string): Promise<void> {
 }
 
 /**
- * Step-1 (data store) probe: verifies the Supabase schema + service-role
+ * (data store) probe — legacy, unused: verifies the Supabase schema + service-role
  * reachability (and the chosen storefront data store), then persists the
  * storage-related operational settings so the operator's data-store choices are
- * saved early. Never creates the admin or flips is_configured.
+ * saved early. Never creates the admin or flips is_configured. The setup page
+ * only emits `probe: 'supabase'` today; this branch is kept for reference.
  */
 async function probeStorage(operational: ReturnType<typeof normalizeOperationalSettingsInput>) {
   try {
@@ -209,7 +210,7 @@ async function verifyAiProvider(provider: string, key: string): Promise<void> {
   if (!res.ok) throw new Error(`AI provider is unreachable (HTTP ${res.status}).`);
 }
 
-/** Continue on the "Core services" step — verify payment/email/maps live. */
+/** Legacy, unused — verify payment/email/maps keys live (old multi-step wizard). */
 async function probeCore(body: Record<string, unknown>): Promise<NextResponse> {
   try {
     await verifyPaymentProvider(String(body.payment_provider || ''), String(body.payment_api_key || '').trim());
@@ -223,7 +224,7 @@ async function probeCore(body: Record<string, unknown>): Promise<NextResponse> {
   }
 }
 
-/** Continue on the "AI engine" step — verify the primary (and secondary) key live. */
+/** Legacy, unused — verify the AI primary (and secondary) key live (old wizard). */
 async function probeAi(body: Record<string, unknown>): Promise<NextResponse> {
   try {
     const primary = String(body.ai_provider || '').toLowerCase();
@@ -259,7 +260,7 @@ async function probeAi(body: Record<string, unknown>): Promise<NextResponse> {
  *       an already-configured platform requires the admin password.
  */
 /**
- * Live Supabase connection probe — the "Test connection" button on step 1.
+ * Live Supabase connection probe — the "Test connection" button.
  * Reads the 3 credentials from the request body (or falls back to the current
  * environment) and verifies them against the REAL Supabase project:
  *   - reports exactly WHICH of the 3 are still missing (with their env-var name);
@@ -474,22 +475,21 @@ export async function POST(request: Request) {
     // ── operational settings (security / site / payments / AI / storage) ─────
     const operational = normalizeOperationalSettingsInput(body);
 
-    // ── data-store probe (Continue on step 1) ───────────────────────────────
-    // Verifying the data store the moment the operator leaves the data-store
-    // step surfaces a missing schema / unreachable backend right there, instead
-    // of only after every other step has been filled in and the final save runs.
+    // ── data-store probe (legacy — unused) ──────────────────────────────────
+    // Kept for reference from the old multi-step wizard; the setup page only
+    // emits `probe: 'supabase'`, so these three branches never run today.
     if (String(body.probe || '').trim() === 'storage') {
       return probeStorage(operational);
     }
 
-    // ── core-services probe (Continue on step 3) ───────────────────────────
-    // Verify the payment / email / maps keys against their real APIs BEFORE the
-    // operator advances, so a wrong Stripe/Resend key is caught immediately.
+    // ── core-services probe (legacy — unused) ──────────────────────────────
+    // Kept for reference (see above).
     if (String(body.probe || '').trim() === 'core') {
       return probeCore(body);
     }
 
-    // ── AI probe (Continue on step 5) ──────────────────────────────────────
+    // ── AI probe (legacy — unused) ─────────────────────────────────────────
+    // Kept for reference (see above).
     if (String(body.probe || '').trim() === 'ai') {
       return probeAi(body);
     }
@@ -514,16 +514,16 @@ export async function POST(request: Request) {
 
     // ── re-configuration guard ───────────────────────────────────────────────
     const superAdminSession = await isSuperAdminSession(request);
-    // Accept EITHER the master admin password (step 2) or the dedicated
-    // ADMIN_BASIC_AUTH_PASSWORD field (step 4) as the supplied Basic-Auth secret.
+    // Accept EITHER the master admin password or the dedicated
+    // ADMIN_BASIC_AUTH_PASSWORD field as the supplied Basic-Auth secret.
     const basicAuthOk = adminRequestAuthorized(
       request,
       String(body.admin_basic_auth_password || adminPassword),
     );
 
     // Beyond the Basic-Auth password and a valid super-admin device session, the
-    // operator can re-save by re-entering their MASTER ADMIN credentials (the
-    // email + password from step 2) — this is the fix for the "I already set up,
+    // operator can re-save by re-entering their MASTER ADMIN email + password —
+    // this is the fix for the "I already set up,
     // re-entered my admin account and got locked out" deadlock. The Supabase
     // SERVICE-ROLE key is also accepted as authorization: it is the master write
     // credential for `global_platform_settings`, so proving it (a successful
