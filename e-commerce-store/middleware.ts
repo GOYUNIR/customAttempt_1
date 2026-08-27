@@ -361,7 +361,7 @@ export async function middleware(request: NextRequest) {
       pathname === '/admin' ||
       pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
-    if (!isPage && !isVerifyEndpoint && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi) {
+    if (!isPage && !isVerifyEndpoint && !isLoginPath && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi) {
       const token = adminDeviceTokenFromRequest(request);
       const redis = createStorageClient();
       let verified = false;
