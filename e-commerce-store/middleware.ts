@@ -267,7 +267,11 @@ export async function middleware(request: NextRequest) {
     // data store is missing or no admin account exists yet (no Basic Auth
     // password AND no Supabase super-admin). The setup checklist, provider
     // wizard and super-login endpoints stay OPEN so the operator can bootstrap
-    // with no credentials. See lib/env-discovery.ts → computeAdminReady().
+    // with no credentials. The in-site login page + API must also stay reachable
+    // pre-config: it is the replacement for the native Basic-Auth dialog, and the
+    // ONLY way in when ADMIN_BASIC_AUTH_PASSWORD is unset and the operator signs
+    // in via the Supabase master account. See lib/env-discovery.ts →
+    // computeAdminReady().
     // Storage readiness is per-driver (ANY ONE of Supabase / Cloudflare / Redis)
     // — no single backend is mandatory. See lib/env-discovery.ts.
     const storage = detectStorageDrivers();
@@ -285,8 +289,8 @@ export async function middleware(request: NextRequest) {
     const ready = computeAdminReady({ storage, legacyAdminOk, platformConfigured });
 
     if (!ready) {
-      if (isSetupPath || isSuperLoginPath) {
-        return NextResponse.next(); // bootstrap endpoints are open pre-config
+      if (isSetupPath || isSuperLoginPath || isLoginPath) {
+        return NextResponse.next(); // bootstrap + in-site login endpoints are open pre-config
       }
       if (pathname.startsWith('/api/admin')) {
         return NextResponse.json(
