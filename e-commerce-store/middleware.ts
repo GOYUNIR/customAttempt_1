@@ -41,6 +41,11 @@ function resolveAdminPassword(): string {
 function resolveAdminEmail(): string {
   const direct = (process.env.ADMIN_VERIFY_EMAIL || '').trim();
   if (direct) return direct;
+  // In older setups the admin email was stored in ADMIN_BASIC_AUTH_USERNAME.
+  // Honor it so those installs keep signing in by email (same as
+  // getAdminVerifyEmail() in lib/server-config.ts).
+  const basicAuthUser = (process.env.ADMIN_BASIC_AUTH_USERNAME || '').trim();
+  if (basicAuthUser) return basicAuthUser;
   const support = (process.env.SUPPORT_EMAIL || process.env.REPLY_TO_EMAIL || '').trim();
   if (support) return support;
   if (process.env.NODE_ENV !== 'production') return 'admin@localhost.dev';

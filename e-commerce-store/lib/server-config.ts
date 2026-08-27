@@ -699,6 +699,11 @@ export function adminRequestAuthorized(request: Request, suppliedPassword?: stri
 export function getAdminVerifyEmail(): string {
   const direct = String(process.env.ADMIN_VERIFY_EMAIL || '').trim();
   if (direct) return direct;
+  // In older setups the admin email was stored in ADMIN_BASIC_AUTH_USERNAME.
+  // Honor it so those installs keep signing in by email (the admin portal login
+  // form labels this field "Email", not "username").
+  const basicAuthUser = String(process.env.ADMIN_BASIC_AUTH_USERNAME || '').trim();
+  if (basicAuthUser) return basicAuthUser;
   const support = String(process.env.SUPPORT_EMAIL || process.env.REPLY_TO_EMAIL || '').trim();
   if (support) return support;
   // Local development: no real inbox, but the verify-start route echoes the
