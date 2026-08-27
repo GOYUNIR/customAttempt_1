@@ -1,4 +1,4 @@
-#  Private Allocation Storefront — White-Label Template
+# Private Allocation Storefront — White-Label Template
 
 A **drop-allocation / raffle storefront** built on Next.js + Redis + Stripe.
 Customers enter releases with an email, shipping address, and a saved card; on
@@ -6,6 +6,8 @@ a schedule (or when you trigger it), winners are drawn and their cards are
 charged automatically. Direct-buy (FCFS) products, a cart/bag, points &
 rewards, promo codes with promoter payouts, waitlists, and address autofill are
 all included.
+
+
 
 **The headline feature is** `/admin`**:** every product, price, size, inventory,
 winner tier, Stripe ID, color, font, brand name, logo, footer link, policy page
@@ -15,15 +17,13 @@ without touching a single file.
 
 ---
 
-
-
 ## Related workspaces
 
-- **`multi-tenant-platform/`** — a self-contained multi-tenant website template
-  platform: Supabase Postgres + RLS as the source of truth, Cloudflare Workers +
-  Cloudflare KV for edge delivery. Strict shared TS contracts, SQL migrations
-  with RLS policies, an edge-rendering Worker and an admin Save/Publish +
-  cache-invalidation pipeline. See its `README.md`.
+- `multi-tenant-platform/` — a self-contained multi-tenant website template
+platform: Supabase Postgres + RLS as the source of truth, Cloudflare Workers +
+Cloudflare KV for edge delivery. Strict shared TS contracts, SQL migrations
+with RLS policies, an edge-rendering Worker and an admin Save/Publish +
+cache-invalidation pipeline. See its `README.md`.
 
 ## Multi-tenant B2B SaaS platform (Supabase, licensing, AI, webhooks)
 
@@ -31,34 +31,34 @@ This template also ships a full multi-tenant B2B SaaS foundation on top of the
 storefront:
 
 - **Supabase is the default primary data store.** When `SUPABASE_URL` + a key
-  are present, the storage layer (`lib/storage/`) uses a PostgREST `store_kv`
-  table. **Upstash Redis** (`UPSTASH_REDIS_REST_URL/TOKEN`) and **Cloudflare
-  D1 / Workers KV** (`STORAGE_PROVIDER=cloudflare-kv`) remain supported fallback
-  adapters. The schema lives in
-  [`supabase/migrations/00001_init.sql`](supabase/migrations/00001_init.sql)
-  (`tenants`, `users`, `global_platform_settings`, `analytics_events`,
-  `audit_logs`, `outbound_webhooks`, `store_kv`).
+are present, the storage layer (`lib/storage/`) uses a PostgREST `store_kv`
+table. **Upstash Redis** (`UPSTASH_REDIS_REST_URL/TOKEN`) and **Cloudflare
+D1 / Workers KV** (`STORAGE_PROVIDER=cloudflare-kv`) remain supported fallback
+adapters. The schema lives in
+`[supabase/migrations/00001_init.sql](supabase/migrations/00001_init.sql)`
+(`tenants`, `users`, `global_platform_settings`, `analytics_events`,
+`audit_logs`, `outbound_webhooks`, `store_kv`).
 - **Licensing gatekeeper** (`lib/license.ts`): `CLIENT_LICENSE_KEY` +
-  async `LICENSE_SERVER_URL` validation (cached). `ACTIVE` → full access;
-  `GRACE` (1–3 days) → full access + "License payment pending." banner;
-  `EXPIRED`/`MISSING` → Demo Mode (POST/PUT/DELETE write routes blocked).
-- **`/admin` interception + auto-discovery** (`lib/env-discovery.ts`): a missing
-  data store or admin account redirects `/admin` → `/admin/setup`, the unified
-  setup dashboard, which shows a live environment-health scan, per-category
-  badges, and copyable `npx wrangler secret put …` commands plus the exact
-  Cloudflare path
-  *Workers & Pages → [Project] → Settings → Variables and Secrets → Production*.
+async `LICENSE_SERVER_URL` validation (cached). `ACTIVE` → full access;
+`GRACE` (1–3 days) → full access + "License payment pending." banner;
+`EXPIRED`/`MISSING` → Demo Mode (POST/PUT/DELETE write routes blocked).
+- `/admin` **interception + auto-discovery** (`lib/env-discovery.ts`): a missing
+data store or admin account redirects `/admin` → `/admin/setup`, the unified
+setup dashboard, which shows a live environment-health scan, per-category
+badges, and copyable `npx wrangler secret put …` commands plus the exact
+Cloudflare path
+*Workers & Pages → [Project] → Settings → Variables and Secrets → Production*.
 - **Setup dashboard** (`/admin/setup`): one page for the whole install —
-  data store matrix (Supabase / Upstash Redis / Cloudflare KV-D1), master
-  admin, email / payment / map providers, **AI provider** (DeepSeek Pro /
-  OpenAI / Anthropic / Replicate / Workers AI), security, site identity and
-  Stripe keys — persisted to `global_platform_settings`.
+data store matrix (Supabase / Upstash Redis / Cloudflare KV-D1), master
+admin, email / payment / map providers, **AI provider** (DeepSeek Pro /
+OpenAI / Anthropic / Replicate / Workers AI), security, site identity and
+Stripe keys — persisted to `global_platform_settings`.
 - **Universal AI engine** (`services/ai/`): image-to-animation + dynamic SVG
-  generation via `/api/ai/animation` and `/api/ai/generate`, with CSS/SVG
-  fallback presets and masked keys (`sk-ds-••••••••1234`).
+generation via `/api/ai/animation` and `/api/ai/generate`, with CSS/SVG
+fallback presets and masked keys (`sk-ds-••••••••1234`).
 - **Analytics** (`/api/admin/analytics`), **outbound webhooks**
-  (`/api/admin/webhooks`, exponential backoff ×3) and **maintenance mode**
-  (`MAINTENANCE_MODE=true`).
+(`/api/admin/webhooks`, exponential backoff ×3) and **maintenance mode**
+(`MAINTENANCE_MODE=true`).
 
 ### 4-tier RBAC routing + Universal Item Engine + Lockdown
 
@@ -66,22 +66,22 @@ The enterprise multi-tenant foundation (4-tier role hierarchy, an extensible
 "any business type" item engine, and post-setup configuration lockdown) ships
 as three pure, edge-safe modules plus one Supabase migration:
 
-- **`lib/rbac.ts`** — the 4-tier hierarchy + role/capability matrix. Route
-  prefixes: `/a` (Tier 1 super-admin), `/s` (Tier 2 sales), `/b` (Tier 3
-  business owner); everything else — including each merchant's **custom domain**
-  — is the Tier 4 end-customer storefront. `canAccessTenant()` enforces
-  tenant isolation (super-admin unrestricted, sales → assigned tenants,
-  owner/staff/customer → own tenant).
-- **`lib/item-engine/`** — the **Universal Item Engine**. One item record per
-  business vertical via a schema-driven `itemType` + JSON `rules` blob:
-  `fcfs`, `raffle`, `appointment`, `table_booking`, `ticketed_access`,
-  `subscription`. Adding a vertical = one JSON Schema, no DB rewrite.
-- **`lib/lockdown.ts`** — the **Lockdown Engine**. Critical system parameters
-  (storage, admin auth, payment, cron, license) are frozen after setup and can
-  only be changed by an authenticated Tier-1 super-admin with fresh **step-up**
-  verification.
-- **`supabase/migrations/00003_tenant_routing.sql`** — `tenants.business_type`
-  + `custom_domain`, `users.role`, the `tenant_items` table (JSONB `rules`), the
+- `lib/rbac.ts` — the 4-tier hierarchy + role/capability matrix. Route
+prefixes: `/a` (Tier 1 super-admin), `/s` (Tier 2 sales), `/b` (Tier 3
+business owner); everything else — including each merchant's **custom domain**
+— is the Tier 4 end-customer storefront. `canAccessTenant()` enforces
+tenant isolation (super-admin unrestricted, sales → assigned tenants,
+owner/staff/customer → own tenant).
+- `lib/item-engine/` — the **Universal Item Engine**. One item record per
+business vertical via a schema-driven `itemType` + JSON `rules` blob:
+`fcfs`, `raffle`, `appointment`, `table_booking`, `ticketed_access`,
+`subscription`. Adding a vertical = one JSON Schema, no DB rewrite.
+- `lib/lockdown.ts` — the **Lockdown Engine**. Critical system parameters
+(storage, admin auth, payment, cron, license) are frozen after setup and can
+only be changed by an authenticated Tier-1 super-admin with fresh **step-up**
+verification.
+- `supabase/migrations/00003_tenant_routing.sql` — `tenants.business_type`
+  - `custom_domain`, `users.role`, the `tenant_items` table (JSONB `rules`), the
   `system_locks` table, and strict RLS tenant-isolation policies.
 
 ### Local dev + setup commands
@@ -120,27 +120,29 @@ HTTPS APIs, no platform-specific code.
 
 ### Pick your platform
 
-| Platform | How hard | Why you'd pick it | Where to look |
-| --- | --- | --- | --- |
-| **Vercel** | Easiest — click "Import", done | Git-connected auto-deploys, built-in cron, zero config | [Vercel](#vercel) below |
-| **Netlify** | Easiest — click "Import", done | Same as Vercel, if you prefer Netlify | [Netlify](#netlify) below |
-| **Cloudflare** | A few terminal commands | Edge network, free tier, single Worker | [`DEPLOY-CLOUDFLARE.md`](DEPLOY-CLOUDFLARE.md) — full 6-step walkthrough |
-| **Any Node host** (Railway, Render, Fly, VPS) | `npm run build` + `npm start` | You already run a VPS/container | [Any other Node host](#any-other-node-host) below |
+
+| Platform                                      | How hard                       | Why you'd pick it                                      | Where to look                                                            |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| **Vercel**                                    | Easiest — click "Import", done | Git-connected auto-deploys, built-in cron, zero config | [Vercel](#vercel) below                                                  |
+| **Netlify**                                   | Easiest — click "Import", done | Same as Vercel, if you prefer Netlify                  | [Netlify](#netlify) below                                                |
+| **Cloudflare**                                | A few terminal commands        | Edge network, free tier, single Worker                 | `[DEPLOY-CLOUDFLARE.md](DEPLOY-CLOUDFLARE.md)` — full 6-step walkthrough |
+| **Any Node host** (Railway, Render, Fly, VPS) | `npm run build` + `npm start`  | You already run a VPS/container                        | [Any other Node host](#any-other-node-host) below                        |
+
 
 ### Common setup (every platform, once it's deployed)
 
 1. **Set the environment variables** from the tables below in your platform's
-   project settings (Production + Preview), then trigger a redeploy.
+  project settings (Production + Preview), then trigger a redeploy.
 2. Open `https://yourdomain.com/admin` — you'll land on the in-site **admin
-   sign-in** form. Enter your **admin email + password** (the email is your
+  sign-in** form. Enter your **admin email + password** (the email is your
    admin inbox, from `ADMIN_VERIFY_EMAIL` → `SUPPORT_EMAIL` → `REPLY_TO_EMAIL`,
    or the master admin email you created during setup), then confirm the
    emailed **two-step code** and click **Developer → Seed Defaults**
    (or build your catalog by hand with **Add Product**).
 3. Set your Stripe webhook to `https://yourdomain.com/api/stripe/webhook`
-   (Stripe → Developers → Webhooks).
+  (Stripe → Developers → Webhooks).
 4. Check **/admin → SetUp** — it shows ✓/✗ for every env var and a launch
-   checklist.
+  checklist.
 5. Your store is live.
 
 > **Repo layout:** the entire application lives in the `e-commerce-store/`
@@ -148,52 +150,46 @@ HTTPS APIs, no platform-specific code.
 > lockfile, `vercel.json`, `netlify.toml`, `.gitignore`). Set your platform's
 > **Root / Base directory** to `e-commerce-store`.
 
-
-
 ### Vercel
 
 1. **Import the repo**: vercel.com → **Add New → Project** → connect your Git
-   repo.
-2. **Set the Root Directory to `e-commerce-store`** (where `package.json`
-   lives) — Vercel auto-detects Next.js from there.
+  repo.
+2. **Set the Root Directory to** `e-commerce-store` (where `package.json`
+  lives) — Vercel auto-detects Next.js from there.
 3. **Environment Variables** (Project → Settings → Environment Variables, both
-   Production and Preview): add the variables from the tables below.
+  Production and Preview): add the variables from the tables below.
 4. **Deploy** (Vercel auto-deploys on every push to the connected branch).
 5. **Daily safety net**: already wired by `vercel.json`
-   (`0 0 * * *` → `/api/checkout/cron-draw`). Set `CRON_SECRET` in the env so
+  (`0 0 * * *` → `/api/checkout/cron-draw`). Set `CRON_SECRET` in the env so
    the cron can authenticate. Note: Vercel's Hobby plan allows **one cron run
    per day** — draws still fire in real time from the client countdown, so the
    cron is a backstop, not a requirement.
 6. When no site URL is configured, `VERCEL_PROJECT_PRODUCTION_URL` /
-   `VERCEL_URL` are used automatically — no `NEXT_PUBLIC_URL` needed unless
+  `VERCEL_URL` are used automatically — no `NEXT_PUBLIC_URL` needed unless
    you want a specific domain.
-
-
 
 ### Netlify
 
 1. **Import the repo**: app.netlify.com → **Add new site → Import an existing
-   project** → connect your Git repo.
-2. **Set the Base directory to `e-commerce-store`**. The included
-   `netlify.toml` sets the build command and the daily scheduled function
+  project** → connect your Git repo.
+2. **Set the Base directory to** `e-commerce-store`. The included
+  `netlify.toml` sets the build command and the daily scheduled function
    automatically.
 3. **Environment Variables** (Site configuration → Environment variables, both
-   Production and Preview): add the variables from the tables below.
+  Production and Preview): add the variables from the tables below.
 4. **Deploy** (auto-deploys on push; Netlify's Next.js runtime plugin handles
-   routing, the middleware/proxy and server functions).
+  routing, the middleware/proxy and server functions).
 5. **Daily safety net**: automatic — Netlify invokes
-   `netlify/functions/cron-tasks.mjs` daily, which pings
+  `netlify/functions/cron-tasks.mjs` daily, which pings
    `/api/checkout/cron-draw`, `/api/cron/recovery` and
    `/api/analytics/social-tick` with `Authorization: Bearer $CRON_SECRET`
    (set `CRON_SECRET` in the Netlify env).
 6. When no site URL is configured, Netlify's `URL` / `DEPLOY_URL` are used
-   automatically.
-
-
+  automatically.
 
 ### Cloudflare
 
-Follow the complete, copy-paste walkthrough in **`DEPLOY-CLOUDFLARE.md`** —
+Follow the complete, copy-paste walkthrough in `DEPLOY-CLOUDFLARE.md` —
 six numbered steps. The one-line version (full details in the guide):
 
 ```bash
@@ -206,89 +202,82 @@ cd ..
 ```
 
 - The whole app runs as **one Worker** via the official OpenNext adapter
-  (`@opennextjs/cloudflare` — already in `package.json`). The `/api/*` routes,
-  middleware, `/og` card, `/icon` and `/media` all work unchanged, and the
-  public routes already emit `CDN-Cache-Control` headers Cloudflare's edge
-  honors.
-- **Build-time vs runtime env vars matter on Cloudflare** — `NEXT_PUBLIC_*`
-  must be in your shell when you build; everything else is set with
-  `npx wrangler secret put` after the first deploy. The guide explains this
-  with a table.
+(`@opennextjs/cloudflare` — already in `package.json`). The `/api/*` routes,
+middleware, `/og` card, `/icon` and `/media` all work unchanged, and the
+public routes already emit `CDN-Cache-Control` headers Cloudflare's edge
+honors.
+- **Build-time vs runtime env vars matter on Cloudflare** — `NEXT_PUBLIC_`*
+must be in your shell when you build; everything else is set with
+`npx wrangler secret put` after the first deploy. The guide explains this
+with a table.
 - The daily safety net is the tiny scheduled worker in `cron-worker/` — deploy
-  it once and set two secrets: `TARGET_URL` (your store URL) and `CRON_SECRET`
-  (the same value as any platform). See `cron-worker/README.md`.
+it once and set two secrets: `TARGET_URL` (your store URL) and `CRON_SECRET`
+(the same value as any platform). See `cron-worker/README.md`.
 - When no site URL is configured, Cloudflare's `CF_PAGES_URL` is used
-  automatically.
-
-
+automatically.
 
 ### Any other Node host
 
 1. Run `npm run build` then `npm start` (or the platform's Next.js runtime).
 2. Set the environment variables from the tables below (Production).
 3. Schedule a daily hit to `/api/checkout/cron-draw` (plus the optional
-   `/api/cron/recovery` and `/api/analytics/social-tick`) with
+  `/api/cron/recovery` and `/api/analytics/social-tick`) with
    `Authorization: Bearer $CRON_SECRET` — cron-job.org, GitHub Actions,
    UptimeRobot and QStash all work. See `lib/cron-auth.ts`.
 4. Done — draws still fire in real time from the client countdown even without
-   any scheduler.
-
-
+  any scheduler.
 
 ### Required environment variables
 
-> **📄 `/.env.example` is the complete, copy-paste template** with a realistic
+> **📄** `/.env.example` **is the complete, copy-paste template** with a realistic
 > example value + annotation for EVERY variable this app reads (Vercel, Netlify,
 > Node and local dev). For Cloudflare Workers use `/.dev.vars.example` (local)
 > and the `wrangler.jsonc` reference. The tables below summarize the same list.
 
 
-| Variable                                                 | Purpose                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`     | Redis (the data store — everything lives here). Any Upstash REST pair works from any platform. Aliases accepted: `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash/Vercel KV), `REDIS_REST_URL`/`REDIS_REST_TOKEN`. Wire-protocol `redis://` URLs are skipped automatically.                                                      |
-| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Optional — the Setup Wizard's source of truth for `global_platform_settings` (provider keys + the configuration gate). Aliases: `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`. Without them the store uses the legacy env-var providers (Stripe/Resend/Mapbox) unchanged. |
-| `STRIPE_SECRET_KEY`                                      | Stripe API key                                                                                                                                                                                                                                                                                                                 |
-| `STRIPE_WEBHOOK_SECRET`                                  | Stripe webhook signing secret                                                                                                                                                                                                                                                                                                  |
-| `ADMIN_BASIC_AUTH_PASSWORD` | Protects `/admin` (Basic Auth + two-step verification). The sign-in **email field is the admin email** (`ADMIN_VERIFY_EMAIL` → `SUPPORT_EMAIL` → `REPLY_TO_EMAIL`), not a separate username. |
-| `ADMIN_VERIFY_EMAIL`                                     | Inbox that receives the `/admin` two-step code — and the email you sign in with. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`.                                                                                                                                                                            |
-| `CRON_SECRET`                                            | Protects the scheduled safety-net endpoints (`/api/checkout/cron-draw`, `/api/cron/*`). Schedulers authenticate with `Authorization: Bearer $CRON_SECRET`.                                                                                                                                                                     |
-| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL` | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, the platform's own URL variables are used automatically: Vercel (`VERCEL_PROJECT_PRODUCTION_URL`/`VERCEL_URL`), Netlify (`URL`/`DEPLOY_URL`), Cloudflare Pages (`CF_PAGES_URL`). |
-
-
+| Variable                                                         | Purpose                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`             | Redis (the data store — everything lives here). Any Upstash REST pair works from any platform. Aliases accepted: `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Upstash/Vercel KV), `REDIS_REST_URL`/`REDIS_REST_TOKEN`. Wire-protocol `redis://` URLs are skipped automatically.                                                      |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | Optional — the Setup Wizard's source of truth for `global_platform_settings` (provider keys + the configuration gate). Aliases: `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`. Without them the store uses the legacy env-var providers (Stripe/Resend/Mapbox) unchanged.                                         |
+| `STRIPE_SECRET_KEY`                                              | Stripe API key                                                                                                                                                                                                                                                                                                                 |
+| `STRIPE_WEBHOOK_SECRET`                                          | Stripe webhook signing secret                                                                                                                                                                                                                                                                                                  |
+| `ADMIN_BASIC_AUTH_PASSWORD`                                      | Protects `/admin` (Basic Auth + two-step verification). The sign-in **email field is the admin email** (`ADMIN_VERIFY_EMAIL` → `SUPPORT_EMAIL` → `REPLY_TO_EMAIL`), not a separate username.                                                                                                                                   |
+| `ADMIN_VERIFY_EMAIL`                                             | Inbox that receives the `/admin` two-step code — and the email you sign in with. Falls back to `SUPPORT_EMAIL`/`REPLY_TO_EMAIL`.                                                                                                                                                                                               |
+| `CRON_SECRET`                                                    | Protects the scheduled safety-net endpoints (`/api/checkout/cron-draw`, `/api/cron/*`). Schedulers authenticate with `Authorization: Bearer $CRON_SECRET`.                                                                                                                                                                     |
+| `NEXT_PUBLIC_URL`, `NEXT_PUBLIC_SITE_URL`, or `SITE_URL`         | Your canonical domain (used for links, social cards, emails). Any of the three works — set whichever your platform provides. If none are set, the platform's own URL variables are used automatically: Vercel (`VERCEL_PROJECT_PRODUCTION_URL`/`VERCEL_URL`), Netlify (`URL`/`DEPLOY_URL`), Cloudflare Pages (`CF_PAGES_URL`). |
 
 
 ### Recommended environment variables
 
 
-| Variable                                | Purpose                                                                                                                                                                                                                                                               |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STRIPE_PRODUCT_ID`                     | Global default Stripe **Price** ID for any product/size that doesn't have one set in admin. Per-product IDs in admin always win. If nothing is set, checkout fails loudly with `price_placeholder_not_configured` instead of charging the wrong account.              |
+| Variable                                | Purpose                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STRIPE_PRODUCT_ID`                     | Global default Stripe **Price** ID for any product/size that doesn't have one set in admin. Per-product IDs in admin always win. If nothing is set, checkout fails loudly with `price_placeholder_not_configured` instead of charging the wrong account.                                                                |
 | `STORAGE_PROVIDER`                      | Optional data-backend selector. Default (unset) = auto-detect: **Supabase first** (when `SUPABASE_URL` + a key are present), then Cloudflare KV/D1 bindings, then Upstash Redis. Set `supabase`, `cloudflare-kv` (or `d1`), or `upstash` to force a driver. Active provider shows in `/admin → SetUp` + `/admin/setup`. |
-| `RESEND_API_KEY`, `RESEND_FROM`         | Transactional email (entry confirmations, winners, resets).                                                                                                                                                                                                           |
-| `NEXT_PUBLIC_MAPBOX_TOKEN`              | Mapbox Address Autofill (public `pk.*` token). Without it, customers just type addresses manually. Set it in the SAME environment you deploy, then redeploy.                                                                                                          |
-| `BRAND_NAME` or `NEXT_PUBLIC_SITE_NAME` | Brand name used in email "from" and templates.                                                                                                                                                                                                                        |
-| `SUPPORT_EMAIL`, `REPLY_TO_EMAIL`       | Support inbox used in emails.                                                                                                                                                                                                                                         |
+| `RESEND_API_KEY`, `RESEND_FROM`         | Transactional email (entry confirmations, winners, resets).                                                                                                                                                                                                                                                             |
+| `NEXT_PUBLIC_MAPBOX_TOKEN`              | Mapbox Address Autofill (public `pk.*` token). Without it, customers just type addresses manually. Set it in the SAME environment you deploy, then redeploy.                                                                                                                                                            |
+| `BRAND_NAME` or `NEXT_PUBLIC_SITE_NAME` | Brand name used in email "from" and templates.                                                                                                                                                                                                                                                                          |
+| `SUPPORT_EMAIL`, `REPLY_TO_EMAIL`       | Support inbox used in emails.                                                                                                                                                                                                                                                                                           |
 
 
 ### Optional / feature-specific environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `LEMONSQUEEZY_API_KEY`, `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_VARIANT_ID` | Lemon Squeezy alternative payment provider (API key + numeric store id + checkout variant id). |
-| `PADDLE_API_KEY` | Paddle alternative payment provider. |
-| `POSTMARK_API_KEY`, `SENDGRID_API_KEY` | Alternative email providers (Postmark / SendGrid). |
-| `EMAIL_FROM` | "From" address alias — takes priority over `RESEND_FROM` when both are set. |
-| `GOOGLE_MAPS_API_KEY` (alias `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`) | Google Maps Places alternative to Mapbox. Build-time when using the `NEXT_PUBLIC_*` alias. |
-| `DEEPSEEK_API_KEY` | Universal AI engine primary provider (default). |
+
+| Variable                                                                                                                                | Purpose                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LEMONSQUEEZY_API_KEY`, `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_VARIANT_ID`                                                              | Lemon Squeezy alternative payment provider (API key + numeric store id + checkout variant id).                                                                                                              |
+| `PADDLE_API_KEY`                                                                                                                        | Paddle alternative payment provider.                                                                                                                                                                        |
+| `POSTMARK_API_KEY`, `SENDGRID_API_KEY`                                                                                                  | Alternative email providers (Postmark / SendGrid).                                                                                                                                                          |
+| `EMAIL_FROM`                                                                                                                            | "From" address alias — takes priority over `RESEND_FROM` when both are set.                                                                                                                                 |
+| `GOOGLE_MAPS_API_KEY` (alias `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`)                                                                         | Google Maps Places alternative to Mapbox. Build-time when using the `NEXT_PUBLIC_*` alias.                                                                                                                  |
+| `DEEPSEEK_API_KEY`                                                                                                                      | Universal AI engine primary provider (default).                                                                                                                                                             |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `REPLICATE_API_TOKEN`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `GEMINI_API_KEY` | Optional AI providers (fallbacks). **Note:** the Google Gemini key is `GEMINI_API_KEY` (the provider enum is `google_gemini`, but there is no `GOOGLE_GEMINI_API_KEY`). Cloudflare Workers AI needs no key. |
-| `CLIENT_LICENSE_KEY` (alias `LICENSE_KEY`), `LICENSE_SERVER_URL`, `LICENSE_ENFORCED` | Optional licensing gatekeeper. Enforcement is OFF unless a key/server/`LICENSE_ENFORCED` is set. |
-| `MAINTENANCE_MODE` | Set to `true` to show the maintenance screen. |
-| `DEV_WEBHOOK_BYPASS` | **Dev only** — `1` lets `/api/stripe/webhook` accept unsigned events in non-production (for `stripe listen`). Never set in production. |
+| `CLIENT_LICENSE_KEY` (alias `LICENSE_KEY`), `LICENSE_SERVER_URL`, `LICENSE_ENFORCED`                                                    | Optional licensing gatekeeper. Enforcement is OFF unless a key/server/`LICENSE_ENFORCED` is set.                                                                                                            |
+| `MAINTENANCE_MODE`                                                                                                                      | Set to `true` to show the maintenance screen.                                                                                                                                                               |
+| `DEV_WEBHOOK_BYPASS`                                                                                                                    | **Dev only** — `1` lets `/api/stripe/webhook` accept unsigned events in non-production (for `stripe listen`). Never set in production.                                                                      |
 
 
 ---
-
-
 
 ## 2. Branding in 5 minutes (no code)
 
@@ -328,8 +317,6 @@ In `/admin` → **Settings**:
 That's it — the whole site now reflects your brand.
 
 ---
-
-
 
 ## 3. Running the store day to day
 
@@ -376,8 +363,6 @@ keys — safe to re-run anytime).
 > intentional. Product slugs only resolve for products that exist in Redis.
 
 ---
-
-
 
 ## 4. How a raffle drop works
 
@@ -441,8 +426,6 @@ on any device. Anonymous visitors keep the localStorage bag as before.
 
 ---
 
-
-
 ## 5. Customer account / rewards
 
 - Signup creates a session immediately (customers land in `/account` logged in)
@@ -454,8 +437,6 @@ one-time store-credit promo codes in `/account`. The gifting toggle and the
 update payment methods via Stripe's secure Customer Portal.
 
 ---
-
-
 
 ## 6. Stripe setup checklist
 
@@ -469,8 +450,6 @@ Portal) with "Payment methods" on — this powers "Update payment" on `/account`
 fallback).
 
 ---
-
-
 
 ## 7. Customer-facing pages
 
@@ -487,8 +466,6 @@ fallback).
 | `/admin`                                                 | The control room                               |
 
 
-
-
 ### Shipping addresses are validated — strictly
 
 Every entry, cart checkout, waitlist and address update requires a **complete,
@@ -501,22 +478,22 @@ See `lib/address-validation.ts`.
 ### Admin extras
 
 - **Two-step admin verification**: the in-site **admin sign-in** form at `/admin/login` (replacing the native Basic-Auth dialog) takes your admin **email + password**; once accepted, `/admin` emails a 6-digit code that you must enter before the portal unlocks.
-  Check "remember this device" to skip the code for 30 days on that browser. Wrong codes lock out for 15 minutes after 5 tries, so a leaked password alone can't get into `/admin`. To receive the code, set up a transactional email provider (Resend / Postmark / SendGrid) in setup or the portal's Settings.
+Check "remember this device" to skip the code for 30 days on that browser. Wrong codes lock out for 15 minutes after 5 tries, so a leaked password alone can't get into `/admin`. To receive the code, set up a transactional email provider (Resend / Postmark / SendGrid) in setup or the portal's Settings.
 - **Setup Wizard + super-admin login**: on first run `/admin` redirects to
-  `/admin/setup`, where you choose your databases (primary + optional safety
-  mirror), paste API
-  keys, and create the master super-admin (stored in Supabase
-  `global_platform_settings`). Afterwards the master account can sign back in at
-  `/admin/login` (or `POST /api/admin/super-login`) to change
-  providers without the Basic-Auth password. When Supabase isn't configured,
-  everything falls back to the legacy `STRIPE_SECRET_KEY` / `RESEND_API_KEY` /
-  `NEXT_PUBLIC_MAPBOX_TOKEN` env vars unchanged.
-- **System Configuration dashboard (`/admin/setup`)**: until the install
-  is ready (data store + admin account present), `/admin` is intercepted and
-  redirected to this page, which scans the environment on every request and
-  shows a ✅/❌ breakdown of every variable, secret and Cloudflare binding —
-  with copyable `npx wrangler secret put …` commands and `wrangler.toml` blocks.
-  Once everything is detected, the standard portal unlocks automatically.
+`/admin/setup`, where you choose your databases (primary + optional safety
+mirror), paste API
+keys, and create the master super-admin (stored in Supabase
+`global_platform_settings`). Afterwards the master account can sign back in at
+`/admin/login` (or `POST /api/admin/super-login`) to change
+providers without the Basic-Auth password. When Supabase isn't configured,
+everything falls back to the legacy `STRIPE_SECRET_KEY` / `RESEND_API_KEY` /
+`NEXT_PUBLIC_MAPBOX_TOKEN` env vars unchanged.
+- **System Configuration dashboard (**`/admin/setup`**)**: until the install
+is ready (data store + admin account present), `/admin` is intercepted and
+redirected to this page, which scans the environment on every request and
+shows a ✅/❌ breakdown of every variable, secret and Cloudflare binding —
+with copyable `npx wrangler secret put …` commands and `wrangler.toml` blocks.
+Once everything is detected, the standard portal unlocks automatically.
 - **Streamer Mode** (default ON): masks customer emails, shipping addresses,
 card numbers, tracking numbers, promo codes, order refs, phone numbers and
 names (fixed-length bullet masks — even the character lengths never leak), and
@@ -530,8 +507,6 @@ confirmation** (admin password + typing `WIPE`), optionally rebuilding the
 seeded defaults. Use it to reset a demo or hand a clean slate to a new buyer.
 
 ---
-
-
 
 ## 8. Development
 
@@ -557,8 +532,6 @@ Useful files:
 - `lib/mapbox-autofill.ts` — Mapbox address autofill wiring.
 - `goyunir.config.ts` — starter defaults (brand seed value, theme, products).
 
-
-
 ### A note on Redis
 
 Everything lives in Redis (Upstash). The key space is intentionally tidy so the
@@ -583,8 +556,6 @@ renamed in place with no data loss.
 
 ---
 
-
-
 ## 9. Troubleshooting
 
 
@@ -592,7 +563,7 @@ renamed in place with no data loss.
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Store shows 0 items                            | Seed defaults or add a product in `/admin`                                                                                                         |
 | Product page 404                               | Product isn't in Redis — add/seed it in `/admin`                                                                                                   |
-| `/admin` won't open                            | Check `ADMIN_BASIC_AUTH_PASSWORD` (sign in with the admin email)                                                                                                                  |
+| `/admin` won't open                            | Check `ADMIN_BASIC_AUTH_PASSWORD` (sign in with the admin email)                                                                                   |
 | "Price not configured" / `price_placeholder_*` | Set the Stripe Price ID for that size in `/admin`                                                                                                  |
 | Settings don't show immediately                | Storefront caches ~10–30s; wait and refresh                                                                                                        |
 | Mapbox dropdown missing                        | `NEXT_PUBLIC_MAPBOX_TOKEN` unset or not redeployed                                                                                                 |
