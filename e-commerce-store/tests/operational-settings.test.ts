@@ -63,7 +63,6 @@ test('OPERATIONAL_SETTING_KEYS covers the full provider matrix', () => {
   const required = [
     'storage_provider',
     'storage_replicas',
-    'supabase_url',
     'upstash_redis_rest_url',
     'cloudflare_kv_binding',
     'admin_basic_auth_password',
@@ -75,4 +74,12 @@ test('OPERATIONAL_SETTING_KEYS covers the full provider matrix', () => {
     'support_email',
   ];
   for (const k of required) assert.ok(OPERATIONAL_SETTING_KEYS.includes(k), k);
+});
+
+test('OPERATIONAL_SETTING_KEYS never persists Supabase database credentials', () => {
+  // The Supabase trio is verified as a TRANSIENT runtime check only — it must
+  // never be written to the site's persistent settings row.
+  assert.equal(OPERATIONAL_SETTING_KEYS.includes('supabase_url'), false);
+  assert.equal(OPERATIONAL_SETTING_KEYS.includes('supabase_anon_key'), false);
+  assert.equal(OPERATIONAL_SETTING_KEYS.includes('supabase_service_role_key'), false);
 });

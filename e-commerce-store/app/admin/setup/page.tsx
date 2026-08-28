@@ -4,14 +4,15 @@
  * /admin/setup — the production Setup Wizard, kept deliberately minimal.
  *
  * The store boots from TWO required inputs:
- *   1. A Supabase connection (project URL + anon key + service-role key).
+ *   1. Choose your database (the Supabase fields collapse into this step when
+ *      Supabase is selected).
  *   2. A master admin account (email + password).
  *
  * Payments, transactional email, maps and the AI engine are all OPTIONAL and
  * tucked into one collapsed section — the storefront runs without them (no
  * checkout / no emails / no autofill / CSS fallback animations) and each can be
  * added later in the admin portal. This is the "less is more" setup: one page,
- * two required cards (connect database + admin account), two collapsed optional
+ * two required cards (choose database + admin account), two collapsed optional
  * cards (safety mirror + payments/email/maps/AI), one button.
  */
 
@@ -130,7 +131,7 @@ function DatabaseInstructions(props: { primary: string; mirror: string; copied: 
       ) : (
         <>
           <p style={hintStyle}>
-            <strong>Supabase (PostgreSQL)</strong> is the recommended all-in-one store — it holds your products, orders and entries AND your admin account + settings. Fill in the three Supabase values in step 2 below; no extra <code>STORAGE_PROVIDER</code> variable is needed (Supabase is the default).
+            <strong>Supabase (PostgreSQL)</strong> is the recommended all-in-one store — it holds your products, orders and entries AND your admin account + settings. Fill in the three Supabase values above; no extra <code>STORAGE_PROVIDER</code> variable is needed (Supabase is the default).
           </p>
           <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open supabase.com/dashboard →</a>
         </>
@@ -362,8 +363,11 @@ export default function SetupPage() {
     setWarning('');
     setNotice('');
 
-    const needsSupabase = !configured || !supabaseEnvReady;
-    if (needsSupabase && (!form.supabase_url.trim() || !form.supabase_anon_key.trim() || !form.supabase_service_role_key.trim())) {
+    // The Supabase fields are only required when Supabase is the selected
+    // database. Their values travel in the body payload and are verified against
+    // the runtime environment as a transient check — never persisted.
+    const supabaseSelected = form.storage_provider === 'supabase';
+    if (supabaseSelected && (!form.supabase_url.trim() || !form.supabase_anon_key.trim() || !form.supabase_service_role_key.trim())) {
       setError('Enter your Supabase project URL, anon key and service-role key.');
       return;
     }
@@ -474,68 +478,70 @@ export default function SetupPage() {
             <Field label="Second database (safety mirror, optional)" hint="Mirrors every write to an independent backup so one vendor outage or data loss never takes the store down.">
               <Select value={form.storage_replicas} onChange={(v) => set('storage_replicas', v)} options={MIRROR_OPTIONS} />
             </Field>
+
+            {form.storage_provider === 'supabase' && (
+              <>
+                <p style={hintStyle}>
+                  Your <strong>master admin account and store settings</strong> are saved in Supabase. Paste the 3 values (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value. These values are verified against your environment as a transient runtime check and are never written to the site&apos;s database.
+                </p>
+
+                <Field label="Supabase project URL" hint="Looks like https://abcdefghijklm.supabase.co">
+                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                    <EnvNameChip name="SUPABASE_URL" copied={copied} onCopy={copy} />
+                  </div>
+                  <TextInput value={form.supabase_url} onChange={(v) => set('supabase_url', v)} placeholder="https://your-project.supabase.co" />
+                </Field>
+
+                <Field label="Anon public key" hint="A long JWT starting with eyJ...">
+                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                    <EnvNameChip name="SUPABASE_ANON_KEY" copied={copied} onCopy={copy} />
+                  </div>
+                  <SecretInput value={form.supabase_anon_key} onChange={(v) => set('supabase_anon_key', v)} placeholder="eyJ..." />
+                </Field>
+
+                <Field label="Service-role key (secret)" hint="Never expose this one. It also starts with eyJ...">
+                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
+                    <EnvNameChip name="SUPABASE_SERVICE_ROLE_KEY" copied={copied} onCopy={copy} />
+                  </div>
+                  <SecretInput value={form.supabase_service_role_key} onChange={(v) => set('supabase_service_role_key', v)} placeholder="eyJ..." />
+                </Field>
+
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => void testConnection()} disabled={probe.state === 'busy'} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: probe.state === 'busy' ? 'default' : 'pointer', opacity: probe.state === 'busy' ? 0.6 : 1 }}>
+                    {probe.state === 'busy' ? 'Testing…' : 'Test connection'}
+                  </button>
+                  {probe.state === 'ok' && <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>{probe.message}</span>}
+                  {probe.state === 'fail' && <span style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c' }}>{probe.message}</span>}
+                </div>
+
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <button type="button" onClick={() => setShowHelp((s) => !s)} style={{ justifySelf: 'start', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
+                    {showHelp ? 'Hide' : 'Where do I find these values?'} {showHelp ? '−' : '+'}
+                  </button>
+                  {showHelp && (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 8 }}>
+                      <p style={hintStyle}>
+                        1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>supabase.com/dashboard</a> → open your project → <strong>Project Settings → API</strong>.
+                      </p>
+                      <p style={hintStyle}>2. Copy the <strong>Project URL</strong>, the <strong>anon public</strong> key, and the <strong>service_role</strong> key.</p>
+                      <p style={hintStyle}>
+                        3. Add them in Cloudflare — by hand in the <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>dashboard</a> (Workers &amp; Pages → [project] → Settings → Variables and Secrets → Production → <strong>Secrets</strong>), or with the copy-paste commands above.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <p style={hintStyle}>
+                  No account yet? Create a free project at supabase.com, then grab these three values under Project Settings, API.
+                </p>
+              </>
+            )}
+
             <DatabaseInstructions primary={form.storage_provider} mirror={form.storage_replicas} copied={copied} onCopy={copy} />
           </Card>
 
           <Card>
-            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>2 · Connect Supabase (admin &amp; settings)</h2>
-            <p style={hintStyle}>
-              Your <strong>master admin account and store settings</strong> are saved in Supabase — this is required no matter which store database you chose above. Paste the 3 values (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value.
-            </p>
-
-            <Field label="Supabase project URL" hint="Looks like https://abcdefghijklm.supabase.co">
-              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                <EnvNameChip name="SUPABASE_URL" copied={copied} onCopy={copy} />
-              </div>
-              <TextInput value={form.supabase_url} onChange={(v) => set('supabase_url', v)} placeholder="https://your-project.supabase.co" />
-            </Field>
-
-            <Field label="Anon public key" hint="A long JWT starting with eyJ...">
-              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                <EnvNameChip name="SUPABASE_ANON_KEY" copied={copied} onCopy={copy} />
-              </div>
-              <SecretInput value={form.supabase_anon_key} onChange={(v) => set('supabase_anon_key', v)} placeholder="eyJ..." />
-            </Field>
-
-            <Field label="Service-role key (secret)" hint="Never expose this one. It also starts with eyJ...">
-              <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                <EnvNameChip name="SUPABASE_SERVICE_ROLE_KEY" copied={copied} onCopy={copy} />
-              </div>
-              <SecretInput value={form.supabase_service_role_key} onChange={(v) => set('supabase_service_role_key', v)} placeholder="eyJ..." />
-            </Field>
-
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="button" onClick={() => void testConnection()} disabled={probe.state === 'busy'} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: probe.state === 'busy' ? 'default' : 'pointer', opacity: probe.state === 'busy' ? 0.6 : 1 }}>
-                {probe.state === 'busy' ? 'Testing…' : 'Test connection'}
-              </button>
-              {probe.state === 'ok' && <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>{probe.message}</span>}
-              {probe.state === 'fail' && <span style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c' }}>{probe.message}</span>}
-            </div>
-
-            <div style={{ display: 'grid', gap: 8 }}>
-              <button type="button" onClick={() => setShowHelp((s) => !s)} style={{ justifySelf: 'start', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
-                {showHelp ? 'Hide' : 'Where do I find these values?'} {showHelp ? '−' : '+'}
-              </button>
-              {showHelp && (
-                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 8 }}>
-                  <p style={hintStyle}>
-                    1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>supabase.com/dashboard</a> → open your project → <strong>Project Settings → API</strong>.
-                  </p>
-                  <p style={hintStyle}>2. Copy the <strong>Project URL</strong>, the <strong>anon public</strong> key, and the <strong>service_role</strong> key.</p>
-                  <p style={hintStyle}>
-                    3. Add them in Cloudflare — by hand in the <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>dashboard</a> (Workers &amp; Pages → [project] → Settings → Variables and Secrets → Production → <strong>Secrets</strong>), or with the copy-paste commands above.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <p style={hintStyle}>
-              No account yet? Create a free project at supabase.com, then grab these three values under Project Settings, API.
-            </p>
-          </Card>
-
-          <Card>
-            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>3 · Create your admin account</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>2 · Create your admin account</h2>
             <Field label="Email">
               <TextInput value={adminEmail} onChange={(v) => setAdminEmail(v)} placeholder="you@example.com" />
             </Field>

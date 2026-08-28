@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE } from '@/lib/server-config';
-import { issueAdminAuthSession } from '@/lib/admin-verify';
+import { createRedisClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { issueAdminAuthSession, issueAdminDevice } from '@/lib/admin-verify';
 import { verifySuperAdminSignIn, supabaseConfigured, supabaseAuthMissingReason } from '@/services/config/supabase-client';
+import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -14,6 +15,24 @@ import { rateLimitedResponse } from '@/lib/rate-limit';
  */
 function basicAuthLoginUsable(): boolean {
   return Boolean(getAdminPassword()) && Boolean(getAdminVerifyEmail().trim());
+}
+
+/**
+ * Whether ANY transactional email provider is available — either persisted in
+ * `global_platform_settings` (Setup Wizard) or a legacy env binding such as
+ * RESEND_API_KEY / POSTMARK_API_KEY / SENDGRID_API_KEY. This is the single
+ * source of truth that decides whether the 6-digit two-step code can even be
+ * delivered, and it is read from the same factory the email senders use so the
+ * two can never drift.
+ */
+async function emailProviderConfigured(): Promise<boolean> {
+  try {
+    return Boolean(await EmailFactory.getDriver({ force: true }));
+  } catch {
+    // If the email state cannot be determined, fail OPEN: never lock the
+    // operator out of their own admin portal behind a code that can't arrive.
+    return false;
+  }
 }
 
 export const dynamic = 'force-dynamic';
@@ -92,9 +111,32 @@ export async function POST(request: Request) {
     );
   }
 
+  // BREAK-LOCKOUT BYPASS: when no transactional email provider is configured,
+  // a 6-digit OTP can never be delivered. Forcing the two-step gate here would
+  // trap the operator behind a code they cannot receive. Grant dashboard access
+  // on the correct password alone, and let the portal's Settings screen
+  // activate two-step verification once an email provider is configured.
+  const twoStepEnabled = await emailProviderConfigured();
+
+  if (!twoStepEnabled) {
+    // Issue the long-lived device cookie directly (marked superAdmin so the
+    // middleware skips both Basic Auth and the 2FA gate) — the operator is now
+    // fully signed in.
+    const { token, maxAgeSeconds } = await issueAdminDevice(redis, email, true, { superAdmin: true });
+    const response = NextResponse.json({ ok: true, needs2fa: false, twoStepEnabled: false, email });
+    response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: maxAgeSeconds,
+      path: '/',
+    });
+    return response;
+  }
+
   const token = await issueAdminAuthSession(redis, email);
 
-  const response = NextResponse.json({ ok: true, needs2fa: true, email });
+  const response = NextResponse.json({ ok: true, needs2fa: true, twoStepEnabled: true, email });
   response.cookies.set(ADMIN_AUTH_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

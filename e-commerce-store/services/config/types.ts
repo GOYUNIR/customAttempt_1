@@ -147,9 +147,6 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
 export interface OperationalSettings {
   storage_provider?: string;
   storage_replicas?: string;
-  supabase_url?: string;
-  supabase_anon_key?: string;
-  supabase_service_role_key?: string;
   upstash_redis_rest_url?: string;
   upstash_redis_rest_token?: string;
   cloudflare_kv_binding?: string;
@@ -180,9 +177,6 @@ export interface OperationalSettings {
 export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
   'storage_provider',
   'storage_replicas',
-  'supabase_url',
-  'supabase_anon_key',
-  'supabase_service_role_key',
   'upstash_redis_rest_url',
   'upstash_redis_rest_token',
   'cloudflare_kv_binding',

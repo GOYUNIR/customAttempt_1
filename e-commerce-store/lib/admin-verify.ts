@@ -340,9 +340,19 @@ export async function adminLoginAuthorized(
   const redis = createRedisClient();
   if (!redis) return false;
   const token = adminAuthTokenFromRequest(request);
-  if (!token) return false;
-  const session = await consumeAdminAuthSession(redis, token);
-  return Boolean(session?.email);
+  if (token) {
+    const session = await consumeAdminAuthSession(redis, token);
+    if (session?.email) return true;
+  }
+  // A valid device cookie is ALSO full authorization. The middleware already
+  // trusts it for every /api/admin request, so the verify-* routes must too —
+  // this is what lets the break-lockout bypass (and /api/admin/super-login)
+  // reach /api/admin/verify-status without a separate login-session cookie.
+  const deviceToken = adminDeviceTokenFromRequest(request);
+  if (deviceToken) {
+    return await isAdminDeviceValid(redis, deviceToken).catch(() => false);
+  }
+  return false;
 }
 
 

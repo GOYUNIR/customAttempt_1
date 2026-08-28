@@ -1,13 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
 /**
  * /admin/login — the in-site admin sign-in form (replaces the native browser
- * Basic-Auth dialog). The operator enters their email + password; on success a
- * short-lived login session is set and they are taken to /admin, which then
- * shows the two-step email verification gate (2FA) before the portal unlocks.
+ * Basic-Auth dialog). The operator enters their email + password; on success
+ * they are signed in. When a transactional email provider is configured, a
+ * short-lived login session is set and /admin shows the two-step email
+ * verification gate (2FA) before the portal unlocks. When no email provider is
+ * configured, the two-step gate is bypassed and dashboard access is granted
+ * directly.
  */
 
 const inputStyle = { padding: '13px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
@@ -20,6 +23,27 @@ export default function AdminLoginPage() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Whether the two-step email gate is active (hydrated from /api/config-check —
+  // the client never reads server-side env vars directly, which was undefined at
+  // runtime and produced 400 payload mismatches).
+  const [twoStepEnabled, setTwoStepEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config-check', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data.twoStepEnabled === 'boolean') {
+          setTwoStepEnabled(data.twoStepEnabled);
+        }
+      })
+      .catch(() => {
+        /* keep the neutral copy when the check is unreachable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -90,10 +114,18 @@ export default function AdminLoginPage() {
           </button>
 
           <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 6 }}>
-            <p style={{ ...hintStyle, fontWeight: 700, color: '#0f172a' }}>Why two steps?</p>
-            <p style={hintStyle}>
-              After your password is accepted, a <strong>6-digit code is emailed</strong> to your admin inbox to confirm it&apos;s really you. That two-step protection keeps the store safe even if your password leaks. To receive the code, set up a transactional email provider (Resend, Postmark or SendGrid) in <Link href="/admin/setup?reconfigure=1" prefetch={false} style={{ color: '#1d4ed8', textDecoration: 'underline' }}>setup</Link> or in the portal&apos;s Settings.
+            <p style={{ ...hintStyle, fontWeight: 700, color: '#0f172a' }}>
+              {twoStepEnabled === false ? 'Two-step verification is off' : 'Why two steps?'}
             </p>
+            {twoStepEnabled === false ? (
+              <p style={hintStyle}>
+                No transactional email provider is configured yet, so you&apos;ll be signed in with just your password. To enable the extra <strong>6-digit email code</strong> for future sign-ins, add an email provider (Resend, Postmark or SendGrid) in the portal&apos;s Settings after you sign in.
+              </p>
+            ) : (
+              <p style={hintStyle}>
+                After your password is accepted, a <strong>6-digit code is emailed</strong> to your admin inbox to confirm it&apos;s really you. That two-step protection keeps the store safe even if your password leaks. To receive the code, set up a transactional email provider (Resend, Postmark or SendGrid) in <Link href="/admin/setup?reconfigure=1" prefetch={false} style={{ color: '#1d4ed8', textDecoration: 'underline' }}>setup</Link> or in the portal&apos;s Settings.
+              </p>
+            )}
           </div>
 
           <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', margin: 0 }}>

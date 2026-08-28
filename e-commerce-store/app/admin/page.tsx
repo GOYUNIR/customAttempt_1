@@ -987,6 +987,12 @@ export default function AdminPortal() {
   const [wipeRebuild, setWipeRebuild] = useState(true);
   const [envStatus, setEnvStatus] = useState<any>(null);
   const [envStatusLoading, setEnvStatusLoading] = useState(false);
+  // Email provider configuration (activates two-step sign-in for future logins).
+  const [emailProvider, setEmailProvider] = useState('');
+  const [emailProviderKey, setEmailProviderKey] = useState('');
+  const [emailProviderBusy, setEmailProviderBusy] = useState(false);
+  const [emailProviderMsg, setEmailProviderMsg] = useState('');
+  const [emailProviderErr, setEmailProviderErr] = useState(false);
   
   const [drawHistory, setDrawHistory] = useState<any[]>([]);
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
@@ -2441,6 +2447,47 @@ export default function AdminPortal() {
     }
   };
 
+  const loadEmailProvider = async () => {
+    try {
+      const res = await adminFetch('/api/admin/email-provider');
+      const data = await res.json();
+      if (data && typeof data.provider === 'string') setEmailProvider(data.provider || '');
+    } catch {
+      /* keep the dropdown at its current value if the check is unreachable */
+    }
+  };
+
+  const saveEmailProvider = async () => {
+    if (!password) return showToast('Enter the admin password first');
+    setEmailProviderBusy(true);
+    setEmailProviderMsg('');
+    setEmailProviderErr(false);
+    try {
+      const res = await adminFetch('/api/admin/email-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, provider: emailProvider, apiKey: emailProviderKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.ok) {
+        setEmailProviderKey('');
+        setEmailProviderMsg(
+          data.provider
+            ? `Email provider set to ${data.provider}. Two-step verification is now active for future sign-ins.`
+            : 'Email provider cleared. Two-step verification is off until you configure one.',
+        );
+      } else {
+        setEmailProviderErr(true);
+        setEmailProviderMsg(String(data?.error || 'Could not save the email provider.'));
+      }
+    } catch {
+      setEmailProviderErr(true);
+      setEmailProviderMsg('Could not save the email provider.');
+    } finally {
+      setEmailProviderBusy(false);
+    }
+  };
+
   const saveSettings = async () => {
     if (!password) {
       return showToast('Enter the admin password first');
@@ -3077,7 +3124,7 @@ export default function AdminPortal() {
                         if (t.id === 'drops') fetchConfig();
                         if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                         if (t.id === 'settings') fetchSettings();
-                        if (t.id === 'setup') fetchEnvStatus();
+                        if (t.id === 'setup') { fetchEnvStatus(); loadEmailProvider(); }
                         if (t.id === 'products') fetchProducts();
                         if (t.id === 'products') fetchSettings();
                         if (t.id === 'users') fetchUsers();
@@ -5423,6 +5470,45 @@ export default function AdminPortal() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            <div style={cardStyle}>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Email Provider &amp; Two-Step Verification</h2>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 12px', lineHeight: 1.6 }}>
+                Choose a transactional email provider to activate the 6-digit two-step sign-in code for every future login. Until one is configured, the admin portal signs you in with just your password. The API key is saved to your database and is never shown back.
+              </p>
+              <div style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
+                <select
+                  value={emailProvider}
+                  onChange={(e) => setEmailProvider(e.target.value)}
+                  style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #27272a', background: '#0a0a0a', color: '#f7f7f7', fontSize: 13 }}
+                >
+                  <option value="">Skip for now (password only)</option>
+                  <option value="resend">Resend</option>
+                  <option value="postmark">Postmark</option>
+                  <option value="sendgrid">SendGrid</option>
+                </select>
+                {emailProvider !== '' && (
+                  <input
+                    type="password"
+                    value={emailProviderKey}
+                    onChange={(e) => setEmailProviderKey(e.target.value)}
+                    placeholder={emailProvider === 'resend' ? 're_...' : emailProvider === 'postmark' ? 'Postmark server token' : 'SG....'}
+                    autoComplete="off"
+                    style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #27272a', background: '#0a0a0a', color: '#f7f7f7', fontSize: 13 }}
+                  />
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button onClick={saveEmailProvider} disabled={emailProviderBusy} style={{ padding: '8px 14px', borderRadius: 999, border: 'none', background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: emailProviderBusy ? 'default' : 'pointer', opacity: emailProviderBusy ? 0.6 : 1 }}>
+                    {emailProviderBusy ? 'Saving…' : 'Save email provider'}
+                  </button>
+                  {emailProviderMsg && (
+                    <span style={{ fontSize: 11, color: emailProviderErr ? '#f87171' : '#34d399' }}>
+                      {emailProviderMsg}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
