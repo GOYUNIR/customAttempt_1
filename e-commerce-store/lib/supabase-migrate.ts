@@ -28,10 +28,24 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00004_ai_secondary.sql', sql: MIGRATION_00004 },
 ];
 
+/** Read + trim the Supabase Management-API access token (never logged). */
+function readSupabaseAccessToken(): string {
+  return String(process.env.SUPABASE_ACCESS_TOKEN || '').trim();
+}
+
+/** True when a token is present but clearly not a Supabase personal access
+ *  token (they start with `sbp_`). Lets us give a friendlier error instead of
+ *  a raw Management-API 401. */
+export function isMalformedSupabaseAccessToken(): boolean {
+  const token = readSupabaseAccessToken();
+  if (!token) return false;
+  return !token.startsWith('sbp_') || token.length < 12;
+}
+
 export function supabaseAutoMigrateAvailable(): boolean {
-  const token = String(process.env.SUPABASE_ACCESS_TOKEN || '').trim();
+  const token = readSupabaseAccessToken();
   const { url } = readSupabaseEnv();
-  return Boolean(token && url);
+  return Boolean(token && url && projectRefFromUrl(url));
 }
 
 function projectRefFromUrl(url: string): string | null {
@@ -52,7 +66,7 @@ export type AutoMigrateResult = {
 
 /** Apply all four migrations in order via the Supabase Management API. */
 export async function autoApplySchema(): Promise<AutoMigrateResult> {
-  const token = String(process.env.SUPABASE_ACCESS_TOKEN || '').trim();
+  const token = readSupabaseAccessToken();
   const { url } = readSupabaseEnv();
   const ref = url ? projectRefFromUrl(url) : null;
 
@@ -61,7 +75,16 @@ export async function autoApplySchema(): Promise<AutoMigrateResult> {
       applied: false,
       ran: [],
       error:
-        'Set SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) so the wizard can build the schema for you, or apply the migrations manually.',
+        'Set SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) so the wizard can build the schema for you, or run `supabase db push`.',
+    };
+  }
+
+  if (isMalformedSupabaseAccessToken()) {
+    return {
+      applied: false,
+      ran: [],
+      error:
+        'SUPABASE_ACCESS_TOKEN does not look like a Supabase personal access token (it must start with `sbp_`). Create a NEW token at https://supabase.com/dashboard/account/tokens and paste the full value.',
     };
   }
 
@@ -79,6 +102,14 @@ export async function autoApplySchema(): Promise<AutoMigrateResult> {
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
+        if (res.status === 401 || res.status === 403) {
+          return {
+            applied: false,
+            ran,
+            error:
+              `${migration.name} failed: the SUPABASE_ACCESS_TOKEN was rejected (HTTP ${res.status}). It is likely a legacy or expired token. Delete it and create a NEW personal access token at https://supabase.com/dashboard/account/tokens (tokens start with \`sbp_\`), set it as SUPABASE_ACCESS_TOKEN, then retry.`,
+          };
+        }
         return {
           applied: false,
           ran,

@@ -144,18 +144,21 @@ alter table public.store_kv enable row level security;
 
 -- Super-admins (service role bypasses RLS anyway) can do everything on the
 -- settings row; anon gets no direct read so secrets never leak over PostgREST.
+drop policy if exists "super_admin_manage_settings" on public.global_platform_settings;
 create policy "super_admin_manage_settings" on public.global_platform_settings
   for all using (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.is_super_admin = true
   ));
 
+drop policy if exists "super_admin_manage_profiles" on public.profiles;
 create policy "super_admin_manage_profiles" on public.profiles
   for all using (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.is_super_admin = true
   ));
 
+drop policy if exists "users_read_own" on public.users;
 create policy "users_read_own" on public.users
   for select using (auth.uid() = id);
 

@@ -374,7 +374,20 @@ export default function SetupPage() {
       const res = await fetch('/api/admin/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ probe: 'auto-migrate' }),
+        // Send the Supabase service-role key so the server can verify the
+        // caller is authorized to trigger DDL (same as the test-connection
+        // probe). When Supabase is already wired into the environment, the
+        // server falls back to the env credentials automatically.
+        body: JSON.stringify(
+          supabaseEnvReady
+            ? { probe: 'auto-migrate' }
+            : {
+                probe: 'auto-migrate',
+                supabase_url: form.supabase_url,
+                supabase_anon_key: form.supabase_anon_key,
+                supabase_service_role_key: form.supabase_service_role_key,
+              },
+        ),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; ran?: string[] };
       if (data.ok) {
@@ -585,7 +598,7 @@ export default function SetupPage() {
               <p style={{ ...hintStyle, color: '#92400e' }}>
                 {autoMigrateAvailable
                   ? 'The wizard can build it for you — one click.'
-                  : 'Add SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) and the wizard will build it for you, or run `supabase db push`.'}
+                  : 'Add SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens, tokens start with `sbp_`) and the wizard will build it for you — or run `supabase db push` from this repo.'}
               </p>
               <button
                 type="button"

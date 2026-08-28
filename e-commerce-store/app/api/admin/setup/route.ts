@@ -320,12 +320,59 @@ async function probeSupabase(body: Record<string, unknown>) {
   }
 }
 
+/** Verify a service-role key is accepted by PostgREST WITHOUT touching any
+ *  table — schema-independent, so it works before migrations are applied. */
+async function verifyServiceRoleKey(url: string, serviceRoleKey: string): Promise<boolean> {
+  if (!/^https?:\/\//i.test(url) || !serviceRoleKey) return false;
+  try {
+    const res = await fetch(`${url}/rest/v1/`, {
+      method: 'GET',
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * "Fix the schema for me" — applies the four idempotent migrations through the
  * Supabase Management API (needs SUPABASE_ACCESS_TOKEN). This is what makes a
  * wiped/fresh Supabase project set ITSELF up instead of showing a wall of SQL.
+ *
+ * SECURITY: this triggers real DDL, so it is gated. An unauthenticated caller
+ * must NOT be able to run migrations against the project. Any ONE of the
+ * following authorizes the call:
+ *   • a valid super-admin device session, or
+ *   • the Basic-Auth admin password, or
+ *   • a service-role key that PostgREST actually accepts (verified live).
  */
-async function probeAutoMigrate() {
+async function probeAutoMigrate(request: Request, body: Record<string, unknown>) {
+  const env = readSupabaseEnv();
+  const url = String(body.supabaseUrl || body.supabase_url || env.url || '').trim().replace(/\/+$/, '');
+  const serviceRoleKey = String(body.supabaseServiceRoleKey || body.supabase_service_role_key || env.serviceRoleKey || '').trim();
+
+  const superAdminSession = await isSuperAdminSession(request);
+  const basicAuthOk = adminRequestAuthorized(request, String(body.admin_basic_auth_password || body.adminPassword || ''));
+  const serviceRoleOk = url && serviceRoleKey ? await verifyServiceRoleKey(url, serviceRoleKey) : false;
+
+  if (!superAdminSession && !basicAuthOk && !serviceRoleOk) {
+    return NextResponse.json(
+      {
+        ok: false,
+        applied: false,
+        error:
+          'Unauthorized. To apply the schema, enter your Supabase service-role key in Step 1 (then click “Test connection”), or sign in as the super-admin.',
+      },
+      { status: 401 },
+    );
+  }
+
+  // Point the migrator at the operator's project even when Supabase credentials
+  // are only available inline (production keeps them in the environment).
+  setSupabaseRuntimeCredentials({ url });
+
   if (!supabaseAutoMigrateAvailable()) {
     return NextResponse.json({
       ok: false,
@@ -456,7 +503,7 @@ export async function POST(request: Request) {
 
     // "Fix the schema for me" — applies the migrations automatically.
     if (String(body.probe || '').trim() === 'auto-migrate') {
-      return probeAutoMigrate();
+      return probeAutoMigrate(request, body);
     }
 
     // ── already configured? (controls the re-save guard + the env gate) ────────

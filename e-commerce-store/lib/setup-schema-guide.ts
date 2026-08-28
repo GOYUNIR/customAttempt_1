@@ -250,18 +250,21 @@ alter table public.store_kv enable row level security;
 const MIGRATION_00001_C = `
 -- Super-admins (service role bypasses RLS anyway) can do everything on the
 -- settings row; anon gets no direct read so secrets never leak over PostgREST.
+drop policy if exists "super_admin_manage_settings" on public.global_platform_settings;
 create policy "super_admin_manage_settings" on public.global_platform_settings
   for all using (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.is_super_admin = true
   ));
 
+drop policy if exists "super_admin_manage_profiles" on public.profiles;
 create policy "super_admin_manage_profiles" on public.profiles
   for all using (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.is_super_admin = true
   ));
 
+drop policy if exists "users_read_own" on public.users;
 create policy "users_read_own" on public.users
   for select using (auth.uid() = id);
 
@@ -435,6 +438,7 @@ alter table public.system_locks enable row level security;
 -- Tenant items: super admins see everything; owner/staff see + manage their own
 -- tenant; sales see their assigned tenants (via the \`role\`/tenant helper the
 -- app enforces for writes too — DB-side RLS is the backstop).
+drop policy if exists "tenant_items_select" on public.tenant_items;
 create policy "tenant_items_select" on public.tenant_items
   for select
   using (
@@ -442,6 +446,7 @@ create policy "tenant_items_select" on public.tenant_items
     or tenant_id = public.current_user_tenant()
   );
 
+drop policy if exists "tenant_items_manage" on public.tenant_items;
 create policy "tenant_items_manage" on public.tenant_items
   for all
   using (
@@ -461,9 +466,11 @@ create policy "tenant_items_manage" on public.tenant_items
 
 -- System locks: readable by any authenticated user (the lockdown engine checks
 -- state); writable only by super admins.
+drop policy if exists "system_locks_select" on public.system_locks;
 create policy "system_locks_select" on public.system_locks
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "system_locks_manage" on public.system_locks;
 create policy "system_locks_manage" on public.system_locks
   for all using (public.current_user_is_super_admin());
 

@@ -21,6 +21,10 @@
 SUPABASE_URL=https://abcdefghijklm.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# (OPTIONAL - auto "Fix the schema for me") Supabase personal access token for the
+# Management API. Create a NEW one at https://supabase.com/dashboard/account/tokens
+# (starts with `sbp_`). If a legacy token is rejected, delete it and create a new one.
+SUPABASE_ACCESS_TOKEN=sbp_...new-personal-access-token...
 
 # --- ALTERNATIVE / FALLBACK DATA STORES -------------------------------------
 # (NECESSARY HERE - only if you override the default) one of: supabase | upstash | cloudflare-kv

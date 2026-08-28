@@ -113,6 +113,7 @@ alter table public.system_locks enable row level security;
 -- Tenant items: super admins see everything; owner/staff see + manage their own
 -- tenant; sales see their assigned tenants (via the `role`/tenant helper the
 -- app enforces for writes too — DB-side RLS is the backstop).
+drop policy if exists "tenant_items_select" on public.tenant_items;
 create policy "tenant_items_select" on public.tenant_items
   for select
   using (
@@ -120,6 +121,7 @@ create policy "tenant_items_select" on public.tenant_items
     or tenant_id = public.current_user_tenant()
   );
 
+drop policy if exists "tenant_items_manage" on public.tenant_items;
 create policy "tenant_items_manage" on public.tenant_items
   for all
   using (
@@ -139,9 +141,11 @@ create policy "tenant_items_manage" on public.tenant_items
 
 -- System locks: readable by any authenticated user (the lockdown engine checks
 -- state); writable only by super admins.
+drop policy if exists "system_locks_select" on public.system_locks;
 create policy "system_locks_select" on public.system_locks
   for select using (auth.role() = 'authenticated');
 
+drop policy if exists "system_locks_manage" on public.system_locks;
 create policy "system_locks_manage" on public.system_locks
   for all using (public.current_user_is_super_admin());
 
