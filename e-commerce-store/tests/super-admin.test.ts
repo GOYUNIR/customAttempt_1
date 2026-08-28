@@ -105,6 +105,41 @@ test(
         id: 'user-1',
         email: 'admin@x.co',
         accessToken: 'tok',
+        isSuperAdmin: false,
+      });
+    } finally {
+      restore();
+    }
+  }),
+);
+
+test(
+  'verifySuperAdminSignIn: falls back to GoTrue metadata when the profiles table read fails (schema not applied)',
+  withSupabaseEnv(async () => {
+    const restore = installFetchMock((url) => {
+      if (url.includes('/auth/v1/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'tok',
+            user: {
+              id: 'user-1',
+              email: 'admin@x.co',
+              user_metadata: { is_super_admin: true, role: 'super_admin' },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.includes('/rest/v1/profiles')) {
+        // A fresh project with no schema → PostgREST returns a 404/PGRST error.
+        return new Response('{"message":"Could not find the table"}', { status: 404 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    try {
+      assert.deepEqual(await verifySuperAdminSignIn('admin@x.co', 'pw'), {
+        id: 'user-1',
+        email: 'admin@x.co',
       });
     } finally {
       restore();

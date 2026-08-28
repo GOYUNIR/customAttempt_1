@@ -28,6 +28,9 @@ import {
   supabaseEnvFullySet,
 } from '@/lib/env-discovery';
 import { isSchemaError, buildSchemaFixPlan, schemaFixPlanToText } from '@/lib/setup-schema-guide';
+import { autoApplySchema, supabaseAutoMigrateAvailable } from '@/lib/supabase-migrate';
+import { pruneExpiredSupabaseKv } from '@/lib/storage/supabase';
+import { nudgeUnverifiedAccounts } from '@/lib/customer-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -317,6 +320,43 @@ async function probeSupabase(body: Record<string, unknown>) {
   }
 }
 
+/**
+ * "Fix the schema for me" — applies the four idempotent migrations through the
+ * Supabase Management API (needs SUPABASE_ACCESS_TOKEN). This is what makes a
+ * wiped/fresh Supabase project set ITSELF up instead of showing a wall of SQL.
+ */
+async function probeAutoMigrate() {
+  if (!supabaseAutoMigrateAvailable()) {
+    return NextResponse.json({
+      ok: false,
+      applied: false,
+      error:
+        'Add SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) so the wizard can build the schema for you, or run `supabase db push`.',
+    });
+  }
+  const result = await autoApplySchema();
+  if (result.applied) {
+    return NextResponse.json({ ok: true, applied: true, ran: result.ran });
+  }
+  return NextResponse.json({ ok: false, applied: false, ran: result.ran, error: result.error });
+}
+
+/** Proactively make sure the Supabase schema exists; auto-applies migrations when
+ *  it is missing and a management access token is available. No-op when the
+ *  schema is already fully applied. */
+async function selfHealSupabaseSchema(): Promise<void> {
+  try {
+    await probePlatformSettingsSchema();
+  } catch (err: unknown) {
+    const message = (err as Error)?.message || String(err);
+    if (!isSchemaError(message)) throw err;
+    const result = await autoApplySchema();
+    if (!result.applied) {
+      throw new Error(result.error || 'Supabase schema auto-fix failed.');
+    }
+  }
+}
+
 export async function GET(request: Request) {
   let settings: Awaited<ReturnType<typeof getPlatformSettings>> = null;
   let configured: Awaited<ReturnType<typeof isPlatformConfigured>> = null;
@@ -392,6 +432,7 @@ export async function GET(request: Request) {
     isProduction: process.env.NODE_ENV === 'production',
     dataStores: dataStoreSummary(),
     dashboardUrl: CLOUDFLARE_DASHBOARD_URL,
+    autoMigrateAvailable: supabaseAutoMigrateAvailable(),
   });
 }
 
@@ -411,6 +452,11 @@ export async function POST(request: Request) {
     // ── operator can verify inline credentials without env vars being set yet.
     if (String(body.probe || '').trim() === 'supabase') {
       return probeSupabase(body);
+    }
+
+    // "Fix the schema for me" — applies the migrations automatically.
+    if (String(body.probe || '').trim() === 'auto-migrate') {
+      return probeAutoMigrate();
     }
 
     // ── already configured? (controls the re-save guard + the env gate) ────────
@@ -572,6 +618,11 @@ export async function POST(request: Request) {
 
     // 1. Persist provider keys (is_configured stays false until the admin exists).
     stage = 'storage_init';
+    // Self-heal: when a Supabase access token is available, make sure the schema
+    // exists (and auto-apply the migrations if it was wiped) instead of failing.
+    if (supabaseAutoMigrateAvailable()) {
+      await selfHealSupabaseSchema();
+    }
     await savePlatformSettings(normalized.input);
 
     // 2. Persist operational settings (security / site / payments / AI / storage).
@@ -588,6 +639,24 @@ export async function POST(request: Request) {
     //    factories re-resolve against the newly persisted providers.
     stage = 'finalize';
     await markPlatformConfigured();
+
+    // Once a transactional email provider is configured, nudge the customers who
+    // signed up while there was no email API — they can now finish verifying.
+    if (normalized.input.mail_provider) {
+      try {
+        const nudgeRedis = createRedisClient();
+        if (nudgeRedis) await nudgeUnverifiedAccounts(nudgeRedis);
+      } catch {
+        // Best-effort — never block a save on a marketing nudge.
+      }
+    }
+
+    // Self-heal: prune any expired Supabase KV rows left over from earlier runs.
+    try {
+      await pruneExpiredSupabaseKv();
+    } catch {
+      // Best-effort — never block a save on a maintenance sweep.
+    }
 
     // 5. On FIRST setup, sign the operator in as the super-admin immediately so
     //    the "Open admin portal →" click lands IN the portal instead of on the
@@ -633,7 +702,15 @@ export async function POST(request: Request) {
     const schemaMissing = isSchemaError(message);
     const plan = schemaMissing ? buildSchemaFixPlan(message) : null;
     return NextResponse.json(
-      { success: false, error: plan ? schemaFixPlanToText(plan) : message, stage, schemaMissing, schemaError: plan },
+      {
+        success: false,
+        error: plan
+          ? 'Your Supabase database is missing its schema. Click "Fix the schema for me" to apply it automatically (or run `supabase db push`).'
+          : message,
+        stage,
+        schemaMissing,
+        schemaError: plan,
+      },
       { status: 422 },
     );
   }

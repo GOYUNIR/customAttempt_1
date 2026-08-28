@@ -142,3 +142,37 @@ export function supabaseStorageConfigured(): boolean {
   const { url, key } = readSupabaseStorageEnv();
   return Boolean(url && key);
 }
+
+/**
+ * SELF-HEAL — prune every expired `store_kv` row.
+ *
+ * The Supabase KV adapter lazily deletes an expired row when it is read, but a
+ * row that is never read again would linger forever and slowly bloat the table.
+ * This runs a single PostgREST DELETE against rows whose `expires_at` is in the
+ * past, keeping a Supabase-backed datastore tidy with no operator action.
+ * Returns true when the prune ran without throwing (PostgREST DELETE is 204 even
+ * when no rows match, so a no-op is indistinguishable from a real prune — and
+ * both are safe).
+ */
+export async function pruneExpiredSupabaseKv(): Promise<boolean> {
+  const { url, key } = readSupabaseStorageEnv();
+  if (!url || !key) return false;
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/store_kv?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&select=key`,
+      {
+        method: 'DELETE',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

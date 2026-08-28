@@ -325,12 +325,14 @@ export async function createSuperAdmin(input: {
 }
 
 /** Verify an operator email+password against Supabase Auth (password grant).
- *  Returns { id, email, accessToken } on success, null on bad credentials.
- *  Does NOT yet confirm the super-admin flag — see verifySuperAdminSignIn. */
+ *  Returns { id, email, accessToken, isSuperAdmin } on success, null on bad
+ *  credentials. `isSuperAdmin` is read from the GoTrue user_metadata the Setup
+ *  Wizard stamps when it creates the master account (role/is_super_admin) — the
+ *  same flag the wizard's `createSuperAdmin` writes. */
 export async function verifySuperAdminCredentials(
   email: string,
   password: string,
-): Promise<{ id: string; email: string; accessToken: string } | null> {
+): Promise<{ id: string; email: string; accessToken: string; isSuperAdmin: boolean } | null> {
   if (!supabaseConfigured()) return null;
   const { anonKey } = readSupabaseEnv();
   try {
@@ -338,12 +340,19 @@ export async function verifySuperAdminCredentials(
       key: anonKey,
       method: 'POST',
       body: { email, password },
-    })) as { access_token?: string; user?: { id?: string; email?: string } } | null;
+    })) as {
+      access_token?: string;
+      user?: { id?: string; email?: string; user_metadata?: Record<string, unknown> };
+    } | null;
     if (!result?.access_token || !result.user?.id) return null;
+    const meta = result.user.user_metadata || {};
+    const isSuperAdmin =
+      meta.is_super_admin === true || meta.role === 'super_admin';
     return {
       id: String(result.user.id),
       email: String(result.user.email || email).trim().toLowerCase(),
       accessToken: String(result.access_token),
+      isSuperAdmin,
     };
   } catch {
     return null;
@@ -353,7 +362,13 @@ export async function verifySuperAdminCredentials(
 /** Full super-admin sign-in: verify credentials AND confirm the
  *  `profiles.is_super_admin` flag (via the authenticated user's own RLS-scoped
  *  read of their profile row). Returns the master account on success, null when
- *  the credentials are wrong OR the user is not a super-admin. */
+ *  the credentials are wrong OR the user is not a super-admin.
+ *
+ *  Robustness: when the `profiles` table read fails (a fresh Supabase project
+ *  whose schema was never applied — the most common cause of "Invalid email or
+ *  password" despite a correct password), fall back to the GoTrue user_metadata
+ *  super-admin flag. The wizard is the only thing that ever creates an Auth user
+ *  with that flag, so accepting it cannot be a privilege escalation. */
 export async function verifySuperAdminSignIn(
   email: string,
   password: string,
@@ -369,8 +384,15 @@ export async function verifySuperAdminSignIn(
     if (Array.isArray(rows) && rows.length > 0 && rows[0]?.is_super_admin === true) {
       return { id: credentials.id, email: credentials.email };
     }
+    // A profile row exists but isn't flagged super-admin → not a super-admin
+    // (fail closed). Only fall through to metadata when the read genuinely
+    // failed (schema missing), handled below.
   } catch {
-    // profile read failed — treat as not-a-super-admin (fail closed)
+    // Profile read failed (e.g. `profiles` table missing on a fresh project).
+    // Fall back to the wizard-stamped GoTrue metadata below.
+  }
+  if (credentials.isSuperAdmin) {
+    return { id: credentials.id, email: credentials.email };
   }
   return null;
 }

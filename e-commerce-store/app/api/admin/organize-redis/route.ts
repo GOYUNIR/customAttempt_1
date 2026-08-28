@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
 import { maintainDedupeStructures, sweepOrphanedProductState } from '@/lib/redis-maintenance';
+import { pruneExpiredSupabaseKv } from '@/lib/storage/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -344,6 +345,13 @@ export async function POST(request: Request) {
       const sweep = await sweepOrphanedProductState(redis);
       const totals = sweep.entriesStats + sweep.lastAuto + sweep.overrides + sweep.liveState + sweep.carts + sweep.emptyPools + sweep.orphanPools;
       if (totals > 0) removed.push(`orphan sweep (${sweep.entriesStats} stats, ${sweep.lastAuto} last-auto, ${sweep.overrides} overrides, ${sweep.liveState} live-states, ${sweep.carts} carts, ${sweep.emptyPools} empty pools, ${sweep.orphanPools} orphan pools)`);
+    } catch {}
+    // c) Supabase-backed store: prune expired `store_kv` rows (self-heal the KV
+    //    table so dead keys never accumulate).
+    try {
+      if (await pruneExpiredSupabaseKv()) {
+        removed.push('Supabase store_kv (expired rows pruned)');
+      }
     } catch {}
 
     return NextResponse.json({

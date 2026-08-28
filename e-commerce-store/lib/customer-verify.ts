@@ -13,7 +13,7 @@
  */
 
 import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
-import { emailVerifyKey } from '@/lib/redis-keys';
+import { emailVerifyKey, USERS_KEY } from '@/lib/redis-keys';
 import { safeParseRedisItem } from '@/lib/server-config';
 import { sendCustomerVerificationEmail } from '@/lib/email';
 
@@ -116,4 +116,54 @@ export async function consumeCustomerVerifyCode(
 
   await redis.del(key);
   return { ok: true };
+}
+
+/**
+ * NUDGE UNVERIFIED ACCOUNTS — run once a transactional email provider becomes
+ * available, so customers who signed up while there was no email API get an
+ * actionable "verify your inbox" code instead of being silently stuck.
+ *
+ * Anti-spam: each account is only nudged once per NUDGE_COOLDOWN_MS (stored on
+ * the account as `verifyNudgeSentAt`), and a single run is capped at `max`
+ * sends. Best-effort — failures are skipped, never thrown.
+ */
+const NUDGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+export async function nudgeUnverifiedAccounts(
+  redis: any,
+  opts: { max?: number } = {},
+): Promise<{ sent: number; skipped: number }> {
+  const raw = await redis.hgetall(USERS_KEY).catch(() => null);
+  if (!raw) return { sent: 0, skipped: 0 };
+
+  const max = Number(opts.max ?? 25) || 25;
+  const now = Date.now();
+  let sent = 0;
+  let skipped = 0;
+
+  for (const [id, value] of Object.entries(raw)) {
+    if (sent >= max) break;
+    const user = safeParseRedisItem<any>(value);
+    if (!user || user.emailVerified === true || !user.email) {
+      skipped++;
+      continue;
+    }
+    const lastNudge = user.verifyNudgeSentAt ? new Date(user.verifyNudgeSentAt).getTime() : 0;
+    if (lastNudge && now - lastNudge < NUDGE_COOLDOWN_MS) {
+      skipped++;
+      continue;
+    }
+
+    const email = String(user.email).toLowerCase();
+    const res = await issueCustomerVerifyCode(redis, email);
+    if (res.ok) {
+      const updated = { ...user, verifyNudgeSentAt: new Date().toISOString() };
+      await redis.hset(USERS_KEY, { [id]: JSON.stringify(updated) }).catch(() => {});
+      sent++;
+    } else {
+      skipped++;
+    }
+  }
+
+  return { sent, skipped };
 }

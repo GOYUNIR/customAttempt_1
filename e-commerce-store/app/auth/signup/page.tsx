@@ -81,7 +81,7 @@ export default function SignupPage() {
         setDevCode(data.devCode || '');
         setVerifyCode('');
         lastSubmittedCodeRef.current = '';
-        setVerifyMsg(data.devCode ? 'Account created. Enter the dev-mode code below to finish.' : 'Account created — the code is in the email subject line, so it shows right in your notification.');
+        setVerifyMsg(data.devCode ? 'Account created. Enter the dev-mode code below to finish.' : 'Account created — check your inbox for the 6-digit code.');
         setStep('verify');
         notify({ id: 'auth-signup', type: 'success', message: 'Account created — verify your email to unlock your rewards.' });
       } else if (res.ok) {

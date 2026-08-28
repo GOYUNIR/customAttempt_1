@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
+import { grantWelcomeRewards, createCustomerSession, trySendWelcomeEmail, CUSTOMER_SESSION_TTL_SECONDS } from '@/lib/customer-rewards';
+import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -9,13 +11,26 @@ function hashPassword(password: string, salt: string): string {
   return scryptSync(password, salt, 64).toString('hex');
 }
 
+/** Whether any transactional email provider is configured (wizard or env). */
+async function emailProviderConfigured(): Promise<boolean> {
+  try {
+    return Boolean(await EmailFactory.getDriver({ force: true }));
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Signup now requires email verification before any rewards are granted:
- *  1. The account is created UNVERIFIED with 0 points and no welcome promo.
- *  2. A 6-digit code is emailed to the address (`/api/auth/verify-email`).
- *  3. Only after the code is confirmed does the account get the 250 welcome
- *     points + one-time 10% credit, and a session is created.
- * This stops automated bots from farming welcome rewards with fake inboxes.
+ * Signup behavior depends on whether an email provider exists:
+ *
+ * - EMAIL CONFIGURED — the account is created UNVERIFIED (0 points, no welcome
+ *   promo) and a 6-digit code is emailed. Only after the code is confirmed does
+ *   the account get the welcome rewards + session (anti-bot: proves the inbox is
+ *   real before rewards are granted).
+ *
+ * - NO EMAIL PROVIDER — there is nothing to verify against, so the account is
+ *   created verified and the welcome rewards + session are granted immediately.
+ *   The customer is never held hostage behind a code that cannot arrive.
  */
 export async function POST(request: Request) {
   let body: any = {};
@@ -61,19 +76,43 @@ export async function POST(request: Request) {
   const hashed = hashPassword(password, salt);
   const id = `usr_${Date.now().toString(36)}`;
 
+  const emailConfigured = await emailProviderConfigured();
+
   const user = {
     id,
     email: normalizedEmail,
     password: `${salt}:${hashed}`,
     role: 'customer',
-    // Deliberately locked until the inbox is proven real.
-    emailVerified: false,
+    // When there is no email provider the account is verified immediately
+    // (nothing to send a code with); otherwise it stays locked until verified.
+    emailVerified: !emailConfigured,
     rewards: 0,
     emailOptIn: emailOptIn === true,
     termsAgreedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
   await redis.hset(USERS_KEY, { [id]: JSON.stringify(user) });
+
+  // No email provider → unlock the account + rewards right now and sign them in.
+  if (!emailConfigured) {
+    const { updatedUser, welcomeCode } = await grantWelcomeRewards(redis, user, normalizedEmail);
+    await trySendWelcomeEmail(normalizedEmail, welcomeCode);
+
+    const token = await createCustomerSession(redis, normalizedEmail, updatedUser);
+    const response = NextResponse.json({
+      success: true,
+      needsVerification: false,
+      user: { id, email: normalizedEmail, role: 'customer', rewards: updatedUser.rewards, welcomePromoCode: welcomeCode },
+    });
+    response.cookies.set('goyunir_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: CUSTOMER_SESSION_TTL_SECONDS,
+      path: '/',
+    });
+    return response;
+  }
 
   // Email the verification code (throttled server-side). If the email provider
   // is unavailable the account still exists — the customer can retry the code
@@ -88,4 +127,5 @@ export async function POST(request: Request) {
     devCode: verify.devCode,
   });
 }
+
 

@@ -12,12 +12,14 @@
  * tucked into one collapsed section — the storefront runs without them (no
  * checkout / no emails / no autofill / CSS fallback animations) and each can be
  * added later in the admin portal. This is the "less is more" setup: one page,
- * two required cards (choose database + admin account), two collapsed optional
- * cards (safety mirror + payments/email/maps/AI), one button.
+ * two required cards (choose database + admin account), one collapsed optional
+ * card (payments/email/maps/AI), one button. The safety mirror lives inside the
+ * database card as a second dropdown with its own copy-paste instructions.
  */
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { isSchemaError } from '@/lib/setup-schema-guide';
 
 // ── shared styles ─────────────────────────────────────────────────────────────
 const inputStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid #d1d5db', background: '#fff', fontSize: 15, width: '100%', boxSizing: 'border-box' } as const;
@@ -38,6 +40,8 @@ type Status = {
   supabaseEnvReady?: boolean;
   dataStores?: DataStoreStatus[];
   dashboardUrl?: string;
+  autoMigrateAvailable?: boolean;
+  supabaseSchemaError?: string;
 };
 
 // ── provider options (each defaults to "Skip for now") ────────────────────────
@@ -75,14 +79,14 @@ const AI_OPTIONS = [
 const DB_OPTIONS = [
   { value: 'supabase', label: 'Supabase (PostgreSQL) — recommended' },
   { value: 'upstash', label: 'Upstash Redis' },
-  { value: 'cloudflare-kv', label: 'Cloudflare KV / D1' },
+  { value: 'cloudflare-kv', label: 'Cloudflare KV' },
 ];
 
 const MIRROR_OPTIONS = [
   { value: '', label: 'No mirror (single database)' },
   { value: 'upstash', label: 'Upstash Redis' },
   { value: 'supabase', label: 'Supabase' },
-  { value: 'cloudflare-kv', label: 'Cloudflare KV / D1' },
+  { value: 'cloudflare-kv', label: 'Cloudflare KV' },
 ];
 
 /** One copy-paste env-var row: the variable name + a click-to-copy command. */
@@ -102,53 +106,84 @@ function EnvVarRow(props: { variable: string; command: string; where: string; co
   );
 }
 
+/** Human label for a database provider value. */
+function providerLabel(provider: string): string {
+  return provider === 'supabase' ? 'Supabase' : provider === 'upstash' ? 'Upstash Redis' : 'Cloudflare KV';
+}
+
+/** Full copy-paste instructions for ONE database choice — used for both the
+ *  primary store AND the optional safety mirror, so the mirror never silently
+ *  gets less help than the primary. */
+function ProviderInstructions(props: {
+  provider: string;
+  role: 'primary' | 'mirror';
+  copied: string;
+  onCopy: (t: string) => void;
+}) {
+  const { provider, role, copied, onCopy } = props;
+  const isPrimary = role === 'primary';
+  const selectVar = isPrimary ? 'STORAGE_PROVIDER' : 'STORAGE_REPLICAS';
+
+  if (provider === 'supabase') {
+    return (
+      <>
+        <p style={hintStyle}>
+          <strong>Supabase</strong> {isPrimary ? 'holds your store data AND your admin account + settings (the default — no STORAGE_PROVIDER variable needed).' : 'mirrors every write. Set STORAGE_REPLICAS to supabase and add the three credentials below.'}
+        </p>
+        <EnvVarRow variable="SUPABASE_URL" command="npx wrangler secret put SUPABASE_URL" where="Project Settings → API → Project URL (https://….supabase.co)." copied={copied} onCopy={onCopy} />
+        <EnvVarRow variable="SUPABASE_ANON_KEY" command="npx wrangler secret put SUPABASE_ANON_KEY" where="Project Settings → API → anon public key." copied={copied} onCopy={onCopy} />
+        <EnvVarRow variable="SUPABASE_SERVICE_ROLE_KEY" command="npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY" where="Project Settings → API → service_role key (secret — never expose)." copied={copied} onCopy={onCopy} />
+        <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open supabase.com/dashboard →</a>
+      </>
+    );
+  }
+
+  if (provider === 'upstash') {
+    return (
+      <>
+        <p style={hintStyle}>
+          <strong>Upstash Redis</strong> {isPrimary ? 'is your store data store.' : 'mirrors every write.'} Set <code>{selectVar}</code> to <code>upstash</code> and add the REST URL + token.
+        </p>
+        <EnvVarRow variable={selectVar} command={`npx wrangler secret put ${selectVar}`} where="Value: upstash (set as a plaintext Variable in the dashboard)." copied={copied} onCopy={onCopy} />
+        <EnvVarRow variable="UPSTASH_REDIS_REST_URL" command="npx wrangler secret put UPSTASH_REDIS_REST_URL" where="console.upstash.com → your database → REST API → REST URL (https://….upstash.io)." copied={copied} onCopy={onCopy} />
+        <EnvVarRow variable="UPSTASH_REDIS_REST_TOKEN" command="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" where="Same page → REST token (secret). Never expose it." copied={copied} onCopy={onCopy} />
+        <a href="https://console.upstash.com" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open console.upstash.com →</a>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p style={hintStyle}>
+        <strong>Cloudflare KV</strong> {isPrimary ? 'is your store data store (no third-party store).' : 'mirrors every write.'} Set <code>{selectVar}</code> to <code>cloudflare-kv</code> and bind a KV namespace. KV is best for admin/config/low-concurrency data.
+      </p>
+      <EnvVarRow variable={selectVar} command={`npx wrangler secret put ${selectVar}`} where="Value: cloudflare-kv (plaintext Variable)." copied={copied} onCopy={onCopy} />
+      <p style={hintStyle}>
+        Then bind a KV namespace in <code>wrangler.jsonc</code> (the app auto-detects a KV-shaped binding) — see <a href="https://developers.cloudflare.com/kv/" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>developers.cloudflare.com/kv</a>.
+      </p>
+      <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open the Cloudflare dashboard →</a>
+    </>
+  );
+}
+
 /** The env-var names + copy-paste commands + links for the chosen database(s). */
 function DatabaseInstructions(props: { primary: string; mirror: string; copied: string; onCopy: (t: string) => void }) {
   const { primary, mirror, copied, onCopy } = props;
   return (
-    <div style={{ display: 'grid', gap: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
-      {primary === 'upstash' ? (
-        <>
-          <p style={hintStyle}>
-            Your store data (products, orders, entries) will live in <strong>Upstash Redis</strong>. Set these in Cloudflare — the URL and token as <strong>Secrets</strong>, and <code>STORAGE_PROVIDER</code> as a plaintext <strong>Variable</strong> with the value <code>upstash</code>.
-          </p>
-          <EnvVarRow variable="STORAGE_PROVIDER" command="npx wrangler secret put STORAGE_PROVIDER" where="Value: upstash (or set it as a plaintext Variable in the dashboard)." copied={copied} onCopy={onCopy} />
-          <EnvVarRow variable="UPSTASH_REDIS_REST_URL" command="npx wrangler secret put UPSTASH_REDIS_REST_URL" where="Where: console.upstash.com → your database → REST API → copy the REST URL (https://…upstash.io)." copied={copied} onCopy={onCopy} />
-          <EnvVarRow variable="UPSTASH_REDIS_REST_TOKEN" command="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" where="Where: same page → copy the REST token. Never expose it." copied={copied} onCopy={onCopy} />
-          <a href="https://console.upstash.com" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open console.upstash.com →</a>
-        </>
-      ) : primary === 'cloudflare-kv' ? (
-        <>
-          <p style={hintStyle}>
-            Your store data will live in <strong>Cloudflare Workers KV</strong> (no third-party store). Set <code>STORAGE_PROVIDER</code> to <code>cloudflare-kv</code> and add a KV namespace binding. Note: KV is best for admin/config/low-concurrency data — read the concurrency caveats before pointing raffle/payment writes at it.
-          </p>
-          <EnvVarRow variable="STORAGE_PROVIDER" command="npx wrangler secret put STORAGE_PROVIDER" where="Value: cloudflare-kv (plaintext Variable)." copied={copied} onCopy={onCopy} />
-          <p style={hintStyle}>
-            Then bind a KV namespace in <code>wrangler.jsonc</code> (the app auto-detects a KV-shaped binding) — see <a href="https://developers.cloudflare.com/kv/" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>developers.cloudflare.com/kv</a>.
-          </p>
-          <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open the Cloudflare dashboard →</a>
-        </>
-      ) : (
-        <>
-          <p style={hintStyle}>
-            <strong>Supabase (PostgreSQL)</strong> is the recommended all-in-one store — it holds your products, orders and entries AND your admin account + settings. Fill in the three Supabase values above; no extra <code>STORAGE_PROVIDER</code> variable is needed (Supabase is the default).
-          </p>
-          <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ justifySelf: 'start', fontSize: 13, fontWeight: 700, color: '#1d4ed8', textDecoration: 'underline' }}>Open supabase.com/dashboard →</a>
-        </>
-      )}
+    <div style={{ display: 'grid', gap: 12, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+          Primary · {providerLabel(primary)}
+        </div>
+        <ProviderInstructions provider={primary} role="primary" copied={copied} onCopy={onCopy} />
+      </div>
 
       {mirror && mirror !== primary && (
-        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 10, display: 'grid', gap: 10 }}>
-          <p style={{ ...hintStyle, fontWeight: 700, color: '#0f172a' }}>
-            Safety mirror: every write also copies to <strong>{mirror === 'upstash' ? 'Upstash Redis' : mirror === 'supabase' ? 'Supabase' : 'Cloudflare KV'}</strong> (failover + data-loss protection).
-          </p>
-          <EnvVarRow variable="STORAGE_REPLICAS" command="npx wrangler secret put STORAGE_REPLICAS" where={`Value: ${mirror} (comma-separate 2–3 mirrors). Plaintext Variable.`} copied={copied} onCopy={onCopy} />
-          {mirror === 'upstash' && (
-            <>
-              <EnvVarRow variable="UPSTASH_REDIS_REST_URL" command="npx wrangler secret put UPSTASH_REDIS_REST_URL" where="Mirror: console.upstash.com → REST API → REST URL." copied={copied} onCopy={onCopy} />
-              <EnvVarRow variable="UPSTASH_REDIS_REST_TOKEN" command="npx wrangler secret put UPSTASH_REDIS_REST_TOKEN" where="Mirror: REST token (Secret)." copied={copied} onCopy={onCopy} />
-            </>
-          )}
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, display: 'grid', gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+            Safety mirror · {providerLabel(mirror)}
+          </div>
+          <ProviderInstructions provider={mirror} role="mirror" copied={copied} onCopy={onCopy} />
         </div>
       )}
     </div>
@@ -260,10 +295,9 @@ export default function SetupPage() {
   const [warning, setWarning] = useState('');
   const [notice, setNotice] = useState('');
   const [showOptional, setShowOptional] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [showMirror, setShowMirror] = useState(false);
   const [copied, setCopied] = useState('');
   const [probe, setProbe] = useState<{ state: 'idle' | 'busy' | 'ok' | 'fail'; message: string }>({ state: 'idle', message: '' });
+  const [migrating, setMigrating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -285,6 +319,9 @@ export default function SetupPage() {
   const supabaseEnvReady = status?.supabaseEnvReady === true;
   const supabaseStore = status?.dataStores?.find((d) => d.key === 'supabase');
   const missingSupabase = supabaseStore?.missing ?? [];
+  const autoMigrateAvailable = status?.autoMigrateAvailable === true;
+  const supabaseSchemaError = status?.supabaseSchemaError || '';
+  const showSchemaBanner = supabaseSchemaError !== '' && isSchemaError(supabaseSchemaError);
 
   function set(key: string, value: string) {
     setNotice('');
@@ -308,21 +345,48 @@ export default function SetupPage() {
       const res = await fetch('/api/admin/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          probe: 'supabase',
-          supabase_url: form.supabase_url,
-          supabase_anon_key: form.supabase_anon_key,
-          supabase_service_role_key: form.supabase_service_role_key,
-        }),
+        // When Supabase is already wired into Cloudflare, just pull from the
+        // environment — no need to re-enter keys that are already there.
+        body: JSON.stringify(supabaseEnvReady
+          ? { probe: 'supabase' }
+          : {
+              probe: 'supabase',
+              supabase_url: form.supabase_url,
+              supabase_anon_key: form.supabase_anon_key,
+              supabase_service_role_key: form.supabase_service_role_key,
+            }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; connected?: boolean; error?: string };
       if (data.connected) {
-        setProbe({ state: 'ok', message: '✓ Connected — Supabase accepted your keys.' });
+        setProbe({ state: 'ok', message: '✓ Connected — Supabase reached from Cloudflare.' });
       } else {
         setProbe({ state: 'fail', message: String(data.error || 'Connection failed.') });
       }
     } catch {
       setProbe({ state: 'fail', message: 'Could not test the connection — check your network.' });
+    }
+  }
+
+  async function fixSchema() {
+    setMigrating(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ probe: 'auto-migrate' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; ran?: string[] };
+      if (data.ok) {
+        setError('');
+        await load();
+      } else {
+        setError(String(data.error || 'Schema fix failed.'));
+      }
+    } catch {
+      setError('Schema fix failed — check your network.');
+    } finally {
+      setMigrating(false);
     }
   }
 
@@ -367,8 +431,8 @@ export default function SetupPage() {
     // database. Their values travel in the body payload and are verified against
     // the runtime environment as a transient check — never persisted.
     const supabaseSelected = form.storage_provider === 'supabase';
-    if (supabaseSelected && (!form.supabase_url.trim() || !form.supabase_anon_key.trim() || !form.supabase_service_role_key.trim())) {
-      setError('Enter your Supabase project URL, anon key and service-role key.');
+    if (supabaseSelected && !supabaseEnvReady && (!form.supabase_url.trim() || !form.supabase_anon_key.trim() || !form.supabase_service_role_key.trim())) {
+      setError('Enter your Supabase project URL, anon key and service-role key (or set them in Cloudflare).');
       return;
     }
     if (!configured) {
@@ -480,31 +544,27 @@ export default function SetupPage() {
             </Field>
 
             {form.storage_provider === 'supabase' && (
-              <>
-                <p style={hintStyle}>
-                  Your <strong>master admin account and store settings</strong> are saved in Supabase. Paste the 3 values (Project Settings → API). Each field shows the exact <strong>variable name</strong> Cloudflare expects — copy the name, paste the value. These values are verified against your environment as a transient runtime check and are never written to the site&apos;s database.
-                </p>
-
-                <Field label="Supabase project URL" hint="Looks like https://abcdefghijklm.supabase.co">
-                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                    <EnvNameChip name="SUPABASE_URL" copied={copied} onCopy={copy} />
+              <div style={{ display: 'grid', gap: 10 }}>
+                {supabaseEnvReady ? (
+                  <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#065f46', lineHeight: 1.55 }}>
+                    ✓ Supabase is already connected from Cloudflare — your admin account + settings will be saved there. No keys to paste here.
                   </div>
-                  <TextInput value={form.supabase_url} onChange={(v) => set('supabase_url', v)} placeholder="https://your-project.supabase.co" />
-                </Field>
-
-                <Field label="Anon public key" hint="A long JWT starting with eyJ...">
-                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                    <EnvNameChip name="SUPABASE_ANON_KEY" copied={copied} onCopy={copy} />
-                  </div>
-                  <SecretInput value={form.supabase_anon_key} onChange={(v) => set('supabase_anon_key', v)} placeholder="eyJ..." />
-                </Field>
-
-                <Field label="Service-role key (secret)" hint="Never expose this one. It also starts with eyJ...">
-                  <div style={{ display: 'grid', gap: 8, marginBottom: 8 }}>
-                    <EnvNameChip name="SUPABASE_SERVICE_ROLE_KEY" copied={copied} onCopy={copy} />
-                  </div>
-                  <SecretInput value={form.supabase_service_role_key} onChange={(v) => set('supabase_service_role_key', v)} placeholder="eyJ..." />
-                </Field>
+                ) : (
+                  <>
+                    <p style={hintStyle}>
+                      <strong>Supabase</strong> holds your admin account + settings. Add the 3 secrets in Cloudflare (see the panel above), or paste them below for local development.
+                    </p>
+                    <Field label="Supabase project URL" hint="https://abcdefghijklm.supabase.co">
+                      <TextInput value={form.supabase_url} onChange={(v) => set('supabase_url', v)} placeholder="https://your-project.supabase.co" />
+                    </Field>
+                    <Field label="Anon public key" hint="A long JWT starting with eyJ...">
+                      <SecretInput value={form.supabase_anon_key} onChange={(v) => set('supabase_anon_key', v)} placeholder="eyJ..." />
+                    </Field>
+                    <Field label="Service-role key (secret)" hint="Never expose this one.">
+                      <SecretInput value={form.supabase_service_role_key} onChange={(v) => set('supabase_service_role_key', v)} placeholder="eyJ..." />
+                    </Field>
+                  </>
+                )}
 
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => void testConnection()} disabled={probe.state === 'busy'} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: probe.state === 'busy' ? 'default' : 'pointer', opacity: probe.state === 'busy' ? 0.6 : 1 }}>
@@ -513,32 +573,30 @@ export default function SetupPage() {
                   {probe.state === 'ok' && <span style={{ fontSize: 13, fontWeight: 700, color: '#065f46' }}>{probe.message}</span>}
                   {probe.state === 'fail' && <span style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c' }}>{probe.message}</span>}
                 </div>
-
-                <div style={{ display: 'grid', gap: 8 }}>
-                  <button type="button" onClick={() => setShowHelp((s) => !s)} style={{ justifySelf: 'start', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
-                    {showHelp ? 'Hide' : 'Where do I find these values?'} {showHelp ? '−' : '+'}
-                  </button>
-                  {showHelp && (
-                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', display: 'grid', gap: 8 }}>
-                      <p style={hintStyle}>
-                        1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>supabase.com/dashboard</a> → open your project → <strong>Project Settings → API</strong>.
-                      </p>
-                      <p style={hintStyle}>2. Copy the <strong>Project URL</strong>, the <strong>anon public</strong> key, and the <strong>service_role</strong> key.</p>
-                      <p style={hintStyle}>
-                        3. Add them in Cloudflare — by hand in the <a href={CLOUDFLARE_DASHBOARD} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline' }}>dashboard</a> (Workers &amp; Pages → [project] → Settings → Variables and Secrets → Production → <strong>Secrets</strong>), or with the copy-paste commands above.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <p style={hintStyle}>
-                  No account yet? Create a free project at supabase.com, then grab these three values under Project Settings, API.
-                </p>
-              </>
+              </div>
             )}
 
             <DatabaseInstructions primary={form.storage_provider} mirror={form.storage_replicas} copied={copied} onCopy={copy} />
           </Card>
+
+          {showSchemaBanner && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#92400e' }}>Your Supabase database is missing its schema.</div>
+              <p style={{ ...hintStyle, color: '#92400e' }}>
+                {autoMigrateAvailable
+                  ? 'The wizard can build it for you — one click.'
+                  : 'Add SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) and the wizard will build it for you, or run `supabase db push`.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => void fixSchema()}
+                disabled={migrating}
+                style={{ justifySelf: 'start', background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '10px 18px', fontSize: 13, fontWeight: 700, cursor: migrating ? 'default' : 'pointer', opacity: migrating ? 0.6 : 1 }}
+              >
+                {migrating ? 'Applying…' : 'Fix the schema for me'}
+              </button>
+            </div>
+          )}
 
           <Card>
             <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#111' }}>2 · Create your admin account</h2>
@@ -549,32 +607,6 @@ export default function SetupPage() {
               <SecretInput value={adminPassword} onChange={(v) => setAdminPassword(v)} placeholder="password" />
             </Field>
           </Card>
-
-          <Card>
-            <button
-              type="button"
-              onClick={() => setShowMirror((s) => !s)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, width: '100%', color: '#111' }}
-            >
-              <span style={{ fontSize: 15, fontWeight: 800 }}>Optional: add a safety mirror (redundancy)</span>
-              <span style={{ fontSize: 18, color: '#6b7280' }}>{showMirror ? '−' : '+'}</span>
-            </button>
-            <p style={hintStyle}>
-              Mirror every write to a second independent database (e.g. Upstash Redis) so if one provider ever goes down or loses data, the store keeps a full copy. Add these in Cloudflare the same way as above, then redeploy.
-            </p>
-            {showMirror && (
-              <div style={{ display: 'grid', gap: 10 }}>
-                <EnvNameChip name="STORAGE_REPLICAS" copied={copied} onCopy={copy} />
-                <p style={hintStyle}>Set this to <code>upstash</code> (or a comma-separated list for 2–3 mirrors).</p>
-                <EnvNameChip name="UPSTASH_REDIS_REST_URL" copied={copied} onCopy={copy} />
-                <EnvNameChip name="UPSTASH_REDIS_REST_TOKEN" copied={copied} onCopy={copy} />
-                <p style={hintStyle}>
-                  The store then writes to both automatically and reads from the primary with failover. Set the token as a Secret; STORAGE_REPLICAS and the URL can be plaintext Variables.
-                </p>
-              </div>
-            )}
-          </Card>
-
 
           <Card>
             <button
