@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , verifyAdminPassword, PROMO_CODES_KEY, promoUsedKey} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, PROMO_CODES_KEY, promoUsedKey} from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,10 @@ async function loadPromos(redis: any): Promise<Record<string, PromoRecord>> {
   return out;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!(await adminAuthorized(request))) {
+    return NextResponse.json({ promos: [] });
+  }
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ promos: [] });
   const map = await loadPromos(redis);
@@ -57,7 +61,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (!verifyAdminPassword(password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

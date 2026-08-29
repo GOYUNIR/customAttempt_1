@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, verifyAdminPassword, adminRequestAuthorized, PRODUCTS_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, PRODUCTS_KEY} from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    if (!(await adminAuthorized(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
     const url = new URL(request.url);
     const productId = url.searchParams.get('productId');
 
@@ -45,7 +49,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
@@ -127,7 +131,7 @@ export async function DELETE(request: Request) {
 
     const url = new URL(request.url);
     const password = url.searchParams.get('password') || '';
-    if (!adminRequestAuthorized(request, password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

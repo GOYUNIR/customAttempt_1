@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY , verifyAdminPassword} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { normalizeCategories } from '@/lib/storefront-config';
 
 export const dynamic = 'force-dynamic';
 
 const SETTINGS_KEY = STORE_CONFIG_KEY;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    if (!(await adminAuthorized(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
@@ -27,7 +31,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

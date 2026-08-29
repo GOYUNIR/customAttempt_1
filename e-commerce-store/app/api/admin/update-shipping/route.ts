@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, verifyAdminPassword, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { resolveSamplerConfig } from '@/lib/sampler-config';
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

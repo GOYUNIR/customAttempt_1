@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, verifyAdminPassword } from '@/lib/server-config';
+import { createRedisClient } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { runSeedDefaults } from '@/app/api/admin/seed/route';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -60,8 +61,8 @@ export async function POST(request: Request) {
     const confirm = String(body?.confirm || '').trim();
     const rebuild = body?.rebuild === true || body?.rebuild === 'true';
 
-    // Gate 1 — admin password.
-    if (!verifyAdminPassword(password)) {
+    // Gate 1 — admin session (password / super-admin / verified device).
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
     // Gate 2 — confirmation phrase.

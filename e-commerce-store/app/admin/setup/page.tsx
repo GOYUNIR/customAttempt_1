@@ -36,6 +36,7 @@ type MissingCred = { variable: string; command: string; example: string; where?:
 type DataStoreStatus = { key: string; label: string; configured: boolean; missing: MissingCred[] };
 type Status = {
   configured?: boolean;
+  signedIn?: boolean;
   isProduction?: boolean;
   supabaseEnvReady?: boolean;
   dataStores?: DataStoreStatus[];
@@ -315,6 +316,7 @@ export default function SetupPage() {
   }, [load]);
 
   const configured = status?.configured === true;
+  const signedIn = status?.signedIn === true;
   const inProduction = status?.isProduction === true;
   const supabaseEnvReady = status?.supabaseEnvReady === true;
   const supabaseStore = status?.dataStores?.find((d) => d.key === 'supabase');
@@ -484,6 +486,29 @@ export default function SetupPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Once the store is configured, /admin/setup is NOT a public surface: it is
+  // only reachable to update providers through the signed-in admin portal. A
+  // public visitor sees a sign-in gate instead of the wizard (and none of the
+  // store's configuration is rendered).
+  if (configured && !signedIn) {
+    return (
+      <main style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '48px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '100%', maxWidth: 420, background: '#fff', borderRadius: 18, padding: '28px 26px', boxShadow: '0 8px 30px rgba(0,0,0,0.07)', display: 'grid', gap: 16, textAlign: 'center' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: '#111' }}>Store already set up</h1>
+          <p style={{ margin: 0, color: '#6b7280', fontSize: 14, lineHeight: 1.6 }}>
+            Sign in with your admin account to update this store&apos;s settings.
+          </p>
+          <Link href="/admin/login" prefetch={false} style={{ display: 'inline-block', background: '#111', color: '#fff', borderRadius: 999, padding: '12px 20px', fontSize: 15, fontWeight: 800, textDecoration: 'none', justifySelf: 'center' }}>
+            Go to admin sign-in
+          </Link>
+          <p style={{ margin: 0, fontSize: 12, color: '#9ca3af' }}>
+            <Link href="/" prefetch={false} style={{ color: '#6b7280', textDecoration: 'underline' }}>← Back to store</Link>
+          </p>
+        </div>
+      </main>
+    );
   }
 
   return (

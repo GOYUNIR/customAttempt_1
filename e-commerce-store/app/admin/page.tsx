@@ -1160,7 +1160,9 @@ export default function AdminPortal() {
       // eslint-disable-next-line react-hooks/purity
       const res = await adminFetch(`/api/admin/status?t=${Date.now()}`);
       if (res.status === 401 || res.status === 403) {
-        window.location.assign('/');
+        // Not (or no longer) signed in as an admin — send the operator to the
+        // admin sign-in page, never to the public storefront.
+        window.location.assign('/admin/login');
         return;
       }
       const data = await res.json();

@@ -11,8 +11,8 @@ import {
   loadProducts,
   ANALYTICS_ONLINE_KEY,
   getAdminPassword,
-  adminRequestAuthorized,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 function parseWinnerTier(value: unknown): number {
   if (Array.isArray(value)) {
@@ -39,7 +39,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!adminRequestAuthorized(request, password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

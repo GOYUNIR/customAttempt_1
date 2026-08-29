@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem, adminRequestAuthorized} from '@/lib/server-config';
+import { createRedisClient, ARCHIVE_LEDGER_KEY, safeParseRedisItem } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ function csvCell(value: unknown): string {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!adminRequestAuthorized(request, password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

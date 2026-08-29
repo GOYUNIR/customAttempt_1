@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY, adminRequestAuthorized } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,7 @@ export async function GET(request: Request) {
   // so it also verifies the admin password directly.
   const url = new URL(request.url);
   const password = String(url.searchParams.get('password') || '');
-  if (!adminRequestAuthorized(request, password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

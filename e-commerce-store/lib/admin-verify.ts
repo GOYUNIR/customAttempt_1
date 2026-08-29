@@ -355,4 +355,29 @@ export async function adminLoginAuthorized(
   return false;
 }
 
+/**
+ * Full admin authorization for /api/admin routes (read + write). Accepts ANY
+ * credential the middleware's Gate 1 trusts:
+ *   1. the Basic-Auth admin password (HTTP header, or a supplied body/query
+ *      value), or
+ *   2. a super-admin device session (Supabase master-account sign-in), or
+ *   3. a verified device cookie (issued after the emailed 2FA code).
+ *
+ * A bare login-session cookie is deliberately NOT sufficient here — it only
+ * proves the password was entered, not that the 2FA step was completed. Use
+ * `adminLoginAuthorized()` for the verify-* 2FA routes instead.
+ */
+export async function adminAuthorized(
+  request: Request,
+  suppliedPassword?: string,
+): Promise<boolean> {
+  if (adminRequestAuthorized(request, suppliedPassword)) return true;
+  if (await isSuperAdminSession(request)) return true;
+  const redis = createRedisClient();
+  if (!redis) return false;
+  const token = adminDeviceTokenFromRequest(request);
+  if (!token) return false;
+  return isAdminDeviceValid(redis, token).catch(() => false);
+}
+
 

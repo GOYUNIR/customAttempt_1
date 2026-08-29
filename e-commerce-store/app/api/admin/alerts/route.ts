@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts, verifyAdminPassword, adminRequestAuthorized, WAITLIST_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, loadProducts, WAITLIST_KEY} from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { sendReleaseAnnouncementEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
-function authorized(password: string) {
-  return verifyAdminPassword(password);
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = String(url.searchParams.get('password') || '');
-  if (!adminRequestAuthorized(request, password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ subscribers: [], activeCount: 0 });
@@ -34,7 +31,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (!authorized(password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const action = String(body?.action || '');
   if (action === 'remove') {

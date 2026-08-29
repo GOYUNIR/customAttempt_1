@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, verifyAdminPassword, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { maintainDedupeStructures, sweepOrphanedProductState } from '@/lib/redis-maintenance';
 import { pruneExpiredSupabaseKv } from '@/lib/storage/supabase';
 
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

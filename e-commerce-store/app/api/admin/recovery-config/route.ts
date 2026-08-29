@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem , verifyAdminPassword, RECOVERY_CONFIG_KEY} from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, RECOVERY_CONFIG_KEY} from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,10 @@ function defaultConfig() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!(await adminAuthorized(request))) {
+    return NextResponse.json(defaultConfig());
+  }
   const redis = createRedisClient();
   if (!redis) return NextResponse.json(defaultConfig());
   const raw = await redis.get(RECOVERY_CONFIG_KEY);
@@ -26,7 +30,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (!verifyAdminPassword(password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

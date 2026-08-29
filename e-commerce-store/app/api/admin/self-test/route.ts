@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import {
   createRedisClient,
   loadProducts,
-  adminRequestAuthorized,
   safeParseRedisItem,
   PROMO_CODES_KEY,
   POOL_KEY_PREFIX,
@@ -14,6 +13,7 @@ import {
   ENTRY_EMAIL_SENT_KEY,
   type LiveStateRecord,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
@@ -52,7 +52,7 @@ function isHexColor(value: unknown): boolean {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!adminRequestAuthorized(request, password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

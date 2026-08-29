@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import {
   createRedisClient,
   loadProducts,
-  verifyAdminPassword,
   defaultStripePriceId,
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
@@ -21,6 +20,7 @@ import {
   emailBlockKey,
   cardBlockKey,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
@@ -175,6 +175,9 @@ async function deleteProduct(redis: any, id: string) {
 }
 
 export async function GET(request: Request) {
+  if (!(await adminAuthorized(request))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
   const url = new URL(request.url);
   const includeArchived = url.searchParams.get('includeArchived') === 'true';
   const redis = createRedisClient();
@@ -193,7 +196,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = body.password || '';
-  if (!verifyAdminPassword(password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

@@ -6,20 +6,15 @@ import {
   adminCancelOrder,
   adminUpdateOrderAddress,
   loadProducts,
-  verifyAdminPassword,
-  adminRequestAuthorized,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
-
-function checkAuth(password: string) {
-  return verifyAdminPassword(password);
-}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!adminRequestAuthorized(request, password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const redis = createRedisClient();
   if (!redis) return NextResponse.json({ orders: [] });
@@ -49,7 +44,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (!checkAuth(password)) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+  if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
   const action = String(body?.action || '');
   const variant = String(body?.variant || '');

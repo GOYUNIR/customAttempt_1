@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, adminRequestAuthorized, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
+import { createRedisClient, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
 
@@ -541,7 +542,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const password = url.searchParams.get('password') || '';
 
-    if (!adminRequestAuthorized(request, password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

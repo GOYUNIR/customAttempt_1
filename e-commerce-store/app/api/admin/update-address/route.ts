@@ -7,8 +7,8 @@ import {
   ARCHIVE_LEDGER_KEY,
   archiveEntry,
   loadProducts,
-  verifyAdminPassword,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { sendAccountUpdateEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 

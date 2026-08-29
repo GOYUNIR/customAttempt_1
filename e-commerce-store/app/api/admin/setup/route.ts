@@ -440,16 +440,15 @@ export async function GET(request: Request) {
   // snapshot (presence booleans, provider names, schema error text). Return the
   // minimal safe status for unauthenticated requests; the full payload is only
   // served to a caller with Basic Auth or a super-admin session.
-  if (platformConfigured) {
-    const authorized = adminRequestAuthorized(request) || (await isSuperAdminSession(request));
-    if (!authorized) {
-      return NextResponse.json({ configured: true, ready: true, signedIn: false });
-    }
+  const signedIn = adminRequestAuthorized(request) || (await isSuperAdminSession(request));
+  if (platformConfigured && !signedIn) {
+    return NextResponse.json({ configured: true, ready: true, signedIn: false });
   }
 
   return NextResponse.json({
     configured: platformConfigured,
     ready,
+    signedIn,
     storageProvider: detectStorageProvider(),
     storageDrivers,
     storageOk,
@@ -705,11 +704,13 @@ export async function POST(request: Request) {
       // Best-effort — never block a save on a maintenance sweep.
     }
 
-    // 5. On FIRST setup, sign the operator in as the super-admin immediately so
-    //    the "Open admin portal →" click lands IN the portal instead of on the
-    //    Basic-Auth + email-2FA gates. The device cookie carries `superAdmin:
-    //    true`, which middleware.ts treats as full authorization. Best-effort:
-    //    if no storage backend is reachable the operator can still super-login.
+    // 5. Sign the operator in as the super-admin immediately so the "Open admin
+    //    portal →" click lands IN the portal instead of on the Basic-Auth +
+    //    email-2FA gates. On first setup we just created the master account; on
+    //    a re-save we just re-verified the master credentials above. The device
+    //    cookie carries `superAdmin: true`, which middleware.ts treats as full
+    //    authorization. Best-effort: if no storage backend is reachable the
+    //    operator can still super-login.
     const response = NextResponse.json({
       ok: true,
       redirect: '/admin',
@@ -721,7 +722,7 @@ export async function POST(request: Request) {
         ? undefined
         : 'Supabase credentials were entered inline and are NOT saved as environment variables. They only work for the current server session. Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in your hosting platform (and redeploy) — otherwise you will be locked out of the admin portal on the next restart or deploy.',
     });
-    if (!alreadyConfigured) {
+    if (!alreadyConfigured || masterCredentialOk) {
       const redis = createRedisClient();
       if (redis) {
         try {

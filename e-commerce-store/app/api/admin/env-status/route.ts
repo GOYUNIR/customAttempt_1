@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { detectStorageProvider, discoverEnvironment, CLOUDFLARE_VARS_PATH } from '@/lib/env-discovery';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
@@ -39,7 +39,7 @@ type EnvStatusItem = {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!adminRequestAuthorized(request, password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

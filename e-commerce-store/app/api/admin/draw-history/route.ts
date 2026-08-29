@@ -1,35 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY , getAdminPassword, verifyAdminPassword, getAdminVerifyEmail, DRAW_HISTORY_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY, DRAW_HISTORY_KEY } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-
-  // Defense-in-depth auth (proxy.ts already enforces Basic Auth + 2FA): accept
-  // either the query password or the HTTP Basic Authorization header, compared
-  // in constant time so response timing can never leak the password.
-  const authHeader = request.headers.get('authorization');
-  if (!getAdminPassword()) {
-    return NextResponse.json({ error: 'Admin password not configured' }, { status: 500 });
-  }
-
-  let isAuthorized = false;
-  if (password && verifyAdminPassword(password)) {
-    isAuthorized = true;
-  } else if (authHeader && authHeader.startsWith('Basic ')) {
-    try {
-      const encoded = authHeader.slice(6);
-      const decoded = atob(encoded);
-      const [user, pass] = decoded.split(':');
-      if (user === getAdminVerifyEmail() && verifyAdminPassword(pass)) {
-        isAuthorized = true;
-      }
-    } catch {}
-  }
-
-  if (!isAuthorized) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -68,7 +46,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const password = String(body?.password || '');
-  if (!verifyAdminPassword(password)) {
+  if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 

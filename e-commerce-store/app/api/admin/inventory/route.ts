@@ -5,9 +5,8 @@ import {
   saveLiveState,
   loadProducts,
   PRODUCTS_KEY,
-
-  verifyAdminPassword,
 } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { getWinnerCount } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -20,7 +19,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const password = String(body?.password || '');
-    if (!verifyAdminPassword(password)) {
+    if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password.' }, { status: 403 });
     }
 

@@ -198,7 +198,7 @@ function adminAuthRequired(request: NextRequest) {
   const url = request.nextUrl.clone();
   url.pathname = '/admin/login';
   url.search = '';
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function middleware(request: NextRequest) {
@@ -301,7 +301,7 @@ export async function middleware(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin/setup';
       url.search = '';
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     // Ready: the provider wizard is no longer shown (except ?reconfigure=1).
@@ -309,7 +309,7 @@ export async function middleware(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin';
       url.search = '';
-      return NextResponse.redirect(url);
+      return NextResponse.redirect(url, { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
