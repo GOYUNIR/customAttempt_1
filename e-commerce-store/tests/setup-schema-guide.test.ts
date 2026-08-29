@@ -18,6 +18,7 @@ import {
   MIGRATION_00002,
   MIGRATION_00003,
   MIGRATION_00004,
+  MIGRATION_00005,
 } from '../lib/setup-schema-guide.ts';
 
 const MIGRATIONS_DIR = join(process.cwd(), 'supabase', 'migrations');
@@ -40,6 +41,7 @@ test('embedded migration SQL is byte-for-byte identical to the real files', () =
   assert.equal(MIGRATION_00002, readMigration('00002_setup_operational.sql'));
   assert.equal(MIGRATION_00003, readMigration('00003_tenant_routing.sql'));
   assert.equal(MIGRATION_00004, readMigration('00004_ai_secondary.sql'));
+  assert.equal(MIGRATION_00005, readMigration('00005_stripe_price_id.sql'));
 });
 
 test('ai_secondary plan targets only 00004 with the right SQL', () => {
@@ -53,10 +55,10 @@ test('ai_secondary plan targets only 00004 with the right SQL', () => {
   assert.ok(plan.cli.includes('supabase db push'));
 });
 
-test('full plan targets all four migrations in order', () => {
+test('full plan targets all five migrations in order', () => {
   const plan = buildSchemaFixPlan("Could not find the table 'public.global_platform_settings' in the schema cache");
   assert.equal(plan.kind, 'full');
-  assert.equal(plan.migrations.length, 4);
+  assert.equal(plan.migrations.length, 5);
   assert.deepEqual(
     plan.migrations.map((m) => m.file),
     [
@@ -64,6 +66,15 @@ test('full plan targets all four migrations in order', () => {
       'supabase/migrations/00002_setup_operational.sql',
       'supabase/migrations/00003_tenant_routing.sql',
       'supabase/migrations/00004_ai_secondary.sql',
+      'supabase/migrations/00005_stripe_price_id.sql',
     ],
   );
+});
+
+test('stripe_price_id plan targets only 00005 with the right SQL', () => {
+  const plan = buildSchemaFixPlan("Could not find the 'stripe_price_id' column of 'global_platform_settings' in the schema cache");
+  assert.equal(plan.kind, 'stripe_price_id');
+  assert.equal(plan.migrations.length, 1);
+  assert.equal(plan.migrations[0].file, 'supabase/migrations/00005_stripe_price_id.sql');
+  assert.ok(plan.migrations[0].sql.includes('add column if not exists stripe_price_id text'));
 });

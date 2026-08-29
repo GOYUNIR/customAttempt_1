@@ -128,3 +128,13 @@ test('Payments still require a key when a real provider is selected', () => {
   const missingKey = normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: '', map_provider: 'open_street_map', ai_provider: 'deepseek', ai_api_key: 'x' });
   assert.equal(missingKey.ok, false);
 });
+
+test('stripe_price_id is optional and passes through trimmed', () => {
+  const ok = normalizePlatformSettingsInput({ ...BASE, stripe_price_id: '  price_xyz  ' });
+  assert.ok(ok.ok);
+  if (ok.ok) assert.equal(ok.input.stripe_price_id, 'price_xyz');
+
+  const omitted = normalizePlatformSettingsInput(BASE);
+  assert.ok(omitted.ok);
+  if (omitted.ok) assert.equal(omitted.input.stripe_price_id, undefined);
+});

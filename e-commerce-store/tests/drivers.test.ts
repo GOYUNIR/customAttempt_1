@@ -103,6 +103,30 @@ test('toPublicSummary strips every secret — provider names only', () => {
   assert.ok(!json.includes('pk_secret'));
 });
 
+test('parseSettingsRow normalizes the default Stripe price ID', () => {
+  const row = parseSettingsRow({
+    id: GLOBAL_PLATFORM_SETTINGS_ROW_ID,
+    payment_provider: 'stripe',
+    payment_api_key: 'sk_1',
+    stripe_price_id: '  price_abc  ',
+  });
+  assert.ok(row);
+  assert.equal(row!.stripe_price_id, 'price_abc');
+});
+
+test('toPublicSummary exposes the default Stripe price ID (it is not a secret)', () => {
+  const summary = toPublicSummary(
+    parseSettingsRow({
+      id: GLOBAL_PLATFORM_SETTINGS_ROW_ID,
+      is_configured: true,
+      payment_provider: 'stripe',
+      payment_api_key: 'sk_secret',
+      stripe_price_id: 'price_123abc',
+    }),
+  );
+  assert.equal(summary.stripe_price_id, 'price_123abc');
+});
+
 test('normalizePlatformSettingsInput validates the wizard payload', () => {
   const good = normalizePlatformSettingsInput({
     mail_provider: 'sendgrid',

@@ -24,7 +24,7 @@ export type SchemaFixMigration = {
 };
 
 export type SchemaFixPlan = {
-  kind: 'ai_secondary' | 'full';
+  kind: 'ai_secondary' | 'stripe_price_id' | 'full';
   title: string;
   summary: string;
   intro: string;
@@ -73,6 +73,29 @@ alter table public.global_platform_settings
 
 alter table public.global_platform_settings
   add column if not exists ai_api_key_secondary text;
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 00005_stripe_price_id.sql — the default Stripe price ID column.
+// ─────────────────────────────────────────────────────────────────────────────
+export const MIGRATION_00005 = `-- =============================================================================
+-- 00005_stripe_price_id.sql — default Stripe price ID on the settings row.
+--
+-- Adds \`stripe_price_id\` to \`public.global_platform_settings\`. This is the
+-- global fallback Stripe Price ID the operator can set from the admin portal
+-- ("API Keys & Integrations") / Setup Wizard instead of only via the
+-- \`STRIPE_PRODUCT_ID\` environment variable. Resolution order at checkout:
+--   1. per-product/size price ID (stored in Redis) — always wins
+--   2. this admin-saved default price ID
+--   3. the legacy STRIPE_PRODUCT_ID env var
+--
+-- Idempotent: safe to run on top of an already-migrated schema (fresh installs
+-- get this column straight from 00001_init.sql, so this is a no-op there).
+-- Apply with: \`supabase db push\` or \`psql "$DATABASE_URL" -f 00005_stripe_price_id.sql\`
+-- =============================================================================
+
+alter table public.global_platform_settings
+  add column if not exists stripe_price_id text;
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,6 +193,7 @@ create table if not exists public.global_platform_settings (
   payment_provider text check (payment_provider in ('stripe', 'lemon_squeezy', 'paddle')),
   payment_api_key text,
   payment_webhook_secret text,
+  stripe_price_id text,
   map_provider text check (map_provider in ('mapbox', 'google_maps', 'open_street_map')),
   map_api_key text,
   ai_provider text check (ai_provider in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),
@@ -494,11 +518,16 @@ const AI_SECONDARY_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00004_ai_secondary.sql', sql: MIGRATION_00004 },
 ];
 
+const STRIPE_PRICE_ID_FILES: SchemaFixMigration[] = [
+  { file: 'supabase/migrations/00005_stripe_price_id.sql', sql: MIGRATION_00005 },
+];
+
 const FULL_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00001_init.sql', sql: MIGRATION_00001 },
   { file: 'supabase/migrations/00002_setup_operational.sql', sql: MIGRATION_00002 },
   { file: 'supabase/migrations/00003_tenant_routing.sql', sql: MIGRATION_00003 },
   { file: 'supabase/migrations/00004_ai_secondary.sql', sql: MIGRATION_00004 },
+  { file: 'supabase/migrations/00005_stripe_price_id.sql', sql: MIGRATION_00005 },
 ];
 
 const OPEN_STEPS = [
@@ -509,6 +538,27 @@ const OPEN_STEPS = [
 ];
 
 export function buildSchemaFixPlan(errorText: string): SchemaFixPlan {
+  const isStripePriceId = /stripe_price_id/i.test(errorText);
+  if (isStripePriceId) {
+    return {
+      kind: 'stripe_price_id',
+      title: 'Your Supabase database is missing the default Stripe price ID column.',
+      summary: 'One migration (00005_stripe_price_id.sql) was never applied.',
+      intro:
+        'The Supabase project is reachable, but it is missing the stripe_price_id column on global_platform_settings. This takes about a minute to fix — nothing else is wrong and no data is touched.',
+      steps: [
+        ...OPEN_STEPS,
+        'Click the green “Copy SQL” button on the file below — it copies the entire migration for you, so you do not need to find the file in the repo.',
+        'Paste the SQL into the blank query box (Ctrl+V on Windows, Cmd+V on Mac).',
+        'Click the green “Run” button (or press Ctrl+Enter / Cmd+Enter).',
+        'Come back to this page and click “Continue” again — the data store will now verify.',
+      ],
+      migrations: STRIPE_PRICE_ID_FILES,
+      verify:
+        'What success looks like: a green “Success. No rows returned” result with no red error. If you see “column … already exists” instead, that is fine too — it means the fix is already applied, so just click Continue.',
+      cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies this migration automatically.',
+    };
+  }
   const isAiSecondary = /ai_provider_secondary|ai_api_key_secondary/i.test(errorText);
   if (isAiSecondary) {
     return {
@@ -535,15 +585,15 @@ export function buildSchemaFixPlan(errorText: string): SchemaFixPlan {
     title: 'Your Supabase database is missing its schema.',
     summary: 'The platform tables were never created.',
     intro:
-      'The Supabase project could not be reached because its tables were never created. Apply the four migrations below in order to build the schema, then click Continue.',
+      'The Supabase project could not be reached because its tables were never created. Apply the five migrations below in order to build the schema, then click Continue.',
     steps: [
       ...OPEN_STEPS,
-      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
+      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 → 00005 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
       'Come back to this page and click “Continue” again.',
     ],
     migrations: FULL_FILES,
     verify: 'What success looks like: a green “Success” result for each file with no red error text.',
-    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all four migrations in order automatically.',
+    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all five migrations in order automatically.',
   };
 }
 

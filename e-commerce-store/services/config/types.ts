@@ -71,6 +71,8 @@ export interface GlobalPlatformSettings {
   payment_provider: PaymentProvider | null;
   payment_api_key: string | null;
   payment_webhook_secret: string | null;
+  /** Default Stripe price ID — the global fallback for sizes without their own. */
+  stripe_price_id: string | null;
   map_provider: MapProvider | null;
   map_api_key: string | null;
   ai_provider: AiProvider | null;
@@ -96,6 +98,8 @@ export interface PlatformSettingsInput {
   payment_provider: PaymentProvider | null;
   payment_api_key: string | null;
   payment_webhook_secret?: string;
+  /** Default Stripe price ID (optional global fallback). */
+  stripe_price_id?: string;
   map_provider: MapProvider | null;
   map_api_key?: string;
   /** The PRIMARY AI provider (optional — the storefront uses built-in CSS/SVG presets when null). */
@@ -120,6 +124,8 @@ export interface PlatformSettingsPublicSummary {
   is_configured: boolean;
   mail_provider: MailProvider | null;
   payment_provider: PaymentProvider | null;
+  /** Default Stripe price ID (not a secret — safe to return to the admin UI). */
+  stripe_price_id: string | null;
   map_provider: MapProvider | null;
   ai_provider: AiProvider | null;
   ai_provider_secondary: AiProvider | null;
@@ -131,6 +137,7 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
     is_configured: Boolean(settings?.is_configured),
     mail_provider: settings?.mail_provider ?? null,
     payment_provider: settings?.payment_provider ?? null,
+    stripe_price_id: settings?.stripe_price_id ?? null,
     map_provider: settings?.map_provider ?? null,
     ai_provider: settings?.ai_provider ?? null,
     ai_provider_secondary: settings?.ai_provider_secondary ?? null,
@@ -236,6 +243,7 @@ export function parseSettingsRow(raw: Record<string, unknown> | null | undefined
     payment_provider: paymentProvider,
     payment_api_key: paymentProvider ? String(raw.payment_api_key || '').trim() || null : null,
     payment_webhook_secret: paymentProvider === 'stripe' ? String(raw.payment_webhook_secret || '').trim() || null : null,
+    stripe_price_id: String(raw.stripe_price_id || '').trim() || null,
     map_provider: mapProvider,
     map_api_key: mapProvider ? String(raw.map_api_key || '').trim() || null : null,
     ai_provider: aiProvider,

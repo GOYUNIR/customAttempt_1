@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, resolveStripePriceId, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
+import { createRedisClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { resolveStripeClient } from '@/services/payment/factory';
+import { resolveStripePriceIdWithSettings } from '@/services/config/platform-settings';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
       const priceCat = (product.priceCategories || []).find((c: any) => c.size === size);
       if (!priceCat || !isConfiguredPrice(priceCat.price)) continue;
       const basePriceCents = Math.round(priceCat.price * 100);
-      const stripePriceId = resolveStripePriceId(priceCat.stripeId);
+      const stripePriceId = await resolveStripePriceIdWithSettings(priceCat.stripeId);
       if (!stripePriceId) continue;
 
       const entries = await redis.lrange(poolKey, 0, -1);

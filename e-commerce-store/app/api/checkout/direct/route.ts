@@ -6,11 +6,11 @@ import {
   archiveEntry,
   ArchiveRecord,
   loadProducts, // new helper to fetch product from Redis
-  resolveStripePriceId,
   safeParseRedisItem,
   STORE_CONFIG_KEY,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
+import { resolveStripePriceIdWithSettings } from '@/services/config/platform-settings';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     }
     const priceCents = Math.round(basePrice * 100);
 
-    const stripeId = resolveStripePriceId(category.stripeId);
+    const stripeId = await resolveStripePriceIdWithSettings(category.stripeId);
     if (!stripeId || stripeId.startsWith('price_placeholder') || stripeId === '') {
       return NextResponse.json({ error: `Stripe price ID not set for size "${size}". Set it in admin or via STRIPE_PRODUCT_ID.` }, { status: 400 });
     }

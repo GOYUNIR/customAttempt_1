@@ -1129,6 +1129,7 @@ export default function AdminPortal() {
     payment_provider: '',
     payment_api_key: '',
     payment_webhook_secret: '',
+    stripe_price_id: '',
     mail_provider: '',
     mail_api_key: '',
     map_provider: '',
@@ -2613,6 +2614,7 @@ export default function AdminPortal() {
         setProviderForm((prev) => ({
           ...prev,
           payment_provider: s.payment_provider || '',
+          stripe_price_id: s.stripe_price_id || '',
           mail_provider: s.mail_provider || '',
           map_provider: s.map_provider || '',
           ai_provider: s.ai_provider || '',
@@ -5614,7 +5616,10 @@ export default function AdminPortal() {
                     <input type="password" value={providerForm.payment_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, payment_api_key: e.target.value }))} placeholder="sk_..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                   {providerForm.payment_provider === 'stripe' && (
-                    <input type="password" value={providerForm.payment_webhook_secret} onChange={(e) => setProviderForm((p) => ({ ...p, payment_webhook_secret: e.target.value }))} placeholder="whsec_... (webhook signing secret, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                    <>
+                      <input type="password" value={providerForm.payment_webhook_secret} onChange={(e) => setProviderForm((p) => ({ ...p, payment_webhook_secret: e.target.value }))} placeholder="whsec_... (webhook signing secret, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                      <input type="text" value={providerForm.stripe_price_id} onChange={(e) => setProviderForm((p) => ({ ...p, stripe_price_id: e.target.value }))} placeholder="price_... (default Stripe price ID, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                    </>
                   )}
                 </div>
 

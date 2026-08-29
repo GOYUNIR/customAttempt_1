@@ -35,6 +35,7 @@ create table if not exists public.global_platform_settings (
   payment_provider      text,
   payment_api_key       text,
   payment_webhook_secret text,
+  stripe_price_id       text,
   map_provider          text,
   map_api_key           text,
   created_at            timestamptz not null default now(),

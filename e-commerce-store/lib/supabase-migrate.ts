@@ -6,7 +6,7 @@
  * DDL. Arbitrary SQL (our idempotent migrations) is executed through the
  * Supabase **Management API** (`api.supabase.com`), which needs a one-time
  * personal access token (`SUPABASE_ACCESS_TOKEN`, starts with `sbp_`). When that
- * token is present the wizard applies all four migrations in order, edge-safe
+ * token is present the wizard applies all five migrations in order, edge-safe
  * (plain `fetch`, no Node builtins), and the store "sets itself up".
  *
  * When the token is absent the wizard falls back to the concise manual plan
@@ -18,6 +18,7 @@ import {
   MIGRATION_00002,
   MIGRATION_00003,
   MIGRATION_00004,
+  MIGRATION_00005,
 } from '@/lib/setup-schema-guide';
 import { readSupabaseEnv } from '@/services/config/supabase-client';
 
@@ -26,6 +27,7 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00002_setup_operational.sql', sql: MIGRATION_00002 },
   { name: '00003_tenant_routing.sql', sql: MIGRATION_00003 },
   { name: '00004_ai_secondary.sql', sql: MIGRATION_00004 },
+  { name: '00005_stripe_price_id.sql', sql: MIGRATION_00005 },
 ];
 
 /** Read + trim the Supabase Management-API access token (never logged). */
@@ -64,7 +66,7 @@ export type AutoMigrateResult = {
   error?: string;
 };
 
-/** Apply all four migrations in order via the Supabase Management API. */
+/** Apply all five migrations in order via the Supabase Management API. */
 export async function autoApplySchema(): Promise<AutoMigrateResult> {
   const token = readSupabaseAccessToken();
   const { url } = readSupabaseEnv();

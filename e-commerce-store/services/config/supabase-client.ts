@@ -267,7 +267,7 @@ export async function probePlatformSettingsSchema(): Promise<void> {
   }
   const { serviceRoleKey } = readSupabaseEnv();
   await supabaseRestFetch(
-    `/global_platform_settings?select=id,is_configured,mail_provider,mail_api_key,payment_provider,payment_api_key,payment_webhook_secret,map_provider,map_api_key,ai_provider,ai_api_key,ai_provider_secondary,ai_api_key_secondary,operational_settings&limit=1`,
+    `/global_platform_settings?select=id,is_configured,mail_provider,mail_api_key,payment_provider,payment_api_key,payment_webhook_secret,stripe_price_id,map_provider,map_api_key,ai_provider,ai_api_key,ai_provider_secondary,ai_api_key_secondary,operational_settings&limit=1`,
     { key: serviceRoleKey },
   );
 }

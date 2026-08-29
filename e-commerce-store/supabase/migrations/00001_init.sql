@@ -68,6 +68,7 @@ create table if not exists public.global_platform_settings (
   payment_provider text check (payment_provider in ('stripe', 'lemon_squeezy', 'paddle')),
   payment_api_key text,
   payment_webhook_secret text,
+  stripe_price_id text,
   map_provider text check (map_provider in ('mapbox', 'google_maps', 'open_street_map')),
   map_api_key text,
   ai_provider text check (ai_provider in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),

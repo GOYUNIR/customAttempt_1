@@ -200,6 +200,7 @@ const DEFAULT_FORM: Record<string, string> = {
   payment_provider: '',
   payment_api_key: '',
   payment_webhook_secret: '',
+  stripe_price_id: '',
   map_provider: '',
   map_api_key: '',
   ai_provider: '',
@@ -669,9 +670,14 @@ export default function SetupPage() {
                     </Field>
                   )}
                   {form.payment_provider === 'stripe' && (
-                    <Field label="Webhook signing secret" hint="Optional at setup. Add it under Settings later.">
-                      <SecretInput value={form.payment_webhook_secret} onChange={(v) => set('payment_webhook_secret', v)} placeholder="whsec_..." />
-                    </Field>
+                    <>
+                      <Field label="Webhook signing secret" hint="Optional at setup. Add it under Settings later.">
+                        <SecretInput value={form.payment_webhook_secret} onChange={(v) => set('payment_webhook_secret', v)} placeholder="whsec_..." />
+                      </Field>
+                      <Field label="Default Stripe price ID" hint="Optional global fallback. A size without its own price ID charges this one.">
+                        <TextInput value={form.stripe_price_id} onChange={(v) => set('stripe_price_id', v)} placeholder="price_..." />
+                      </Field>
+                    </>
                   )}
                 </div>
 

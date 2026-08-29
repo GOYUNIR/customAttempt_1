@@ -100,6 +100,7 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   const paymentApiKey = String(raw.payment_api_key || '').trim();
   if (paymentProvider && !paymentApiKey) return { ok: false, error: 'Enter a payment provider API key.' };
   const paymentWebhookSecret = String(raw.payment_webhook_secret || '').trim();
+  const stripePriceId = String(raw.stripe_price_id || '').trim();
 
   // Maps are OPTIONAL - a missing / blank / 'none' provider means "skip for
   // now": address autofill is simply disabled until one is configured.
@@ -152,6 +153,7 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       payment_provider: paymentProvider,
       payment_api_key: paymentProvider ? paymentApiKey : null,
       payment_webhook_secret: paymentWebhookSecret || undefined,
+      stripe_price_id: stripePriceId || undefined,
       map_provider: mapProvider,
       map_api_key: mapProvider ? mapApiKey || undefined : undefined,
       ai_provider: aiProvider,
@@ -164,14 +166,21 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
 
 /** Persist the settings row WITHOUT flipping the configured flag. */
 export async function savePlatformSettings(input: PlatformSettingsInput): Promise<void> {
+  // NOTE: `is_configured` is deliberately OMITTED. The upsert uses PostgREST
+  // `resolution=merge-duplicates`, which only writes the columns present in this
+  // payload — so the existing `is_configured` value is preserved. Writing
+  // `is_configured: false` here would flip a configured store back to
+  // "unconfigured", which the middleware readiness gate then reads as
+  // SETUP_REQUIRED and bounces the admin portal to /admin/setup on the next
+  // request (the "clicked Refresh → sent to setup panel" bug).
   await upsertPlatformSettingsRow({
     id: GLOBAL_PLATFORM_SETTINGS_ROW_ID,
-    is_configured: false,
     mail_provider: input.mail_provider,
     mail_api_key: input.mail_api_key,
     payment_provider: input.payment_provider,
     payment_api_key: input.payment_api_key,
     payment_webhook_secret: input.payment_webhook_secret || null,
+    stripe_price_id: input.stripe_price_id || null,
     map_provider: input.map_provider,
     map_api_key: input.map_api_key || null,
     ai_provider: input.ai_provider,
@@ -213,4 +222,33 @@ export async function markPlatformConfigured(): Promise<void> {
 export function clearPlatformSettingsCache(): void {
   localSettingsCache.clear();
   localConfiguredCache.clear();
+}
+
+/**
+ * Resolve the global default Stripe price ID at runtime. Resolution order:
+ *   1. The admin-saved `global_platform_settings.stripe_price_id` (Setup Wizard
+ *      / admin "API Keys & Integrations").
+ *   2. The legacy `STRIPE_PRODUCT_ID` env var.
+ *   3. '' (callers apply their own placeholder / error handling).
+ *
+ * Async because the DB value lives on the settings row; a missing/inaccessible
+ * Supabase simply falls through to the env var (and then '').
+ */
+export async function resolveDefaultStripePriceId(): Promise<string> {
+  const settings = await getPlatformSettings().catch(() => null);
+  const db = String(settings?.stripe_price_id || '').trim();
+  if (db) return db;
+  return (process.env.STRIPE_PRODUCT_ID || '').trim();
+}
+
+/**
+ * Resolve the effective Stripe price ID for a category: an explicit per-size ID
+ * always wins, otherwise the admin/env default is used. Empty when nothing is
+ * configured (mirrors the sync `resolveStripePriceId` in lib/server-config, but
+ * also consults the DB-backed default price ID).
+ */
+export async function resolveStripePriceIdWithSettings(stored?: string | null): Promise<string> {
+  const raw = typeof stored === 'string' ? stored.trim() : '';
+  if (raw && !raw.startsWith('price_placeholder')) return raw;
+  return resolveDefaultStripePriceId();
 }

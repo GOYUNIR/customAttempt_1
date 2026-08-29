@@ -21,6 +21,7 @@ import {
   cardBlockKey,
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { resolveDefaultStripePriceId } from '@/services/config/platform-settings';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
@@ -187,7 +188,10 @@ export async function GET(request: Request) {
   if (!includeArchived) {
     products = products.filter((p: any) => !p.isArchived && !p.isUpcoming);
   }
-  return NextResponse.json({ products, defaultStripePriceId: defaultStripePriceId() });
+  // Prefill the product form with the admin-saved default price ID (falls back
+  // to STRIPE_PRODUCT_ID, then the obvious placeholder).
+  const resolvedDefault = await resolveDefaultStripePriceId().catch(() => '');
+  return NextResponse.json({ products, defaultStripePriceId: resolvedDefault || defaultStripePriceId() });
 }
 
 export async function POST(request: Request) {
