@@ -12,10 +12,38 @@ import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib/storefront-config';
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
+import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
+
+/** Human labels for the provider enums. The API-key dropdowns below are
+ *  data-driven from the shared `services/config/types.ts` lists (the same
+ *  source of truth the SQL check constraints + driver registries use), so the
+ *  admin UI can never drift from the backend — e.g. a newly added AI provider
+ *  automatically shows up here instead of needing a hand-edited <option>. */
+const PROVIDER_LABELS: Record<string, string> = {
+  stripe: 'Stripe',
+  lemon_squeezy: 'Lemon Squeezy',
+  paddle: 'Paddle',
+  resend: 'Resend',
+  postmark: 'Postmark',
+  sendgrid: 'SendGrid',
+  mapbox: 'Mapbox',
+  google_maps: 'Google Maps',
+  open_street_map: 'OpenStreetMap (no key)',
+  deepseek: 'DeepSeek',
+  deepseek_lite: 'DeepSeek Lite',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  replicate: 'Replicate',
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  google_gemini: 'Google Gemini',
+  workers_ai: 'Workers AI (no key)',
+};
 
 function typeColor(type: string | undefined) {
   if (!type) return '#a1a1aa';
@@ -3005,7 +3033,7 @@ export default function AdminPortal() {
     { id: 'growth', label: 'Growth', group: 'Customers' },
     { id: 'settings', label: 'Settings', group: 'Configuration' },
     { id: 'system', label: 'System', group: 'Configuration' },
-    { id: 'setup', label: 'SetUp', group: 'Configuration' },
+    { id: 'setup', label: 'Setup', group: 'Configuration' },
   ];
 
   // ============================================================
@@ -5581,7 +5609,7 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Provider keys &amp; APIs</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>API Keys &amp; Integrations</h2>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
                 Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
               </p>
@@ -5591,9 +5619,7 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Payments</div>
                   <select value={providerForm.payment_provider} onChange={(e) => setProviderForm((p) => ({ ...p, payment_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">Skip for now</option>
-                    <option value="stripe">Stripe</option>
-                    <option value="lemon_squeezy">Lemon Squeezy</option>
-                    <option value="paddle">Paddle</option>
+                    {PAYMENT_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {providerForm.payment_provider !== '' && providerForm.payment_provider !== 'none' && (
                     <input type="password" value={providerForm.payment_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, payment_api_key: e.target.value }))} placeholder="sk_..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
@@ -5607,9 +5633,7 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Transactional email</div>
                   <select value={providerForm.mail_provider} onChange={(e) => setProviderForm((p) => ({ ...p, mail_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">Skip for now</option>
-                    <option value="resend">Resend</option>
-                    <option value="postmark">Postmark</option>
-                    <option value="sendgrid">SendGrid</option>
+                    {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {providerForm.mail_provider !== '' && providerForm.mail_provider !== 'none' && (
                     <input type="password" value={providerForm.mail_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, mail_api_key: e.target.value }))} placeholder={providerForm.mail_provider === 'resend' ? 're_...' : providerForm.mail_provider === 'postmark' ? 'Postmark server token' : 'SG....'} autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
@@ -5619,9 +5643,7 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Address autofill (maps)</div>
                   <select value={providerForm.map_provider} onChange={(e) => setProviderForm((p) => ({ ...p, map_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">Skip for now</option>
-                    <option value="mapbox">Mapbox</option>
-                    <option value="google_maps">Google Maps</option>
-                    <option value="open_street_map">OpenStreetMap (no key)</option>
+                    {MAP_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {(providerForm.map_provider === 'mapbox' || providerForm.map_provider === 'google_maps') && (
                     <input type="password" value={providerForm.map_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, map_api_key: e.target.value }))} placeholder="pk.eyJ... (public token)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
@@ -5632,31 +5654,14 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine</div>
                   <select value={providerForm.ai_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">Skip for now</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="replicate">Replicate</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="groq">Groq</option>
-                    <option value="mistral">Mistral</option>
-                    <option value="google_gemini">Google Gemini</option>
-                    <option value="workers_ai">Workers AI (no key)</option>
+                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {providerForm.ai_provider !== '' && providerForm.ai_provider !== 'workers_ai' && (
                     <input type="password" value={providerForm.ai_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key: e.target.value }))} placeholder="sk-..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                   <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">No fallback AI</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="deepseek_lite">DeepSeek Lite</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="replicate">Replicate</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="groq">Groq</option>
-                    <option value="mistral">Mistral</option>
-                    <option value="google_gemini">Google Gemini</option>
-                    <option value="workers_ai">Workers AI (no key)</option>
+                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
                     <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
@@ -5715,6 +5720,13 @@ export default function AdminPortal() {
                     {label}
                   </button>
                 ))}
+                <button
+                  onClick={() => setTab('setup')}
+                  style={{ ...buttonGhost, padding: '5px 11px', fontSize: 10, borderRadius: 999, borderColor: '#7dd3fc', color: '#7dd3fc' }}
+                  title="Stripe, email, maps and AI keys live in Setup → API Keys & Integrations"
+                >
+                  🔑 API Keys
+                </button>
               </div>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
 
@@ -6619,9 +6631,10 @@ export default function AdminPortal() {
                   <label style={{ fontSize: 11 }}>
                     Typeface
                     <select value={brandingSettings.shareFontFamily || 'system'} onChange={(e) => setBrandingSettings((prev) => ({ ...prev, shareFontFamily: e.target.value }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}>
-                      <option value="system">System UI</option>
+                      <option value="system">System UI (default)</option>
                       <option value="serif">Serif (Georgia)</option>
                     </select>
+                    <span style={{ fontSize: 10, color: '#888' }}>Link-preview card typeface. System UI renders on every platform.</span>
                   </label>
                   <label style={{ fontSize: 11 }}>
                     Title size (px)
