@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
+import { FONT_CATALOG } from '@/lib/font-catalog';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import ProductLivePreview from '@/components/ProductLivePreview';
@@ -350,22 +351,87 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-/** Font-family presets shown in the Settings → Font Family dropdown, each option
- *  rendered in its own typeface so admins see a live preview of the style. */
-const FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'SF Pro / system (Apple default)', value: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" },
-  { label: 'Inter — clean modern sans', value: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" },
-  { label: 'Space Grotesk — techy geometric sans', value: "'Space Grotesk', 'Inter', 'Segoe UI', Arial, sans-serif" },
-  { label: 'Sora — rounded friendly sans', value: "'Sora', 'Inter', 'Segoe UI', Arial, sans-serif" },
-  { label: 'IBM Plex Sans — crisp corporate sans', value: "'IBM Plex Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" },
-  { label: 'Archivo — bold condensed sans', value: "'Archivo', 'Helvetica Neue', Arial, sans-serif" },
-  { label: 'Nunito — soft rounded sans', value: "'Nunito', 'Poppins', 'Segoe UI', sans-serif" },
-  { label: 'Playfair Display — elegant editorial serif', value: "'Playfair Display', Georgia, 'Times New Roman', serif" },
-  { label: 'Cormorant Garamond — luxury fashion serif', value: "'Cormorant Garamond', 'Playfair Display', Georgia, serif" },
-  { label: 'Georgia — classic book serif', value: "Georgia, 'Times New Roman', serif" },
-  { label: 'System UI — native platform font', value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif" },
-  { label: 'Monospace — terminal / technical', value: "'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace" },
-];
+/** A searchable font dropdown for Settings → Font Family (and the top-bar name
+ *  font). Every option is previewed in its own typeface, and the list can be
+ *  filtered with the little search bar. The catalog lives in lib/font-catalog.ts
+ *  so the picker and the Google Fonts <link> in the root layout never drift. */
+function FontPicker({ value, onChange, allowEmpty = false, emptyLabel = 'Inherit site font' }: {
+  value: string;
+  onChange: (v: string) => void;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [customMode, setCustomMode] = useState(false);
+
+  const normalized = String(value || '').trim();
+  const current = FONT_CATALOG.find((f) => f.value === normalized);
+  const label = normalized === '' ? emptyLabel : current?.label || 'Custom font stack';
+  const q = query.trim().toLowerCase();
+  const filtered = FONT_CATALOG.filter((f) =>
+    !q || f.label.toLowerCase().includes(q) || f.value.toLowerCase().includes(q) || f.category.toLowerCase().includes(q),
+  );
+
+  const rowStyle: React.CSSProperties = {
+    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 10, padding: '9px 12px', background: 'transparent', border: 'none', cursor: 'pointer',
+    textAlign: 'left', fontSize: 13,
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => { setOpen((o) => !o); setQuery(''); setCustomMode(false); }}
+        style={{ ...inputStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%', marginTop: 4, height: 40, cursor: 'pointer', textAlign: 'left', color: normalized ? '#fff' : '#9ca3af' }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: normalized || undefined }}>{label}</span>
+        <span style={{ fontSize: 10, opacity: 0.6 }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 30, background: '#141417', border: '1px solid #2a2a30', borderRadius: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
+          <input
+            type="text"
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search fonts…"
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: 'none', borderBottom: '1px solid #26262c', background: '#0d0d10', color: '#fff', fontSize: 13, outline: 'none' }}
+          />
+          <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            {allowEmpty && (
+              <button type="button" onClick={() => { onChange(''); setOpen(false); setQuery(''); }} style={rowStyle}>
+                <span style={{ color: '#9ca3af' }}>{emptyLabel}</span>
+              </button>
+            )}
+            {filtered.map((f) => (
+              <button key={f.value} type="button" onClick={() => { onChange(f.value); setOpen(false); setQuery(''); }} style={rowStyle}>
+                <span style={{ fontFamily: f.value, color: '#f7f7f7', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.label}</span>
+                <span style={{ fontSize: 9, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>{f.category}</span>
+              </button>
+            ))}
+            <button type="button" onClick={() => { setCustomMode(true); setQuery(''); }} style={rowStyle}>
+              <span style={{ color: '#9ca3af' }}>Custom font stack…</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {customMode && (
+        <input
+          type="text"
+          value={normalized}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. Georgia, serif"
+          autoFocus
+          style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 6 }}
+        />
+      )}
+    </div>
+  );
+}
 
 /** Friendly labels for the theme color inputs (Settings → Theme Colors) so the
  *  admin UI reads like Apple settings instead of raw camelCase key names. */
@@ -987,12 +1053,26 @@ export default function AdminPortal() {
   const [wipeRebuild, setWipeRebuild] = useState(true);
   const [envStatus, setEnvStatus] = useState<any>(null);
   const [envStatusLoading, setEnvStatusLoading] = useState(false);
-  // Email provider configuration (activates two-step sign-in for future logins).
-  const [emailProvider, setEmailProvider] = useState('');
-  const [emailProviderKey, setEmailProviderKey] = useState('');
-  const [emailProviderBusy, setEmailProviderBusy] = useState(false);
-  const [emailProviderMsg, setEmailProviderMsg] = useState('');
-  const [emailProviderErr, setEmailProviderErr] = useState(false);
+  // Provider keys & APIs — mirrors the Setup Wizard's optional-providers card
+  // (payments / email / maps / AI). Keys are written to the DB and never echoed
+  // back, so the form only ever re-populates the PROVIDER names on load.
+  const [providerForm, setProviderForm] = useState({
+    payment_provider: '',
+    payment_api_key: '',
+    payment_webhook_secret: '',
+    mail_provider: '',
+    mail_api_key: '',
+    map_provider: '',
+    map_api_key: '',
+    ai_provider: '',
+    ai_api_key: '',
+    ai_provider_secondary: '',
+    ai_api_key_secondary: '',
+  });
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [providerMsg, setProviderMsg] = useState('');
+  const [providerErr, setProviderErr] = useState(false);
+  const [providerSummary, setProviderSummary] = useState<any>(null);
   
   const [drawHistory, setDrawHistory] = useState<any[]>([]);
   const [drawHistoryLoading, setDrawHistoryLoading] = useState(false);
@@ -2449,44 +2529,63 @@ export default function AdminPortal() {
     }
   };
 
-  const loadEmailProvider = async () => {
+  const loadProviderKeys = async () => {
     try {
-      const res = await adminFetch('/api/admin/email-provider');
+      const res = await adminFetch('/api/admin/provider-keys');
       const data = await res.json();
-      if (data && typeof data.provider === 'string') setEmailProvider(data.provider || '');
+      if (data?.summary) {
+        const s = data.summary;
+        setProviderSummary(s);
+        setProviderForm((prev) => ({
+          ...prev,
+          payment_provider: s.payment_provider || '',
+          mail_provider: s.mail_provider || '',
+          map_provider: s.map_provider || '',
+          ai_provider: s.ai_provider || '',
+          ai_provider_secondary: s.ai_provider_secondary || '',
+        }));
+      }
     } catch {
-      /* keep the dropdown at its current value if the check is unreachable */
+      /* keep the form at its current value if the check is unreachable */
     }
   };
 
-  const saveEmailProvider = async () => {
+  const saveProviderKeys = async () => {
     if (!password) return showToast('Enter the admin password first');
-    setEmailProviderBusy(true);
-    setEmailProviderMsg('');
-    setEmailProviderErr(false);
+    setProviderBusy(true);
+    setProviderMsg('');
+    setProviderErr(false);
     try {
-      const res = await adminFetch('/api/admin/email-provider', {
+      const res = await adminFetch('/api/admin/provider-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, provider: emailProvider, apiKey: emailProviderKey }),
+        body: JSON.stringify({ password, ...providerForm }),
       });
       const data = await res.json();
       if (res.ok && data?.ok) {
-        setEmailProviderKey('');
-        setEmailProviderMsg(
-          data.provider
-            ? `Email provider set to ${data.provider}. Two-step verification is now active for future sign-ins.`
-            : 'Email provider cleared. Two-step verification is off until you configure one.',
-        );
+        setProviderMsg('Provider keys & APIs saved.');
+        setProviderSummary(data.summary || null);
+        showToast('UPDATED · Provider keys');
+        // Keys are write-only: clear them after a save (they are never echoed
+        // back by the server), but keep the selected provider names in place.
+        setProviderForm((prev) => ({
+          ...prev,
+          payment_api_key: '',
+          payment_webhook_secret: '',
+          mail_api_key: '',
+          map_api_key: '',
+          ai_api_key: '',
+          ai_api_key_secondary: '',
+        }));
       } else {
-        setEmailProviderErr(true);
-        setEmailProviderMsg(String(data?.error || 'Could not save the email provider.'));
+        setProviderErr(true);
+        setProviderMsg(String(data?.error || 'Could not save provider keys.'));
       }
-    } catch {
-      setEmailProviderErr(true);
-      setEmailProviderMsg('Could not save the email provider.');
+    } catch (err: any) {
+      setProviderErr(true);
+      setProviderMsg('Could not save provider keys: ' + (err?.message || 'network error'));
     } finally {
-      setEmailProviderBusy(false);
+      setProviderBusy(false);
     }
   };
 
@@ -2859,6 +2958,10 @@ export default function AdminPortal() {
   // Drives the "Discard changes" button in the sticky save bar.
   const settingsDirty = (() => {
     if (!settingsSnapshot) return false;
+    // Must include EXACTLY the same keys (and in the same order) as the snapshot
+    // written by fetchSettings()/saveSettings(). Previously checkout + refPrefix
+    // were missing here, so `current` never matched the snapshot and the "●
+    // Unsaved changes" badge stayed lit forever alongside "Settings saved!".
     const current = JSON.stringify({
       theme: themeSettings,
       hero: heroSettings,
@@ -2871,6 +2974,8 @@ export default function AdminPortal() {
       legal: legalSettings,
       catalog: catalogSettings,
       behavior: behaviorSettings,
+      checkout: checkoutSettings,
+      refPrefix,
       orbs: orbSettings,
     });
     return current !== settingsSnapshot;
@@ -3126,7 +3231,7 @@ export default function AdminPortal() {
                         if (t.id === 'drops') fetchConfig();
                         if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
                         if (t.id === 'settings') fetchSettings();
-                        if (t.id === 'setup') { fetchEnvStatus(); loadEmailProvider(); }
+                        if (t.id === 'setup') { fetchEnvStatus(); loadProviderKeys(); }
                         if (t.id === 'products') fetchProducts();
                         if (t.id === 'products') fetchSettings();
                         if (t.id === 'users') fetchUsers();
@@ -5476,41 +5581,101 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Email Provider &amp; Two-Step Verification</h2>
-              <p style={{ fontSize: 11, color: '#888', margin: '0 0 12px', lineHeight: 1.6 }}>
-                Choose a transactional email provider to activate the 6-digit two-step sign-in code for every future login. Until one is configured, the admin portal signs you in with just your password. The API key is saved to your database and is never shown back.
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Provider keys &amp; APIs</h2>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
+                Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
               </p>
-              <div style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
-                <select
-                  value={emailProvider}
-                  onChange={(e) => setEmailProvider(e.target.value)}
-                  style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #27272a', background: '#0a0a0a', color: '#f7f7f7', fontSize: 13 }}
-                >
-                  <option value="">Skip for now (password only)</option>
-                  <option value="resend">Resend</option>
-                  <option value="postmark">Postmark</option>
-                  <option value="sendgrid">SendGrid</option>
-                </select>
-                {emailProvider !== '' && (
-                  <input
-                    type="password"
-                    value={emailProviderKey}
-                    onChange={(e) => setEmailProviderKey(e.target.value)}
-                    placeholder={emailProvider === 'resend' ? 're_...' : emailProvider === 'postmark' ? 'Postmark server token' : 'SG....'}
-                    autoComplete="off"
-                    style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #27272a', background: '#0a0a0a', color: '#f7f7f7', fontSize: 13 }}
-                  />
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button onClick={saveEmailProvider} disabled={emailProviderBusy} style={{ padding: '8px 14px', borderRadius: 999, border: 'none', background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: emailProviderBusy ? 'default' : 'pointer', opacity: emailProviderBusy ? 0.6 : 1 }}>
-                    {emailProviderBusy ? 'Saving…' : 'Save email provider'}
-                  </button>
-                  {emailProviderMsg && (
-                    <span style={{ fontSize: 11, color: emailProviderErr ? '#f87171' : '#34d399' }}>
-                      {emailProviderMsg}
-                    </span>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Payments</div>
+                  <select value={providerForm.payment_provider} onChange={(e) => setProviderForm((p) => ({ ...p, payment_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    <option value="stripe">Stripe</option>
+                    <option value="lemon_squeezy">Lemon Squeezy</option>
+                    <option value="paddle">Paddle</option>
+                  </select>
+                  {providerForm.payment_provider !== '' && providerForm.payment_provider !== 'none' && (
+                    <input type="password" value={providerForm.payment_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, payment_api_key: e.target.value }))} placeholder="sk_..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  {providerForm.payment_provider === 'stripe' && (
+                    <input type="password" value={providerForm.payment_webhook_secret} onChange={(e) => setProviderForm((p) => ({ ...p, payment_webhook_secret: e.target.value }))} placeholder="whsec_... (webhook signing secret, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                 </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Transactional email</div>
+                  <select value={providerForm.mail_provider} onChange={(e) => setProviderForm((p) => ({ ...p, mail_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    <option value="resend">Resend</option>
+                    <option value="postmark">Postmark</option>
+                    <option value="sendgrid">SendGrid</option>
+                  </select>
+                  {providerForm.mail_provider !== '' && providerForm.mail_provider !== 'none' && (
+                    <input type="password" value={providerForm.mail_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, mail_api_key: e.target.value }))} placeholder={providerForm.mail_provider === 'resend' ? 're_...' : providerForm.mail_provider === 'postmark' ? 'Postmark server token' : 'SG....'} autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Address autofill (maps)</div>
+                  <select value={providerForm.map_provider} onChange={(e) => setProviderForm((p) => ({ ...p, map_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    <option value="mapbox">Mapbox</option>
+                    <option value="google_maps">Google Maps</option>
+                    <option value="open_street_map">OpenStreetMap (no key)</option>
+                  </select>
+                  {(providerForm.map_provider === 'mapbox' || providerForm.map_provider === 'google_maps') && (
+                    <input type="password" value={providerForm.map_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, map_api_key: e.target.value }))} placeholder="pk.eyJ... (public token)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine</div>
+                  <select value={providerForm.ai_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="replicate">Replicate</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="groq">Groq</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="google_gemini">Google Gemini</option>
+                    <option value="workers_ai">Workers AI (no key)</option>
+                  </select>
+                  {providerForm.ai_provider !== '' && providerForm.ai_provider !== 'workers_ai' && (
+                    <input type="password" value={providerForm.ai_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key: e.target.value }))} placeholder="sk-..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">No fallback AI</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="deepseek_lite">DeepSeek Lite</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="replicate">Replicate</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="groq">Groq</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="google_gemini">Google Gemini</option>
+                    <option value="workers_ai">Workers AI (no key)</option>
+                  </select>
+                  {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
+                    <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 14 }}>
+                <button onClick={saveProviderKeys} disabled={providerBusy} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: providerBusy ? 'default' : 'pointer', opacity: providerBusy ? 0.6 : 1 }}>
+                  {providerBusy ? 'Saving…' : 'Save provider keys & APIs'}
+                </button>
+                {providerMsg && <span style={{ fontSize: 11, color: providerErr ? '#f87171' : '#34d399' }}>{providerMsg}</span>}
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, fontSize: 10, color: '#888' }}>
+                <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.payment_provider}</strong> : '✗ none'}</span>
+                <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.mail_provider}</strong> : '✗ none'}</span>
+                <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.map_provider}</strong> : '✗ none'}</span>
+                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.ai_provider}</strong> : '✗ none'}</span>
               </div>
             </div>
 
@@ -5821,29 +5986,11 @@ export default function AdminPortal() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
                 <label style={{ fontSize: 11 }}>
                   Font Family
-                  <select
-                    value={FONT_OPTIONS.some((f) => f.value === String(themeSettings.fontFamily || '').trim()) ? String(themeSettings.fontFamily || '').trim() : '__custom__'}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v !== '__custom__') setThemeSettings({ ...themeSettings, fontFamily: v });
-                    }}
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4, height: 40 }}
-                  >
-                    {FONT_OPTIONS.map((f) => (
-                      <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>{f.label}</option>
-                    ))}
-                    <option value="__custom__">Custom font stack…</option>
-                  </select>
-                  {!FONT_OPTIONS.some((f) => f.value === String(themeSettings.fontFamily || '').trim()) && (
-                    <input
-                      type="text"
-                      value={String(themeSettings.fontFamily || '')}
-                      onChange={(e) => setThemeSettings({ ...themeSettings, fontFamily: e.target.value })}
-                      placeholder="e.g. Georgia, serif"
-                      style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                    />
-                  )}
-                  <span style={{ fontSize: 10, color: '#888' }}>Each option is previewed in its own typeface.</span>
+                  <FontPicker
+                    value={String(themeSettings.fontFamily || '')}
+                    onChange={(v) => setThemeSettings({ ...themeSettings, fontFamily: v })}
+                  />
+                  <span style={{ fontSize: 10, color: '#888' }}>Search the list or pick “Custom font stack…”. Each option is previewed in its own typeface.</span>
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Border Radius (px)
@@ -6370,12 +6517,11 @@ export default function AdminPortal() {
                 </label>
                 <label style={{ fontSize: 11 }}>
                   Top-bar name font (optional)
-                  <input
-                    type="text"
-                    value={brandingSettings.brandFontFamily || ''}
-                    onChange={(e) => setBrandingSettings((prev) => ({ ...prev, brandFontFamily: e.target.value }))}
-                    placeholder="e.g. Georgia, serif (leave empty to inherit the site font)"
-                    style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                  <FontPicker
+                    value={String(brandingSettings.brandFontFamily || '')}
+                    onChange={(v) => setBrandingSettings((prev) => ({ ...prev, brandFontFamily: v }))}
+                    allowEmpty
+                    emptyLabel="Inherit site font (use Font Family)"
                   />
                 </label>
                 <label style={{ fontSize: 11 }}>

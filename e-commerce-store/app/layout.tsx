@@ -11,6 +11,7 @@ import { brandLogoRef } from '@/lib/media';
 import { revisionHash } from '@/lib/share-card-config';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { contentSpacingScale } from '@/lib/storefront-config';
+import { GOOGLE_FONTS_HREF } from '@/lib/font-catalog';
 import { MapFactory } from '@/services/maps/factory';
 
 /**
@@ -193,6 +194,14 @@ export default async function RootLayout({
   } as React.CSSProperties;
   return (
     <html lang="en" suppressHydrationWarning style={htmlStyle}>
+      <head>
+        {/* Load the Google Fonts referenced by the admin font pickers so a
+            selected typeface actually renders on the storefront + admin preview
+            (system fonts in the catalog need no download). */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+      </head>
       <body
         suppressHydrationWarning
         style={{

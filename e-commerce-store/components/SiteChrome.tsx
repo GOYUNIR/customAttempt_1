@@ -613,8 +613,15 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
       // high enough that a real overshoot is possible (the old 0.024 cap made
       // the orbs feel like they were wading through syrup).
       const maxVel = 0.105 * speedFactor * (0.5 + momentumFactor);
-      const maxLayerX = reducedMotion ? 0.02 : -0.2;
-      const maxLayerY = reducedMotion ? 0.05 : -0.12;
+      // Soft motion bounds: the orbs may peek slightly past the viewport edges
+      // (a full-bleed glow), but they must never park there. Instead of a hard
+      // position clamp — which used to let an orb stick to the edge while the
+      // spring kept pushing outward — the velocity is reflected with damping at
+      // the boundary, so the orb turns around and keeps gliding.
+      const boundMinX = reducedMotion ? 0.02 : -0.16;
+      const boundMaxX = reducedMotion ? 0.98 : 1.16;
+      const boundMinY = reducedMotion ? 0.05 : -0.1;
+      const boundMaxY = reducedMotion ? 0.95 : 1.1;
       const states = layerStatesRef.current;
       for (let i = 0; i < states.length && i < ORB_LAYERS.length; i += 1) {
         const def = ORB_LAYERS[i];
@@ -634,12 +641,26 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
           state.vx += pointerVelXRef.current * def.impulse * 0.01 * speedFactor * frame;
           state.vy += pointerVelYRef.current * def.impulse * 0.01 * speedFactor * frame;
         }
+        // Perpetual micro-drift so no orb ever fully freezes: even when the
+        // pointer is completely still, each layer keeps gliding on its own slow
+        // sine path (staggered per layer), which is what keeps the glow feeling
+        // alive and "always moving" without ever looking algorithmic.
+        const driftT = now / 1000;
+        const driftAmp = 0.0011 * speedFactor * (reducedMotion ? 0.4 : 1);
+        state.vx += Math.sin(driftT * 0.52 + i * 1.61) * driftAmp * frame;
+        state.vy += Math.cos(driftT * 0.46 + i * 2.31) * driftAmp * frame;
         state.vx *= Math.pow(springF, frame);
         state.vy *= Math.pow(springF, frame);
         state.vx = clamp(state.vx, -maxVel, maxVel);
         state.vy = clamp(state.vy, -maxVel, maxVel);
-        state.x = clamp(state.x + state.vx * frame, maxLayerX, 1.2);
-        state.y = clamp(state.y + state.vy * frame, maxLayerY, 1.12);
+        state.x += state.vx * frame;
+        state.y += state.vy * frame;
+        // Reflective boundaries (see note above) — never a hard stop, so the
+        // orb always turns around and keeps moving instead of locking in place.
+        if (state.x < boundMinX) { state.x = boundMinX; state.vx = Math.abs(state.vx) * 0.42; }
+        else if (state.x > boundMaxX) { state.x = boundMaxX; state.vx = -Math.abs(state.vx) * 0.42; }
+        if (state.y < boundMinY) { state.y = boundMinY; state.vy = Math.abs(state.vy) * 0.42; }
+        else if (state.y > boundMaxY) { state.y = boundMaxY; state.vy = -Math.abs(state.vy) * 0.42; }
       }
       glowFrameCount += 1;
       // Idle throttle: while the visitor isn't interacting (no pointer/scroll/
