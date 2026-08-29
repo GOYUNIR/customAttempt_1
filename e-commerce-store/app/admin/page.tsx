@@ -13,7 +13,7 @@ import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
-import { TIDY_REDIS_ACTION_LABEL, API_KEYS_INTEGRATIONS_LABEL } from '@/lib/admin-action-labels';
+import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -227,7 +227,7 @@ const PRODUCT_FORM_SECTIONS: [string, string][] = [
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
  *  settings page navigable without hunting through the whole form. */
 const SETTINGS_SECTIONS: [string, string][] = [
-  ['settings-integrations', 'API Keys'],
+  ['settings-integrations', 'API Keys & Integrations'],
   ['settings-presets', 'Design'],
   ['settings-theme', 'Theme'],
   ['settings-hero', 'Hero'],
@@ -3073,6 +3073,14 @@ export default function AdminPortal() {
     showToast('DISCARDED · Reverted to last saved settings');
   };
 
+  // The ACTIVE data store (Supabase / Redis / Cloudflare KV) drives several
+  // labels that used to be hardcoded to "Redis" — the System-tab maintenance
+  // card, its migrate button, and the destructive wipe action below.
+  const activeStorageProvider = status?.storageProvider || envStatus?.storageProvider || null;
+  const isRedisStore = activeStorageProvider === 'upstash' || activeStorageProvider === 'redis';
+  const tidyActionLabel = tidyDataStoreActionLabel(activeStorageProvider);
+  const dataStoreName = dataStoreDisplayName(activeStorageProvider);
+
   const tabs: { id: Tab; label: string; group: string; badge?: number }[] = [
     { id: 'overview', label: 'Overview', group: 'Store' },
     { id: 'drops', label: 'Drops', group: 'Store' },
@@ -3209,10 +3217,16 @@ export default function AdminPortal() {
               </div>
             ) : null}
             <p style={{ color: '#888', margin: '6px 0 0', fontSize: 12 }}>
-              {lastUpdatedAt ? `Updated ${secondsAgo}s ago` : 'Loading…'} ·{' '}
-              <span style={{ color: status?.stripeConfigured ? '#34d399' : '#f87171' }}>Stripe</span> ·{' '}
-              <span style={{ color: status?.redisConfigured ? '#34d399' : '#f87171' }}>Redis</span>{' · '}<span style={{ color: status?.resendConfigured ? '#34d399' : '#f87171' }}>Resend</span> ·{' '}
-              <span style={{ color: '#34d399' }}>{status?.liveActiveUsersOnline ?? 0} online</span>
+              {lastUpdatedAt ? `Updated ${secondsAgo}s ago` : 'Loading…'}
+              {Array.isArray(status?.integrations) && status.integrations.map((it: any) => (
+                <span key={it.id}>
+                  {' · '}
+                  <span style={{ color: it.configured ? '#34d399' : '#f87171' }}>
+                    {it.configured ? it.label : it.category}
+                  </span>
+                </span>
+              ))}
+              {' · '}<span style={{ color: '#34d399' }}>{status?.liveActiveUsersOnline ?? 0} online</span>
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -5533,31 +5547,49 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{TIDY_REDIS_ACTION_LABEL}</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{tidyActionLabel}</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys and runs a maintenance sweep (converts the unbounded legacy <code>entries:processed</code> / <code>entries:email_sent</code> sets into bounded timestamp-scored zsets, and prunes per-product state that outlived a deleted product or user). It is lossless (data is renamed, never dropped) and safe to re-run anytime — run it a few times a year to keep the key space small. See AGENTS.md for the key map.
+                {isRedisStore ? (
+                  <>
+                    Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys and runs a maintenance sweep (converts the unbounded legacy <code>entries:processed</code> / <code>entries:email_sent</code> sets into bounded timestamp-scored zsets, and prunes per-product state that outlived a deleted product or user). It is lossless (data is renamed, never dropped) and safe to re-run anytime — run it a few times a year to keep the key space small. See AGENTS.md for the key map.
+                  </>
+                ) : (
+                  <>
+                    This install is backed by <strong style={{ color: '#ccc' }}>{dataStoreName}</strong>. The Redis-specific key-space migration (legacy <code>drop_pool:*</code> / <code>session:*</code> / <code>stats:*</code> prefixes, dedupe SET→ZSET conversion and orphaned product-state sweep) only applies to Redis-backed stores, so it is not needed here. Run <strong style={{ color: '#ccc' }}>Site Self-Test</strong> above to verify schema health instead.
+                  </>
+                )}
               </p>
-              <button onClick={organizeRedis} style={buttonGhost}>{TIDY_REDIS_ACTION_LABEL}</button>
+              {isRedisStore ? (
+                <button onClick={organizeRedis} style={buttonGhost}>{tidyActionLabel}</button>
+              ) : (
+                <p style={{ fontSize: 11, color: '#888', margin: 0 }}>No {dataStoreName}-specific migration action is required.</p>
+              )}
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
             </div>
 
             <div style={{ ...cardStyle, borderColor: 'rgba(248,113,113,0.35)' }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase', color: '#f87171' }}>Wipe &amp; Rebuild Redis</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase', color: '#f87171' }}>Wipe &amp; Rebuild {dataStoreName}</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                <strong style={{ color: '#f87171' }}>DESTRUCTIVE.</strong> Deletes <em>every key</em> in this Redis database — products, config, entries, ledger, promos, users, sessions, analytics, everything. Use it to reset a demo store or hand a clean slate to a new buyer. Requires the admin password <em>and</em> typing <strong>WIPE</strong> to confirm (two-step verification). Streamer mode must be OFF.
+                <strong style={{ color: '#f87171' }}>DESTRUCTIVE.</strong> Deletes <em>every key</em> in this {dataStoreName} database — products, config, entries, ledger, promos, users, sessions, analytics, everything. Use it to reset a demo store or hand a clean slate to a new buyer. Requires the admin password <em>and</em> typing <strong>WIPE</strong> to confirm (two-step verification). Streamer mode must be OFF.
               </p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <input type="text" value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="Type WIPE to confirm"
-                  style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
-                <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
-                  Rebuild with Seed Defaults after wipe
-                </label>
-                <button onClick={runWipe} disabled={wipeBusy}
-                  style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
-                  {wipeBusy ? 'Wiping…' : 'Wipe Redis'}
-                </button>
-              </div>
+              {isRedisStore ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input type="text" value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="Type WIPE to confirm"
+                    style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+                  <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
+                    Rebuild with Seed Defaults after wipe
+                  </label>
+                  <button onClick={runWipe} disabled={wipeBusy}
+                    style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
+                    {wipeBusy ? 'Wiping…' : `Wipe ${dataStoreName}`}
+                  </button>
+                </div>
+              ) : (
+                <p style={{ fontSize: 11, color: '#888', margin: 0 }}>
+                  This destructive reset is a Redis-only action and is not available for a {dataStoreName}-backed install.
+                </p>
+              )}
               {wipeMsg && <p style={{ fontSize: 11, color: wipeMsg.includes('Failed') || wipeMsg.includes('Type') ? '#f87171' : '#34d399', marginTop: 10 }}>{wipeMsg}</p>}
             </div>
           </div>
@@ -5745,11 +5777,17 @@ export default function AdminPortal() {
                 {providerMsg && <span style={{ fontSize: 11, color: providerErr ? '#f87171' : '#34d399' }}>{providerMsg}</span>}
               </div>
 
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, fontSize: 10, color: '#888' }}>
-                <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.payment_provider}</strong> : '✗ none'}</span>
-                <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.mail_provider}</strong> : '✗ none'}</span>
-                <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.map_provider}</strong> : '✗ none'}</span>
-                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.ai_provider}</strong> : '✗ none'}</span>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, fontSize: 10, color: '#888' }}>
+                <span>
+                  Data store:{' '}
+                  <strong style={{ color: status?.storageProvider ? '#34d399' : '#f87171' }}>
+                    {status?.storageProvider ? dataStoreDisplayName(status.storageProvider) : 'not detected'}
+                  </strong>
+                </span>
+                <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.payment_provider] || providerSummary.payment_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.mail_provider] || providerSummary.mail_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.map_provider] || providerSummary.map_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai_provider] || providerSummary.ai_provider}{providerSummary.ai_provider_secondary ? ` + ${PROVIDER_LABELS[providerSummary.ai_provider_secondary] || providerSummary.ai_provider_secondary}` : ''}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
               </div>
             </div>
             <div style={cardStyle}>
@@ -5769,13 +5807,6 @@ export default function AdminPortal() {
                     {label}
                   </button>
                 ))}
-                <button
-                  onClick={() => document.getElementById('settings-integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  style={{ ...buttonGhost, padding: '5px 11px', fontSize: 10, borderRadius: 999, borderColor: '#7dd3fc', color: '#7dd3fc' }}
-                  title="Stripe, email, maps and AI keys live in Settings → API Keys & Integrations"
-                >
-                  🔑 API Keys
-                </button>
               </div>
               {settingsLoading && <p style={{ color: '#888', fontSize: 11 }}>Loading settings…</p>}
 

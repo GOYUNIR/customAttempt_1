@@ -353,11 +353,12 @@ entry ledger.
 - **Promos** — create customer discount codes and promoter codes (with payout %),
 set per-email/per-total caps and per-product/size eligibility.
 - **Users** — adjust rewards points, view accounts.
-- **Developer** — **Seed Defaults** (populates a starter store), **Site
+- **System** — **Seed Defaults** (populates a starter store), **Site
 Self-Test** (health check that repairs missing live states), and **Tidy &
-Migrate Redis Schema** (losslessly migrates any legacy key names from older template
-versions into the tidy `domain:subdomain:` schema and removes redundant
-keys — safe to re-run anytime).
+Migrate [Data Store] Schema** (losslessly migrates any legacy Redis key names from
+older template versions into the tidy `domain:subdomain:` schema and removes
+redundant keys — safe to re-run anytime; the label adapts to Supabase / Redis /
+Cloudflare KV).
 
 > The storefront shows **0 items until you seed or add products** — that is
 > intentional. Product slugs only resolve for products that exist in Redis.
@@ -551,8 +552,8 @@ Redis data browser stays readable even at thousands of customers:
 
 If you ever see legacy key names (`drop_pool:*`, `session:*`, `live_state`,
 `stats:*`, `config:promos`, …) in the browser — e.g. after upgrading an older
-install — run **/admin → Developer → Tidy & Migrate Redis Schema** and they will be
-renamed in place with no data loss.
+install — run **/admin → System → Tidy & Migrate [Data Store] Schema** and they
+will be renamed in place with no data loss.
 
 ---
 

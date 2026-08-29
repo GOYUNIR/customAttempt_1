@@ -1700,4 +1700,30 @@ is the backing endpoint.
     and the mandatory rule that every future key change must update
     `lib/redis-keys.ts`, the migration table, and both docs in the same change set.
 
+- **2026-08-29 — Dynamic datastore + integration labels in the admin portal (`dynamic-integrations-and-datastore-labels`):**
+  - **🗄 "Tidy & Migrate Redis Schema" is no longer hardcoded.** New
+    `dataStoreDisplayName()` + `tidyDataStoreActionLabel()` helpers in
+    `lib/admin-action-labels.ts` derive the name from the active storage
+    provider (Supabase / Redis / Cloudflare KV). The `/admin → System`
+    maintenance card + its migrate button + the destructive wipe card now use
+    the dynamic label, and for non-Redis installs they correctly explain that
+    the Redis-only key-space migration / wipe does not apply (instead of
+    offering a button that would fail against a Supabase store).
+  - **🟢🔴 The `/admin` header status line is now data-driven.** `GET
+    /api/admin/status` returns a new `integrations[]` array (Data store /
+    Payments / Email / Maps / AI — including the AI fallback provider) resolved
+    from `getPlatformSettings()` + `detectStorageProvider()` + legacy env
+    fallbacks, plus `storageProvider`. The header renders each chip green with
+    its provider name when configured, or red with its CATEGORY ("Data store",
+    "Payments", "Email", "Maps", "AI") when not set up — no more hardcoded
+    "Stripe · Redis · Resend".
+  - **⚙️ Settings polish.** "API Keys & Integrations" is confirmed at the top of
+    Settings with a consistent quick-jump label (duplicate "🔑 API Keys" pill
+    removed), and the integration summary chips now show the live data store +
+    human-readable provider names (green ✓ / red ✗) including the AI fallback.
+  - **🧪 Verified:** `tsc --noEmit` clean, `eslint` 0/0 on all touched files,
+    `npm test` **275/275** (new `tests/admin-action-labels.test.ts`), and
+    `next build` compiles cleanly. No Redis keys added or changed.
+
+
 

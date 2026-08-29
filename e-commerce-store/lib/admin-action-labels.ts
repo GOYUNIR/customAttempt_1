@@ -16,3 +16,29 @@ export const TIDY_REDIS_ACTION_LABEL = 'Tidy & Migrate Redis Schema';
 
 /** Canonical label for the third-party provider keys section. */
 export const API_KEYS_INTEGRATIONS_LABEL = 'API Keys & Integrations';
+
+/**
+ * Human display name for the ACTIVE data store. The admin portal used to
+ * hardcode "Redis" in several places, but the template can run on Supabase
+ * (default), Upstash Redis, or Cloudflare KV — so labels are now derived from
+ * the same storage-provider string the rest of the app uses
+ * (`lib/env-discovery.ts` → `detectStorageProvider()`).
+ */
+export function dataStoreDisplayName(provider?: string | null): string {
+  const p = String(provider || '').trim().toLowerCase();
+  if (p === 'upstash' || p === 'redis') return 'Redis';
+  if (p === 'supabase' || p === 'postgres' || p === 'pg') return 'Supabase';
+  if (p === 'cloudflare-kv' || p === 'kv' || p === 'd1' || p === 'workers-kv') return 'Cloudflare KV';
+  return 'Data Store';
+}
+
+/**
+ * Canonical label for the schema tidy/migrate maintenance action, parameterised
+ * by the active data store. Keeps the old Redis wording for Redis-backed
+ * installs while correctly naming Supabase / Cloudflare KV / generic stores
+ * everywhere else (the /admin → System card, its button, and any docs).
+ */
+export function tidyDataStoreActionLabel(provider?: string | null): string {
+  const name = dataStoreDisplayName(provider);
+  return `Tidy & Migrate ${name} Schema`;
+}

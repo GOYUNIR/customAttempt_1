@@ -13,6 +13,9 @@ import {
   getAdminPassword,
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { detectStorageProvider, dataStoreSummary } from '@/lib/env-discovery';
+import { getPlatformSettings } from '@/services/config/platform-settings';
+import { toPublicSummary } from '@/services/config/types';
 
 function parseWinnerTier(value: unknown): number {
   if (Array.isArray(value)) {
@@ -34,6 +37,35 @@ function parseWinnerTier(value: unknown): number {
   return 0;
 }
 
+/** Display labels for the admin-header integration chips (never secrets). */
+const DATA_STORE_DISPLAY: Record<string, string> = {
+  supabase: 'Supabase',
+  upstash: 'Redis',
+  'cloudflare-kv': 'Cloudflare KV',
+};
+
+const PROVIDER_DISPLAY: Record<string, string> = {
+  stripe: 'Stripe',
+  lemon_squeezy: 'Lemon Squeezy',
+  paddle: 'Paddle',
+  resend: 'Resend',
+  postmark: 'Postmark',
+  sendgrid: 'SendGrid',
+  mapbox: 'Mapbox',
+  google_maps: 'Google Maps',
+  open_street_map: 'OpenStreetMap',
+  deepseek: 'DeepSeek',
+  deepseek_lite: 'DeepSeek Lite',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  replicate: 'Replicate',
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  google_gemini: 'Google Gemini',
+  workers_ai: 'Workers AI',
+};
+
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
@@ -53,6 +85,32 @@ export async function GET(request: Request) {
     );
     const hasResend = Boolean(process.env.RESEND_API_KEY);
 
+    // ── Dynamic integration summary for the admin header ──────────────────
+    // Reflect what is ACTUALLY configured (Setup Wizard providers first, then
+    // legacy env-var fallbacks) so the header never hardcodes Stripe/Redis/
+    // Resend. `configured: false` entries are shown red under their CATEGORY.
+    const platformSettings = await getPlatformSettings().catch(() => null);
+    const platform = toPublicSummary(platformSettings);
+
+    const storageProvider = detectStorageProvider();
+    const dataStores = dataStoreSummary();
+    const activeStore = dataStores.find((s) => s.key === storageProvider) || dataStores[0] || null;
+
+    const hasMapboxEnv = Boolean(process.env.NEXT_PUBLIC_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN);
+
+    const mailProvider = platform.mail_provider || (hasResend ? 'resend' : null);
+    const paymentProvider = platform.payment_provider || (hasStripeKey ? 'stripe' : null);
+    const mapProvider = platform.map_provider || (hasMapboxEnv ? 'mapbox' : null);
+    const aiProvider = platform.ai_provider;
+
+    const integrations = [
+      { id: 'datastore', category: 'Data store', label: DATA_STORE_DISPLAY[storageProvider] || 'Data store', configured: Boolean(activeStore?.configured) },
+      { id: 'payments', category: 'Payments', label: paymentProvider ? PROVIDER_DISPLAY[paymentProvider] || paymentProvider : null, configured: Boolean(paymentProvider) },
+      { id: 'email', category: 'Email', label: mailProvider ? PROVIDER_DISPLAY[mailProvider] || mailProvider : null, configured: Boolean(mailProvider) },
+      { id: 'maps', category: 'Maps', label: mapProvider ? PROVIDER_DISPLAY[mapProvider] || mapProvider : null, configured: Boolean(mapProvider) },
+      { id: 'ai', category: 'AI', label: aiProvider ? (PROVIDER_DISPLAY[aiProvider] || aiProvider) + (platform.ai_provider_secondary ? ` + ${PROVIDER_DISPLAY[platform.ai_provider_secondary] || platform.ai_provider_secondary}` : '') : null, configured: Boolean(aiProvider) },
+    ];
+
     let redis = null as ReturnType<typeof createRedisClient>;
     let stripe = null as ReturnType<typeof createStripeClient>;
     let redisError: string | null = null;
@@ -71,6 +129,8 @@ export async function GET(request: Request) {
     }
 
     const status: any = {
+      storageProvider,
+      integrations,
       stripeConfigured: Boolean(stripe) || hasStripeKey,
       redisConfigured: redisOk || (hasRedisUrl && hasRedisToken),
       resendConfigured: hasResend,
@@ -151,6 +211,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: err?.message || 'status failed',
+        storageProvider: detectStorageProvider(),
+        integrations: [],
         stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
         redisConfigured: Boolean(
           (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL) &&
