@@ -227,7 +227,6 @@ const PRODUCT_FORM_SECTIONS: [string, string][] = [
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
  *  settings page navigable without hunting through the whole form. */
 const SETTINGS_SECTIONS: [string, string][] = [
-  ['settings-integrations', 'API Keys & Integrations'],
   ['settings-presets', 'Design'],
   ['settings-theme', 'Theme'],
   ['settings-hero', 'Hero'],
@@ -3322,8 +3321,8 @@ export default function AdminPortal() {
                         if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
                         if (t.id === 'drops') fetchConfig();
                         if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
-                        if (t.id === 'settings') { fetchSettings(); loadProviderKeys(); }
-                        if (t.id === 'setup') fetchEnvStatus();
+                        if (t.id === 'settings') { fetchSettings(); }
+                        if (t.id === 'setup') { fetchEnvStatus(); loadProviderKeys(); }
                         if (t.id === 'products') fetchProducts();
                         if (t.id === 'products') fetchSettings();
                         if (t.id === 'users') fetchUsers();
@@ -5599,6 +5598,87 @@ export default function AdminPortal() {
         {tab === 'setup' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>
+              <h2 id="settings-integrations" style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{API_KEYS_INTEGRATIONS_LABEL}</h2>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
+                Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
+              </p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Payments</div>
+                  <select value={providerForm.payment_provider} onChange={(e) => setProviderForm((p) => ({ ...p, payment_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    {PAYMENT_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.payment_provider !== '' && providerForm.payment_provider !== 'none' && (
+                    <input type="password" value={providerForm.payment_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, payment_api_key: e.target.value }))} placeholder="sk_..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  {providerForm.payment_provider === 'stripe' && (
+                    <input type="password" value={providerForm.payment_webhook_secret} onChange={(e) => setProviderForm((p) => ({ ...p, payment_webhook_secret: e.target.value }))} placeholder="whsec_... (webhook signing secret, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Transactional email</div>
+                  <select value={providerForm.mail_provider} onChange={(e) => setProviderForm((p) => ({ ...p, mail_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.mail_provider !== '' && providerForm.mail_provider !== 'none' && (
+                    <input type="password" value={providerForm.mail_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, mail_api_key: e.target.value }))} placeholder={providerForm.mail_provider === 'resend' ? 're_...' : providerForm.mail_provider === 'postmark' ? 'Postmark server token' : 'SG....'} autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Address autofill (maps)</div>
+                  <select value={providerForm.map_provider} onChange={(e) => setProviderForm((p) => ({ ...p, map_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    {MAP_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {(providerForm.map_provider === 'mapbox' || providerForm.map_provider === 'google_maps') && (
+                    <input type="password" value={providerForm.map_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, map_api_key: e.target.value }))} placeholder="pk.eyJ... (public token)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine</div>
+                  <select value={providerForm.ai_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">Skip for now</option>
+                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.ai_provider !== '' && providerForm.ai_provider !== 'workers_ai' && (
+                    <input type="password" value={providerForm.ai_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key: e.target.value }))} placeholder="sk-..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">No fallback AI</option>
+                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
+                    <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 14 }}>
+                <button onClick={saveProviderKeys} disabled={providerBusy} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: providerBusy ? 'default' : 'pointer', opacity: providerBusy ? 0.6 : 1 }}>
+                  {providerBusy ? 'Saving…' : 'Save provider keys & APIs'}
+                </button>
+                {providerMsg && <span style={{ fontSize: 11, color: providerErr ? '#f87171' : '#34d399' }}>{providerMsg}</span>}
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, fontSize: 10, color: '#888' }}>
+                <span>
+                  Data store:{' '}
+                  <strong style={{ color: status?.storageProvider ? '#34d399' : '#f87171' }}>
+                    {status?.storageProvider ? dataStoreDisplayName(status.storageProvider) : 'not detected'}
+                  </strong>
+                </span>
+                <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.payment_provider] || providerSummary.payment_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.mail_provider] || providerSummary.mail_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.map_provider] || providerSummary.map_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai_provider] || providerSummary.ai_provider}{providerSummary.ai_provider_secondary ? ` + ${PROVIDER_LABELS[providerSummary.ai_provider_secondary] || providerSummary.ai_provider_secondary}` : ''}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+              </div>
+            </div>
+            <div style={cardStyle}>
               <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Cloudflare Variables &amp; Secrets</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
                 The <strong>Supabase connection</strong> (Project URL + anon + service-role key) is the one thing that must be set in Cloudflare — in the dashboard at <code>{envStatus?.cloudflareVarsPath}</code> or via <code>npx wrangler secret put</code>. Stripe, email and AI keys are instead typed into the Setup Wizard and saved to your database. Values are never shown; only ✓ set / ✗ missing.
@@ -5709,87 +5789,6 @@ export default function AdminPortal() {
         {/* ============ SETTINGS (unchanged) ============ */}
         {tab === 'settings' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={cardStyle}>
-              <h2 id="settings-integrations" style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{API_KEYS_INTEGRATIONS_LABEL}</h2>
-              <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
-                Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
-              </p>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Payments</div>
-                  <select value={providerForm.payment_provider} onChange={(e) => setProviderForm((p) => ({ ...p, payment_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">Skip for now</option>
-                    {PAYMENT_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {providerForm.payment_provider !== '' && providerForm.payment_provider !== 'none' && (
-                    <input type="password" value={providerForm.payment_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, payment_api_key: e.target.value }))} placeholder="sk_..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                  {providerForm.payment_provider === 'stripe' && (
-                    <input type="password" value={providerForm.payment_webhook_secret} onChange={(e) => setProviderForm((p) => ({ ...p, payment_webhook_secret: e.target.value }))} placeholder="whsec_... (webhook signing secret, optional)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Transactional email</div>
-                  <select value={providerForm.mail_provider} onChange={(e) => setProviderForm((p) => ({ ...p, mail_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">Skip for now</option>
-                    {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {providerForm.mail_provider !== '' && providerForm.mail_provider !== 'none' && (
-                    <input type="password" value={providerForm.mail_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, mail_api_key: e.target.value }))} placeholder={providerForm.mail_provider === 'resend' ? 're_...' : providerForm.mail_provider === 'postmark' ? 'Postmark server token' : 'SG....'} autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                </div>
-                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Address autofill (maps)</div>
-                  <select value={providerForm.map_provider} onChange={(e) => setProviderForm((p) => ({ ...p, map_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">Skip for now</option>
-                    {MAP_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {(providerForm.map_provider === 'mapbox' || providerForm.map_provider === 'google_maps') && (
-                    <input type="password" value={providerForm.map_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, map_api_key: e.target.value }))} placeholder="pk.eyJ... (public token)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine</div>
-                  <select value={providerForm.ai_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">Skip for now</option>
-                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {providerForm.ai_provider !== '' && providerForm.ai_provider !== 'workers_ai' && (
-                    <input type="password" value={providerForm.ai_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key: e.target.value }))} placeholder="sk-..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                  <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">No fallback AI</option>
-                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
-                    <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 14 }}>
-                <button onClick={saveProviderKeys} disabled={providerBusy} style={{ padding: '9px 16px', borderRadius: 999, border: 'none', background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, cursor: providerBusy ? 'default' : 'pointer', opacity: providerBusy ? 0.6 : 1 }}>
-                  {providerBusy ? 'Saving…' : 'Save provider keys & APIs'}
-                </button>
-                {providerMsg && <span style={{ fontSize: 11, color: providerErr ? '#f87171' : '#34d399' }}>{providerMsg}</span>}
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, fontSize: 10, color: '#888' }}>
-                <span>
-                  Data store:{' '}
-                  <strong style={{ color: status?.storageProvider ? '#34d399' : '#f87171' }}>
-                    {status?.storageProvider ? dataStoreDisplayName(status.storageProvider) : 'not detected'}
-                  </strong>
-                </span>
-                <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.payment_provider] || providerSummary.payment_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
-                <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.mail_provider] || providerSummary.mail_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
-                <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.map_provider] || providerSummary.map_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
-                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai_provider] || providerSummary.ai_provider}{providerSummary.ai_provider_secondary ? ` + ${PROVIDER_LABELS[providerSummary.ai_provider_secondary] || providerSummary.ai_provider_secondary}` : ''}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
-              </div>
-            </div>
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
