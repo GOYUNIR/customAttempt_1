@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { verifySuperAdminSignIn, verifySuperAdminCredentials } from '../services/config/supabase-client.ts';
+import { verifySuperAdminSignIn, verifySuperAdminCredentials, createSuperAdmin } from '../services/config/supabase-client.ts';
 
 /** Replace globalThis.fetch with a canned handler; returns a restore fn. */
 function installFetchMock(handler: (url: string) => Response): () => void {
@@ -161,4 +161,95 @@ test(
       if (anon !== undefined) process.env.SUPABASE_ANON_KEY = anon;
     }
   },
+);
+
+/** Set URL + anon + SERVICE-ROLE env for createSuperAdmin tests (needs the
+ *  service-role key to create/re-link the master account). Env is set/restored
+ *  PER TEST so sequential runs can't leak deletions between cases. */
+function withSupabaseServiceEnv(fn: () => Promise<void>) {
+  return async () => {
+    const url = process.env.SUPABASE_URL;
+    const anon = process.env.SUPABASE_ANON_KEY;
+    const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_URL = 'https://example.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'anon-key';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key';
+    try {
+      await fn();
+    } finally {
+      if (url === undefined) delete process.env.SUPABASE_URL;
+      else process.env.SUPABASE_URL = url;
+      if (anon === undefined) delete process.env.SUPABASE_ANON_KEY;
+      else process.env.SUPABASE_ANON_KEY = anon;
+      if (svc === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+      else process.env.SUPABASE_SERVICE_ROLE_KEY = svc;
+    }
+  };
+}
+
+test(
+  'createSuperAdmin: creates the Auth user and stamps the profile flag',
+  withSupabaseServiceEnv(async () => {
+    const restore = installFetchMock((url) => {
+      if (url.endsWith('/auth/v1/admin/users')) {
+        return new Response(JSON.stringify({ id: 'user-1', email: 'admin@x.co' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/rest/v1/profiles')) {
+        return new Response('[]', { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    try {
+      assert.deepEqual(await createSuperAdmin({ email: 'admin@x.co', password: 'secret1' }), {
+        id: 'user-1',
+        email: 'admin@x.co',
+      });
+    } finally {
+      restore();
+    }
+  }),
+);
+
+test(
+  'createSuperAdmin: re-links an existing Auth user on email_exists (idempotent)',
+  withSupabaseServiceEnv(async () => {
+    const restore = installFetchMock((url) => {
+      if (url.endsWith('/auth/v1/admin/users')) {
+        // POST create → duplicate email (the auth.users record survived a wipe).
+        return new Response(
+          '{"code":422,"error_code":"email_exists","msg":"A user with this email address has already been registered"}',
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.includes('/auth/v1/admin/users?')) {
+        // GET list → locate the existing user by email.
+        return new Response(JSON.stringify({ users: [{ id: 'user-existing', email: 'admin@x.co' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/auth/v1/admin/users/user-existing')) {
+        // PUT → refresh password + metadata.
+        return new Response(JSON.stringify({ id: 'user-existing', email: 'admin@x.co' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/rest/v1/profiles')) {
+        return new Response('[]', { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    try {
+      assert.deepEqual(await createSuperAdmin({ email: 'admin@x.co', password: 'newpw123' }), {
+        id: 'user-existing',
+        email: 'admin@x.co',
+      });
+    } finally {
+      restore();
+    }
+  }),
 );

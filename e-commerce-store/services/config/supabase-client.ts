@@ -178,7 +178,7 @@ export async function supabaseRestFetch(
 /** GoTrue (auth) fetch — used to create / verify the master super-admin. */
 export async function supabaseAuthFetch(
   path: string,
-  options: { key: string; method?: 'POST' | 'GET'; body?: unknown },
+  options: { key: string; method?: 'GET' | 'POST' | 'PUT'; body?: unknown },
 ): Promise<unknown> {
   const { url } = readSupabaseEnv();
   if (!url || !options.key) throw new Error('Supabase is not configured (SUPABASE_URL / key missing).');
@@ -287,8 +287,50 @@ export async function upsertPlatformSettingsRow(row: Record<string, unknown>): P
 }
 
 /**
+ * Locate an existing Supabase Auth user by email via the GoTrue admin list
+ * endpoint (which supports pagination but NOT email filtering). Returns null
+ * when the user can't be found or Supabase isn't configured.
+ */
+async function findAuthUserByEmail(email: string): Promise<{ id: string; email: string } | null> {
+  if (!supabaseServiceConfigured()) return null;
+  const { serviceRoleKey } = readSupabaseEnv();
+  const target = String(email || '').trim().toLowerCase();
+  const perPage = 200;
+  const maxPages = 100; // safety ceiling (20k users); a store rarely exceeds this
+  for (let page = 1; page <= maxPages; page++) {
+    const result = (await supabaseAuthFetch(`/admin/users?page=${page}&per_page=${perPage}`, {
+      key: serviceRoleKey,
+      method: 'GET',
+    })) as
+      | Array<{ id?: string; email?: string }>
+      | { users?: Array<{ id?: string; email?: string }> }
+      | null;
+
+    let users: Array<{ id?: string; email?: string }> = [];
+    if (Array.isArray(result)) {
+      users = result;
+    } else if (result && Array.isArray(result.users)) {
+      users = result.users;
+    }
+
+    const match = users.find((u) => String(u?.email || '').trim().toLowerCase() === target);
+    if (match?.id) {
+      return { id: String(match.id), email: String(match.email || email) };
+    }
+    if (users.length < perPage) break; // reached the last page
+  }
+  return null;
+}
+
+/**
  * Service-role creation of the master super-admin (Auth user + is_super_admin
  * profile flag so the RLS policy on global_platform_settings unlocks).
+ *
+ * Idempotent: when the Auth user already exists (the usual cause is a PUBLIC
+ * schema reset — `profiles` / `global_platform_settings` wiped — while the
+ * `auth.users` record survived), the existing user is located by email, its
+ * password + metadata refreshed, and the profile flag re-linked instead of
+ * failing the whole bootstrap on GoTrue's `email_exists` 422.
  */
 export async function createSuperAdmin(input: {
   email: string;
@@ -298,30 +340,60 @@ export async function createSuperAdmin(input: {
     throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured — cannot create the super-admin.');
   }
   const { serviceRoleKey } = readSupabaseEnv();
-  const created = (await supabaseAuthFetch('/admin/users', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
-      email: input.email,
-      password: input.password,
-      email_confirm: true,
-      user_metadata: { role: 'super_admin', is_super_admin: true },
-    },
-  })) as { id?: string; email?: string } | null;
+  const email = String(input.email || '').trim().toLowerCase();
 
-  const id = String(created?.id || '');
-  if (!id) throw new Error('Supabase did not return a user id when creating the super-admin.');
+  let created: { id?: string; email?: string } | null = null;
+  try {
+    created = (await supabaseAuthFetch('/admin/users', {
+      key: serviceRoleKey,
+      method: 'POST',
+      body: {
+        email,
+        password: input.password,
+        email_confirm: true,
+        user_metadata: { role: 'super_admin', is_super_admin: true },
+      },
+    })) as { id?: string; email?: string } | null;
+  } catch (err: unknown) {
+    const message = String((err as Error)?.message || err);
+    if (!/email_exists/.test(message)) throw err;
+    // The master account already exists in Supabase Auth — re-link it below
+    // instead of failing the whole bootstrap on the duplicate email.
+  }
+
+  let id = String(created?.id || '');
+  if (!id) {
+    const existing = await findAuthUserByEmail(email);
+    if (!existing) {
+      throw new Error(
+        'A user with this email already exists in Supabase Auth, but it could not be located to re-link as the super-admin. Delete the user in Supabase → Authentication → Users (or choose a different admin email) and try again.',
+      );
+    }
+    id = existing.id;
+    // Refresh the password + metadata so the credentials just typed by the
+    // operator work (they may have reset the database and chosen a new password)
+    // and the account is unambiguously flagged as the super-admin.
+    await supabaseAuthFetch(`/admin/users/${id}`, {
+      key: serviceRoleKey,
+      method: 'PUT',
+      body: {
+        password: input.password,
+        email_confirm: true,
+        user_metadata: { role: 'super_admin', is_super_admin: true },
+      },
+    });
+  }
 
   await supabaseRestFetch('/profiles', {
     key: serviceRoleKey,
     method: 'POST',
-    body: { id, is_super_admin: true },
+    body: { id, is_super_admin: true, email },
     prefer: 'resolution=merge-duplicates,return=representation',
   }).catch((err) => {
     throw new Error(`Super-admin created but profile flag failed: ${String(err?.message || err)}`);
   });
 
-  return { id, email: String(created?.email || input.email) };
+  return { id, email };
 }
 
 /** Verify an operator email+password against Supabase Auth (password grant).
