@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
-      copy, legal, catalog, behavior, checkout, refPrefix
+      copy, legal, catalog, behavior, checkout, refPrefix, layout
     } = body;
     
     // Get current config to merge
@@ -73,6 +73,11 @@ export async function POST(request: Request) {
       },
       checkout: {
         requireAddressAutofill: checkout?.requireAddressAutofill !== false,
+      },
+      // Home-page layout (admin → Settings → Home Layout): how many featured
+      // products share a row on the home page (1 = full width, 2 = side by side).
+      layout: {
+        productsPerRow: layout?.productsPerRow === 1 ? 1 : 2,
       },
       // Configurable order/entry reference prefix (default GU). Letters/numbers,
       // up to 4 chars — legacy GY-/GOY- refs are normalized to it at read time.

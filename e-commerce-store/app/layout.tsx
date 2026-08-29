@@ -61,6 +61,7 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
     dropSchedule: config.dropSchedule || {},
     behavior: config.behavior || { scrollToTopOnLoad: true },
     checkout: config.checkout || { requireAddressAutofill: true },
+    layout: config.layout || { productsPerRow: 2 },
   };
   return liveValue;
 }

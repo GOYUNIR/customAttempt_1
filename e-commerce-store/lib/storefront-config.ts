@@ -223,6 +223,12 @@ export interface StorefrontConfig {
      *  Mapbox-dropdown address — a partial address can never be saved. */
     requireAddressAutofill?: boolean;
   };
+  /** Home-page layout (admin → Settings → Home Layout). */
+  layout?: {
+    /** Number of featured products per row on the home page: 1 = full width,
+     *  2 = two side by side (default). */
+    productsPerRow?: 1 | 2;
+  };
   orbs: OrbsConfig;
   /** Legal & policy content for /terms, /privacy, /shipping (admin-editable). */
   legal: StoreLegalConfig;
@@ -348,6 +354,19 @@ const defaultCatalogSettings: NonNullable<StorefrontConfig['catalog']> = {
 const defaultCheckoutSettings: NonNullable<StorefrontConfig['checkout']> = {
   requireAddressAutofill: true,
 };
+
+/** Default home-page layout (admin → Settings → Home Layout). */
+const defaultLayoutSettings: NonNullable<StorefrontConfig['layout']> = {
+  productsPerRow: 2,
+};
+
+/**
+ * How many featured products share a row on the home page (1 = full width,
+ * 2 = side by side). Defaults to 2 when the config flag is absent.
+ */
+export function homeProductsPerRow(config: Record<string, any> | null | undefined): 1 | 2 {
+  return config?.layout?.productsPerRow === 1 ? 1 : 2;
+}
 
 /**
  * Whether customer "update address" flows must reject partial addresses
@@ -649,6 +668,9 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     },
     checkout: {
       requireAddressAutofill: input.checkout?.requireAddressAutofill ?? defaultCheckoutSettings.requireAddressAutofill,
+    },
+    layout: {
+      productsPerRow: input.layout?.productsPerRow === 1 ? 1 : defaultLayoutSettings.productsPerRow,
     },
     orbs: mergeOrbsConfig(input.orbs),
     legal: { ...DEFAULT_LEGAL, ...(input.legal ?? {}) },

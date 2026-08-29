@@ -164,6 +164,12 @@ export interface StoreConfig {
      *  admin portal can override and save a partial address regardless. */
     requireAddressAutofill?: boolean;
   };
+  /** Home-page layout (admin → Settings → Home Layout). */
+  layout?: {
+    /** Number of featured products per row on the home page: 1 = full width,
+     *  2 = two side by side (default). */
+    productsPerRow?: 1 | 2;
+  };
   orbs: OrbsConfig;
   productCatalog: any[];
 }
@@ -281,6 +287,9 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   checkout: {
     requireAddressAutofill: true,
   },
+  layout: {
+    productsPerRow: 2,
+  },
   orbs: {
     enabled: true,
     primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
@@ -327,6 +336,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
       catalogPreview: { ...DEFAULT_CONFIG.catalogPreview, ...config.catalogPreview },
       catalog: { ...DEFAULT_CONFIG.catalog, ...config.catalog },
       checkout: { ...DEFAULT_CONFIG.checkout, ...config.checkout },
+      layout: { ...DEFAULT_CONFIG.layout, ...config.layout },
       orbs: mergeOrbsConfig(config.orbs),
     } as StoreConfig;
   } catch {

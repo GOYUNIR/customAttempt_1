@@ -18,6 +18,7 @@ import { resolveStripeClient } from '@/services/payment/factory';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
+import { TIDY_REDIS_ACTION_LABEL } from '@/lib/admin-action-labels';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -197,7 +198,7 @@ export async function GET(request: Request) {
       legacyFound.length === 0,
       legacyFound.length === 0
         ? 'clean (single source of truth in store:products)'
-        : `found: ${legacyFound.join(', ')} — run Tidy Redis Schema in /admin → Developer`
+        : `found: ${legacyFound.join(', ')} — run ${TIDY_REDIS_ACTION_LABEL} in /admin → Developer`
     );
 
     // ------------------------------------------------------------------
@@ -426,7 +427,7 @@ export async function GET(request: Request) {
         // v2 consolidation leftovers — these namespaces are now FIELDS of a
         // single hash (ops:overrides / store:carts / entries:last_auto /
         // analytics:ticks / admin:verify:<email>); any top-level key with these
-        // prefixes is stale and should be folded by Tidy Redis Schema.
+        // prefixes is stale and should be folded by Tidy & Migrate Redis Schema.
         'ops:override:',
         'store:cart:',
         'entries:last_auto:',
@@ -450,7 +451,7 @@ export async function GET(request: Request) {
         foundLegacy.length === 0,
         foundLegacy.length === 0
           ? `clean — key space uses the tidy ${tidyPrefixes.length} namespaces from lib/redis-keys.ts`
-          : `found legacy keys: ${foundLegacy.join(', ')} — run Tidy Redis Schema in /admin → Developer`
+          : `found legacy keys: ${foundLegacy.join(', ')} — run ${TIDY_REDIS_ACTION_LABEL} in /admin → Developer`
       );
     } catch (e: any) {
       push('Redis schema tidy', false, e.message || 'scan failed');
@@ -469,7 +470,7 @@ export async function GET(request: Request) {
         'Dedupe sets bounded (72h / 30d)',
         !legacyShape,
         legacyShape
-          ? `legacy SET shape detected (processed=${processedCount}, email_sent=${emailSentCount}) — run Tidy Redis Schema to convert`
+          ? `legacy SET shape detected (processed=${processedCount}, email_sent=${emailSentCount}) — run ${TIDY_REDIS_ACTION_LABEL} to convert`
           : `processed=${processedCount} (${processedType}), email_sent=${emailSentCount} (${emailSentType}) — old members auto-prune on every write`
       );
     } catch {

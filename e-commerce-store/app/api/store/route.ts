@@ -240,6 +240,9 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
     checkout: {
       requireAddressAutofill: redisConfig?.checkout?.requireAddressAutofill !== false,
     },
+    layout: {
+      productsPerRow: redisConfig?.layout?.productsPerRow === 1 ? 1 : 2,
+    },
     branding: {
       ...(defaults.branding || {}),
       ...(redisConfig.branding || {}),

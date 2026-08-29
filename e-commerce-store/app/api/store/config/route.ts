@@ -135,6 +135,10 @@ const DEFAULT_CONFIG = {
   checkout: {
     requireAddressAutofill: true,
   },
+  // Home-page layout (admin → Settings → Home Layout).
+  layout: {
+    productsPerRow: 2,
+  },
   orbs: {
     enabled: true,
     primary: { enabled: true, color: '#3b82f6', opacity: 12, size: 58 },
@@ -192,6 +196,9 @@ export async function GET(request: NextRequest) {
       },
       checkout: {
         requireAddressAutofill: config?.checkout?.requireAddressAutofill !== false,
+      },
+      layout: {
+        productsPerRow: config?.layout?.productsPerRow === 1 ? 1 : 2,
       },
       orbs: mergeOrbsConfig(config?.orbs || DEFAULT_CONFIG.orbs),
     };

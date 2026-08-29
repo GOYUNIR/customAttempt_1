@@ -20,8 +20,8 @@
  *    entries:last_auto timestamps, ops:overrides `product:<id>` fields,
  *    ops:live_state rows) and pool keys can linger. `sweepOrphanedProductState`
  *    prunes every field/key whose product (or user) no longer exists. It is
- *    run by the admin → Developer → Tidy Redis Schema action and the admin
- *    self-test helper so operators can keep a live store tidy without a wipe.
+ *    run by the admin → Developer → Tidy & Migrate Redis Schema action and the
+ *    admin self-test helper so operators can keep a live store tidy without a wipe.
  *
  * Self-contained on purpose (relative imports only, no `@/` alias) so the
  * node --test runner can load it directly.

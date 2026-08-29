@@ -155,6 +155,12 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     requireAddressAutofill: true,
   },
 
+  // Home-page layout (admin → Settings → Home Layout). How many featured
+  // products share a row on the home page: 1 = full width, 2 = side by side.
+  layout: {
+    productsPerRow: 2,
+  },
+
   // Glow orb system (editable live from /admin → Settings → Orb Glow).
   // Background glow orbs behind the storefront content. Opacities stay LOW on
   // purpose — the glow is an ambient wash, not a blob. The top-bar orb and the

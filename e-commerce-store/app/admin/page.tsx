@@ -13,6 +13,7 @@ import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib
 import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
+import { TIDY_REDIS_ACTION_LABEL, API_KEYS_INTEGRATIONS_LABEL } from '@/lib/admin-action-labels';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -226,10 +227,12 @@ const PRODUCT_FORM_SECTIONS: [string, string][] = [
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
  *  settings page navigable without hunting through the whole form. */
 const SETTINGS_SECTIONS: [string, string][] = [
+  ['settings-integrations', 'API Keys'],
   ['settings-presets', 'Design'],
   ['settings-theme', 'Theme'],
   ['settings-hero', 'Hero'],
   ['settings-behavior', 'Behavior'],
+  ['settings-layout', 'Layout'],
   ['settings-form', 'Form'],
   ['settings-footer', 'Footer'],
   ['settings-copy', 'Copy'],
@@ -504,19 +507,51 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     // If the proxy's two-step device cookie is missing/expired, every /api/admin
     // request returns 401 { error: 'ADMIN_2FA_REQUIRED' }. Surface that to the
     // portal so it can re-show the verification screen instead of a silent error.
-    if (res.status === 401 && typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       res
         .clone()
         .json()
         .then((d) => {
-          if (d && d.error === 'ADMIN_2FA_REQUIRED') {
+          if (!d) return;
+          if (d.error === 'ADMIN_2FA_REQUIRED') {
             window.dispatchEvent(new CustomEvent('goyunir-admin-2fa-required'));
+          } else if (d.error === 'AUTH_REQUIRED' && d.redirect) {
+            // Login session expired — bounce to the in-site sign-in page.
+            window.location.assign(d.redirect);
+          } else if (d.error === 'SETUP_REQUIRED' && d.redirect) {
+            window.location.assign(d.redirect);
           }
         })
         .catch(() => {});
     }
     return res;
   });
+}
+
+/**
+ * Parse an admin API response safely. The server normally returns JSON, but an
+ * expired login session (or a transient host error) can produce an HTML
+ * redirect/error page — `res.json()` then throws the cryptic
+ * "Unexpected token '<', '<!DOCTYPE '... is not valid JSON". Parse manually and
+ * surface a clear, actionable message instead.
+ */
+async function readAdminJson(res: Response): Promise<any> {
+  const contentType = res.headers.get('content-type') || '';
+  const text = await res.text();
+  if (text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const isHtml = contentType.includes('text/html')
+        || text.trimStart().startsWith('<!DOCTYPE')
+        || text.trimStart().startsWith('<html');
+      if (isHtml) {
+        throw new Error('received an HTML page instead of JSON — your session may have expired. Please sign in again.');
+      }
+      throw new Error(`received an invalid response (HTTP ${res.status}).`);
+    }
+  }
+  return {};
 }
 
 // Default Stripe price ID prefilled in the product form. Mirrors the server-side
@@ -734,6 +769,13 @@ const DEFAULT_CHECKOUT_SETTINGS = {
   // dropdown address (a partial address can never be saved). The admin portal
   // can override and save a partial address regardless.
   requireAddressAutofill: true,
+};
+
+// Home-page layout (admin → Settings → Home Layout). How many featured
+// products sit side-by-side per row: 1 = full width per product, 2 = two
+// side by side (the default).
+const DEFAULT_LAYOUT_SETTINGS = {
+  productsPerRow: 2 as 1 | 2,
 };
 
 const DEFAULT_REF_PREFIX = 'GU';
@@ -1209,6 +1251,9 @@ export default function AdminPortal() {
   const [behaviorSettings, setBehaviorSettings] = useState<{ scrollToTopOnLoad: boolean }>(DEFAULT_BEHAVIOR_SETTINGS);
   // Checkout & orders policy (admin → Settings → Checkout & Orders).
   const [checkoutSettings, setCheckoutSettings] = useState<{ requireAddressAutofill: boolean }>(DEFAULT_CHECKOUT_SETTINGS);
+  // Home-page layout (admin → Settings → Home Layout). How many featured
+  // products share a row on the home page (1 = full width, 2 = side by side).
+  const [layoutSettings, setLayoutSettings] = useState<{ productsPerRow: 1 | 2 }>(DEFAULT_LAYOUT_SETTINGS);
   // Reference-code prefix (admin → Settings → Checkout & Orders). Every order /
   // entry reference starts with this prefix (default `GU-`). Stored under
   // store:config.refPrefix.
@@ -1388,7 +1433,7 @@ export default function AdminPortal() {
     setSettingsLoading(true);
     try {
       const res = await adminFetch('/api/admin/settings');
-      const data = await res.json();
+      const data = await readAdminJson(res);
       if (data.settings) {
         const s = data.settings;
         // Merge the server payload over the module defaults DETERMINISTICALLY
@@ -1413,6 +1458,7 @@ export default function AdminPortal() {
           },
           behavior: { ...DEFAULT_BEHAVIOR_SETTINGS, ...(s.behavior || {}) },
           checkout: { ...DEFAULT_CHECKOUT_SETTINGS, ...(s.checkout || {}) },
+          layout: { ...DEFAULT_LAYOUT_SETTINGS, ...(s.layout || {}) },
           refPrefix: (() => {
             const raw = String(s.refPrefix || '').trim().toUpperCase();
             return /^[A-Z0-9]{1,4}$/.test(raw) ? raw : DEFAULT_REF_PREFIX;
@@ -1431,6 +1477,7 @@ export default function AdminPortal() {
         setCatalogSettings(next.catalog);
         setBehaviorSettings(next.behavior);
         setCheckoutSettings(next.checkout);
+        setLayoutSettings(next.layout);
         setRefPrefix(next.refPrefix);
         setOrbSettings(next.orbs);
         if (s.productNotes) setProductNotes(s.productNotes);
@@ -2639,12 +2686,13 @@ export default function AdminPortal() {
           catalog: catalogSettings,
           behavior: behaviorSettings,
           checkout: checkoutSettings,
+          layout: layoutSettings,
           refPrefix,
           productNotes,
           orbs: orbSettings,
         }),
       });
-      const data = await res.json();
+      const data = await readAdminJson(res);
       if (res.ok) {
         setSettingsMsg('Settings saved successfully!');
         showToast('UPDATED · Settings');
@@ -2662,6 +2710,7 @@ export default function AdminPortal() {
           catalog: catalogSettings,
           behavior: behaviorSettings,
           checkout: checkoutSettings,
+          layout: layoutSettings,
           refPrefix,
           orbs: orbSettings,
         }));
@@ -3003,6 +3052,7 @@ export default function AdminPortal() {
       catalog: catalogSettings,
       behavior: behaviorSettings,
       checkout: checkoutSettings,
+      layout: layoutSettings,
       refPrefix,
       orbs: orbSettings,
     });
@@ -3258,8 +3308,8 @@ export default function AdminPortal() {
                         if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
                         if (t.id === 'drops') fetchConfig();
                         if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
-                        if (t.id === 'settings') fetchSettings();
-                        if (t.id === 'setup') { fetchEnvStatus(); loadProviderKeys(); }
+                        if (t.id === 'settings') { fetchSettings(); loadProviderKeys(); }
+                        if (t.id === 'setup') fetchEnvStatus();
                         if (t.id === 'products') fetchProducts();
                         if (t.id === 'products') fetchSettings();
                         if (t.id === 'users') fetchUsers();
@@ -5483,11 +5533,11 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Tidy Redis Schema</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{TIDY_REDIS_ACTION_LABEL}</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
                 Migrates any legacy key names (drop_pool:*, intent_pool:*, session:*, live_state, stats:*, etc.) into the tidy <code>domain:subdomain:</code> schema from lib/redis-keys.ts, then removes redundant mirror keys and runs a maintenance sweep (converts the unbounded legacy <code>entries:processed</code> / <code>entries:email_sent</code> sets into bounded timestamp-scored zsets, and prunes per-product state that outlived a deleted product or user). It is lossless (data is renamed, never dropped) and safe to re-run anytime — run it a few times a year to keep the key space small. See AGENTS.md for the key map.
               </p>
-              <button onClick={organizeRedis} style={buttonGhost}>Tidy &amp; Migrate Redis Schema</button>
+              <button onClick={organizeRedis} style={buttonGhost}>{TIDY_REDIS_ACTION_LABEL}</button>
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
             </div>
 
@@ -5609,7 +5659,26 @@ export default function AdminPortal() {
             </div>
 
             <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>API Keys &amp; Integrations</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Production Launch Checklist</h2>
+              <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
+                <p style={{ margin: '6px 0' }}>1. Set the environment variables above on <strong>Cloudflare</strong>: the dashboard at <strong>Workers &amp; Pages → [your project] → Settings → Variables and Secrets → Production</strong> (secrets via the Secrets column or <code>npx wrangler secret put</code>), then redeploy. Build-time <code>NEXT_PUBLIC_*</code> vars go in your shell before <code>npm run build:cloudflare</code> — never in the dashboard.</p>
+                <p style={{ margin: '6px 0' }}>2. In <strong>/admin → Settings → Branding &amp; Share</strong>: set your brand name, logo, favicon colors, share card, and header mode.</p>
+                <p style={{ margin: '6px 0' }}>3. In <strong>/admin → Settings → Legal &amp; Policies</strong>: replace the company name + support email and review Terms / Privacy / Shipping.</p>
+                <p style={{ margin: '6px 0' }}>4. In <strong>/admin → Products</strong>: set real Stripe price IDs per size, real prices, inventory, and winner tiers. The seeded placeholder prices will refuse to charge until real IDs/prices are set.</p>
+                <p style={{ margin: '6px 0' }}>5. Point your Stripe webhook at <code>https://YOUR_DOMAIN/api/stripe/webhook</code> and set <strong>STRIPE_WEBHOOK_SECRET</strong>.</p>
+                <p style={{ margin: '6px 0' }}>6. Add <strong>NEXT_PUBLIC_MAPBOX_TOKEN</strong> (public pk.* token) and redeploy to turn on full-address autofill at checkout — the dropdown fills street, city, state, ZIP and country.</p>
+                <p style={{ margin: '6px 0' }}>7. Run <strong>/admin → System → Site Self-Test</strong> before a drop. It verifies every env var, product price/Stripe ID, live state, and key-space hygiene.</p>
+                <p style={{ margin: '6px 0' }}>8. This portal opens in <strong>Streamer Mode</strong> (customer data masked with fixed-length bullets — even character lengths stay hidden). It only masks display; every save, draw and edit keeps working, so you can run the whole store live on a stream. Toggle it ON before sharing your screen.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============ SETTINGS (unchanged) ============ */}
+        {tab === 'settings' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={cardStyle}>
+              <h2 id="settings-integrations" style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{API_KEYS_INTEGRATIONS_LABEL}</h2>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
                 Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
               </p>
@@ -5683,26 +5752,6 @@ export default function AdminPortal() {
                 <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {providerSummary.ai_provider}</strong> : '✗ none'}</span>
               </div>
             </div>
-
-            <div style={cardStyle}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>Production Launch Checklist</h2>
-              <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
-                <p style={{ margin: '6px 0' }}>1. Set the environment variables above on <strong>Cloudflare</strong>: the dashboard at <strong>Workers &amp; Pages → [your project] → Settings → Variables and Secrets → Production</strong> (secrets via the Secrets column or <code>npx wrangler secret put</code>), then redeploy. Build-time <code>NEXT_PUBLIC_*</code> vars go in your shell before <code>npm run build:cloudflare</code> — never in the dashboard.</p>
-                <p style={{ margin: '6px 0' }}>2. In <strong>/admin → Settings → Branding &amp; Share</strong>: set your brand name, logo, favicon colors, share card, and header mode.</p>
-                <p style={{ margin: '6px 0' }}>3. In <strong>/admin → Settings → Legal &amp; Policies</strong>: replace the company name + support email and review Terms / Privacy / Shipping.</p>
-                <p style={{ margin: '6px 0' }}>4. In <strong>/admin → Products</strong>: set real Stripe price IDs per size, real prices, inventory, and winner tiers. The seeded placeholder prices will refuse to charge until real IDs/prices are set.</p>
-                <p style={{ margin: '6px 0' }}>5. Point your Stripe webhook at <code>https://YOUR_DOMAIN/api/stripe/webhook</code> and set <strong>STRIPE_WEBHOOK_SECRET</strong>.</p>
-                <p style={{ margin: '6px 0' }}>6. Add <strong>NEXT_PUBLIC_MAPBOX_TOKEN</strong> (public pk.* token) and redeploy to turn on full-address autofill at checkout — the dropdown fills street, city, state, ZIP and country.</p>
-                <p style={{ margin: '6px 0' }}>7. Run <strong>/admin → System → Site Self-Test</strong> before a drop. It verifies every env var, product price/Stripe ID, live state, and key-space hygiene.</p>
-                <p style={{ margin: '6px 0' }}>8. This portal opens in <strong>Streamer Mode</strong> (customer data masked with fixed-length bullets — even character lengths stay hidden). It only masks display; every save, draw and edit keeps working, so you can run the whole store live on a stream. Toggle it ON before sharing your screen.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ============ SETTINGS (unchanged) ============ */}
-        {tab === 'settings' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={cardStyle}>
               <h2 style={{ margin: '0 0 4px', fontSize: 13, textTransform: 'uppercase' }}>Site Settings</h2>
               <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
@@ -5721,9 +5770,9 @@ export default function AdminPortal() {
                   </button>
                 ))}
                 <button
-                  onClick={() => setTab('setup')}
+                  onClick={() => document.getElementById('settings-integrations')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                   style={{ ...buttonGhost, padding: '5px 11px', fontSize: 10, borderRadius: 999, borderColor: '#7dd3fc', color: '#7dd3fc' }}
-                  title="Stripe, email, maps and AI keys live in Setup → API Keys & Integrations"
+                  title="Stripe, email, maps and AI keys live in Settings → API Keys & Integrations"
                 >
                   🔑 API Keys
                 </button>
@@ -6157,6 +6206,32 @@ export default function AdminPortal() {
                 <input type="checkbox" checked={behaviorSettings.scrollToTopOnLoad !== false} onChange={(e) => setBehaviorSettings({ scrollToTopOnLoad: e.target.checked })} />
                 Start at the top when the page opens
               </label>
+
+              <h4 id="settings-layout" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Home Layout</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                How many featured releases share a row on the home page. Choose <strong>1 per row</strong> for full-width cards or <strong>2 per row</strong> to show them side by side.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {([1, 2] as const).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setLayoutSettings({ productsPerRow: n })}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: `1px solid ${layoutSettings.productsPerRow === n ? '#fff' : '#27272a'}`,
+                      background: layoutSettings.productsPerRow === n ? '#fff' : 'transparent',
+                      color: layoutSettings.productsPerRow === n ? '#000' : '#aaa',
+                    }}
+                  >
+                    {n === 1 ? '1 per row (full width)' : '2 per row (side by side)'}
+                  </button>
+                ))}
+              </div>
 
               <h4 id="settings-form" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

@@ -51,6 +51,12 @@ export default function HomePage() {
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
   const [copyOverrides, setCopyOverrides] = useState<Record<string, any>>(liveCtx?.copy || {});
+  // Home-page layout (admin → Settings → Home Layout): how many featured
+  // releases share a row — 1 = full width, 2 = side by side (default). Baked
+  // into the SSR shell, then refreshed from /api/store so admin edits apply.
+  const [productsPerRow, setProductsPerRow] = useState<1 | 2>(
+    (liveCtx as any)?.layout?.productsPerRow === 1 ? 1 : 2,
+  );
 
   const brandName = String(branding?.brandName || branding?.shareTitle || neutralBrandName());
 
@@ -106,6 +112,7 @@ export default function HomePage() {
         if (data?.config?.heroContent) setHeroContent({ ...GOYUNIR_STORE_SUITE.heroContent, ...data.config.heroContent });
         if (data?.config?.socialProof) setSocialProofCfg(data.config.socialProof);
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
+        if (data?.config?.layout?.productsPerRow) setProductsPerRow(data.config.layout.productsPerRow === 1 ? 1 : 2);
         // `/api/store` returns ONE canonical `allProducts` array (lifecycle
         // flags on each product) — derive the active releases here.
         const sorted = Array.isArray(data.allProducts)
@@ -208,7 +215,7 @@ export default function HomePage() {
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
-      <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
+      <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           {heroContent.showEyebrow !== false && (
             <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8, whiteSpace: 'pre-line' }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
@@ -259,7 +266,7 @@ export default function HomePage() {
               <div style={{ fontSize: 12, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.accentBlue }}>{priorityDropsTitle}</div>
               <div style={{ fontSize: 11, color: configPalette.textMuted, whiteSpace: 'pre-line' }}>{priorityDropsSubtitle}</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: Math.round(14 * spacing) }}>
+            <div style={{ display: 'grid', gridTemplateColumns: productsPerRow === 2 ? '1fr 1fr' : '1fr', gap: Math.round(14 * spacing) }}>
               {activeProducts.map((product: any, index: number) => (
                 <Link key={product.id} href={`/${product.slug}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit', display: 'block', borderRadius: themeRadius(configPalette, 22) }}>
                   <div style={{ borderRadius: themeRadius(configPalette, 22), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 14), marginTop: index === 0 ? 0 : 2, animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>

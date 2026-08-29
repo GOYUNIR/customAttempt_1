@@ -29,6 +29,8 @@ export interface LiveThemeValue {
   behavior?: { scrollToTopOnLoad?: boolean };
   /** Checkout & orders policy (admin → Settings → Checkout & Orders). */
   checkout?: { requireAddressAutofill?: boolean };
+  /** Home-page layout (admin → Settings → Home Layout). */
+  layout?: { productsPerRow?: number };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);
