@@ -13,7 +13,7 @@ import {
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
 import { supabaseEnvSummary } from '@/services/config/edge';
-import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, verifyServiceRoleAccess, verifySuperAdminSignIn, probePlatformSettingsSchema } from '@/services/config/supabase-client';
+import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, setSupabaseRuntimeAccessToken, verifyServiceRoleAccess, verifySuperAdminSignIn, probePlatformSettingsSchema } from '@/services/config/supabase-client';
 import {
   discoverEnvironment,
   computeAdminReady,
@@ -371,17 +371,19 @@ async function probeAutoMigrate(request: Request, body: Record<string, unknown>)
 
   // Point the migrator at the operator's project even when Supabase credentials
   // are only available inline (production keeps them in the environment).
-  setSupabaseRuntimeCredentials({ url });
+  const supabaseAccessToken = String(body.supabaseAccessToken || body.supabase_access_token || '').trim();
+  setSupabaseRuntimeCredentials({ url, accessToken: supabaseAccessToken || undefined });
 
-  if (!supabaseAutoMigrateAvailable()) {
+  const token = supabaseAccessToken || undefined;
+  if (!supabaseAutoMigrateAvailable(token)) {
     return NextResponse.json({
       ok: false,
       applied: false,
       error:
-        'Add SUPABASE_ACCESS_TOKEN (Supabase → Account → Access Tokens) so the wizard can build the schema for you, or run `supabase db push`.',
+        'Add your Supabase access token (Supabase → Account → Access Tokens, starts with `sbp_`) so the wizard can build the schema for you, or run `supabase db push`.',
     });
   }
-  const result = await autoApplySchema();
+  const result = await autoApplySchema(token);
   if (result.applied) {
     return NextResponse.json({ ok: true, applied: true, ran: result.ran });
   }
@@ -563,6 +565,13 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    // Keep the inline Supabase access token even when the connection itself comes
+    // from the environment — it is what lets `selfHealSupabaseSchema` below build
+    // the tables automatically instead of asking the operator to run
+    // `supabase db push`.
+    const supabaseAccessToken = String(body.supabaseAccessToken || body.supabase_access_token || '').trim();
+    if (supabaseAccessToken) setSupabaseRuntimeAccessToken(supabaseAccessToken);
 
     // ── operational settings (security / site / payments / AI / storage) ─────
     const operational = normalizeOperationalSettingsInput(body);

@@ -20,7 +20,7 @@ import {
   MIGRATION_00004,
   MIGRATION_00005,
 } from '@/lib/setup-schema-guide';
-import { readSupabaseEnv } from '@/services/config/supabase-client';
+import { readSupabaseEnv, readSupabaseAccessToken } from '@/services/config/supabase-client';
 
 const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00001_init.sql', sql: MIGRATION_00001 },
@@ -30,22 +30,20 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00005_stripe_price_id.sql', sql: MIGRATION_00005 },
 ];
 
-/** Read + trim the Supabase Management-API access token (never logged). */
-function readSupabaseAccessToken(): string {
-  return String(process.env.SUPABASE_ACCESS_TOKEN || '').trim();
-}
-
 /** True when a token is present but clearly not a Supabase personal access
  *  token (they start with `sbp_`). Lets us give a friendlier error instead of
  *  a raw Management-API 401. */
-export function isMalformedSupabaseAccessToken(): boolean {
-  const token = readSupabaseAccessToken();
+export function isMalformedSupabaseAccessToken(tokenOverride?: string): boolean {
+  const token = (tokenOverride ?? readSupabaseAccessToken()).trim();
   if (!token) return false;
   return !token.startsWith('sbp_') || token.length < 12;
 }
 
-export function supabaseAutoMigrateAvailable(): boolean {
-  const token = readSupabaseAccessToken();
+/** Whether a schema auto-apply is possible right now. An inline token may be
+ *  supplied (e.g. the admin provider-keys panel) when the operator hasn't set
+ *  `SUPABASE_ACCESS_TOKEN` in the environment yet. */
+export function supabaseAutoMigrateAvailable(tokenOverride?: string): boolean {
+  const token = (tokenOverride ?? readSupabaseAccessToken()).trim();
   const { url } = readSupabaseEnv();
   return Boolean(token && url && projectRefFromUrl(url));
 }
@@ -66,9 +64,11 @@ export type AutoMigrateResult = {
   error?: string;
 };
 
-/** Apply all five migrations in order via the Supabase Management API. */
-export async function autoApplySchema(): Promise<AutoMigrateResult> {
-  const token = readSupabaseAccessToken();
+/** Apply all five migrations in order via the Supabase Management API.
+ *  `tokenOverride` lets a caller supply the personal access token inline when it
+ *  is not present in the environment (the admin provider-keys save path). */
+export async function autoApplySchema(tokenOverride?: string): Promise<AutoMigrateResult> {
+  const token = (tokenOverride ?? readSupabaseAccessToken()).trim();
   const { url } = readSupabaseEnv();
   const ref = url ? projectRefFromUrl(url) : null;
 
@@ -81,7 +81,7 @@ export async function autoApplySchema(): Promise<AutoMigrateResult> {
     };
   }
 
-  if (isMalformedSupabaseAccessToken()) {
+  if (isMalformedSupabaseAccessToken(token)) {
     return {
       applied: false,
       ran: [],

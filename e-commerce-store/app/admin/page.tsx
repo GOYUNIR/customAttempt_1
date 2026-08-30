@@ -1138,6 +1138,7 @@ export default function AdminPortal() {
     ai_api_key: '',
     ai_provider_secondary: '',
     ai_api_key_secondary: '',
+    supabase_access_token: '',
   });
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerMsg, setProviderMsg] = useState('');
@@ -2663,6 +2664,7 @@ export default function AdminPortal() {
           map_api_key: '',
           ai_api_key: '',
           ai_api_key_secondary: '',
+          supabase_access_token: '',
         }));
       } else {
         setProviderErr(true);
@@ -5675,6 +5677,23 @@ export default function AdminPortal() {
                     <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                 </div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6, marginTop: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1' }}>
+                  Supabase access token (optional — auto-builds the database schema)
+                </div>
+                <input
+                  type="password"
+                  value={providerForm.supabase_access_token}
+                  onChange={(e) => setProviderForm((p) => ({ ...p, supabase_access_token: e.target.value }))}
+                  placeholder="sbp_... (Supabase → Account → Access Tokens)"
+                  autoComplete="off"
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+                <p style={{ fontSize: 10, color: '#888', margin: 0, lineHeight: 1.6 }}>
+                  Only needed once (or after a schema wipe) so the store can build its own tables instead of showing a “missing schema” error. Create a NEW personal access token at supabase.com/dashboard/account/tokens — it starts with <code>sbp_</code>. It is never stored in your database or shown back.
+                </p>
               </div>
 
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 14 }}>

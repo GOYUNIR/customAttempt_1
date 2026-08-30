@@ -30,6 +30,9 @@ interface SupabaseRuntimeCredentials {
   url?: string;
   anonKey?: string;
   serviceRoleKey?: string;
+  /** Supabase personal access token (starts with `sbp_`) — used only for the
+   *  one-click schema build via the Management API. Never exposed client-side. */
+  accessToken?: string;
 }
 
 /**
@@ -60,12 +63,39 @@ function writeRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void
     url: (creds.url || '').trim().replace(/\/+$/, ''),
     anonKey: (creds.anonKey || '').trim(),
     serviceRoleKey: (creds.serviceRoleKey || '').trim(),
+    accessToken: (creds.accessToken || '').trim(),
   };
 }
 
 /** Set (or clear) the inline Supabase credentials the Setup Wizard entered. */
 export function setSupabaseRuntimeCredentials(creds: SupabaseRuntimeCredentials | null): void {
   writeRuntimeCredentials(creds);
+}
+
+/** Merge JUST the Supabase access token into the runtime override without
+ *  disturbing URL / anon / service-role credentials already in place. Used when
+ *  the connection comes from the environment but the schema-build token is only
+ *  available inline (a common production setup). */
+export function setSupabaseRuntimeAccessToken(token: string | null): void {
+  const current = readRuntimeCredentials();
+  if (!token) {
+    if (current) {
+      writeRuntimeCredentials({
+        url: current.url,
+        anonKey: current.anonKey,
+        serviceRoleKey: current.serviceRoleKey,
+      });
+    }
+    return;
+  }
+  writeRuntimeCredentials({ ...(current || {}), accessToken: token.trim() });
+}
+
+/** The Supabase personal access token, honoring the inline runtime override
+ *  first and the `SUPABASE_ACCESS_TOKEN` environment variable second. */
+export function readSupabaseAccessToken(): string {
+  const override = readRuntimeCredentials();
+  return String(override?.accessToken || process.env.SUPABASE_ACCESS_TOKEN || '').trim();
 }
 
 export function readSupabaseEnv(): { url: string; anonKey: string; serviceRoleKey: string } {

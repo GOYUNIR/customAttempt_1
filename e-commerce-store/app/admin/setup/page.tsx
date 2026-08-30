@@ -195,6 +195,7 @@ const DEFAULT_FORM: Record<string, string> = {
   supabase_url: '',
   supabase_anon_key: '',
   supabase_service_role_key: '',
+  supabase_access_token: '',
   mail_provider: '',
   mail_api_key: '',
   payment_provider: '',
@@ -383,12 +384,13 @@ export default function SetupPage() {
         // server falls back to the env credentials automatically.
         body: JSON.stringify(
           supabaseEnvReady
-            ? { probe: 'auto-migrate' }
+            ? { probe: 'auto-migrate', supabase_access_token: form.supabase_access_token }
             : {
                 probe: 'auto-migrate',
                 supabase_url: form.supabase_url,
                 supabase_anon_key: form.supabase_anon_key,
                 supabase_service_role_key: form.supabase_service_role_key,
+                supabase_access_token: form.supabase_access_token,
               },
         ),
       });
@@ -604,6 +606,10 @@ export default function SetupPage() {
                     </Field>
                   </>
                 )}
+
+                <Field label="Supabase access token (optional)" hint="Create a NEW personal access token at supabase.com/dashboard/account/tokens (it starts with `sbp_`). Used only for the one-click schema build — never stored in your database or shown back.">
+                  <SecretInput value={form.supabase_access_token} onChange={(v) => set('supabase_access_token', v)} placeholder="sbp_..." />
+                </Field>
 
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => void testConnection()} disabled={probe.state === 'busy'} style={{ background: '#111', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: probe.state === 'busy' ? 'default' : 'pointer', opacity: probe.state === 'busy' ? 0.6 : 1 }}>
