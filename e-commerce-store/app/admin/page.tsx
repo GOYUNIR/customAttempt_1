@@ -2637,7 +2637,18 @@ export default function AdminPortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, ...providerForm }),
       });
-      const data = await res.json();
+      // Parse defensively: a proxy/edge 500 can return an empty body, which
+      // would otherwise surface as "Unexpected end of JSON input" instead of
+      // the real error message.
+      const rawText = await res.text().catch(() => '');
+      let data: any = {};
+      if (rawText) {
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          /* non-JSON error page / empty body — fall through to the HTTP status */
+        }
+      }
       if (res.ok && data?.ok) {
         setProviderMsg('Provider keys & APIs saved.');
         setProviderSummary(data.summary || null);
@@ -2655,7 +2666,10 @@ export default function AdminPortal() {
         }));
       } else {
         setProviderErr(true);
-        setProviderMsg(String(data?.error || 'Could not save provider keys.'));
+        const fallback = res.ok
+          ? 'Could not save provider keys.'
+          : `Save failed (HTTP ${res.status}).`;
+        setProviderMsg(String(data?.error || fallback));
       }
     } catch (err: any) {
       setProviderErr(true);
@@ -5602,7 +5616,7 @@ export default function AdminPortal() {
             <div style={cardStyle}>
               <h2 id="settings-integrations" style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase' }}>{API_KEYS_INTEGRATIONS_LABEL}</h2>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 14px', lineHeight: 1.6 }}>
-                Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below).
+                Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below). <strong>Leave a key field blank to keep the currently saved value</strong> — you can change just one or two keys without re-entering the rest.
               </p>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>

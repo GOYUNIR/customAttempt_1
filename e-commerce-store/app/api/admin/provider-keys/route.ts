@@ -9,9 +9,11 @@ import {
 import {
   getPlatformSettings,
   savePlatformSettings,
-  normalizePlatformSettingsInput,
+  normalizePlatformSettingsPatch,
 } from '@/services/config/platform-settings';
-import { toPublicSummary } from '@/services/config/types';
+import { toPublicSummary, type PlatformSettingsInput } from '@/services/config/types';
+import { isSchemaError, buildSchemaFixPlan } from '@/lib/setup-schema-guide';
+import { autoApplySchema, supabaseAutoMigrateAvailable } from '@/lib/supabase-migrate';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +44,29 @@ export async function GET() {
   return NextResponse.json({ ok: true, summary: toPublicSummary(settings) });
 }
 
+/**
+ * Save the settings row, transparently applying a missing Supabase schema when a
+ * management access token is available. This mirrors the Setup Wizard's
+ * self-heal: `stripe_price_id` (00005) / `ai_api_key_secondary` (00004) may be
+ * absent on an older database, which PostgREST reports as a schema error.
+ */
+async function saveWithSchemaHeal(input: PlatformSettingsInput): Promise<void> {
+  try {
+    await savePlatformSettings(input);
+    return;
+  } catch (err) {
+    const message = (err as Error)?.message || String(err);
+    if (isSchemaError(message) && supabaseAutoMigrateAvailable()) {
+      const result = await autoApplySchema();
+      if (result.applied) {
+        await savePlatformSettings(input);
+        return;
+      }
+    }
+    throw err;
+  }
+}
+
 export async function POST(request: Request) {
   let body: Record<string, unknown> = {};
   try {
@@ -55,7 +80,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
-  const normalized = normalizePlatformSettingsInput(body);
+  // The currently persisted row is used to PRESERVE write-only keys that the
+  // operator leaves blank (they are never echoed back to the UI). A read failure
+  // is non-fatal: the patch then simply requires a key for every selected
+  // provider, which is the safe behavior for a store that can't be read.
+  const existing = await getPlatformSettings({ force: true }).catch(() => null);
+
+  const normalized = normalizePlatformSettingsPatch(body, existing);
   if (!normalized.ok) {
     return NextResponse.json({ error: normalized.error }, { status: 400 });
   }
@@ -65,7 +96,25 @@ export async function POST(request: Request) {
   // is_configured gate. Operational settings (storage provider, cron secret,
   // admin passwords…) are intentionally left untouched here so this route can
   // never accidentally wipe them.
-  await savePlatformSettings(normalized.input);
+  try {
+    await saveWithSchemaHeal(normalized.input);
+  } catch (err) {
+    const message = (err as Error)?.message || String(err);
+    console.error('[provider-keys] save failed', message);
+    const schemaMissing = isSchemaError(message);
+    const plan = schemaMissing ? buildSchemaFixPlan(message) : null;
+    return NextResponse.json(
+      {
+        ok: false,
+        error: plan
+          ? 'Your Supabase database is missing part of its schema. Run `supabase db push` (or set SUPABASE_ACCESS_TOKEN to apply it automatically), then retry.'
+          : message,
+        schemaMissing,
+        schemaError: plan,
+      },
+      { status: schemaMissing ? 400 : 500 },
+    );
+  }
 
   const settings = await getPlatformSettings({ force: true }).catch(() => null);
   return NextResponse.json({ ok: true, summary: toPublicSummary(settings) });

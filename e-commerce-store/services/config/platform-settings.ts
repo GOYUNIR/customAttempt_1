@@ -164,6 +164,159 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   };
 }
 
+/**
+ * Normalize a PARTIAL provider-keys update from the admin "API Keys &
+ * Integrations" panel. API keys are write-only (the server never echoes the
+ * stored VALUES back to the browser), so a re-save that leaves a key field blank
+ * must PRESERVE the stored key instead of wiping it. Rules, per category:
+ *
+ *   - provider blank / 'none'        → clear the whole category (provider + key).
+ *   - provider set + key present     → write the new provider + key.
+ *   - provider set + key blank       → keep the stored key when the provider is
+ *                                      unchanged; otherwise error (a newly
+ *                                      selected provider needs its own key).
+ *   - optional SECRET fields (e.g. Stripe webhook secret) are preserved when
+ *     blank.
+ *   - optional NON-SECRET fields (e.g. stripe_price_id, which IS echoed back)
+ *     are cleared when blank.
+ *
+ * `existing` is the currently persisted row (may be null on a fresh store).
+ */
+export function normalizePlatformSettingsPatch(
+  raw: Record<string, unknown>,
+  existing: GlobalPlatformSettings | null,
+): { ok: true; input: PlatformSettingsInput } | { ok: false; error: string } {
+  // ── Email (optional) ────────────────────────────────────────────────────────
+  const mailRaw = String(raw.mail_provider ?? '').trim();
+  const isMailSkip = !mailRaw || mailRaw.toLowerCase() === 'none';
+  const mailProvider = isMailSkip ? null : sanitizeMailProvider(raw.mail_provider);
+  if (!isMailSkip && !mailProvider) return { ok: false, error: 'Choose a valid email provider.' };
+  const mailApiKeyRaw = String(raw.mail_api_key ?? '').trim();
+  let mailApiKey: string | null;
+  if (!mailProvider) {
+    mailApiKey = null;
+  } else if (mailApiKeyRaw) {
+    mailApiKey = mailApiKeyRaw;
+  } else if (existing?.mail_provider === mailProvider && existing.mail_api_key) {
+    mailApiKey = existing.mail_api_key;
+  } else {
+    return { ok: false, error: 'Enter an email provider API key.' };
+  }
+
+  // ── Payments (optional) ─────────────────────────────────────────────────────
+  const paymentRaw = String(raw.payment_provider ?? '').trim();
+  const isPaymentSkip = !paymentRaw || paymentRaw.toLowerCase() === 'none';
+  const paymentProvider = isPaymentSkip ? null : sanitizePaymentProvider(raw.payment_provider);
+  if (!isPaymentSkip && !paymentProvider) return { ok: false, error: 'Choose a valid payment provider.' };
+  const paymentApiKeyRaw = String(raw.payment_api_key ?? '').trim();
+  let paymentApiKey: string | null;
+  if (!paymentProvider) {
+    paymentApiKey = null;
+  } else if (paymentApiKeyRaw) {
+    paymentApiKey = paymentApiKeyRaw;
+  } else if (existing?.payment_provider === paymentProvider && existing.payment_api_key) {
+    paymentApiKey = existing.payment_api_key;
+  } else {
+    return { ok: false, error: 'Enter a payment provider API key.' };
+  }
+
+  // Webhook secret is write-only → blank keeps the stored value.
+  const paymentWebhookSecretRaw = String(raw.payment_webhook_secret ?? '').trim();
+  const paymentWebhookSecret =
+    paymentProvider === 'stripe'
+      ? paymentWebhookSecretRaw || existing?.payment_webhook_secret || undefined
+      : undefined;
+
+  // stripe_price_id is NOT a secret (it is echoed back to the UI) → blank clears it.
+  const stripePriceIdRaw = String(raw.stripe_price_id ?? '').trim();
+  const stripePriceId = paymentProvider === 'stripe' && stripePriceIdRaw ? stripePriceIdRaw : undefined;
+
+  // ── Maps (optional) ─────────────────────────────────────────────────────────
+  const mapRaw = String(raw.map_provider ?? '').trim();
+  const isMapSkip = !mapRaw || mapRaw.toLowerCase() === 'none';
+  const mapProvider = isMapSkip ? null : sanitizeMapProvider(raw.map_provider);
+  if (!isMapSkip && !mapProvider) return { ok: false, error: 'Choose a valid map provider.' };
+  const mapApiKeyRaw = String(raw.map_api_key ?? '').trim();
+  let mapApiKey: string | undefined;
+  if (!mapProvider || mapProvider === 'open_street_map') {
+    mapApiKey = undefined;
+  } else if (mapApiKeyRaw) {
+    mapApiKey = mapApiKeyRaw;
+  } else if (existing?.map_provider === mapProvider && existing.map_api_key) {
+    mapApiKey = existing.map_api_key;
+  } else {
+    return { ok: false, error: 'Enter a map provider API key.' };
+  }
+
+  // ── AI primary (optional) ───────────────────────────────────────────────────
+  const aiRaw = String(raw.ai_provider ?? '').trim();
+  const isAiSkip = !aiRaw || aiRaw.toLowerCase() === 'none';
+  const aiProvider = isAiSkip ? null : sanitizeAiProvider(raw.ai_provider);
+  if (!isAiSkip && !aiProvider) return { ok: false, error: 'Choose a valid AI provider.' };
+  const aiApiKeyRaw = String(raw.ai_api_key ?? '').trim();
+  let aiApiKey: string | null;
+  if (!aiProvider) {
+    aiApiKey = null;
+  } else if (aiProvider === 'workers_ai') {
+    aiApiKey = null;
+  } else if (aiApiKeyRaw) {
+    aiApiKey = aiApiKeyRaw;
+  } else if (existing?.ai_provider === aiProvider && existing.ai_api_key) {
+    aiApiKey = existing.ai_api_key;
+  } else {
+    return { ok: false, error: 'Enter an AI provider API key (Workers AI needs none).' };
+  }
+
+  // ── AI secondary (optional fallback) ────────────────────────────────────────
+  const aiSecondaryRaw = String(raw.ai_provider_secondary ?? '').trim();
+  const aiProviderSecondary =
+    !aiSecondaryRaw || aiSecondaryRaw.toLowerCase() === 'none'
+      ? null
+      : sanitizeAiProvider(raw.ai_provider_secondary);
+  const aiApiKeySecondaryRaw = String(raw.ai_api_key_secondary ?? '').trim();
+  let aiApiKeySecondary: string | undefined;
+  if (!aiProviderSecondary) {
+    aiApiKeySecondary = undefined;
+  } else if (aiProviderSecondary === 'workers_ai') {
+    aiApiKeySecondary = undefined;
+  } else if (aiApiKeySecondaryRaw) {
+    aiApiKeySecondary = aiApiKeySecondaryRaw;
+  } else if (
+    isDeepSeekProvider(aiProviderSecondary) &&
+    isDeepSeekProvider(aiProvider) &&
+    Boolean(aiApiKey)
+  ) {
+    // DeepSeek Pro/Lite share ONE key — the factories reuse the primary key, so
+    // the secondary column stays empty (mirrors normalizePlatformSettingsInput).
+    aiApiKeySecondary = undefined;
+  } else if (existing?.ai_provider_secondary === aiProviderSecondary && existing.ai_api_key_secondary) {
+    aiApiKeySecondary = existing.ai_api_key_secondary;
+  } else {
+    return {
+      ok: false,
+      error: 'Enter a secondary AI provider API key (Workers AI needs none), or clear the secondary provider.',
+    };
+  }
+
+  return {
+    ok: true,
+    input: {
+      mail_provider: mailProvider,
+      mail_api_key: mailApiKey,
+      payment_provider: paymentProvider,
+      payment_api_key: paymentApiKey,
+      payment_webhook_secret: paymentWebhookSecret,
+      stripe_price_id: stripePriceId,
+      map_provider: mapProvider,
+      map_api_key: mapApiKey,
+      ai_provider: aiProvider,
+      ai_api_key: aiApiKey,
+      ai_provider_secondary: aiProviderSecondary,
+      ai_api_key_secondary: aiApiKeySecondary,
+    },
+  };
+}
+
 /** Persist the settings row WITHOUT flipping the configured flag. */
 export async function savePlatformSettings(input: PlatformSettingsInput): Promise<void> {
   // NOTE: `is_configured` is deliberately OMITTED. The upsert uses PostgREST
