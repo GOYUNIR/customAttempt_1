@@ -51,6 +51,7 @@ export class ResendDriver implements EmailDriver {
         ctaLabel: options?.ctaLabel,
         ctaUrl: options?.ctaUrl,
         brandName: options?.brandName || this.brandName,
+        logoUrl: options?.logoUrl,
       }),
     });
   }

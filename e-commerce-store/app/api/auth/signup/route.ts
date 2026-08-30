@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
 import { grantWelcomeRewards, createCustomerSession, trySendWelcomeEmail, CUSTOMER_SESSION_TTL_SECONDS } from '@/lib/customer-rewards';
@@ -17,6 +17,22 @@ async function emailProviderConfigured(): Promise<boolean> {
     return Boolean(await EmailFactory.getDriver({ force: true }));
   } catch {
     return false;
+  }
+}
+
+/**
+ * Whether mandatory customer signup email verification (2FA) is enabled.
+ * Admin toggle under /admin → Settings → Rewards & Points ("Require email
+ * verification at signup"). Defaults to ON (secure). When OFF, signup creates
+ * a verified account immediately — no 6-digit code is sent.
+ */
+async function requireSignup2FA(redis: any): Promise<boolean> {
+  try {
+    const raw = await redis.get(STORE_CONFIG_KEY);
+    const config = safeParseRedisItem<any>(raw) || {};
+    return config.requireSignup2FA !== false;
+  } catch {
+    return true;
   }
 }
 
@@ -63,29 +79,55 @@ export async function POST(request: Request) {
 
   // check if user exists (accounts older than this feature count as verified)
   const raw = await redis.hgetall(USERS_KEY);
-  let existing = false;
+  let existingUser: any = null;
   if (raw) {
     for (const [, v] of Object.entries(raw)) {
       const u = safeParseRedisItem<any>(v);
-      if (u && String(u.email || '').toLowerCase() === normalizedEmail) { existing = true; break; }
+      if (u && String(u.email || '').toLowerCase() === normalizedEmail) { existingUser = u; break; }
     }
   }
-  if (existing) return NextResponse.json({ error: 'User already exists' }, { status: 400 });
+
+  // A VERIFIED account already exists → hard 400 (normal duplicate-signup).
+  if (existingUser && existingUser.emailVerified === true) {
+    return NextResponse.json({ error: 'User already exists' }, { status: 400 });
+  }
+
+  // An UNVERIFIED account from a previous signup → re-send the code instead of
+  // a confusing 400. This is the "retry signup with an unverified email" path.
+  if (existingUser) {
+    const resend = await issueCustomerVerifyCode(redis, normalizedEmail);
+    if (!resend.ok) {
+      if (resend.throttled) {
+        return NextResponse.json({ error: resend.error || 'Please wait before requesting another code.' }, { status: 429 });
+      }
+      return NextResponse.json({ error: "We couldn't email your verification code. Please try again." }, { status: 502 });
+    }
+    return NextResponse.json({
+      success: true,
+      needsVerification: true,
+      email: normalizedEmail,
+      resent: true,
+      devCode: resend.devCode,
+    });
+  }
 
   const salt = randomBytes(16).toString('hex');
   const hashed = hashPassword(password, salt);
   const id = `usr_${Date.now().toString(36)}`;
 
   const emailConfigured = await emailProviderConfigured();
+  const twoFactorRequired = (await requireSignup2FA(redis)) && emailConfigured;
 
   const user = {
     id,
     email: normalizedEmail,
     password: `${salt}:${hashed}`,
     role: 'customer',
-    // When there is no email provider the account is verified immediately
-    // (nothing to send a code with); otherwise it stays locked until verified.
-    emailVerified: !emailConfigured,
+    // Verified immediately when the admin disables mandatory signup 2FA, or when
+    // there is no email provider to deliver a code with. Otherwise the account
+    // is created UNVERIFIED (0 rewards, no session) and locked until the emailed
+    // 6-digit code is confirmed.
+    emailVerified: !twoFactorRequired,
     rewards: 0,
     emailOptIn: emailOptIn === true,
     termsAgreedAt: new Date().toISOString(),
@@ -93,8 +135,9 @@ export async function POST(request: Request) {
   };
   await redis.hset(USERS_KEY, { [id]: JSON.stringify(user) });
 
-  // No email provider → unlock the account + rewards right now and sign them in.
-  if (!emailConfigured) {
+  // 2FA not required (admin toggle off, or no email provider) → unlock the
+  // account + rewards right now and sign them in.
+  if (!twoFactorRequired) {
     const { updatedUser, welcomeCode } = await grantWelcomeRewards(redis, user, normalizedEmail);
     await trySendWelcomeEmail(normalizedEmail, welcomeCode);
 
@@ -114,10 +157,16 @@ export async function POST(request: Request) {
     return response;
   }
 
-  // Email the verification code (throttled server-side). If the email provider
-  // is unavailable the account still exists — the customer can retry the code
-  // from the verify screen or /account later.
+  // Email the verification code (throttled server-side). If the send fails we
+  // surface the failure clearly instead of stranding the customer with a
+  // "code is in your email" message that never arrives.
   const verify = await issueCustomerVerifyCode(redis, normalizedEmail);
+  if (!verify.ok) {
+    if (verify.throttled) {
+      return NextResponse.json({ error: verify.error || 'Please wait before requesting another code.' }, { status: 429 });
+    }
+    return NextResponse.json({ error: "We couldn't email your verification code. Please try again." }, { status: 502 });
+  }
 
   return NextResponse.json({
     success: true,

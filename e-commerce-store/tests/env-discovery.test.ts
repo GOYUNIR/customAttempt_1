@@ -43,7 +43,10 @@ test('no individual check is blocking — blocking state is group-level', () => 
   const result = discoverEnvironment({});
   assert.equal(result.all.every((c) => c.blocking === false), true);
   const password = result.all.find((c) => c.id === 'admin-password');
-  assert.equal(password?.required, true);
+  // Legacy env-var fallbacks (Basic Auth password, Stripe, Resend, Mapbox,
+  // Cron secret…) are OPTIONAL now that the Setup Wizard persists the real
+  // provider keys to Supabase. They must never surface as "required" warnings.
+  assert.equal(password?.required, false);
   assert.equal(password?.blocking, false);
 });
 

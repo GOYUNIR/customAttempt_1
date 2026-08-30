@@ -76,7 +76,10 @@ export async function issueCustomerVerifyCode(
     // and devCode is echoed below so a fresh clone stays usable even when the
     // sandbox email provider rejects the recipient.
     if (process.env.NODE_ENV === 'production') {
-      return { ok: false, error: 'Could not send the verification email. Check RESEND_API_KEY.' };
+      // The most common cause with a VALID API key is sending from an
+      // unverified FROM address (Resend's `onboarding@resend.dev` only
+      // delivers to the account owner). Surface that explicitly.
+      return { ok: false, error: 'Could not send the verification email — check the email FROM address is a verified sender domain (not the Resend sandbox address).' };
     }
   }
   let devCode: string | undefined;

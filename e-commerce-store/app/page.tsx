@@ -11,6 +11,13 @@ import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, c
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { isImageMedia, isVideoMedia } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
+import { fallbackAnimation } from '@/lib/ai-animation';
+
+// AI product-image animation for the hero. This is the SAME fallback preset the
+// `/api/ai/animation` pipeline emits when no AI provider is configured — a pure-
+// CSS "slow drift" loop — so the home page hero always gets a subtle, premium
+// motion on the featured product's cover image without a live AI call or API key.
+const HERO_ANIMATION_CSS = fallbackAnimation('drift').css || '';
 
 /**
  * Home-page surfaces use the SAME surfaceBackground() helper as the catalog and
@@ -187,6 +194,14 @@ export default function HomePage() {
 
   const primaryProduct = activeProducts[0];
   const soldOutProducts = activeProducts.filter((product: any) => product.soldOut);
+  // Featured cover image for the hero's AI-animated media block. Mirrors the
+  // product card's cover resolution (first IMAGE in the gallery; videos are
+  // skipped — the hero animation is image-only).
+  const heroCoverImage = (() => {
+    if (!primaryProduct) return '';
+    const medias: string[] = (primaryProduct.images || []).filter((src: string) => typeof src === 'string' && src);
+    return medias.find((src: string) => isImageMedia(src)) || '';
+  })();
 
   const formatCountdown = (product: any) => {
     if (product.isArchived) return 'Archived release';
@@ -225,9 +240,23 @@ export default function HomePage() {
 
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
-      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } }`}</style>
+      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${HERO_ANIMATION_CSS}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+          {heroCoverImage && (
+            <div
+              className="goyunir-ai"
+              aria-hidden="true"
+              style={{
+                height: 230,
+                borderRadius: themeRadius(configPalette, 18),
+                background: `url(${heroCoverImage}) center/cover no-repeat`,
+                marginBottom: 18,
+                willChange: 'transform',
+                border: `1px solid ${configPalette.cardBorder}`,
+              }}
+            />
+          )}
           {heroContent.showEyebrow !== false && (
             <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8, whiteSpace: 'pre-line' }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
           )}

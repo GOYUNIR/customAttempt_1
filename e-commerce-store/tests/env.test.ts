@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getSiteUrl, getBrandName, getSupportEmail, neutralBrandName, fallbackSiteUrl } from '../lib/env.ts';
+import { getSiteUrl, getBrandName, getSupportEmail, getBrandLogo, neutralBrandName, fallbackSiteUrl } from '../lib/env.ts';
 
 test('site URL prefers NEXT_PUBLIC_URL over the older aliases', () => {
   const original = { ...process.env };
@@ -82,6 +82,25 @@ test('getSiteUrl rejects Vercel dashboard env placeholders that leak into values
     delete process.env.NEXT_PUBLIC_SITE_URL;
     process.env.SITE_URL = '$vercel_project_production_url';
     assert.equal(getSiteUrl(), '');
+  } finally {
+    process.env = { ...original };
+  }
+});
+
+test('brand logo resolves aliases and drops non-URL placeholders', () => {
+  const original = { ...process.env };
+  try {
+    assert.equal(getBrandLogo(), '');
+    process.env.EMAIL_LOGO_URL = 'https://cdn.example/logo.png';
+    assert.equal(getBrandLogo(), 'https://cdn.example/logo.png');
+    delete process.env.EMAIL_LOGO_URL;
+    process.env.BRAND_LOGO_URL = 'data:image/png;base64,AAAA';
+    assert.equal(getBrandLogo(), 'data:image/png;base64,AAAA');
+    delete process.env.BRAND_LOGO_URL;
+    // A broken placeholder (e.g. "a logo url") must be dropped, never emitted as
+    // a broken <img src> in every email masthead.
+    process.env.NEXT_PUBLIC_LOGO_URL = 'a logo url';
+    assert.equal(getBrandLogo(), '');
   } finally {
     process.env = { ...original };
   }

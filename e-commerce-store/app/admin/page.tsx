@@ -1235,6 +1235,13 @@ export default function AdminPortal() {
   const [brandingSettings, setBrandingSettings] = useState(DEFAULT_BRANDING_SETTINGS);
   // Rewards & points configuration (points earned per $1, redemption rate).
   const [rewardsSettings, setRewardsSettings] = useState(DEFAULT_REWARDS_SETTINGS);
+  // Mandatory customer signup email verification (2FA). Stored under
+  // store:config.requireSignup2FA. Defaults to ON (secure).
+  const [requireSignup2FA, setRequireSignup2FA] = useState(true);
+  // Saved product-default template ("Save as default" in the product editor).
+  // New products are pre-filled from this so operators don't re-enter checkout
+  // mode, size templates and delivery-incentive defaults every time.
+  const [productDefaults, setProductDefaults] = useState<any>(null);
   // Product gallery behaviour (auto-advance + slow zoom).
   const [gallerySettings, setGallerySettings] = useState(DEFAULT_GALLERY_SETTINGS);
   // Storefront copy overrides — saved under settings.copy. Storefront
@@ -1274,7 +1281,11 @@ export default function AdminPortal() {
   const [productNotes, setProductNotes] = useState<Record<string, any[]>>({});
   const [orbSettings, setOrbSettings] = useState<any>(mergeOrbSettings(DEFAULT_ORBS, (GOYUNIR_STORE_SUITE as any).orbs));
   const [settingsMsg, setSettingsMsg] = useState('');
+  // Loading = fetching the current settings from Redis. Saving = actively POSTing
+  // changes. Keeping them separate stops the save button from flashing "Saving…"
+  // the moment the Settings tab opens (which only loads, never saves).
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -1466,6 +1477,7 @@ export default function AdminPortal() {
             return /^[A-Z0-9]{1,4}$/.test(raw) ? raw : DEFAULT_REF_PREFIX;
           })(),
           orbs: mergeOrbSettings(DEFAULT_ORBS, s.orbs || {}),
+          requireSignup2FA: s.requireSignup2FA !== false,
         };
         setThemeSettings(next.theme);
         setHeroSettings(next.hero);
@@ -1482,6 +1494,8 @@ export default function AdminPortal() {
         setLayoutSettings(next.layout);
         setRefPrefix(next.refPrefix);
         setOrbSettings(next.orbs);
+        setRequireSignup2FA(s.requireSignup2FA !== false);
+        if (s.productDefaults && typeof s.productDefaults === 'object') setProductDefaults(s.productDefaults);
         if (s.productNotes) setProductNotes(s.productNotes);
         // Baseline for the "Discard changes" button — everything saved as-is.
         setSettingsSnapshot(JSON.stringify(next));
@@ -1595,6 +1609,28 @@ export default function AdminPortal() {
         { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
       ]
     };
+
+    // Pre-fill from the saved product-default template (if any) so operators
+    // don't have to re-enter checkout mode, size templates and delivery-
+    // incentive defaults for every new release.
+    if (productDefaults && typeof productDefaults === 'object') {
+      const d = productDefaults;
+      if (typeof d.checkoutMode === 'string') fresh.checkoutMode = d.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+      if (typeof d.productType === 'string') fresh.productType = d.productType;
+      if (typeof d.maxPerEmail === 'number') fresh.maxPerEmail = d.maxPerEmail;
+      if (typeof d.maxPerCart === 'number') fresh.maxPerCart = d.maxPerCart;
+      if (typeof d.maxRaffleAllocationLimit === 'number') fresh.maxRaffleAllocationLimit = d.maxRaffleAllocationLimit;
+      if (Array.isArray(d.priceCategories) && d.priceCategories.length > 0) {
+        fresh.priceCategories = d.priceCategories.map((c: any) => ({ ...c }));
+      }
+      if (typeof d.deliveryIncentiveEnabled === 'boolean') fresh.deliveryIncentiveEnabled = d.deliveryIncentiveEnabled;
+      if (typeof d.deliveryIncentiveCreditCents === 'number') fresh.deliveryIncentiveCreditCents = d.deliveryIncentiveCreditCents;
+      if (typeof d.deliveryIncentiveMinOrderSubtotalCents === 'number') fresh.deliveryIncentiveMinOrderSubtotalCents = d.deliveryIncentiveMinOrderSubtotalCents;
+      if (typeof d.deliveryIncentiveExpiresDays === 'number') fresh.deliveryIncentiveExpiresDays = d.deliveryIncentiveExpiresDays;
+      if (typeof d.deliveryIncentiveNeverExpires === 'boolean') fresh.deliveryIncentiveNeverExpires = d.deliveryIncentiveNeverExpires;
+      if (typeof d.deliveryIncentiveCodePrefix === 'string') fresh.deliveryIncentiveCodePrefix = d.deliveryIncentiveCodePrefix;
+    }
+
     setProductForm(fresh);
     setProductFormSnapshot(JSON.stringify(fresh));
     setEditingProduct(null);
@@ -1941,6 +1977,52 @@ export default function AdminPortal() {
     () => sortSanityIssues(checkRewardsSanity(rewardsSettings)),
     [rewardsSettings],
   );
+
+  // Persist the current product form's reusable shape as the DEFAULT template for
+  // future products (checkout mode, size template, delivery-incentive defaults).
+  // New products are pre-filled from this — no more re-entering the same setup.
+  const saveProductDefaults = async () => {
+    if (!requireUnlocked()) return;
+    if (!password) return showToast('Enter the admin password first');
+    const template = {
+      checkoutMode: productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE',
+      productType: productForm.productType || (productForm.checkoutMode === 'FCFS' ? 'fcfs' : 'raffle'),
+      maxPerEmail: Number(productForm.maxPerEmail || 1),
+      maxPerCart: Number(productForm.maxPerCart || productForm.maxPerEmail || 1),
+      maxRaffleAllocationLimit: Number(productForm.maxRaffleAllocationLimit || 0),
+      priceCategories: (productForm.priceCategories || []).map((c: any) => ({
+        size: String(c?.size || '').trim(),
+        price: c?.price ?? UNCONFIGURED_PRICE_SENTINEL,
+        stripeId: c?.stripeId || '',
+        winnerTiers: c?.winnerTiers || '1',
+        checkoutMode: c?.checkoutMode || '',
+      })),
+      deliveryIncentiveEnabled: productForm.deliveryIncentiveEnabled === true,
+      deliveryIncentiveCreditCents: Number(productForm.deliveryIncentiveCreditCents || 0),
+      deliveryIncentiveMinOrderSubtotalCents: Number(productForm.deliveryIncentiveMinOrderSubtotalCents || 0),
+      deliveryIncentiveExpiresDays: Number(productForm.deliveryIncentiveExpiresDays || 60),
+      deliveryIncentiveNeverExpires: productForm.deliveryIncentiveNeverExpires === true,
+      deliveryIncentiveCodePrefix: String(productForm.deliveryIncentiveCodePrefix || ''),
+    };
+    try {
+      const res = await adminFetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, productDefaults: template }),
+      });
+      const data = await readAdminJson(res);
+      if (res.ok) {
+        setProductDefaults(template);
+        showToast('Saved as product default');
+        setProductMsg('Default product configuration saved — new products will pre-fill with it.');
+      } else {
+        showToast(data.error || 'Could not save the default');
+        setProductMsg(`⚠ ${data.error || 'Could not save the default.'}`);
+      }
+    } catch {
+      showToast('Could not save the default');
+    }
+  };
 
   const saveProduct = async () => {
     if (!requireUnlocked()) return;
@@ -2712,7 +2794,7 @@ export default function AdminPortal() {
     if (!password) {
       return showToast('Enter the admin password first');
     }
-    setSettingsLoading(true);
+    setSettingsSaving(true);
     try {
       const res = await adminFetch('/api/admin/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2734,6 +2816,7 @@ export default function AdminPortal() {
           refPrefix,
           productNotes,
           orbs: orbSettings,
+          requireSignup2FA,
         }),
       });
       const data = await readAdminJson(res);
@@ -2757,12 +2840,13 @@ export default function AdminPortal() {
           layout: layoutSettings,
           refPrefix,
           orbs: orbSettings,
+          requireSignup2FA,
         }));
       } else setSettingsMsg(data.error || 'Failed to save settings.');
     } catch (err: any) {
       setSettingsMsg('Connection failed: ' + err.message);
     }
-    setSettingsLoading(false);
+    setSettingsSaving(false);
   };
 
   const applyThemePreset = (presetId: string) => {
@@ -3099,6 +3183,7 @@ export default function AdminPortal() {
       layout: layoutSettings,
       refPrefix,
       orbs: orbSettings,
+      requireSignup2FA,
     });
     return current !== settingsSnapshot;
   })();
@@ -4393,12 +4478,12 @@ export default function AdminPortal() {
                         </span>
                       )}
                       <select
-                        title="Checkout mode for THIS size. Leave on Auto to follow the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
+                        title="Checkout mode for THIS size. 'Follow product' inherits the product's Checkout Mode — the label shows exactly what it resolves to, so there is no ambiguous 'Auto'. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
                         value={cat.checkoutMode || ''}
                         onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
-                        style={{ ...inputStyle, width: 122, padding: 6, fontSize: 10, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : String(cat.checkoutMode || '').toUpperCase() === 'FCFS' ? '#60a5fa' : '#8b95a7' }}
+                        style={{ ...inputStyle, width: 132, padding: 6, fontSize: 10, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : String(cat.checkoutMode || '').toUpperCase() === 'FCFS' ? '#60a5fa' : '#8b95a7' }}
                       >
-                        <option value="">Auto (product)</option>
+                        <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
                         <option value="RAFFLE">🎟 RAFFLE</option>
                         <option value="FCFS">⚡ FCFS</option>
                       </select>
@@ -5082,6 +5167,9 @@ export default function AdminPortal() {
                 <div style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.92)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.35)' }}>
                   <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
                     {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : 'Save Product'}
+                  </button>
+                  <button onClick={saveProductDefaults} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonGhost, margin: 0 }} title="Save the current checkout mode, size template and delivery-incentive defaults so new products pre-fill with them.">
+                    💾 Save as default
                   </button>
                   <button
                     onClick={() => {
@@ -5886,8 +5974,8 @@ export default function AdminPortal() {
                   top: 92 keeps it BELOW the fixed storefront header (84px) instead of sliding
                   underneath it while you scroll. */}
               <div style={{ position: 'sticky', top: 92, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.9)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.3)' }}>
-                <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading}>
-                  {settingsLoading ? 'Saving…' : 'Save All Settings'}
+                <button onClick={saveSettings} style={{ ...buttonPrimary, margin: 0 }} disabled={settingsLoading || settingsSaving}>
+                  {settingsSaving ? 'Saving…' : settingsLoading ? 'Loading…' : 'Save All Settings'}
                 </button>
                 {settingsDirty && (
                   <button onClick={discardSettings} style={buttonGhost} title="Revert every settings tab to the last saved state">
@@ -7058,6 +7146,11 @@ export default function AdminPortal() {
                   <input type="checkbox" checked={Boolean(rewardsSettings.giftingEnabled)} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, giftingEnabled: e.target.checked }))} />
                   Customers can gift/share their credits
                 </label>
+                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={requireSignup2FA} onChange={(e) => setRequireSignup2FA(e.target.checked)} />
+                  Require email verification (2FA) at customer signup
+                </label>
+                <span style={{ fontSize: 10, color: '#666', marginTop: -2 }}>When ON, new accounts must confirm a 6-digit emailed code before their welcome rewards unlock. Turn OFF to let customers sign up without an email code.</span>
                 <label style={{ fontSize: 11 }}>
                   Gift credit discount %
                   <input type="number" min={0} max={100} value={rewardsSettings.giftDiscountPercent ?? 10} onChange={(e) => setRewardsSettings((prev) => ({ ...prev, giftDiscountPercent: Math.max(0, Math.min(100, Number(e.target.value) || 10)) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }} />
@@ -7100,8 +7193,8 @@ export default function AdminPortal() {
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button onClick={saveSettings} style={buttonPrimary} disabled={settingsLoading}>
-                  {settingsLoading ? 'Saving…' : 'Save All Settings'}
+                <button onClick={saveSettings} style={buttonPrimary} disabled={settingsLoading || settingsSaving}>
+                  {settingsSaving ? 'Saving…' : settingsLoading ? 'Loading…' : 'Save All Settings'}
                 </button>
                 {settingsDirty && (
                   <button onClick={discardSettings} style={buttonGhost}>Discard changes</button>

@@ -53,6 +53,7 @@ export class PostmarkDriver implements EmailDriver {
         ctaLabel: options?.ctaLabel,
         ctaUrl: options?.ctaUrl,
         brandName: options?.brandName || this.brandName,
+        logoUrl: options?.logoUrl,
       }),
     });
   }

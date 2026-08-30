@@ -103,6 +103,20 @@ export function getBrandName(): string {
   return readEnv('BRAND_NAME', 'NEXT_PUBLIC_SITE_NAME');
 }
 
+/**
+ * Sender/logo image used in transactional email mastheads (e.g. the store
+ * logo). Accepts a few common aliases so a template buyer can use whichever
+ * naming their platform gives them. Empty when unset — callers fall back to a
+ * text-only masthead. Only absolute http(s)/data URLs are returned (a broken
+ * placeholder is dropped rather than rendering a broken <img> in every email).
+ */
+export function getBrandLogo(): string {
+  const raw = readEnv('EMAIL_LOGO_URL', 'BRAND_LOGO_URL', 'NEXT_PUBLIC_LOGO_URL');
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw) || /^data:image\//i.test(raw)) return raw;
+  return '';
+}
+
 /** Support inbox used in emails and policy pages. Empty when unset. */
 export function getSupportEmail(): string {
   return readEnv('SUPPORT_EMAIL', 'REPLY_TO_EMAIL');

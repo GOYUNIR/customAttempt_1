@@ -40,7 +40,8 @@ export async function POST(request: Request) {
       productNotes,
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
-      copy, legal, catalog, behavior, checkout, refPrefix, layout
+      copy, legal, catalog, behavior, checkout, refPrefix, layout,
+      requireSignup2FA, productDefaults
     } = body;
     
     // Get current config to merge
@@ -88,6 +89,14 @@ export async function POST(request: Request) {
       behavior: {
         scrollToTopOnLoad: behavior?.scrollToTopOnLoad !== false,
       },
+      // Mandatory customer signup email verification (2FA). Admin toggle under
+      // /admin → Settings → Rewards & Points. Defaults to ON unless the operator
+      // explicitly turns it off (a boolean false is preserved verbatim).
+      requireSignup2FA: requireSignup2FA === false ? false : (current.requireSignup2FA !== false),
+      // Saved default product configuration ("Save as default" in the product
+      // editor). New products are pre-filled from this so operators don't
+      // re-enter checkout mode, size templates and delivery-incentive defaults.
+      productDefaults: productDefaults || current.productDefaults || undefined,
       updatedAt: new Date().toISOString(),
     };
 

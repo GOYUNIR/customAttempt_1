@@ -39,6 +39,8 @@ export interface CodeEmailOptions {
   ctaUrl?: string;
   /** Brand label shown in the email masthead. */
   brandName?: string;
+  /** Sender logo image URL shown in the masthead (e.g. the store logo). */
+  logoUrl?: string;
 }
 
 /** Unified result shape every caller can switch on. */
@@ -67,14 +69,20 @@ export function buildCodeEmailHtml(options: {
   ctaLabel?: string;
   ctaUrl?: string;
   brandName?: string;
+  logoUrl?: string;
 }): string {
   const brand = (options.brandName || DEFAULT_EMAIL_BRAND).toUpperCase();
+  const logo = String(options.logoUrl || '').trim();
+  const logoHtml = logo
+    ? `<div style="text-align:left;margin:0 0 16px"><img src="${logo}" alt="${brand}" style="display:block;height:44px;width:auto;max-width:100%" /></div>`
+    : '';
   const headline = options.headline || 'Your verification code';
   const body =
     options.body ||
     'Enter this one-time code to finish signing in. It expires in 10 minutes and can only be used once.';
   return `
     <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+      ${logoHtml}
       <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand}</p>
       <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">${headline}</h1>
       <p style="margin:0 0 14px;color:#4b5563">${body}</p>

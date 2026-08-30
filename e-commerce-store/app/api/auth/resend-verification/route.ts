@@ -37,7 +37,12 @@ export async function POST(request: Request) {
 
     const result = await issueCustomerVerifyCode(redis, email);
     if (!result.ok) {
-      return NextResponse.json({ error: result.error || 'Could not send the code.' }, { status: result.throttled ? 429 : 500 });
+      // Throttle → 429 (retry later). A genuine send failure is a 502 (the
+      // upstream email provider is unreachable), never a bare 500.
+      if (result.throttled) {
+        return NextResponse.json({ error: result.error || 'Please wait before requesting another code.' }, { status: 429 });
+      }
+      return NextResponse.json({ error: "We couldn't email the code right now. Please try again." }, { status: 502 });
     }
     return NextResponse.json({ ok: true, devCode: result.devCode });
   } catch {

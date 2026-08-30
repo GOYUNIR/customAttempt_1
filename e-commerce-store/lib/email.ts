@@ -1,5 +1,5 @@
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
-import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl, getBrandLogo } from '@/lib/env';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { EmailFactory } from '@/services/email';
 import type { EmailDriver } from '@/services/email';
@@ -50,7 +50,9 @@ function getResend() {
           to: payload.to,
           replyTo: payload.replyTo || replyTo(),
           subject: payload.subject,
-          html: payload.html,
+          // Prepend the sender logo (store logo) to every transactional email
+          // masthead. No logo configured → emailLogoHtml() is '' (no-op).
+          html: emailLogoHtml() + payload.html,
           text: payload.text,
         });
         if (result.ok) return { data: { id: result.id }, error: null };
@@ -67,6 +69,21 @@ function getResend() {
  * BRAND_NAME in the platform for production sends. */
 function emailBrandName(): string {
   return getBrandName() || 'Store';
+}
+
+/** Sender/logo image URL for transactional email mastheads (e.g. the store
+ *  logo). Set EMAIL_LOGO_URL (or BRAND_LOGO_URL / NEXT_PUBLIC_LOGO_URL) in the
+ *  platform. Empty → the templates render a text-only masthead. */
+function emailBrandLogo(): string {
+  return getBrandLogo();
+}
+
+/** HTML fragment for the sender image masthead (empty when no logo is set). */
+function emailLogoHtml(): string {
+  const logo = emailBrandLogo();
+  if (!logo) return '';
+  const alt = emailBrandName();
+  return `<div style="text-align:left;margin:0 0 18px"><img src="${logo}" alt="${alt}" style="display:block;height:44px;width:auto;max-width:100%" /></div>`;
 }
 
 const from = () => process.env.RESEND_FROM || `${emailBrandName()} <onboarding@resend.dev>`;
@@ -732,6 +749,7 @@ export async function sendAdminVerificationEmail(opts: { to: string; code: strin
     subject: `${emailBrandName()} — Admin sign-in code: ${opts.code}`,
     headline: 'Admin sign-in verification',
     body: 'A request was made to open the store admin portal. Enter this one-time code to finish signing in.',
+    logoUrl: emailBrandLogo(),
   });
 }
 
@@ -746,5 +764,6 @@ export async function sendCustomerVerificationEmail(opts: { to: string; code: st
     body: `We need to make sure ${opts.to} is really you before your welcome points and one-time member credit are unlocked. Enter this one-time code to verify your account.`,
     ctaLabel: 'Verify my email',
     ctaUrl: opts.siteUrl ? `${String(opts.siteUrl).replace(/\/+$/, '')}/account` : undefined,
+    logoUrl: emailBrandLogo(),
   });
 }
