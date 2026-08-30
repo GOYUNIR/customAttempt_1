@@ -123,7 +123,7 @@ export default function AdminLoginPage() {
               </p>
             ) : (
               <p style={hintStyle}>
-                After your password is accepted, a <strong>6-digit code is emailed</strong> to your admin inbox to confirm it&apos;s really you. That two-step protection keeps the store safe even if your password leaks. To receive the code, set up a transactional email provider (Resend, Postmark or SendGrid) in <Link href="/admin/setup?reconfigure=1" prefetch={false} style={{ color: '#1d4ed8', textDecoration: 'underline' }}>setup</Link> or in the portal&apos;s Settings.
+                After your password is accepted, a <strong>6-digit code is emailed</strong> to your admin inbox to confirm it&apos;s really you. That two-step protection keeps the store safe even if your password leaks. To receive the code, set up a transactional email provider (Resend, Postmark or SendGrid) in the portal&apos;s Settings after you sign in.
               </p>
             )}
           </div>

@@ -775,6 +775,7 @@ const DEFAULT_CHECKOUT_SETTINGS = {
 // side by side (the default).
 const DEFAULT_LAYOUT_SETTINGS = {
   productsPerRow: 2 as 1 | 2,
+  homepageFallback: 'upcoming' as string,
 };
 
 const DEFAULT_REF_PREFIX = 'GU';
@@ -1254,7 +1255,7 @@ export default function AdminPortal() {
   const [checkoutSettings, setCheckoutSettings] = useState<{ requireAddressAutofill: boolean }>(DEFAULT_CHECKOUT_SETTINGS);
   // Home-page layout (admin → Settings → Home Layout). How many featured
   // products share a row on the home page (1 = full width, 2 = side by side).
-  const [layoutSettings, setLayoutSettings] = useState<{ productsPerRow: 1 | 2 }>(DEFAULT_LAYOUT_SETTINGS);
+  const [layoutSettings, setLayoutSettings] = useState<{ productsPerRow: 1 | 2; homepageFallback: string }>(DEFAULT_LAYOUT_SETTINGS);
   // Reference-code prefix (admin → Settings → Checkout & Orders). Every order /
   // entry reference starts with this prefix (default `GU-`). Stored under
   // store:config.refPrefix.
@@ -1604,6 +1605,17 @@ export default function AdminPortal() {
 
   const editProduct = (product: any) => {
     setEditingProduct(product.id);
+    // Reset every TRANSIENT editor state when switching which product is being
+    // edited. Without this, switching from a product with many images (crop
+    // editor open on image N) to a product with fewer images left a stale
+    // cropEditorIdx pointing at a missing image, a leftover image URL in the
+    // paste box, and the previous product's note editor + status message — the
+    // "switch product → editor shows the wrong/stale state" glitch.
+    setCropEditorIdx(null);
+    setImageInput('');
+    setEditingNoteIdx(null);
+    setNoteForm({ label: '', name: '', text: '' });
+    setProductMsg('');
     // Ensure priceCategories exists
     const categories = product.priceCategories && Array.isArray(product.priceCategories)
       ? product.priceCategories
@@ -2189,6 +2201,21 @@ export default function AdminPortal() {
       images: prev.images.filter((_: any, i: number) => i !== idx),
       crops: (Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP)).filter((_: any, i: number) => i !== idx),
     }));
+  };
+
+  /** Reorder a gallery item by one position (±1). Keeps the per-image crop list
+   *  index-aligned so a crop always travels with its image. The first image is
+   *  the storefront cover. */
+  const moveImage = (idx: number, direction: -1 | 1) => {
+    setProductForm((prev: any) => {
+      const images = [...(prev.images || [])];
+      const target = idx + direction;
+      if (target < 0 || target >= images.length) return prev;
+      const crops = [...(Array.isArray(prev.crops) ? prev.crops : images.map(() => DEFAULT_CROP))];
+      [images[idx], images[target]] = [images[target], images[idx]];
+      [crops[idx], crops[target]] = [crops[target], crops[idx]];
+      return { ...prev, images, crops };
+    });
   };
 
   const seedDefaultProducts = async () => {
@@ -4228,19 +4255,27 @@ export default function AdminPortal() {
                       const cropForIdx = Array.isArray(productForm.crops) ? productForm.crops[idx] : undefined;
                       const cropped = !isVideo && !!cropForIdx && normalizeCrop(cropForIdx).w < 0.999;
                       return (
-                        <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, maxWidth: 60, maxHeight: 60, overflow: 'hidden' }}>
+                        <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, width: 64, height: 64, overflow: 'hidden' }}>
                           {isVideo ? (
                             <video src={img} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
                           ) : (
                             <img src={img} alt={`media-${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           )}
                           <span style={{ fontSize: 8, color: '#888', position: 'absolute', bottom: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>
-                            {isVideo ? `▶${idx + 1}` : `#${idx + 1}`}
+                            {isVideo ? `▶${idx + 1}` : `#${idx + 1}`}{idx === 0 ? ' · cover' : ''}
                           </span>
                           {cropped && (
-                            <span style={{ fontSize: 8, color: '#7dd3fc', position: 'absolute', top: 0, left: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>✂</span>
+                            <span style={{ fontSize: 8, color: '#7dd3fc', position: 'absolute', bottom: 0, right: 2, background: 'rgba(0,0,0,0.7)', padding: '0 4px' }}>✂</span>
                           )}
-                          <button onClick={() => removeImage(idx)} style={{ ...buttonGhost, padding: '0 4px', fontSize: 8, color: '#f87171', borderColor: '#f87171', position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)' }}>✕</button>
+                          <div style={{ position: 'absolute', top: 0, right: 0, display: 'flex' }}>
+                            {idx > 0 && (
+                              <button onClick={() => moveImage(idx, -1)} title="Move left" style={{ ...buttonGhost, padding: '0 4px', fontSize: 9, color: '#d4d4d8', borderColor: '#3f3f46', background: 'rgba(0,0,0,0.65)', borderRadius: '3px 0 0 3px' }}>◀</button>
+                            )}
+                            {idx < (productForm.images || []).length - 1 && (
+                              <button onClick={() => moveImage(idx, 1)} title="Move right" style={{ ...buttonGhost, padding: '0 4px', fontSize: 9, color: '#d4d4d8', borderColor: '#3f3f46', background: 'rgba(0,0,0,0.65)', borderRadius: idx > 0 ? '0' : '3px 0 0 3px' }}>▶</button>
+                            )}
+                            <button onClick={() => removeImage(idx)} title="Remove" style={{ ...buttonGhost, padding: '0 4px', fontSize: 9, color: '#f87171', borderColor: '#f87171', background: 'rgba(0,0,0,0.65)', borderRadius: '0 3px 3px 0' }}>✕</button>
+                          </div>
                         </div>
                       );
                     })}
@@ -6284,7 +6319,7 @@ export default function AdminPortal() {
                   <button
                     key={n}
                     type="button"
-                    onClick={() => setLayoutSettings({ productsPerRow: n })}
+                    onClick={() => setLayoutSettings((prev) => ({ ...prev, productsPerRow: n }))}
                     style={{
                       padding: '7px 14px',
                       borderRadius: 999,
@@ -6300,6 +6335,23 @@ export default function AdminPortal() {
                   </button>
                 ))}
               </div>
+
+              <label style={{ fontSize: 11, color: '#888', display: 'grid', gap: 6, marginBottom: 10 }}>
+                When there are no active releases
+                <select
+                  value={layoutSettings.homepageFallback || 'upcoming'}
+                  onChange={(e) => setLayoutSettings((prev) => ({ ...prev, homepageFallback: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="none">Show an empty home page</option>
+                  <option value="upcoming">Show upcoming releases (build hype)</option>
+                  <option value="archived">Show archived releases</option>
+                  <option value="upcoming_then_archived">Upcoming first, then archived</option>
+                </select>
+                <span style={{ fontSize: 10, color: '#666', lineHeight: 1.5 }}>
+                  If you have nothing live, this keeps the home page from rendering blank — it surfaces your next drop (or past work) instead of hiding it in the catalog.
+                </span>
+              </label>
 
               <h4 id="settings-form" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Registration Form</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

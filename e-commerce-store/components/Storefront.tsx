@@ -372,12 +372,23 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
       if (data?.config?.gallery) setGallerySettings((prev: any) => ({ ...prev, ...data.config.gallery }));
       if (data?.config?.copy) setCopySettings((prev) => ({ ...prev, ...data.config.copy }));
       if (data?.config?.rewards) setRewardsCfg(data.config.rewards);
-      const sorted = Array.isArray(data.allProducts)
-        ? [...data.allProducts]
-            .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
-            .sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
-        : [];
-      return sorted;
+      const all = Array.isArray(data.allProducts) ? data.allProducts : [];
+      const sortFn = (a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name));
+      let display = [...all]
+        .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
+        .sort(sortFn);
+      // Home-page fallback: when nothing is live, surface upcoming/archived so
+      // the store never renders an empty grid while drops sit hidden.
+      if (display.length === 0) {
+        const fallback = String(data?.config?.layout?.homepageFallback || 'upcoming');
+        if (fallback === 'upcoming' || fallback === 'upcoming_then_archived') {
+          display = [...all].filter((p: any) => p.isUpcoming === true && p.isArchived !== true).sort(sortFn);
+        }
+        if (display.length === 0 && (fallback === 'archived' || fallback === 'upcoming_then_archived')) {
+          display = [...all].filter((p: any) => p.isArchived === true).sort(sortFn);
+        }
+      }
+      return display;
     } catch {
       return [];
     }

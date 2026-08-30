@@ -491,6 +491,23 @@ export default function SetupPage() {
     }
   }
 
+  // While the readiness probe is in flight, render a neutral placeholder so the
+  // full wizard NEVER flashes for a store that is already set up. Without this
+  // gate, `configured` is `false` until the GET /api/admin/setup probe resolves,
+  // so the customizable setup UI is painted for a fraction of a second before it
+  // flips to the "Store already set up" screen — the exact flicker/exposure bug.
+  if (status === null) {
+    return (
+      <main style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '48px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center' }}>
+          <div style={{ width: 30, height: 30, border: '3px solid #e5e7eb', borderTopColor: '#111', borderRadius: '50%', animation: 'goyunir-setup-spin 0.8s linear infinite' }} />
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#6b7280' }}>Loading store setup…</p>
+          <style>{`@keyframes goyunir-setup-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </main>
+    );
+  }
+
   // Once the store is configured, /admin/setup is NOT a public surface: it is
   // only reachable to update providers through the signed-in admin portal. A
   // public visitor sees a sign-in gate instead of the wizard (and none of the

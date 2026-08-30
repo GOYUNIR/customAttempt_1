@@ -64,8 +64,16 @@ async function cachedFetch<T>(map: Map<string, CacheEntry<T>>, key: string, ttlM
 export async function getPlatformSettings(opts?: { force?: boolean }): Promise<GlobalPlatformSettings | null> {
   if (opts?.force) localSettingsCache.clear();
   return cachedFetch(localSettingsCache, SETTINGS_CACHE_KEY, SETTINGS_CACHE_TTL_MS, async () => {
-    const row = await fetchPlatformSettingsRow();
-    return row ? parseSettingsRow(row) : null;
+    // Never let a settings-read failure (or a malformed row) propagate into the
+    // payment/email factories — checkout and transactional email must fall back
+    // to legacy env keys rather than 500. `fetchPlatformSettingsRow` already
+    // catches transport errors; this also guards a malformed row / parse throw.
+    try {
+      const row = await fetchPlatformSettingsRow();
+      return row ? parseSettingsRow(row) : null;
+    } catch {
+      return null;
+    }
   });
 }
 

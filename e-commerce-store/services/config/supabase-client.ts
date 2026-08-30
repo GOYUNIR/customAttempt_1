@@ -249,12 +249,22 @@ export async function fetchIsPlatformConfigured(): Promise<boolean | null> {
 export async function fetchPlatformSettingsRow(): Promise<Record<string, unknown> | null> {
   if (!supabaseServiceConfigured()) return null;
   const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/global_platform_settings?id=eq.${GLOBAL_PLATFORM_SETTINGS_ROW_ID}&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<Record<string, unknown>> | null;
-  if (!Array.isArray(rows) || rows.length === 0) return null;
-  return rows[0];
+  try {
+    const rows = (await supabaseRestFetch(
+      `/global_platform_settings?id=eq.${GLOBAL_PLATFORM_SETTINGS_ROW_ID}&limit=1`,
+      { key: serviceRoleKey },
+    )) as Array<Record<string, unknown>> | null;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return rows[0];
+  } catch {
+    // A broken/partial Supabase setup (missing table, bad service key, network
+    // blip) must NOT take down checkout/email. Treat the row as absent so the
+    // driver factories fall through to the legacy env-var keys. This was the
+    // root cause of the raffle/FCFS "Checkout could not be started" 500 — a
+    // configured-but-unreachable settings table threw straight through
+    // PaymentFactory.getDriver() into the route's generic 500 catch.
+    return null;
+  }
 }
 
 /**

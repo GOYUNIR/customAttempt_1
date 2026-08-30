@@ -169,6 +169,11 @@ export interface StoreConfig {
     /** Number of featured products per row on the home page: 1 = full width,
      *  2 = two side by side (default). */
     productsPerRow?: 1 | 2;
+    /** What the home page shows when there are NO active releases:
+     *  'none' (empty), 'upcoming' (build hype), 'archived', or
+     *  'upcoming_then_archived'. Defaults to 'upcoming' so an empty catalog
+     *  still shows the next drop instead of a blank site. */
+    homepageFallback?: string;
   };
   orbs: OrbsConfig;
   productCatalog: any[];
@@ -289,6 +294,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   },
   layout: {
     productsPerRow: 2,
+    homepageFallback: 'upcoming',
   },
   orbs: {
     enabled: true,

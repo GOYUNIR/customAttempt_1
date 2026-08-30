@@ -221,21 +221,13 @@ export async function middleware(request: NextRequest) {
     pathname === '/api/admin/super-login' ||
     pathname.startsWith('/api/admin/super-login/');
 
-  // The setup wizard's STATUS read (GET) must stay reachable even AFTER the
-  // platform is configured, so the reconfigure page can detect `configured`
-  // and render the "sign in as super-admin" panel. POST stays fully gated by
-  // the route's own guard (Basic Auth or a super-admin session) — this only
-  // opens the read-only status probe, never a write path.
-  const isSetupRead = isSetupPath && request.method.toUpperCase() === 'GET';
-
-  // The setup API (GET + POST) must reach the route's OWN auth guard — the
-  // route re-checks Basic Auth, a super-admin session AND proof of the Supabase
-  // service-role key (the master write credential). The middleware's Basic-Auth
-  // gate below otherwise blocks the reconfigure SAVE before the route's
-  // service-role fallback can run — the exact "Sign in first" deadlock on an
-  // already-configured store.
-  const isSetupApi =
-    pathname === '/api/admin/setup' || pathname.startsWith('/api/admin/setup');
+  // Setup paths (page + API) are only reachable WITHOUT credentials while the
+  // install is NOT ready — the readiness gate below short-circuits them before
+  // the auth gates run. Once a store is configured, /admin/setup is treated like
+  // any other admin path: it requires a valid admin credential (Basic Auth,
+  // login session, or a verified device). `isSetupReconfigure` is still consulted
+  // by the "ready" redirect above so the reconfigure entry point reaches the
+  // route's own auth guard instead of being silently bounced to /admin.
 
   // The in-site login form (page + API) must stay reachable before ANY auth
   // exists — it is the replacement for the native Basic-Auth dialog.
@@ -346,9 +338,6 @@ export async function middleware(request: NextRequest) {
       !deviceCookieValid &&
       !isLoginPath &&
       !isSuperLoginPath &&
-      !isSetupReconfigure &&
-      !isSetupRead &&
-      !isSetupApi &&
       !ADMIN_PASSWORD
     ) {
       return adminAuthRequired(request);
@@ -362,9 +351,6 @@ export async function middleware(request: NextRequest) {
       superAdminOk ||
       isLoginPath ||
       isSuperLoginPath ||
-      isSetupReconfigure ||
-      isSetupRead ||
-      isSetupApi ||
       verifyBasicAuth(authHeader) ||
       authCookieOk ||
       deviceCookieValid;
@@ -379,7 +365,7 @@ export async function middleware(request: NextRequest) {
       pathname === '/admin' ||
       pathname === '/admin/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
-    if (!isPage && !isVerifyEndpoint && !isLoginPath && !superAdminOk && !isSuperLoginPath && !isSetupReconfigure && !isSetupRead && !isSetupApi) {
+    if (!isPage && !isVerifyEndpoint && !isLoginPath && !superAdminOk && !isSuperLoginPath) {
       const token = adminDeviceTokenFromRequest(request);
       const redis = createStorageClient();
       let verified = false;

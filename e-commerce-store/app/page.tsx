@@ -114,13 +114,24 @@ export default function HomePage() {
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
         if (data?.config?.layout?.productsPerRow) setProductsPerRow(data.config.layout.productsPerRow === 1 ? 1 : 2);
         // `/api/store` returns ONE canonical `allProducts` array (lifecycle
-        // flags on each product) — derive the active releases here.
-        const sorted = Array.isArray(data.allProducts)
-          ? [...data.allProducts]
-              .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
-              .sort((a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)))
-          : [];
-        setActiveProducts(sorted);
+        // flags on each product) — derive the active releases here, then apply
+        // the Home-page fallback when there are no active releases (show
+        // upcoming/archived to build hype instead of an empty site).
+        const all = Array.isArray(data.allProducts) ? data.allProducts : [];
+        const sortFn = (a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name));
+        let display = [...all]
+          .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
+          .sort(sortFn);
+        if (display.length === 0) {
+          const fallback = String(data?.config?.layout?.homepageFallback || 'upcoming');
+          if (fallback === 'upcoming' || fallback === 'upcoming_then_archived') {
+            display = [...all].filter((p: any) => p.isUpcoming === true && p.isArchived !== true).sort(sortFn);
+          }
+          if (display.length === 0 && (fallback === 'archived' || fallback === 'upcoming_then_archived')) {
+            display = [...all].filter((p: any) => p.isArchived === true).sort(sortFn);
+          }
+        }
+        setActiveProducts(display);
       } catch (err) {
         console.error('[HomePage] Error checking products:', err);
       } finally {
