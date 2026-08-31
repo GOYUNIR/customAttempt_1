@@ -1116,6 +1116,9 @@ export default function AdminPortal() {
 
   const [selftestResults, setSelftestResults] = useState<any>(null);
   const [selftestRunning, setSelftestRunning] = useState(false);
+  // Secure admin password troubleshooting tool (System tab) — re-auth + audit-logged.
+  const [pwdTroubleshoot, setPwdTroubleshoot] = useState<any>(null);
+  const [pwdTroubleshootBusy, setPwdTroubleshootBusy] = useState(false);
   const [organizeMsg, setOrganizeMsg] = useState('');
   const [wipeMsg, setWipeMsg] = useState('');
   const [wipeBusy, setWipeBusy] = useState(false);
@@ -2539,6 +2542,27 @@ export default function AdminPortal() {
       setSelftestResults({ error: 'Could not run self-test — connection failed.' });
     } finally {
       setSelftestRunning(false);
+    }
+  };
+
+  // Secure admin password troubleshooting — requires re-auth; every access is
+  // audit-logged server-side. Returns only presence booleans + masked identities.
+  const runPasswordTroubleshoot = async () => {
+    if (!password) return showToast('Enter the admin password first');
+    setPwdTroubleshootBusy(true);
+    setPwdTroubleshoot(null);
+    try {
+      const res = await adminFetch('/api/admin/password-troubleshoot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json();
+      setPwdTroubleshoot(res.ok && data?.ok ? data.report : { error: data?.error || 'Re-authentication failed.' });
+      if (res.ok) fetchAudit();
+    } catch {
+      setPwdTroubleshoot({ error: 'Could not run the diagnostic — connection failed.' });
+    } finally {
+      setPwdTroubleshootBusy(false);
     }
   };
 
@@ -5837,6 +5861,40 @@ export default function AdminPortal() {
                     ))}
                   </div>
                 </>
+              )}
+            </div>
+
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>🔐 Admin Password Troubleshooting</h2>
+                <button onClick={runPasswordTroubleshoot} disabled={pwdTroubleshootBusy || !password} style={buttonGhost} title="Requires the admin password (re-authentication). Every access is written to the audit log.">
+                  {pwdTroubleshootBusy ? 'Checking…' : 'Run diagnostic'}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: '#888', marginTop: 4, marginBottom: 12 }}>
+                Diagnose why admin sign-in / two-step verification isn&apos;t working — without ever exposing a secret. Only presence booleans and masked identities are returned, and every view is audit-logged.
+              </p>
+              {pwdTroubleshoot?.error && <p style={{ color: '#f87171', fontSize: 12 }}>{pwdTroubleshoot.error}</p>}
+              {pwdTroubleshoot && !pwdTroubleshoot.error && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 12 }}>
+                  {([
+                    ['Basic-auth password set', pwdTroubleshoot.adminBasicAuthPasswordSet, 'The legacy ADMIN_BASIC_AUTH_PASSWORD'],
+                    ['Basic-auth username (email)', pwdTroubleshoot.adminBasicAuthUsername, 'The email used as the Basic Auth "username"'],
+                    ['2FA verify email set', pwdTroubleshoot.adminVerifyEmailSet, pwdTroubleshoot.adminVerifyEmail || 'not set'],
+                    ['Supabase auth login', pwdTroubleshoot.supabaseAuthConfigured, 'Supabase password-grant login available'],
+                    ['Supabase writes (service role)', pwdTroubleshoot.supabaseServiceConfigured, 'Service-role key present (needed to persist settings)'],
+                    ['Platform configured', pwdTroubleshoot.platformConfigured, 'Setup Wizard has completed'],
+                    ['Email provider keyed', pwdTroubleshoot.mailProviderConfigured, 'A transactional email provider is configured'],
+                  ] as const).map(([label, ok, hint]) => (
+                    <div key={label} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid #1c1c1e' }}>
+                      <span style={{ color: ok ? '#34d399' : '#f87171', fontSize: 12 }}>{ok ? '✓' : '✗'}</span>
+                      <span style={{ fontSize: 11, lineHeight: 1.4 }}>
+                        <strong style={{ color: '#e4e4e7' }}>{label}</strong>
+                        <span style={{ color: '#888', display: 'block' }}>{hint}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
