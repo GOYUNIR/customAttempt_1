@@ -1764,5 +1764,51 @@ is the backing endpoint.
     `npm test` **275/275** (new `tests/admin-action-labels.test.ts`), and
     `next build` compiles cleanly. No Redis keys added or changed.
 
+- **2026-08-31 — Six-phase audit & hardening pass (`strict-audit-refactor-full`):**
+  - **Phase 1 — auth/rate-limit/security.** (a) Customer resend-verification 429
+    fixed end-to-end: `lib/customer-verify.ts` returns `retryAfterSeconds` on the
+    throttle, `/api/auth/resend-verification` echoes it (+ `Retry-After` header),
+    and BOTH `/account` and `/auth/signup` now show a live cooldown-timer button
+    (`Resend code (Ns)`) that disables itself, so a double-tap can never hit the
+    60s throttle and log a raw 429. (b) Storefront locked-email UI de-cluttered:
+    removed the redundant `🔒 {email}` span next to the (already greyed/disabled)
+    signed-in entry email field — the field value itself now shows the account
+    email cleanly.
+  - **Phase 2 — dynamic system checks / multi-cloud / branding.** (a) Rewrote the
+    Site Self-Test env section to evaluate the ACTIVE provider from Supabase
+    `global_platform_settings` (via `getPlatformSettings()`/`toPublicSummary()`)
+    instead of hardcoded `process.env` checks — a Supabase-first store no longer
+    reports false `MISSING` for `STRIPE_SECRET_KEY`/`UPSTASH_REDIS_REST_URL`/
+    `RESEND_API_KEY`. (b) Theme hex validation now accepts `rgb()/rgba()` via a
+    new `isCssColor()` so `cardBorder` no longer trips a false "non-hex" failure.
+    (c) Purged Vercel/Next.js template SVGs (`public/vercel.svg`, `public/next.svg`).
+    (d) Verified multi-cloud + write-through mirror redundancy already present
+    (`STORAGE_REPLICAS` → `ReplicatedStorageClient`).
+  - **Phase 3 — product panel.** (a) Fixed the dropdown hydration bug: `editProduct`
+    now normalizes every `priceCategories[].checkoutMode` to `''|'RAFFLE'|'FCFS'`
+    so the per-size dropdown always populates the saved value (no more clobbering
+    to "Follow product" on re-save). (b) Added `sampleRefId` to `SamplerConfig`
+    (+ normalize + admin field) so a standalone sample product can be shared across
+    multiple full-size listings without duplicating its definition. (c) Streamlined
+    "Trial sizes & sample credits": the "Product defaults" panel is now a collapsed
+    `<details>` and each sampler gained a "Shared sample reference ID" field. (d)
+    Confirmed per-size inventory (`inventoryPerSize` + Units field) and strict null
+    drop timestamps (empty dates stay empty) are already correct.
+  - **Phase 4 — separated AI architecture.** New `app/api/admin/ai-helper/route.ts`
+    (`POST`/`GET`) implements a comprehensive Admin Portal Helper with two modes —
+    `inquiry` (tell-only: reads the live store snapshot + diagnoses, never writes)
+    and `edit` (proposes bounded setting changes, never auto-applies) + `apply`
+    (explicit confirmation step, re-validated). The helper UI is at the VERY TOP of
+    `/admin` with an Inquiry/Edit mode toggle and a "Confirm & apply" gate. It is
+    fully separate from the storefront hero-animation AI (`/api/ai/hero-animation`).
+  - **Phase 5 — timestamps.** Ledger rows in `/admin` and account entries now display
+    a readable `formatAuditTime(registeredAt)` / `toLocaleString()` timestamp.
+  - **Phase 6 — testing.** Fixed two pre-existing broken test files (unclosed
+    `test(...)` blocks + orphaned assertions in `tests/drivers.test.ts` and
+    `tests/item-engine.test.ts`). Verified: `tsc --noEmit` clean, `eslint` 0/0 on all
+    touched files, and **294/294 tests pass** (via `tsx --test`; Node 20 lacks
+    native `.ts` type-stripping). No new Redis keys (AI helper reuses `store:config`
+    toggles; `sampleRefId` lives on the product object in `store:products`).
+
 
 

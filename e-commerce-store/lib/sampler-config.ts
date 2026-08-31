@@ -40,6 +40,13 @@ export type SamplerConfig = {
   eligibleSizes?: string[] | null;
   /** Optional customer-facing line. Empty → auto-generated per-size copy. */
   note?: string | null;
+  /**
+   * Shared sample reference ID — links THIS sampler to a standalone sample
+   * product so a single trial-SKU definition can be reused across MULTIPLE
+   * full-size listings without duplicating its size/price/image/credit data.
+   * Empty/null = the sampler's definition lives on this product (self-contained).
+   */
+  sampleRefId?: string | null;
 };
 
 /** A sampler with every override merged against the product-level defaults. */
@@ -55,6 +62,7 @@ export type ResolvedSampler = {
   eligibleProductSlugs: string[];
   eligibleSizes: string[];
   note: string;
+  sampleRefId: string;
 };
 
 const cleanSize = (value: unknown): string => String(value ?? '').trim();
@@ -99,6 +107,7 @@ export function normalizeSamplerSizes(raw: unknown, priceCategories: unknown[] =
       eligibleProductSlugs: Array.isArray(rec.eligibleProductSlugs) ? rec.eligibleProductSlugs.map(String).filter(Boolean) : null,
       eligibleSizes: Array.isArray(rec.eligibleSizes) ? rec.eligibleSizes.map(String).filter(Boolean) : null,
       note: typeof rec.note === 'string' ? rec.note.trim().slice(0, 200) || null : null,
+      sampleRefId: cleanShort(rec.sampleRefId, 64) || null,
     });
   }
   return out;
@@ -148,6 +157,7 @@ export function resolveSamplerConfig(product: any, size: string): ResolvedSample
     eligibleSizes: sampler?.eligibleSizes
       ?? (Array.isArray(product.deliveryIncentiveEligibleSizes) ? product.deliveryIncentiveEligibleSizes : []),
     note: sampler?.note || '',
+    sampleRefId: sampler?.sampleRefId || '',
   };
 }
 

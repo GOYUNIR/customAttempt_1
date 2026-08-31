@@ -38,13 +38,18 @@ export async function POST(request: Request) {
     const result = await issueCustomerVerifyCode(redis, email);
     if (!result.ok) {
       // Throttle → 429 (retry later). A genuine send failure is a 502 (the
-      // upstream email provider is unreachable), never a bare 500.
+      // upstream email provider is unreachable), never a bare 500. The 429
+      // carries `retryAfterSeconds` so the client can render an accurate
+      // cooldown timer instead of a raw status code in the console.
       if (result.throttled) {
-        return NextResponse.json({ error: result.error || 'Please wait before requesting another code.' }, { status: 429 });
+        return NextResponse.json(
+          { error: result.error || 'Please wait before requesting another code.', retryAfterSeconds: result.retryAfterSeconds ?? 60 },
+          { status: 429, headers: { 'Retry-After': String(result.retryAfterSeconds ?? 60) } },
+        );
       }
       return NextResponse.json({ error: "We couldn't email the code right now. Please try again." }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, devCode: result.devCode });
+    return NextResponse.json({ ok: true, devCode: result.devCode, retryAfterSeconds: 60 });
   } catch {
     return NextResponse.json({ error: 'Failed to resend the code.' }, { status: 500 });
   }

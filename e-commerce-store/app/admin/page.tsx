@@ -1243,6 +1243,13 @@ export default function AdminPortal() {
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiAssistantBusy, setAiAssistantBusy] = useState(false);
   const [aiAssistantMsg, setAiAssistantMsg] = useState('');
+  // Admin Portal Helper (top-of-portal AI) — expanded from the settings-only
+  // assistant into a comprehensive helper with two permission modes:
+  //   'inquiry' = Tell-Only (read + diagnose, never writes)
+  //   'edit'    = Verified Edit (proposes bounded changes; explicit confirm to apply)
+  const [aiHelperMode, setAiHelperMode] = useState<'inquiry' | 'edit'>('inquiry');
+  const [aiHelperReply, setAiHelperReply] = useState('');
+  const [aiHelperChanges, setAiHelperChanges] = useState<Array<{ key: string; label: string; value: boolean }>>([]);
   // Saved product-default template ("Save as default" in the product editor).
   // New products are pre-filled from this so operators don't re-enter checkout
   // mode, size templates and delivery-incentive defaults every time.
@@ -1657,10 +1664,23 @@ export default function AdminPortal() {
     setEditingNoteIdx(null);
     setNoteForm({ label: '', name: '', text: '' });
     setProductMsg('');
-    // Ensure priceCategories exists
-    const categories = product.priceCategories && Array.isArray(product.priceCategories)
+    // Ensure priceCategories exists AND each category's per-size checkout mode is
+    // normalized to exactly '' | 'RAFFLE' | 'FCFS'. The Pricing, Sizes & Inventory
+    // dropdown binds `value={cat.checkoutMode || ''}` against those three options,
+    // so a legacy lowercase / whitespace / unknown value (e.g. 'raffle' or 'auto')
+    // used to silently fall back to "Follow product" — and a re-save would then
+    // clobber the real mode with ''. Normalizing here makes the dropdown always
+    // populate with the saved value (no more accidental corrupted overwrites).
+    const categories = (product.priceCategories && Array.isArray(product.priceCategories)
       ? product.priceCategories
-      : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }];
+      : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }])
+      .map((c: any) => {
+        const normalized = { ...(c || {}) };
+        const mode = String(c?.checkoutMode || '').trim().toUpperCase();
+        if (mode === 'RAFFLE' || mode === 'FCFS') normalized.checkoutMode = mode;
+        else delete normalized.checkoutMode;
+        return normalized;
+      });
     const form = {
       ...product,
       customDropSchedule: product.customDropSchedule && typeof product.customDropSchedule === 'object' && Object.keys(product.customDropSchedule).length > 0
@@ -1688,6 +1708,7 @@ export default function AdminPortal() {
           eligibleProductSlugs: null,
           eligibleSizes: null,
           note: '',
+          sampleRefId: null,
         }));
       })(),
       priceCategories: categories,
@@ -1878,6 +1899,7 @@ export default function AdminPortal() {
             eligibleProductSlugs: null,
             eligibleSizes: null,
             note: '',
+            sampleRefId: null,
           },
         ],
       };
@@ -2880,6 +2902,59 @@ export default function AdminPortal() {
     setAiAssistantBusy(false);
   };
 
+  // Admin Portal Helper — run an inquiry (tell-only) or edit (propose) request.
+  const runAiHelper = async () => {
+    if (!aiInstruction.trim()) return;
+    setAiAssistantBusy(true);
+    setAiAssistantMsg('');
+    setAiHelperReply('');
+    setAiHelperChanges([]);
+    try {
+      const res = await adminFetch('/api/admin/ai-helper', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, mode: aiHelperMode, instruction: aiInstruction.trim() }),
+      });
+      const data = await readAdminJson(res);
+      if (res.ok && data?.ok) {
+        setAiHelperReply(data.reply || '');
+        setAiHelperChanges(Array.isArray(data.proposedChanges) ? data.proposedChanges : []);
+        if (data.proposedChanges?.length) {
+          setAiAssistantMsg('Edit mode — review the proposed changes below, then confirm to apply.');
+        }
+      } else {
+        setAiAssistantMsg(data?.error || 'The AI helper could not respond.');
+      }
+    } catch (err: any) {
+      setAiAssistantMsg('Connection failed: ' + (err?.message || err));
+    }
+    setAiAssistantBusy(false);
+  };
+
+  // Apply the proposed (bounded) changes — the explicit confirmation step.
+  const applyAiHelperChanges = async () => {
+    if (aiHelperChanges.length === 0) return;
+    setAiAssistantBusy(true);
+    try {
+      const res = await adminFetch('/api/admin/ai-helper', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, mode: 'apply', changes: aiHelperChanges }),
+      });
+      const data = await readAdminJson(res);
+      if (res.ok && data?.ok) {
+        setAiAssistantMsg(data.message || 'Applied.');
+        setAiHelperChanges([]);
+        setAiHelperReply('');
+        showToast('AI · Changes applied');
+        await fetchSettings();
+      } else {
+        setAiAssistantMsg(data?.error || 'Could not apply the changes.');
+      }
+    } catch (err: any) {
+      setAiAssistantMsg('Connection failed: ' + (err?.message || err));
+    }
+    setAiAssistantBusy(false);
+  };
+
   const applyThemePreset = (presetId: string) => {
     const preset = THEME_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
@@ -3395,6 +3470,71 @@ export default function AdminPortal() {
             </button>
             <Link href="/" prefetch={false} style={{ color: '#888', fontSize: 12, textDecoration: 'none', padding: '6px 0' }}>← Store</Link>
           </div>
+        </div>
+
+        {/* ============ AI ADMIN PORTAL HELPER (top of portal) ============ */}
+        <div style={{ ...cardStyle, marginBottom: 14, padding: 14, border: '1px solid rgba(139,92,246,0.28)', background: 'linear-gradient(180deg, rgba(139,92,246,0.06), rgba(20,20,26,0.9))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>🤖</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f0e9ff' }}>AI Admin Helper</div>
+                <div style={{ fontSize: 10, color: '#9b8fc0', lineHeight: 1.4 }}>
+                  Reads your live store, diagnoses issues, and (in Edit mode) proposes bounded setting changes you must confirm before they apply.
+                </div>
+              </div>
+            </div>
+            {/* Mode toggle: Inquiry (tell-only) vs Verified Edit */}
+            <div style={{ display: 'flex', borderRadius: 999, overflow: 'hidden', border: '1px solid #2a2a33', flexShrink: 0 }}>
+              <button
+                onClick={() => { setAiHelperMode('inquiry'); setAiHelperChanges([]); setAiHelperReply(''); setAiAssistantMsg(''); }}
+                style={{ padding: '6px 12px', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer', background: aiHelperMode === 'inquiry' ? 'rgba(139,92,246,0.85)' : 'transparent', color: aiHelperMode === 'inquiry' ? '#fff' : '#9b8fc0' }}
+              >
+                🔍 Inquiry (tell-only)
+              </button>
+              <button
+                onClick={() => { setAiHelperMode('edit'); setAiHelperChanges([]); setAiHelperReply(''); setAiAssistantMsg(''); }}
+                style={{ padding: '6px 12px', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer', background: aiHelperMode === 'edit' ? 'rgba(245,158,11,0.85)' : 'transparent', color: aiHelperMode === 'edit' ? '#1a1a06' : '#cbb48a' }}
+              >
+                ✍️ Edit (needs confirm)
+              </button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={aiInstruction}
+              onChange={(e) => setAiInstruction(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runAiHelper(); } }}
+              placeholder={aiHelperMode === 'inquiry'
+                ? 'e.g. Which active drops have no Stripe price ID set?'
+                : 'e.g. Turn off signup email verification'}
+              style={{ ...inputStyle, flex: 1, minWidth: 240 }}
+            />
+            <button onClick={runAiHelper} style={buttonPrimary} disabled={aiAssistantBusy || !aiInstruction.trim()}>
+              {aiAssistantBusy ? 'Thinking…' : aiHelperMode === 'inquiry' ? 'Ask AI' : 'Propose edits'}
+            </button>
+          </div>
+          {aiHelperReply && (
+            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.22)', fontSize: 12, color: '#e7e0f5', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {aiHelperReply}
+            </div>
+          )}
+          {aiHelperChanges.length > 0 && (
+            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.3)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#fde68a', marginBottom: 6 }}>Proposed changes (not applied yet)</div>
+              {aiHelperChanges.map((c) => (
+                <div key={c.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: '#e5e7eb', padding: '3px 0' }}>
+                  <span>{c.label}</span>
+                  <span style={{ color: c.value ? '#34d399' : '#f87171', fontWeight: 700 }}>{c.value ? '→ ON' : '→ OFF'}</span>
+                </div>
+              ))}
+              <button onClick={applyAiHelperChanges} disabled={aiAssistantBusy} style={{ ...buttonPrimary, marginTop: 8, background: '#f59e0b', color: '#1a1a06' }}>
+                {aiAssistantBusy ? 'Applying…' : '✓ Confirm & apply changes'}
+              </button>
+            </div>
+          )}
+          {aiAssistantMsg && <p style={{ fontSize: 11, color: aiAssistantMsg.toLowerCase().includes('applied') || aiAssistantMsg.startsWith('Updated') || aiAssistantMsg.startsWith('Applied') ? '#34d399' : '#fca5a5', margin: '8px 0 0' }}>{aiAssistantMsg}</p>}
         </div>
 
         <div style={{ ...cardStyle, marginBottom: 14, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -3945,7 +4085,10 @@ export default function AdminPortal() {
                 return (
                   <div key={i} style={{ background: '#09090b', padding: 12, borderRadius: 10, marginBottom: 8, fontSize: 12 }}>
                     <div style={{ fontWeight: 600 }}>{pii(e.email, 'email', streamerMode)}</div>
-                    <div style={{ color: '#666', fontSize: 10 }}>Ref: {pii(orderRef, 'ref', streamerMode)}</div>
+                    <div style={{ color: '#666', fontSize: 10 }}>
+                      Ref: {pii(orderRef, 'ref', streamerMode)}
+                      {e.registeredAt ? ` · ${formatAuditTime(e.registeredAt)}` : ''}
+                    </div>
                     <div style={{ color: '#888' }}>
                       {e.variant} · {e.size} · <span style={{ color: typeColor(e.type), fontWeight: 700 }}>{typeLabel(e.type)}</span>
                       {e.promoCode && <span style={{ color: '#edb210', marginLeft: 6 }}>· promo {pii(e.promoCode, 'promo', streamerMode)}</span>}
@@ -5049,11 +5192,13 @@ export default function AdminPortal() {
 
                   {productForm.deliveryIncentiveEnabled === true && (
                     <>
-                      {/* Product-level defaults — every sampler falls back to these. */}
-                      <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
-                          Product defaults
-                        </div>
+                      {/* Product-level defaults — every sampler falls back to these.
+                          Collapsed by default so the section stays clean; expand to
+                          fine-tune the shared fallback values. */}
+                      <details style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                        <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
+                          Product defaults ▾
+                        </summary>
                         <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
                           Every sampler falls back to these when its own field below is left blank — set one sane default, then fine-tune a single size.
                         </p>
@@ -5088,7 +5233,7 @@ export default function AdminPortal() {
                         <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 0', lineHeight: 1.6 }}>
                           <strong style={{ color: '#aab6c8' }}>Eligible products / sizes</strong> restrict where the generated code can be used (e.g. <code style={{ color: '#cbd5e1' }}>full-size-perfume</code> and <code style={{ color: '#cbd5e1' }}>100ml, 50ml</code>). Blank = the code works anywhere. The generated code looks like <code style={{ color: '#cbd5e1' }}>{String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()}-XXXXX-XXX</code>; letters/numbers only.
                         </p>
-                      </div>
+                      </details>
 
                       {/* Per-sampler setup — one card per size marked "Sample" in Pricing & Sizes. */}
                       {(Array.isArray(productForm.samplerSizes) ? productForm.samplerSizes : []).length === 0 ? (
@@ -5144,6 +5289,9 @@ export default function AdminPortal() {
                                   )}
                                   <label style={{ fontSize: 10, color: '#888' }}>Code prefix
                                     <input type="text" value={sampler?.codePrefix || ''} onChange={(e) => updateSampler(samplerSizeKey, { codePrefix: e.target.value.toUpperCase() })} placeholder={String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()} style={inputStyle} />
+                                  </label>
+                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Shared sample reference ID (optional)
+                                    <input type="text" value={sampler?.sampleRefId || ''} onChange={(e) => updateSampler(samplerSizeKey, { sampleRefId: e.target.value })} placeholder="e.g. sampler-noir-citrus-10ml — links a standalone sample product so many full-size listings can share ONE trial-SKU definition" style={inputStyle} />
                                   </label>
                                   <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Customer-facing note (optional)
                                     <input type="text" value={sampler?.note || ''} onChange={(e) => updateSampler(samplerSizeKey, { note: e.target.value })} placeholder="Blank = auto-generated from the size, credit and full-size target" style={inputStyle} />

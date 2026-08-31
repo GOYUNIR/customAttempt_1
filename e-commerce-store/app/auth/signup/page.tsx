@@ -24,6 +24,9 @@ export default function SignupPage() {
   const [verifyMsg, setVerifyMsg] = useState('');
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [devCode, setDevCode] = useState('');
+  // Resend cooldown (seconds) — disables the button with a live countdown until
+  // the server's 60s throttle clears (prevents the accidental 429 double-tap).
+  const [resendCooldown, setResendCooldown] = useState(0);
   // Guards the AUTO-VERIFY: a 6-digit code is submitted exactly once (a wrong
   // code isn't re-submitted on every re-render, and a resend resets it).
   const lastSubmittedCodeRef = useRef('');
@@ -129,6 +132,7 @@ export default function SignupPage() {
   };
 
   const handleResend = async () => {
+    if (resendCooldown > 0 || verifyBusy) return;
     setVerifyBusy(true);
     setVerifyMsg('');
     try {
@@ -142,14 +146,27 @@ export default function SignupPage() {
         setVerifyMsg(data.devCode ? 'A fresh code was sent. Dev-mode code below.' : 'A fresh code was sent — it shows in your email notification.');
         if (data.devCode) setDevCode(data.devCode);
         lastSubmittedCodeRef.current = '';
+        setResendCooldown(Number(data.retryAfterSeconds) > 0 ? Number(data.retryAfterSeconds) : 60);
       } else {
         setVerifyMsg(data.error || 'Could not resend the code.');
+        if (res.status === 429 && Number(data.retryAfterSeconds) > 0) {
+          setResendCooldown(Number(data.retryAfterSeconds));
+        }
       }
     } catch {
       setVerifyMsg('Network error.');
     }
     setVerifyBusy(false);
   };
+
+  // Tick the resend cooldown down once per second while it is active.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const id = setInterval(() => {
+      setResendCooldown((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [resendCooldown]);
 
   // AUTO-VERIFY: as soon as all 6 digits are present (typed, pasted, or filled
   // by the iOS/Android one-time-code autofill bar) submit immediately.
@@ -244,7 +261,7 @@ export default function SignupPage() {
             />
             {verifyMsg && <p style={{ color: verifyMsg.toLowerCase().includes('sent') ? '#34d399' : '#f87171', fontSize: 12, lineHeight: 1.5, margin: '0 0 12px' }}>{verifyMsg}</p>}
             <button onClick={handleVerify} disabled={verifyBusy || verifyCode.length !== 6} style={{ padding: 12, borderRadius: 999, border: 'none', background: verifyBusy || verifyCode.length !== 6 ? '#555' : configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: verifyBusy || verifyCode.length !== 6 ? 'not-allowed' : 'pointer', width: '100%' }}>{verifyBusy ? 'Verifying…' : 'Verify & unlock rewards'}</button>
-            <button onClick={handleResend} disabled={verifyBusy} style={{ marginTop: 8, width: '100%', padding: 10, borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: verifyBusy ? 'not-allowed' : 'pointer' }}>Resend code</button>
+            <button onClick={handleResend} disabled={verifyBusy || resendCooldown > 0} style={{ marginTop: 8, width: '100%', padding: 10, borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: verifyBusy || resendCooldown > 0 ? configPalette.cardTextMuted : configPalette.cardTextMain, opacity: verifyBusy || resendCooldown > 0 ? 0.6 : 1, fontSize: 12, cursor: verifyBusy || resendCooldown > 0 ? 'not-allowed' : 'pointer' }}>{resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}</button>
             <p style={{ marginTop: 14, fontSize: 11, color: configPalette.cardTextMuted, textAlign: 'center', lineHeight: 1.5 }}>
               Codes expire in 30 minutes. Prefer to finish later? You can verify anytime from your account after logging in.
             </p>

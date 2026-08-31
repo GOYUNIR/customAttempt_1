@@ -82,6 +82,11 @@ test('validateRules enforces appointment + table_booking schedules', () => {
 
   assert.equal(validateRules('table_booking', { partySizeMax: 6 }).ok, true);
   assert.equal(validateRules('table_booking', {}).ok, false);
+  assert.equal(
+    validateRules('table_booking', { partySizeMax: 6, availability: { daysOfWeek: [1, 2] } }).ok,
+    true,
+  );
+});
 
 test('validateRules enforces ticketed_access + subscription rules', () => {
   assert.equal(validateRules('ticketed_access', { eventStartsAt: '2026-09-01T20:00:00Z' }).ok, true);
@@ -145,10 +150,4 @@ test('the JSON Schema validator handles the core keywords', () => {
   assert.equal(deepEqual([1, 2], [2, 1]), false);
   assert.equal(deepEqual('x', 'x'), true);
   assert.equal(deepEqual(null, undefined), false);
-});
-
-  assert.equal(
-    validateRules('table_booking', { partySizeMax: 6, availability: { daysOfWeek: [1, 2] } }).ok,
-    true,
-  );
 });

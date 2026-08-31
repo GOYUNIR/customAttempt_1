@@ -46,7 +46,7 @@ function verifyCodeHash(hashed: string, code: string): boolean {
 export async function issueCustomerVerifyCode(
   redis: any,
   email: string,
-): Promise<{ ok: boolean; devCode?: string; error?: string; throttled?: boolean }> {
+): Promise<{ ok: boolean; devCode?: string; error?: string; throttled?: boolean; retryAfterSeconds?: number }> {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return { ok: false, error: 'Email required.' };
 
@@ -58,7 +58,7 @@ export async function issueCustomerVerifyCode(
     const prev = safeParseRedisItem<{ createdAt?: number }>(existing);
     if (prev && Date.now() - Number(prev.createdAt || 0) < RESEND_THROTTLE_SECONDS * 1000) {
       const wait = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(prev.createdAt || 0)) / 1000));
-      return { ok: false, throttled: true, error: `Please wait ${wait}s before requesting another code.` };
+      return { ok: false, throttled: true, retryAfterSeconds: wait, error: `Please wait ${wait}s before requesting another code.` };
     }
     // Malformed challenge — just overwrite below.
   }

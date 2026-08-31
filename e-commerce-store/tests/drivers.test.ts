@@ -148,6 +148,7 @@ test('normalizePlatformSettingsInput validates the wizard payload', () => {
   }
 
   assert.equal(normalizePlatformSettingsInput({ mail_provider: 'nope', mail_api_key: 'x' }).ok, false);
+});
 
 // ── email drivers ────────────────────────────────────────────────────────────
 
@@ -222,6 +223,13 @@ test('SendGridDriver: sendTransactional posts the v3 mail shape', async () => {
 });
 
 test('email drivers: unconfigured keys skip instead of throwing', async () => {
+  const driver = createEmailDriver('resend', '');
+  assert.ok(driver);
+  assert.equal(driver!.configured, false);
+  const result = await driver!.send2FA('a@b.co', '123456');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.skipped, true);
+});
 
 // ── payment drivers ──────────────────────────────────────────────────────────
 
@@ -299,8 +307,6 @@ test('PaddleDriver: creates a transaction and returns the hosted checkout url', 
   assert.ok(result.url.startsWith('https://checkout.paddle.com'));
 });
 
-test('replaceSessionPlaceholder substitutes every occurrence', () => {
-
 // ── map drivers ──────────────────────────────────────────────────────────────
 
 test('map registry: createMapDriver maps every catalog provider', () => {
@@ -337,6 +343,7 @@ test('provider enum lists match the SQL check constraints', () => {
   assert.deepEqual([...MAP_PROVIDERS].sort(), ['google_maps', 'mapbox', 'open_street_map'].sort());
 });
 
+test('replaceSessionPlaceholder substitutes every occurrence', () => {
   assert.equal(
     replaceSessionPlaceholder('https://s/?a={CHECKOUT_SESSION_ID}&b={CHECKOUT_SESSION_ID}', 'abc'),
     'https://s/?a=abc&b=abc',
@@ -344,13 +351,7 @@ test('provider enum lists match the SQL check constraints', () => {
   assert.equal(replaceSessionPlaceholder('https://s/', 'abc'), 'https://s/');
 });
 
-  const driver = createEmailDriver('resend', '');
-  assert.ok(driver && driver.configured === false);
-  const result = await driver!.send2FA('a@b.co', '000000');
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.skipped, true);
-});
-
+test('normalizePlatformSettingsInput rejects blank keys for selected providers', () => {
   assert.equal(normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: '' }).ok, false);
   assert.equal(
     normalizePlatformSettingsInput({ mail_provider: 'resend', mail_api_key: 'x', payment_provider: 'stripe', payment_api_key: 'y', map_provider: 'mapbox', map_api_key: '' }).ok,

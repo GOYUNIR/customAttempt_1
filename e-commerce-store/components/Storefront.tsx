@@ -1609,9 +1609,6 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 opacity: accountEmail ? 0.8 : 1,
               }}
             />
-            {accountEmail && (
-              <span style={{ fontSize: 11, color: configPalette.cardTextMuted, alignSelf: 'center' }}>🔒 {accountEmail}</span>
-            )}
             <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (

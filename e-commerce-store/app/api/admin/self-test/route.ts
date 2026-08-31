@@ -19,6 +19,7 @@ import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
 import { TIDY_REDIS_ACTION_LABEL } from '@/lib/admin-action-labels';
+import { detectStorageProvider } from '@/lib/env-discovery';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
@@ -50,6 +51,19 @@ function isHexColor(value: unknown): boolean {
   return typeof value === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(value.trim());
 }
 
+/**
+ * Theme tokens accept EITHER a hex color (`#rrggbb`) OR a CSS rgb()/rgba()
+ * color. `cardBorder` is intentionally stored as an rgba() hairline (e.g.
+ * `rgba(0,0,0,0.14)`), so validating it against the hex-only regex produced a
+ * false "non-hex values: cardBorder" failure. This validator accepts both.
+ */
+function isCssColor(value: unknown): boolean {
+  if (isHexColor(value)) return true;
+  if (typeof value !== 'string') return false;
+  const v = value.trim().toLowerCase();
+  return /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+|1\.0)\s*)?\)$/.test(v);
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
@@ -61,48 +75,99 @@ export async function GET(request: Request) {
   const push = (name: string, pass: boolean, detail: string) => results.push({ name, pass, detail });
 
   // ------------------------------------------------------------------
-  // Environment variables
+  // Dynamic provider diagnostics — evaluate the ACTIVE provider chosen in the
+  // Setup Wizard (Supabase `global_platform_settings`) instead of hardcoding
+  // legacy `process.env` names. A Supabase-first store therefore never reports
+  // false "MISSING" errors for STRIPE_SECRET_KEY / UPSTASH_REDIS_REST_URL /
+  // RESEND_API_KEY etc. — those keys are only required when their provider is
+  // actually the active one (see also lib/env-discovery.ts).
   // ------------------------------------------------------------------
-  const envVars = [
-    'STRIPE_SECRET_KEY',
-    'STRIPE_WEBHOOK_SECRET',
-    'UPSTASH_REDIS_REST_URL',
-    'UPSTASH_REDIS_REST_TOKEN',
-    'ADMIN_BASIC_AUTH_PASSWORD',
-    'CRON_SECRET',
-  ];
-  for (const key of envVars) {
-    push(`Env: ${key}`, Boolean(process.env[key]), process.env[key] ? 'set' : 'MISSING');
-  }
-  push('Env: RESEND_API_KEY', Boolean(process.env.RESEND_API_KEY), process.env.RESEND_API_KEY ? 'set' : 'optional (emails disabled)');
-  push('Env: RESEND_FROM', Boolean(process.env.RESEND_FROM), process.env.RESEND_FROM || 'default (no custom from-address)');
-  const mapboxToken = String(
-    process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
-    process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ||
-    ''
-  ).trim();
-  push(
-    'Env: NEXT_PUBLIC_MAPBOX_TOKEN',
-    mapboxToken ? /^pk\./.test(mapboxToken) : false,
-    mapboxToken
-      ? (/^pk\./.test(mapboxToken) ? `set (${mapboxToken.slice(0, 7)}…)` : 'set but NOT a public pk.* token — autofill will be rejected in the browser')
-      : 'not set — address autofill dropdowns will be OFF'
-  );
-
-  // ------------------------------------------------------------------
-  // Supabase + driver-engine platform settings (Setup Wizard).
   const supabaseSummary = supabaseEnvSummary();
-  push('Env: SUPABASE_URL', supabaseSummary.url, supabaseSummary.url ? 'set' : 'not set — Setup Wizard disabled');
-  push('Env: SUPABASE_ANON_KEY', supabaseSummary.anonKey, supabaseSummary.anonKey ? 'set' : 'not set');
-  push('Env: SUPABASE_SERVICE_ROLE_KEY', supabaseSummary.serviceRoleKey, supabaseSummary.serviceRoleKey ? 'set' : 'not set — cannot persist provider keys');
   const configured = (await isPlatformConfigured()) === true;
   const platformSettings = await getPlatformSettings();
   const providers = toPublicSummary(platformSettings);
+  const storageProvider = detectStorageProvider();
+
+  push(
+    'Data store provider',
+    storageProvider !== 'none',
+    storageProvider === 'none'
+      ? 'no store configured — /admin/setup runs on first visit'
+      : `active store = ${storageProvider}`
+  );
+  if (storageProvider === 'supabase') {
+    push(
+      'Supabase (active store)',
+      Boolean(supabaseSummary.url && supabaseSummary.serviceRoleKey),
+      supabaseSummary.url && supabaseSummary.serviceRoleKey
+        ? 'URL + service-role key set'
+        : 'Supabase is the active store but the URL / service-role key are incomplete'
+    );
+  } else if (storageProvider === 'upstash') {
+    const redisUrl = String(
+      process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL || ''
+    ).trim();
+    const redisToken = String(
+      process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || process.env.REDIS_REST_TOKEN || process.env.REDIS_TOKEN || ''
+    ).trim();
+    push(
+      'Redis (active store)',
+      Boolean(redisUrl && redisToken),
+      redisUrl && redisToken ? 'REST URL + token set' : 'Redis is the active store but URL/token are missing'
+    );
+  } else if (storageProvider === 'cloudflare-kv') {
+    push('Cloudflare KV (active store)', true, 'KV/D1 binding is resolved at runtime');
+  }
+
+  // Payments — only demand a key for the ACTIVE provider.
+  const paymentProvider = providers.payment_provider;
+  if (paymentProvider === 'stripe') {
+    const stripeKey = platformSettings?.payment_api_key || process.env.STRIPE_SECRET_KEY || '';
+    push('Payments (Stripe)', Boolean(stripeKey), stripeKey ? 'key set' : 'Stripe is the active payment provider but no key is set');
+  } else if (paymentProvider) {
+    push(
+      'Payments',
+      Boolean(platformSettings?.payment_api_key),
+      platformSettings?.payment_api_key ? `${paymentProvider} key set` : `${paymentProvider} is active but no key is set`
+    );
+  } else {
+    push('Payments', true, 'no payment provider selected (payments optional until one is chosen)');
+  }
+
+  // Email — only demand a key for the ACTIVE provider.
+  const mailProvider = providers.mail_provider;
+  if (mailProvider) {
+    const mailKey = platformSettings?.mail_api_key || process.env.RESEND_API_KEY || '';
+    push('Email', Boolean(mailKey), mailKey ? `${mailProvider} key set` : `${mailProvider} is active but no key is set (codes/emails will fail)`);
+  } else {
+    push('Email', true, 'no email provider selected (transactional email optional)');
+  }
+
+  // Maps — keyless providers (OpenStreetMap) never demand a key.
+  const mapProvider = providers.map_provider;
+  if (mapProvider === 'mapbox') {
+    const token = String(process.env.NEXT_PUBLIC_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '').trim();
+    push(
+      'Maps (Mapbox)',
+      token ? /^pk\./.test(token) : true,
+      token
+        ? (/^pk\./.test(token) ? 'token set' : 'token set but not a public pk.* token — autofill rejected in the browser')
+        : 'Mapbox selected; no public token (address autofill OFF)'
+    );
+  } else if (mapProvider === 'google_maps') {
+    const token = String(process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
+    push('Maps (Google Maps)', Boolean(token), token ? 'key set' : 'Google Maps selected but no key set');
+  } else if (mapProvider === 'open_street_map') {
+    push('Maps (OpenStreetMap)', true, 'keyless provider — no key required');
+  } else {
+    push('Maps', true, 'no map provider selected (address autofill optional)');
+  }
+
   push(
     'Platform providers (Setup Wizard)',
     configured,
     configured
-      ? `email=${providers.mail_provider || 'unset'} payment=${providers.payment_provider || 'unset'} maps=${providers.map_provider || 'unset'}`
+      ? `email=${providers.mail_provider || 'unset'} payment=${providers.payment_provider || 'unset'} maps=${providers.map_provider || 'unset'} ai=${providers.ai_provider || 'unset'}`
       : 'not configured — /admin/setup runs on first visit'
   );
 
@@ -149,7 +214,7 @@ export async function GET(request: Request) {
       const effectiveTheme = { ...(GOYUNIR_STORE_SUITE as any).themeColors, ...storedTheme };
       const missingStored = REQUIRED_THEME_KEYS.filter((key) => !storedTheme[key]);
       const missingEffective = REQUIRED_THEME_KEYS.filter((key) => !effectiveTheme[key]);
-      const badHex = REQUIRED_THEME_KEYS.filter((key) => effectiveTheme[key] && !isHexColor(effectiveTheme[key]));
+      const badColor = REQUIRED_THEME_KEYS.filter((key) => effectiveTheme[key] && !isCssColor(effectiveTheme[key]));
       push(
         'Theme colors complete',
         missingEffective.length === 0,
@@ -158,9 +223,9 @@ export async function GET(request: Request) {
           : `missing: ${missingEffective.join(', ')}`
       );
       push(
-        'Theme colors valid hex',
-        badHex.length === 0,
-        badHex.length === 0 ? 'ok' : `non-hex values: ${badHex.join(', ')} (admin color pickers need #rrggbb)`
+        'Theme colors valid',
+        badColor.length === 0,
+        badColor.length === 0 ? 'ok' : `invalid color values: ${badColor.join(', ')} (admin color pickers need #rrggbb or rgb()/rgba())`
       );
       const radius = Number(storedTheme.borderRadius ?? config.borderRadius ?? GOYUNIR_STORE_SUITE.themeColors.borderRadius);
       push(
