@@ -1238,6 +1238,11 @@ export default function AdminPortal() {
   // Mandatory customer signup email verification (2FA). Stored under
   // store:config.requireSignup2FA. Defaults to ON (secure).
   const [requireSignup2FA, setRequireSignup2FA] = useState(true);
+  // AI settings assistant (Settings tab) — natural-language toggles bounded by
+  // /api/admin/ai-settings' allowlist.
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiAssistantBusy, setAiAssistantBusy] = useState(false);
+  const [aiAssistantMsg, setAiAssistantMsg] = useState('');
   // Saved product-default template ("Save as default" in the product editor).
   // New products are pre-filled from this so operators don't re-enter checkout
   // mode, size templates and delivery-incentive defaults every time.
@@ -2847,6 +2852,32 @@ export default function AdminPortal() {
       setSettingsMsg('Connection failed: ' + err.message);
     }
     setSettingsSaving(false);
+  };
+
+  // Run a natural-language setting change through the bounded AI assistant, then
+  // re-sync the local settings state so the toggles reflect what changed.
+  const runAiSettings = async () => {
+    if (!aiInstruction.trim()) return;
+    setAiAssistantBusy(true);
+    setAiAssistantMsg('');
+    try {
+      const res = await adminFetch('/api/admin/ai-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, instruction: aiInstruction.trim() }),
+      });
+      const data = await readAdminJson(res);
+      if (res.ok && data?.ok) {
+        setAiAssistantMsg(data.message || 'Done.');
+        setAiInstruction('');
+        showToast('AI · Settings updated');
+        await fetchSettings();
+      } else {
+        setAiAssistantMsg(data?.error || 'The AI assistant could not apply that.');
+      }
+    } catch (err: any) {
+      setAiAssistantMsg('Connection failed: ' + (err?.message || err));
+    }
+    setAiAssistantBusy(false);
   };
 
   const applyThemePreset = (presetId: string) => {
@@ -7167,6 +7198,27 @@ export default function AdminPortal() {
                   />
                   <span style={{ fontSize: 10, color: '#666' }}>Leave empty for the default copy. You can also use {`{giftPercent}`} to insert the gift-discount percentage.</span>
                 </label>
+              </div>
+
+              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>AI Settings Assistant</h4>
+              <div style={{ padding: 12, borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid #2a2a30', marginBottom: 8 }}>
+                <p style={{ fontSize: 10.5, color: '#888', margin: '0 0 8px', lineHeight: 1.5 }}>
+                  Describe a setting change in plain English (e.g. “turn off signup email verification” or “hide the social-proof caption”) and the AI applies it. Only the toggles listed below are changeable — anything else is refused.
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={aiInstruction}
+                    onChange={(e) => setAiInstruction(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runAiSettings(); } }}
+                    placeholder="e.g. Turn off signup email verification"
+                    style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+                  />
+                  <button onClick={runAiSettings} style={buttonPrimary} disabled={aiAssistantBusy || !aiInstruction.trim()}>
+                    {aiAssistantBusy ? 'Applying…' : 'Apply with AI'}
+                  </button>
+                </div>
+                {aiAssistantMsg && <p style={{ fontSize: 11, color: aiAssistantMsg.startsWith('Updated') ? '#34d399' : '#fca5a5', margin: '8px 0 0' }}>{aiAssistantMsg}</p>}
               </div>
 
               <h4 id="settings-gallery" style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Product Gallery</h4>

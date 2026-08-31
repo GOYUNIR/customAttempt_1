@@ -215,6 +215,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
+  // When a customer is signed in, the entry-form email field is locked to their
+  // account email so an alternate address can't be used on raffle/FCFS entries.
+  const [accountEmail, setAccountEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   // "Add to bag" runs a server duplicate-entry lookup that can take a moment
   // on a slow connection — this makes the button show a spinner while it runs
@@ -692,6 +695,24 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         }
       })
       .catch(() => {});
+  }, []);
+
+  // Lock the entry email field to the signed-in customer's account email. Runs
+  // once on mount: if `/api/auth/me` reports a session, the account email wins
+  // over any locally-stored draft so an alternate address can't be used.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: any) => {
+        if (cancelled || !data?.user?.email) return;
+        const locked = String(data.user.email).trim().toLowerCase();
+        setAccountEmail(locked);
+        setEmail(locked);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -1565,7 +1586,32 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           {/* Mapbox address autofill requires the field to live inside a <form>. */}
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <input type="email" autoComplete="email" placeholder="email@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} style={{ flex: 1, minWidth: 180, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input
+              type="email"
+              autoComplete="email"
+              placeholder="email@domain.com"
+              value={accountEmail || email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={Boolean(accountEmail)}
+              readOnly={Boolean(accountEmail)}
+              title={accountEmail ? 'Signed in — using your account email' : undefined}
+              style={{
+                flex: 1,
+                minWidth: 180,
+                padding: 12,
+                borderRadius: 12,
+                background: accountEmail
+                  ? `color-mix(in srgb, ${configPalette.cardTextMuted} 12%, ${configPalette.cardBackground})`
+                  : `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`,
+                border: `1px solid ${configPalette.cardBorder}`,
+                color: accountEmail ? configPalette.cardTextMuted : configPalette.cardTextMain,
+                cursor: accountEmail ? 'not-allowed' : 'text',
+                opacity: accountEmail ? 0.8 : 1,
+              }}
+            />
+            {accountEmail && (
+              <span style={{ fontSize: 11, color: configPalette.cardTextMuted, alignSelf: 'center' }}>🔒 {accountEmail}</span>
+            )}
             <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
           </form>
           {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (

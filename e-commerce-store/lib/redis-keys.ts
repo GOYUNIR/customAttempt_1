@@ -282,6 +282,13 @@ export const WAITLIST_KEY = 'customer:waitlist';
 
 /** String — cached Stripe billing-portal configuration id. */
 export const STRIPE_PORTAL_CACHE_KEY = 'cache:stripe_portal_config';
+/** String w/ TTL — cached AI-generated hero animation for a product
+ *  (`cache:ai-hero:<productId>`). Ephemeral; rebuilt lazily by
+ *  `/api/ai/hero-animation` when the product's cover image changes. */
+export function aiHeroAnimationKey(productId: string): string {
+  const id = String(productId || '').trim().slice(0, 128) || 'featured';
+  return `cache:ai-hero:${id}`;
+}
 /** String w/ TTL — per-IP request counter for a public rate-limited endpoint
  *  (`cache:rate:<namespace>:<ip>`). Ephemeral; lives under `cache:` because it
  *  can be deleted anytime without affecting correctness (it only throttles

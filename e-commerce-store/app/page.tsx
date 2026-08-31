@@ -43,6 +43,12 @@ export default function HomePage() {
   );
   const [authUser, setAuthUser] = useState<any>(null);
   const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
+  // Real AI hero animation for the featured product's cover image. Starts on the
+  // built-in fallback so the hero is never blank, then upgrades to the AI engine's
+  // keyframes/SVG once `/api/ai/hero-animation` responds (generated + cached via
+  // services/ai — not a hardcoded CSS drift loop).
+  const [heroAiCss, setHeroAiCss] = useState<string>(HERO_ANIMATION_CSS);
+  const [heroAiSvg, setHeroAiSvg] = useState<string>('');
   // Live theme palette. Initialized from the server-baked /admin → Settings
   // theme (no flash), then upgraded by /api/store on mount so edits pick up
   // within the ~10s cache window without a redeploy.
@@ -181,6 +187,29 @@ export default function HomePage() {
     return () => window.clearInterval(socialTimer);
   }, []);
 
+  // Fetch the REAL AI-generated hero animation for the featured product's cover
+  // image. The endpoint resolves services/ai (cached per product + image), and
+  // only falls back to the built-in drift preset when no provider is configured.
+  useEffect(() => {
+    const primary = activeProducts[0];
+    if (!primary) return;
+    const medias: string[] = (primary.images || []).filter((src: unknown) => typeof src === 'string' && src);
+    const cover = medias.find((src: string) => isImageMedia(src));
+    if (!cover) return;
+    let cancelled = false;
+    fetch('/api/ai/hero-animation')
+      .then((res) => res.json())
+      .then((data: any) => {
+        if (cancelled || !data?.result) return;
+        if (typeof data.result.css === 'string' && data.result.css) setHeroAiCss(data.result.css);
+        if (typeof data.result.svg === 'string' && data.result.svg) setHeroAiSvg(data.result.svg);
+      })
+      .catch(() => {
+        // Keep the built-in fallback — the hero must never be blank on a failure.
+      });
+    return () => { cancelled = true; };
+  }, [activeProducts]);
+
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'system-ui, sans-serif' }}>
@@ -240,7 +269,7 @@ export default function HomePage() {
 
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
-      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${HERO_ANIMATION_CSS}`}</style>
+      <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           {heroCoverImage && (
@@ -248,6 +277,8 @@ export default function HomePage() {
               className="goyunir-ai"
               aria-hidden="true"
               style={{
+                position: 'relative',
+                overflow: 'hidden',
                 height: 230,
                 borderRadius: themeRadius(configPalette, 18),
                 background: `url(${heroCoverImage}) center/cover no-repeat`,
@@ -255,7 +286,14 @@ export default function HomePage() {
                 willChange: 'transform',
                 border: `1px solid ${configPalette.cardBorder}`,
               }}
-            />
+            >
+              {heroAiSvg && (
+                <div
+                  dangerouslySetInnerHTML={{ __html: heroAiSvg }}
+                  style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+                />
+              )}
+            </div>
           )}
           {heroContent.showEyebrow !== false && (
             <div style={{ fontSize: 12, letterSpacing: '4px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8, whiteSpace: 'pre-line' }}>{brandName.toUpperCase()} / {heroContent.eyebrow || 'CALIFORNIA USA'}</div>
