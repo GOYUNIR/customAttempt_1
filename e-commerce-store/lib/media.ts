@@ -46,6 +46,40 @@ export function cropsEqual(a: unknown, b: unknown): boolean {
   return Math.abs(A.x - B.x) < 0.0001 && Math.abs(A.y - B.y) < 0.0001 && Math.abs(A.w - B.w) < 0.0001 && Math.abs(A.h - B.h) < 0.0001;
 }
 
+/**
+ * A stored crop entry. Historically each `crops[i]` was a single flat
+ * `{x,y,w,h}` (applied to every viewport). It can now instead be
+ * `{ desktop, mobile }` so the operator can frame the SAME photo differently
+ * for the wide desktop gallery (2:1) and the narrow mobile gallery (1.17:1).
+ * A flat entry is kept working as a legacy/backward-compatible form.
+ */
+export type CropEntry = MediaCrop | { desktop?: MediaCrop | null; mobile?: MediaCrop | null };
+
+/** Split any stored crop entry into concrete desktop + mobile crops. */
+export function splitCropEntry(crop: unknown): { desktop: MediaCrop; mobile: MediaCrop } {
+  const c = (crop && typeof crop === 'object' && !Array.isArray(crop) ? crop : {}) as Record<string, unknown>;
+  if (c.desktop || c.mobile) {
+    const desktop = normalizeCrop(c.desktop ?? DEFAULT_CROP);
+    return {
+      desktop,
+      mobile: normalizeCrop(c.mobile ?? desktop),
+    };
+  }
+  const flat = normalizeCrop(crop);
+  return { desktop: flat, mobile: flat };
+}
+
+/** Pick the crop that applies to a given viewport. */
+export function pickCrop(crop: unknown, viewport: 'desktop' | 'mobile'): MediaCrop {
+  const split = splitCropEntry(crop);
+  return viewport === 'mobile' ? split.mobile : split.desktop;
+}
+
+/** Build a per-viewport crop entry from two concrete crops. */
+export function cropEntryFromPair(desktop: MediaCrop, mobile: MediaCrop): CropEntry {
+  return { desktop: normalizeCrop(desktop), mobile: normalizeCrop(mobile) };
+}
+
 const VIDEO_EXT_RE = /\.(mp4|mov|mkv|avi|webm)(?:[?#].*)?$/i;
 
 /**

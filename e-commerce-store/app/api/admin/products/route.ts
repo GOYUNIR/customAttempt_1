@@ -310,14 +310,25 @@ export async function POST(request: Request) {
         : (existing?.priceCategories || [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }]);
       // Per-size checkout mode ('RAFFLE' | 'FCFS' | empty = follow product).
       // A product can mix formats — FCFS sizes sell instantly, RAFFLE sizes draw.
+      // Per-item limits (maxPerEmail / maxPerCart / maxRaffleAllocationLimit) are
+      // also sanitized here so a size carries its OWN purchase caps.
       return cats.map((c: any) => {
         const mode = String(c?.checkoutMode || '').toUpperCase();
-        if (mode !== 'RAFFLE' && mode !== 'FCFS') {
-          const out = { ...(c || {}) };
-          delete out.checkoutMode;
-          return out;
-        }
-        return { ...(c || {}), checkoutMode: mode };
+        const out = { ...(c || {}) };
+        if (mode !== 'RAFFLE' && mode !== 'FCFS') delete out.checkoutMode;
+        else out.checkoutMode = mode;
+        // Normalize per-item limits: keep only finite, in-range numbers; drop
+        // otherwise so the product-level fallback takes over.
+        const maxPerEmail = Number(out.maxPerEmail);
+        if (Number.isFinite(maxPerEmail) && maxPerEmail >= 1) out.maxPerEmail = Math.floor(maxPerEmail);
+        else delete out.maxPerEmail;
+        const maxPerCart = Number(out.maxPerCart);
+        if (Number.isFinite(maxPerCart) && maxPerCart >= 1) out.maxPerCart = Math.floor(maxPerCart);
+        else delete out.maxPerCart;
+        const maxRaffleAllocationLimit = Number(out.maxRaffleAllocationLimit);
+        if (Number.isFinite(maxRaffleAllocationLimit) && maxRaffleAllocationLimit >= 0) out.maxRaffleAllocationLimit = Math.floor(maxRaffleAllocationLimit);
+        else delete out.maxRaffleAllocationLimit;
+        return out;
       });
     })(),
     isActive: body.isActive !== undefined ? toBool(body.isActive, existing?.isActive ?? false) : (existing?.isActive ?? false),

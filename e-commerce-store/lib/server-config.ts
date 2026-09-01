@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
-import { UNCONFIGURED_PRICE_SENTINEL } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, resolveSizeLimits } from '@/lib/storefront-config';
 import {
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
@@ -328,12 +328,13 @@ export async function getLiveProductState(redis: StorageClient, productOrId: any
     if (opts.slug) slug = String(opts.slug);
   } else if (productOrId && typeof productOrId === 'object') {
     id = String(productOrId.id || ''); name = String(productOrId.name || productOrId.id || ''); slug = String(productOrId.slug || productOrId.id || '');
-    // Prefer the raffle cap when set; otherwise seed from real stock so FCFS
-    // products (maxRaffleAllocationLimit = 0) never collapse to the 10-unit default.
-    const raffleLimit = Math.max(0, Number(productOrId.maxRaffleAllocationLimit) || 0);
-    const perSize = productOrId.inventoryPerSize && typeof productOrId.inventoryPerSize === 'object' ? productOrId.inventoryPerSize : {};
-    const stock = Math.max(0, Number(perSize[size] ?? productOrId.totalInventory) || 0);
-    seedInv = (raffleLimit > 0 ? raffleLimit : stock) || 10;
+    // Per-item inventory & limits: a size's own values win over the product-level
+    // fallback. Prefer the raffle cap when set; otherwise seed from real stock so
+    // FCFS products (maxRaffleAllocationLimit = 0) never collapse to the 10-unit
+    // default.
+    const limits = resolveSizeLimits(productOrId, size);
+    const stock = limits.inventory;
+    seedInv = (limits.maxRaffleAllocationLimit > 0 ? limits.maxRaffleAllocationLimit : stock) || 10;
     if (typeof fourth === 'number') winners = normalizeWinners(fourth, 1);
     else if (fourth && typeof fourth === 'object') {
       winners = normalizeWinners(fourth.winnersPerDraw, 1);
@@ -830,12 +831,30 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
   const winnerTiers = typeof category?.winnerTiers === 'string'
     ? category.winnerTiers
     : (Array.isArray(category?.winnerTiers) ? category.winnerTiers.join(',') : '0');
-  return {
+  // Preserve the per-size checkout mode (RAFFLE vs FCFS). `loadProducts` is used
+  // by the admin product list, so dropping this field here was what made the
+  // Pricing, Sizes & Inventory dropdowns snap back to "Follow product" (empty)
+  // on edit — the saved value never survived the read. Keeping it (only when it
+  // is a known value) makes the dropdown re-populate correctly and also lets the
+  // draw/checkout consumers resolve a size's real mode instead of the product's.
+  const rawMode = String(category?.checkoutMode || '').trim().toUpperCase();
+  const out: Record<string, any> = {
     size,
     price: Number.isFinite(price) ? price : 0,
     stripeId,
     winnerTiers,
   };
+  if (rawMode === 'RAFFLE' || rawMode === 'FCFS') out.checkoutMode = rawMode;
+  // Preserve per-item limit fields (max per email / cart / raffle allocation).
+  // Same reason as checkoutMode above: `loadProducts` feeds the admin product
+  // list, so dropping these would blank the per-size limit inputs on edit.
+  const maxPerEmail = Number(category?.maxPerEmail);
+  const maxPerCart = Number(category?.maxPerCart);
+  const maxRaffleAllocationLimit = Number(category?.maxRaffleAllocationLimit);
+  if (Number.isFinite(maxPerEmail) && maxPerEmail >= 1) out.maxPerEmail = Math.floor(maxPerEmail);
+  if (Number.isFinite(maxPerCart) && maxPerCart >= 1) out.maxPerCart = Math.floor(maxPerCart);
+  if (Number.isFinite(maxRaffleAllocationLimit) && maxRaffleAllocationLimit >= 0) out.maxRaffleAllocationLimit = Math.floor(maxRaffleAllocationLimit);
+  return out;
 }
 
 function normalizeFallbackProduct(product: any, index: number) {

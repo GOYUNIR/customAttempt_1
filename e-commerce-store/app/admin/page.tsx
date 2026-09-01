@@ -10,7 +10,7 @@ import LinkPreviewGallery from '@/components/LinkPreviewGallery';
 import ProductLivePreview from '@/components/ProductLivePreview';
 import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib/storefront-config';
-import { isVideoMedia, normalizeCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, type MediaCrop } from '@/lib/media';
+import { isVideoMedia, pickCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, splitCropEntry, cropEntryFromPair, type MediaCrop, type CropEntry } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
@@ -797,16 +797,149 @@ const MOBILE_PREVIEW = { w: 200, h: 171 };
 type CropEditorProps = {
   src: string;
   crop: unknown;
-  onCrop: (c: MediaCrop) => void;
+  onCrop: (c: CropEntry) => void;
 };
 
-function CropEditor({ src, crop, onCrop }: CropEditorProps) {
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
-  const [zoom, setZoom] = useState(0);
+function cropZoomValue(c: MediaCrop): number {
+  return Math.max(0, Math.min(100, Math.round(((1 - c.w) / 0.8) * 100)));
+}
+
+function clampCropCenter(next: MediaCrop): MediaCrop {
+  const w = Math.max(0.2, next.w);
+  const h = Math.max(0.2, next.h);
+  return {
+    ...next,
+    w,
+    h,
+    x: Math.max(w / 2, Math.min(1 - w / 2, next.x)),
+    y: Math.max(h / 2, Math.min(1 - h / 2, next.y)),
+  };
+}
+
+/** One device preview: drag to pan inside the viewport + its own zoom slider. */
+function CropPane({ src, natural, crop, boxW, boxH, label, ratioLabel, onChange }: {
+  src: string;
+  natural: { w: number; h: number } | null;
+  crop: MediaCrop;
+  boxW: number;
+  boxH: number;
+  label: string;
+  ratioLabel: string;
+  onChange: (c: MediaCrop) => void;
+}) {
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startCrop: MediaCrop; boxW: number; boxH: number } | null>(null);
 
-  const c = normalizeCrop(crop);
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!natural) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      dragRef.current = { startX: e.clientX, startY: e.clientY, startCrop: crop, boxW, boxH };
+      setDragging(true);
+    },
+    [natural, crop, boxW, boxH],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = ((e.clientX - d.startX) / d.boxW) * d.startCrop.w;
+      const dy = ((e.clientY - d.startY) / d.boxH) * d.startCrop.h;
+      onChange(
+        clampCropCenter({
+          ...d.startCrop,
+          x: d.startCrop.x - dx,
+          y: d.startCrop.y - dy,
+        }),
+      );
+    },
+    [onChange],
+  );
+
+  const onPointerEnd = useCallback(() => {
+    dragRef.current = null;
+    setDragging(false);
+  }, []);
+
+  const style = natural ? coverStyle(natural.w, natural.h, boxW, boxH, crop) : null;
+  const zoom = cropZoomValue(crop);
+
+  return (
+    <div style={{ flex: '0 0 auto', width: boxW }}>
+      <div style={{ fontSize: 10, color: '#8b95a7', marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+        <span>{label} <span style={{ color: '#5d6570' }}>· {ratioLabel}</span></span>
+        <span style={{ color: '#5d6570' }}>{zoom === 0 ? 'Full' : `${Math.round((1 - (zoom / 100) * 0.8) * 100)}%`}</span>
+      </div>
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        style={{
+          width: boxW,
+          height: boxH,
+          borderRadius: 10,
+          overflow: 'hidden',
+          position: 'relative',
+          background: '#0a0a0c',
+          border: dragging ? '1px solid #7dd3fc' : '1px solid #26262e',
+          cursor: natural ? 'grab' : 'wait',
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+        title={`Drag to pan the ${label} crop`}
+      >
+        {natural && style ? (
+          <img
+            src={src}
+            alt={`${label} crop preview`}
+            draggable={false}
+            style={{
+              position: 'absolute',
+              width: style.width,
+              height: style.height,
+              left: style.left,
+              top: style.top,
+              maxWidth: 'none',
+              maxHeight: 'none',
+              pointerEvents: 'none',
+            }}
+          />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 10, color: '#666' }}>Loading…</div>
+        )}
+        {natural && (
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)' }} />
+        )}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: '#a1a1aa', marginTop: 6 }}>
+        <span style={{ whiteSpace: 'nowrap' }}>Zoom</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={zoom}
+          onChange={(e) => {
+            const zz = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+            const size = Math.max(0.2, 1 - (zz / 100) * 0.8);
+            onChange(clampCropCenter({ ...crop, w: size, h: size }));
+          }}
+          style={{ flex: 1, accentColor: '#7dd3fc' }}
+        />
+      </label>
+    </div>
+  );
+}
+
+function CropEditor({ src, crop, onCrop }: CropEditorProps) {
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const split = splitCropEntry(crop);
+  const [desktopCrop, setDesktopCrop] = useState<MediaCrop>(split.desktop);
+  const [mobileCrop, setMobileCrop] = useState<MediaCrop>(split.mobile);
 
   // Load natural dimensions once (data URLs + remote URLs both work).
   useEffect(() => {
@@ -821,120 +954,33 @@ function CropEditor({ src, crop, onCrop }: CropEditorProps) {
     };
   }, [src]);
 
-  // Keep the slider in sync with the stored crop (e.g. when switching images).
+  // Re-sync both crops when switching to a different photo.
   useEffect(() => {
-    setZoom(Math.max(0, Math.min(100, Math.round(((1 - c.w) / 0.8) * 100))));
+    const s = splitCropEntry(crop);
+    setDesktopCrop(s.desktop);
+    setMobileCrop(s.mobile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  const clampCenter = useCallback((next: MediaCrop): MediaCrop => {
-    const size = Math.max(0.2, next.w);
-    return {
-      ...next,
-      x: Math.max(size / 2, Math.min(1 - size / 2, next.x)),
-      y: Math.max(size / 2, Math.min(1 - size / 2, next.y)),
-    };
-  }, []);
-
-  const setZoomed = useCallback(
-    (z: number) => {
-      const zz = Math.max(0, Math.min(100, Number(z) || 0));
-      const size = Math.max(0.2, 1 - (zz / 100) * 0.8);
-      setZoom(zz);
-      onCrop(clampCenter({ ...c, w: size, h: size }));
+  const updateDesktop = useCallback(
+    (c: MediaCrop) => {
+      setDesktopCrop(c);
+      onCrop(cropEntryFromPair(c, mobileCrop));
     },
-    [c, onCrop, clampCenter],
+    [onCrop, mobileCrop],
+  );
+  const updateMobile = useCallback(
+    (c: MediaCrop) => {
+      setMobileCrop(c);
+      onCrop(cropEntryFromPair(desktopCrop, c));
+    },
+    [onCrop, desktopCrop],
   );
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>, boxW: number, boxH: number) => {
-      if (!natural) return;
-      e.preventDefault();
-      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-      dragRef.current = { startX: e.clientX, startY: e.clientY, startCrop: c, boxW, boxH };
-      setDragging(true);
-    },
-    [natural, c],
-  );
-
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const d = dragRef.current;
-      if (!d) return;
-      // The crop region maps 1:1 onto the preview box, so a pointer delta of
-      // one box-width moves the crop center by one crop-width (drag left/right
-      // to look around — the image follows the finger).
-      const dx = ((e.clientX - d.startX) / d.boxW) * d.startCrop.w;
-      const dy = ((e.clientY - d.startY) / d.boxH) * d.startCrop.h;
-      onCrop(
-        clampCenter({
-          ...d.startCrop,
-          x: d.startCrop.x - dx,
-          y: d.startCrop.y - dy,
-        }),
-      );
-    },
-    [onCrop, clampCenter],
-  );
-
-  const onPointerEnd = useCallback(() => {
-    dragRef.current = null;
-    setDragging(false);
-  }, []);
-
-  const renderPreview = (boxW: number, boxH: number, label: string, ratioLabel: string) => {
-    const style = natural ? coverStyle(natural.w, natural.h, boxW, boxH, c) : null;
-    return (
-      <div style={{ flex: '0 0 auto' }}>
-        <div style={{ fontSize: 10, color: '#8b95a7', marginBottom: 4 }}>
-          {label} <span style={{ color: '#5d6570' }}>· aspect {ratioLabel}</span>
-        </div>
-        <div
-          onPointerDown={(e) => onPointerDown(e, boxW, boxH)}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerEnd}
-          onPointerCancel={onPointerEnd}
-          style={{
-            width: boxW,
-            height: boxH,
-            borderRadius: 10,
-            overflow: 'hidden',
-            position: 'relative',
-            background: '#0a0a0c',
-            border: dragging ? '1px solid #7dd3fc' : '1px solid #26262e',
-            cursor: natural ? 'grab' : 'wait',
-            touchAction: 'none',
-            userSelect: 'none',
-            WebkitUserSelect: 'none',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-          title="Drag to adjust which part of the photo shows"
-        >
-          {natural && style ? (
-            <img
-              src={src}
-              alt="crop preview"
-              draggable={false}
-              style={{
-                position: 'absolute',
-                width: style.width,
-                height: style.height,
-                left: style.left,
-                top: style.top,
-                maxWidth: 'none',
-                maxHeight: 'none',
-                pointerEvents: 'none',
-              }}
-            />
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 10, color: '#666' }}>Loading…</div>
-          )}
-          {natural && (
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)' }} />
-          )}
-        </div>
-      </div>
-    );
+  const resetAll = () => {
+    setDesktopCrop({ ...DEFAULT_CROP });
+    setMobileCrop({ ...DEFAULT_CROP });
+    onCrop(cropEntryFromPair(DEFAULT_CROP, DEFAULT_CROP));
   };
 
   return (
@@ -942,35 +988,39 @@ function CropEditor({ src, crop, onCrop }: CropEditorProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#dbe3ee' }}>✂️ Crop — live preview</span>
         <span style={{ fontSize: 10, color: '#8b95a7' }}>
-          Shows exactly how this photo is cropped on the product page. Drag to pan, zoom below.
+          Pan each viewport separately by dragging, and zoom each with its own slider. Computer and Mobile are framed independently.
         </span>
         <button
-          onClick={() => onCrop({ ...DEFAULT_CROP })}
+          onClick={resetAll}
           style={{ ...buttonGhost, marginLeft: 'auto', padding: '4px 10px', fontSize: 10 }}
         >
-          Reset crop
+          Reset both
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
-        {renderPreview(DESKTOP_PREVIEW.w, DESKTOP_PREVIEW.h, 'Computer', aspectRatioLabel(DESKTOP_PREVIEW.w, DESKTOP_PREVIEW.h))}
-        {renderPreview(MOBILE_PREVIEW.w, MOBILE_PREVIEW.h, 'Mobile', aspectRatioLabel(MOBILE_PREVIEW.w, MOBILE_PREVIEW.h))}
-      </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: '#a1a1aa' }}>
-        <span style={{ whiteSpace: 'nowrap' }}>Zoom</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={zoom}
-          onChange={(e) => setZoomed(Number(e.target.value))}
-          style={{ flex: 1, accentColor: '#7dd3fc' }}
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 6 }}>
+        <CropPane
+          src={src}
+          natural={natural}
+          crop={desktopCrop}
+          boxW={DESKTOP_PREVIEW.w}
+          boxH={DESKTOP_PREVIEW.h}
+          label="Computer"
+          ratioLabel={aspectRatioLabel(DESKTOP_PREVIEW.w, DESKTOP_PREVIEW.h)}
+          onChange={updateDesktop}
         />
-        <span style={{ whiteSpace: 'nowrap', color: '#8b95a7', minWidth: 52, textAlign: 'right' }}>
-          {zoom === 0 ? 'Full photo' : `${Math.round((1 - (zoom / 100) * 0.8) * 100)}%`}
-        </span>
-      </label>
+        <CropPane
+          src={src}
+          natural={natural}
+          crop={mobileCrop}
+          boxW={MOBILE_PREVIEW.w}
+          boxH={MOBILE_PREVIEW.h}
+          label="Mobile"
+          ratioLabel={aspectRatioLabel(MOBILE_PREVIEW.w, MOBILE_PREVIEW.h)}
+          onChange={updateMobile}
+        />
+      </div>
       <div style={{ fontSize: 10, color: '#5d6570', marginTop: 8, lineHeight: 1.5 }}>
-        The crop is saved with the product and applies to the product-page gallery, home cards and catalog tiles.
+        The crop is saved with the product. The product page uses the Computer crop on wide screens and the Mobile crop on phones; home cards and catalog tiles follow the same rule.
       </div>
     </div>
   );
@@ -4536,7 +4586,7 @@ export default function AdminPortal() {
                     {(productForm.images || []).map((img: string, idx: number) => {
                       const isVideo = isVideoMedia(img);
                       const cropForIdx = Array.isArray(productForm.crops) ? productForm.crops[idx] : undefined;
-                      const cropped = !isVideo && !!cropForIdx && normalizeCrop(cropForIdx).w < 0.999;
+                      const cropped = !isVideo && !!cropForIdx && pickCrop(cropForIdx, 'desktop').w < 0.999;
                       return (
                         <div key={`${img}-${idx}`} style={{ position: 'relative', background: '#060606', padding: 4, borderRadius: 4, width: 64, height: 64, overflow: 'hidden' }}>
                           {isVideo ? (
@@ -4599,7 +4649,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-sizes"
                   title="Pricing, Sizes & Inventory"
-                  description="Define each size/variant the customer can buy — price, Stripe ID, stock for that size, winner tiers and its own raffle timer. “Winners / draw” is a CSV like 3,2,2 = 3 winners on draw 1, 2 on draw 2, etc. Inventory & limits for the whole release live in the panel below the sizes."
+                  description="Define each size/variant as its own item — price, Stripe ID, its own stock (Units), its own purchase limits (max/email, max/cart, raffle cap), winner tiers and its own raffle timer. “Winners / draw” is a CSV like 3,2,2 = 3 winners on draw 1, 2 on draw 2, etc. Product-level defaults (fallback) live in the collapsed panel below."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
                 >
                   {productForm.priceCategories.map((cat: any, idx: number) => {
@@ -4655,6 +4705,41 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
+                      </div>
+                      {/* Row 1b — per-item limits. Each size is its own item, so
+                          its purchase caps + raffle cap live here (blank falls
+                          back to the product defaults in the panel below). */}
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+                        <span style={{ fontSize: 9, color: '#5d6570', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', minWidth: 96 }}>Limits</span>
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="Max / email"
+                          title="Max per email for THIS size (blank = product default)."
+                          value={cat.maxPerEmail ?? ''}
+                          onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(1, Number(e.target.value) || 1))}
+                          style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="Max / cart"
+                          title="Max in cart per email for THIS size (blank = product default)."
+                          value={cat.maxPerCart ?? ''}
+                          onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(1, Number(e.target.value) || 1))}
+                          style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
+                        />
+                        {effectiveMode === 'RAFFLE' && (
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="Raffle cap (0 = unlimited)"
+                            title="Max raffle allocation for THIS size (0 = unlimited, blank = product default)."
+                            value={cat.maxRaffleAllocationLimit ?? ''}
+                            onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
+                            style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10 }}
+                          />
+                        )}
                       </div>
                       {/* Row 2 — draw / format controls. The "Winners / draw"
                           input is only meaningful for raffle sizes — an FCFS
@@ -4891,14 +4976,14 @@ export default function AdminPortal() {
                     <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below. The <strong>Units</strong> field on each size is its own stock; the totals below reconcile them.</span>
                   </div>
 
-                  {/* ====== Inventory & limits (merged INTO Pricing & Sizes so the
-                       whole sellable shape of the release lives in one place) ====== */}
-                  <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
-                      Inventory &amp; limits
-                    </div>
-                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
-                      Total inventory drives the sold-out state (0 units shows the release as sold out while “stay visible” keeps it on the page as proof of demand). Max per email / cart cap how much ONE customer can take so a single buyer can never wipe a drop.
+                  {/* ====== Product defaults — fallback for any size whose own
+                       limits are left blank. Each size above is its own item. ====== */}
+                  <details style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
+                    <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
+                      Product defaults (fallback) ▾
+                    </summary>
+                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 8px', lineHeight: 1.5 }}>
+                      Each size above is its own item with its own <strong style={{ color: '#aab6c8' }}>Units</strong> + <strong style={{ color: '#aab6c8' }}>Limits</strong>. The values below are only the <strong style={{ color: '#aab6c8' }}>fallback</strong> for a size whose own limit is blank. Total inventory still drives the sold-out state (0 units = sold out while “stay visible” keeps the page up as proof of demand).
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)
@@ -4932,7 +5017,7 @@ export default function AdminPortal() {
                         </div>
                       );
                     })()}
-                  </div>
+                  </details>
                 </SectionCard>
 
                 {/* ============ CUSTOMER-FACING COPY ============ */}
@@ -5311,21 +5396,42 @@ export default function AdminPortal() {
                                       <input type="number" min={1} value={sampler?.expiresDays ?? ''} onChange={(e) => updateSampler(samplerSizeKey, { expiresDays: e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 60) })} placeholder={String(productForm.deliveryIncentiveExpiresDays ?? 60)} style={inputStyle} />
                                     </label>
                                   )}
-                                  <label style={{ fontSize: 10, color: '#888' }}>Code prefix
-                                    <input type="text" value={sampler?.codePrefix || ''} onChange={(e) => updateSampler(samplerSizeKey, { codePrefix: e.target.value.toUpperCase() })} placeholder={String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()} style={inputStyle} />
+                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Connect to a standalone sample product (optional)
+                                    <select
+                                      value={sampler?.sampleRefId || ''}
+                                      onChange={(e) => {
+                                        const slug = e.target.value;
+                                        const linked = slug ? (allProducts || []).find((p: any) => p.slug === slug || p.id === slug) : null;
+                                        updateSampler(samplerSizeKey, { sampleRefId: slug || null, sampleRefName: linked ? linked.name : null });
+                                      }}
+                                      style={inputStyle}
+                                    >
+                                      <option value="">Self-contained (no link)</option>
+                                      {(allProducts || []).filter((p: any) => String(p?.id || '') !== String(productForm.id || '')).map((p: any) => (
+                                        <option key={p.id || p.slug} value={p.slug || p.id}>{p.name || p.slug}</option>
+                                      ))}
+                                    </select>
+                                    <span style={{ fontSize: 9, color: '#5d6570', display: 'block', marginTop: 3 }}>
+                                      Links this sampler to a standalone sample product so its price / image / credit stay in sync across listings.{sampler?.sampleRefName ? ` Linked to: ${sampler.sampleRefName}` : ''}
+                                    </span>
                                   </label>
-                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Shared sample reference ID (optional)
-                                    <input type="text" value={sampler?.sampleRefId || ''} onChange={(e) => updateSampler(samplerSizeKey, { sampleRefId: e.target.value })} placeholder="e.g. sampler-noir-citrus-10ml — links a standalone sample product so many full-size listings can share ONE trial-SKU definition" style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Customer-facing note (optional)
-                                    <input type="text" value={sampler?.note || ''} onChange={(e) => updateSampler(samplerSizeKey, { note: e.target.value })} placeholder="Blank = auto-generated from the size, credit and full-size target" style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV (this sampler)
-                                    <input type="text" value={Array.isArray(sampler?.eligibleProductSlugs) ? sampler.eligibleProductSlugs.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV (this sampler)
-                                    <input type="text" value={Array.isArray(sampler?.eligibleSizes) ? sampler.eligibleSizes.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
-                                  </label>
+                                  <details style={{ gridColumn: '1 / -1', marginTop: 2 }}>
+                                    <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', cursor: 'pointer', userSelect: 'none' }}>Advanced ▾</summary>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                                      <label style={{ fontSize: 10, color: '#888' }}>Code prefix
+                                        <input type="text" value={sampler?.codePrefix || ''} onChange={(e) => updateSampler(samplerSizeKey, { codePrefix: e.target.value.toUpperCase() })} placeholder={String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()} style={inputStyle} />
+                                      </label>
+                                      <label style={{ fontSize: 10, color: '#888' }}>Customer-facing note (optional)
+                                        <input type="text" value={sampler?.note || ''} onChange={(e) => updateSampler(samplerSizeKey, { note: e.target.value })} placeholder="Blank = auto-generated from the size, credit and full-size target" style={inputStyle} />
+                                      </label>
+                                      <label style={{ fontSize: 10, color: '#888' }}>Eligible product slugs CSV
+                                        <input type="text" value={Array.isArray(sampler?.eligibleProductSlugs) ? sampler.eligibleProductSlugs.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
+                                      </label>
+                                      <label style={{ fontSize: 10, color: '#888' }}>Eligible size(s) CSV
+                                        <input type="text" value={Array.isArray(sampler?.eligibleSizes) ? sampler.eligibleSizes.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
+                                      </label>
+                                    </div>
+                                  </details>
                                 </div>
                               </div>
                             );

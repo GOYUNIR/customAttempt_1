@@ -6,11 +6,11 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
-import { isVideoMedia, coverStyle, normalizeCrop, DEFAULT_CROP } from '@/lib/media';
+import { isVideoMedia, coverStyle, pickCrop, DEFAULT_CROP } from '@/lib/media';
 import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
 import NotFoundView from '@/components/NotFoundView';
 
@@ -75,11 +75,10 @@ function resolveProductAnchors(data: any, size: string): { drawAnchor?: string; 
   if (releaseEndsAt && Number.isFinite(releaseMs)) {
     return { drawAnchor: releaseEndsAt, dueAnchor: releaseEndsAt };
   }
-  const fallback = data?.config?.dropSchedule?.targetEndDateTime
-    || data?.config?.dropSchedule?.countdownEndsAt
-    || releaseEndsAt
-    || undefined;
-  return { drawAnchor: fallback, dueAnchor: fallback };
+  // No usable anchor → no countdown. Do NOT fall back to the global drop
+  // schedule's target date/time: a product with no dates set must not show a
+  // countdown at all (previously it re-anchored to the global daily 00:00).
+  return {};
 }
 
 /**
@@ -922,7 +921,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         checkoutMode: checkoutMode,
         productType: isRaffleEntry ? 'raffle' : 'fcfs',
       };
-      const maxPerCart = Math.max(1, Number(product.maxPerCart || product.maxPerEmail || 1));
+      const maxPerCart = resolveSizeLimits(product, selectedSize).maxPerCart;
       const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
       if (inCartCount >= maxPerCart) {
         setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
@@ -1234,9 +1233,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   // Crop support: the crop region maps 1:1 onto the measured gallery box. The
   // crop is applied ONLY when the operator customized it — the default keeps
-  // the classic centered cover + Ken Burns behaviour.
-  const currentCrop = normalizeCrop(
+  // the classic centered cover + Ken Burns behaviour. Each photo can carry a
+  // separate Computer (wide, 2:1) and Mobile (narrow, 1.17:1) crop; the box's
+  // measured aspect ratio decides which one is used.
+  const galleryViewport: 'desktop' | 'mobile' =
+    galleryBoxWidth > 0 && galleryBoxWidth / 280 < 1.5 ? 'mobile' : 'desktop';
+  const currentCrop = pickCrop(
     Array.isArray(product?.crops) && product.crops[selectedImageIndex] ? product.crops[selectedImageIndex] : DEFAULT_CROP,
+    galleryViewport,
   );
   const cropIsCustom = currentCrop.w < 0.999 || currentCrop.h < 0.999 || Math.abs(currentCrop.x - 0.5) > 0.001 || Math.abs(currentCrop.y - 0.5) > 0.001;
   const currentMediaIsVideo = isVideoMedia(galleryImages[selectedImageIndex] || galleryImages[0]);

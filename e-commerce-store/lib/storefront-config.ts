@@ -736,7 +736,7 @@ export function isConfiguredPrice(price: unknown): boolean {
 // implementation lives in lib/checkout-mode.ts (self-contained for the node
 // test runner); this re-export keeps every existing `@/lib/storefront-config`
 // import working.
-export { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes } from './checkout-mode';
+export { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits } from './checkout-mode';
 
 export function getProductPrice(product: StorefrontProduct, size: string): number {
   const category = findPriceCategory(product, size);
@@ -1035,6 +1035,16 @@ export function resolveNextRaffleAnchorMs(
     : null;
   if (explicitMs !== null && explicitMs > now) return explicitMs;
   if (product?.soldOut === true || product?.isArchived === true) return null;
+  // Strict drop timestamps: a product with NO explicit release end AND NO
+  // product-level custom schedule has no countdown at all. It must NEVER fall
+  // through to the global cadence — that is what made an empty product show a
+  // bogus "midnight → midnight" timer (the global daily schedule at 00:00).
+  const hasProductSchedule = !!(
+    product?.customDropSchedule &&
+    typeof product.customDropSchedule === 'object' &&
+    Object.keys(product.customDropSchedule).length > 0
+  );
+  if (explicitMs === null && !hasProductSchedule) return null;
   const base = explicitMs !== null && explicitMs > 0 ? explicitMs : now;
   return getNextRecurringAnchorMs(schedule, base);
 }
@@ -1059,7 +1069,7 @@ export {
 } from './size-configs';
 // Local bindings for the anchor composition below (the `export ... from` above
 // re-exports without binding locally).
-import { resolveSizeReleaseEndsAt, resolveSizeSchedule } from './size-configs';
+import { resolveSizeReleaseEndsAt, resolveSizeSchedule, getSizeCustomSchedule } from './size-configs';
 
 /**
  * The countdown anchor ONE size should show RIGHT NOW — per-size equivalent of
@@ -1079,6 +1089,16 @@ export function resolveSizeNextAnchorMs(
   const explicitMs = explicit ? dropTimestampToMs(explicit, schedule.timezone) : null;
   if (explicitMs !== null && explicitMs > now) return explicitMs;
   if (product?.soldOut === true || product?.isArchived === true) return null;
+  // Strict drop timestamps (per-size): no explicit end, no per-size schedule and
+  // no product schedule ⇒ this size has NO countdown. Never re-anchor to the
+  // global cadence for a size the operator left completely unconfigured.
+  const hasSizeSchedule = !!getSizeCustomSchedule(product, size);
+  const hasProductSchedule = !!(
+    product?.customDropSchedule &&
+    typeof product.customDropSchedule === 'object' &&
+    Object.keys(product.customDropSchedule).length > 0
+  );
+  if (explicitMs === null && !hasSizeSchedule && !hasProductSchedule) return null;
   const base = explicitMs !== null && explicitMs > 0 ? explicitMs : now;
   return getNextRecurringAnchorMs(schedule, base);
 }

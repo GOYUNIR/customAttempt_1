@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes } from '../lib/checkout-mode.ts';
+import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits } from '../lib/checkout-mode.ts';
 
 // A mixed-format product: sampler sells instantly (FCFS), full size runs a raffle.
 const MIXED = {
@@ -89,4 +89,36 @@ test('sizeCheckoutModes: returns a size → mode map', () => {
 test('sizeCheckoutModes: every size resolves even without per-size overrides', () => {
   const map = sizeCheckoutModes(PLAIN_RAFFLE);
   assert.deepEqual(map, { '50ml': 'RAFFLE', '100ml': 'RAFFLE' });
+});
+
+test('resolveSizeLimits: per-size values win, product-level fallback otherwise', () => {
+  const product = {
+    totalInventory: 100,
+    maxPerEmail: 2,
+    maxPerCart: 3,
+    maxRaffleAllocationLimit: 50,
+    inventoryPerSize: { 'Small': 12, 'Large': 40 },
+    priceCategories: [
+      { size: 'Small', price: 10, maxPerEmail: 5, maxPerCart: 7, maxRaffleAllocationLimit: 20 },
+      { size: 'Large', price: 20 },
+    ],
+  };
+  const small = resolveSizeLimits(product, 'Small');
+  assert.equal(small.maxPerEmail, 5);
+  assert.equal(small.maxPerCart, 7);
+  assert.equal(small.maxRaffleAllocationLimit, 20);
+  assert.equal(small.inventory, 12);
+
+  const large = resolveSizeLimits(product, 'Large');
+  assert.equal(large.maxPerEmail, 2);
+  assert.equal(large.maxPerCart, 3);
+  assert.equal(large.maxRaffleAllocationLimit, 50);
+  assert.equal(large.inventory, 40);
+
+  // A size with no per-size stock and no product fallback for a field.
+  const minimal = resolveSizeLimits({ priceCategories: [{ size: 'X' }] }, 'X');
+  assert.equal(minimal.maxPerEmail, 1);
+  assert.equal(minimal.maxPerCart, 1);
+  assert.equal(minimal.maxRaffleAllocationLimit, 0);
+  assert.equal(minimal.inventory, 0);
 });

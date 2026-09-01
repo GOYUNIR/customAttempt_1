@@ -1810,5 +1810,40 @@ is the backing endpoint.
     native `.ts` type-stripping). No new Redis keys (AI helper reuses `store:config`
     toggles; `sampleRefId` lives on the product object in `store:products`).
 
+- **2026-09-01 — Product panel deep-fix (countdown, dropdowns, per-item limits, per-viewport crop, sample linking):**
+  - **🕒 Countdown no longer fires for products with NO dates.** Root cause: the
+    global drop schedule defaults to `mode:'daily'` at `drawHour:0`, and
+    `resolveNextRaffleAnchorMs` / `resolveSizeNextAnchorMs` always fell through to
+    `getNextRecurringAnchorMs` when a product had no `releaseEndsAt` — so an empty
+    product showed a bogus "midnight → midnight" timer. Both resolvers now return
+    `null` when there is no explicit release end AND no product/per-size custom
+    schedule. `components/Storefront.tsx` `resolveProductAnchors` also no longer
+    falls back to `config.dropSchedule.targetEndDateTime`.
+  - **🔽 Dropdown hydration actually fixed.** `loadProducts` → `normalizePriceCategory`
+    was silently DROPPING `priceCategories[].checkoutMode`, so the admin product list
+    came back without per-size modes and the Pricing & Sizes dropdowns re-rendered
+    empty ("Follow product") on edit. `normalizePriceCategory` now preserves
+    `checkoutMode` (and the new per-item limit fields).
+  - **📦 Per-item inventory & limits.** Each size card in Pricing, Sizes & Inventory
+    now carries its own `Max / email`, `Max / cart` and (for raffle sizes) `Raffle
+    cap`, alongside the existing per-size `Units`. The old aggregate panel is now a
+    collapsed "Product defaults (fallback)". New `resolveSizeLimits()` in
+    `lib/checkout-mode.ts` resolves a size's effective limits (size → product), used
+    by the storefront cart guard and `getLiveProductState` seeding. Per-item limit
+    fields are sanitized in `/api/admin/products` and preserved in `loadProducts`.
+  - **✂️ Per-viewport crop (Computer + Mobile) with independent pan & zoom.** The
+    crop editor now renders TWO independently-editable panes (2:1 desktop, 1.17:1
+    mobile), each with its own drag-to-pan + zoom slider. Crops are stored as
+    `crops[i] = { desktop, mobile }` (flat legacy crops still work). New helpers
+    `splitCropEntry` / `pickCrop` / `cropEntryFromPair` in `lib/media.ts`; the
+    storefront gallery picks the crop by the measured box aspect ratio.
+  - **🔗 Sample product linking.** The "Shared sample reference" free-text field is
+    now a product PICKER that links a sampler to a standalone sample product
+    (`sampleRefId` = linked slug, `sampleRefName` = its name), and the sampler card's
+    advanced fields (code prefix, note, eligible slugs/sizes) are collapsed into an
+    "Advanced" `<details>` for a cleaner, more powerful Trial sizes panel.
+  - **✅ Tests:** `tsc --noEmit` clean and **297/297 tests pass** (added coverage for
+    per-viewport crop helpers, `resolveSizeLimits`, and `sampleRefName` round-trip).
+
 
 

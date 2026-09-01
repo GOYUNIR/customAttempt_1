@@ -29,7 +29,7 @@ import {
   UNCONFIGURED_PRICE_SENTINEL,
 } from '@/lib/storefront-config';
 import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
-import { isVideoMedia, normalizeCrop, coverStyle, DEFAULT_CROP } from '@/lib/media';
+import { isVideoMedia, pickCrop, coverStyle, DEFAULT_CROP } from '@/lib/media';
 import { visibleProductCategories } from '@/lib/storefront-config';
 
 /** Fixed preview card + gallery-box widths (300px card − 2×1px borders). */
@@ -149,7 +149,7 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
     img.onerror = () => setNatural(null);
     img.src = coverSrc;
   }, [coverSrc, coverIsVideo]);
-  const crop = normalizeCrop(Array.isArray(product.crops) && product.crops[0] ? product.crops[0] : DEFAULT_CROP);
+  const crop = pickCrop(Array.isArray(product.crops) && product.crops[0] ? product.crops[0] : DEFAULT_CROP, 'desktop');
   const cropIsCustom = crop.w < 0.999 || crop.h < 0.999 || Math.abs(crop.x - 0.5) > 0.001 || Math.abs(crop.y - 0.5) > 0.001;
 
   const mixedTemplate = String(product.mixedFormatRibbon || copy.mixedFormatRibbon || '').trim();

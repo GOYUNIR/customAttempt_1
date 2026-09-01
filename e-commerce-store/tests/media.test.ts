@@ -9,6 +9,9 @@ import {
   coverStyle,
   publicMediaRef,
   brandLogoRef,
+  splitCropEntry,
+  pickCrop,
+  cropEntryFromPair,
 } from '../lib/media.ts';
 
 test('normalizeCrop clamps and fills defaults', () => {
@@ -77,6 +80,30 @@ test('brandLogoRef maps a data-URL logo to /media/logo and passes URLs through',
   assert.equal(brandLogoRef(''), '');
   assert.equal(brandLogoRef(undefined), '');
   assert.notEqual(brandLogoRef('data:image/png;base64,aaaa'), brandLogoRef('data:image/png;base64,bbbb'));
+});
+
+test('splitCropEntry / pickCrop support flat + per-viewport crop entries', () => {
+  // A legacy flat crop applies to BOTH viewports.
+  const flat = { x: 0.3, y: 0.4, w: 0.8, h: 0.8 };
+  const flatSplit = splitCropEntry(flat);
+  assert.deepEqual(flatSplit.desktop, flat);
+  assert.deepEqual(flatSplit.mobile, flat);
+  assert.deepEqual(pickCrop(flat, 'desktop'), flat);
+  assert.deepEqual(pickCrop(flat, 'mobile'), flat);
+
+  // A per-viewport entry keeps desktop and mobile independent.
+  const desktop = { x: 0.5, y: 0.5, w: 1, h: 1 };
+  const mobile = { x: 0.2, y: 0.6, w: 0.6, h: 0.6 };
+  const entry = cropEntryFromPair(desktop, mobile);
+  assert.deepEqual(pickCrop(entry, 'desktop'), desktop);
+  assert.deepEqual(pickCrop(entry, 'mobile'), mobile);
+
+  // A partial entry falls back: mobile missing → desktop crop.
+  const partial = { desktop };
+  assert.deepEqual(pickCrop(partial, 'mobile'), desktop);
+  // null / undefined → DEFAULT_CROP on both viewports.
+  assert.deepEqual(pickCrop(null, 'desktop'), DEFAULT_CROP);
+  assert.deepEqual(pickCrop(undefined, 'mobile'), DEFAULT_CROP);
 });
 
 test('coverStyle maps the crop region onto the box exactly', () => {

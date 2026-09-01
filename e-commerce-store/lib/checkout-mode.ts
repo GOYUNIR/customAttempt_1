@@ -53,3 +53,34 @@ export function sizeCheckoutModes(product: any): Record<string, 'RAFFLE' | 'FCFS
   }
   return out;
 }
+
+/**
+ * Resolve the purchase / inventory limits for ONE size. A size's OWN value on
+ * its `priceCategories[]` entry wins, otherwise the product-level fallback is
+ * used. This is the single source of truth so the admin UI, the storefront cart
+ * guard and the live-state seeding all agree on what "per item" means.
+ */
+export function resolveSizeLimits(product: any, size?: string | null): {
+  maxPerEmail: number;
+  maxPerCart: number;
+  maxRaffleAllocationLimit: number;
+  inventory: number;
+} {
+  const exact = String(size || '').trim();
+  const key = exact.toLowerCase();
+  const cat = key && Array.isArray(product?.priceCategories)
+    ? (product.priceCategories as any[]).find((c) => String(c?.size || '').trim().toLowerCase() === key)
+    : null;
+  const inventoryPerSize =
+    product?.inventoryPerSize && typeof product.inventoryPerSize === 'object' && !Array.isArray(product.inventoryPerSize)
+      ? (product.inventoryPerSize as Record<string, unknown>)
+      : {};
+  const perSizeStock = exact ? Number(inventoryPerSize[exact] ?? inventoryPerSize[key]) : 0;
+  const productStock = Math.max(0, Number(product?.totalInventory) || 0);
+  return {
+    maxPerEmail: Math.max(1, Number(cat?.maxPerEmail ?? product?.maxPerEmail) || 1),
+    maxPerCart: Math.max(1, Number(cat?.maxPerCart ?? product?.maxPerCart ?? product?.maxPerEmail) || 1),
+    maxRaffleAllocationLimit: Math.max(0, Number(cat?.maxRaffleAllocationLimit ?? product?.maxRaffleAllocationLimit) || 0),
+    inventory: perSizeStock > 0 ? perSizeStock : productStock,
+  };
+}

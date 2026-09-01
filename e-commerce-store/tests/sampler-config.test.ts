@@ -106,6 +106,26 @@ test('resolveSamplerConfig supports legacy trigger sizes without a sampler recor
   assert.equal(resolveSamplerConfig({ ...legacy, deliveryIncentiveEnabled: false }, 'Sampler Set'), null);
 });
 
+test('normalizeSamplerSizes + resolveSamplerConfig preserve the shared sample reference', () => {
+  const linked = {
+    ...NOIR,
+    samplerSizes: [
+      {
+        size: 'Sampler Set',
+        sampleRefId: 'noir-citrus-sample-kit',
+        sampleRefName: 'Noir Citrus — Sample Kit',
+      },
+    ],
+  };
+  const normalized = normalizeSamplerSizes(linked.samplerSizes, NOIR.priceCategories);
+  assert.equal(normalized[0].sampleRefId, 'noir-citrus-sample-kit');
+  assert.equal(normalized[0].sampleRefName, 'Noir Citrus — Sample Kit');
+  const resolved = resolveSamplerConfig(linked, 'Sampler Set');
+  assert.ok(resolved);
+  assert.equal(resolved.sampleRefId, 'noir-citrus-sample-kit');
+  assert.equal(resolved.sampleRefName, 'Noir Citrus — Sample Kit');
+});
+
 test('formatMoneyCents renders whole dollars and cents cleanly', () => {
   assert.equal(formatMoneyCents(0), '$0');
   assert.equal(formatMoneyCents(1500), '$15');
