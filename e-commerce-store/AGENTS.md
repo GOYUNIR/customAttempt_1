@@ -643,6 +643,16 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+- **2026-09-04 — Product panel UI/UX cleanup (`product-panel-cleanup`):**
+  - **🧹 Collapsed top bloat & moved Live Preview.** Removed the verbose "Manage all products…" paragraph and the sticky **Math & health check** banner (blocking errors now surface via inline field highlights + a red **"Save Blocked: Fix highlighted errors"** Save button state). The **Live Preview** moved out of the main vertical flow into a toggleable side drawer (👁 Preview button) that renders `ProductLivePreview` as a fixed right-hand overlay.
+  - **🧹 Purged legacy microcopy.** Removed tooltips/descriptions referencing "sentinels", "Base64 storage", "fallback limits", and the duplicated "Upcoming" status explanation; replaced paragraph-long section intros with 1-sentence subtitles.
+  - **🧹 Tab 1 (Core Catalog & Media):** Status is now a single clean `<select>` (Draft | Active | Archived); the gallery copy is streamlined around the existing drag-and-drop zone, thumbnails, progress indicator and cover selection.
+  - **🧹 Tab 2 (Variants & Shared Inventory):** "Total inventory" is READ-ONLY and derived (`computedTotalInventory` = sum of active variant units); the manual total input + reconciliation line are gone, and `totalInventory` is synced to that sum on save. FCFS rows now unmount the "Winners / draw" field (raffle cap + raffle timer were already hidden); price errors render as clear inline badges ("Price required", "Min $0.01").
+  - **🧹 Tab 3 (Drop & Purchase Rules):** FCFS products hide the draw countdown + recurring schedule; the **"Trial sizes & sample credits"** panel was removed from this tab (sampler toggling stays in Variants; unused `updateSampler` / `removeSamplerByName` / `samplerCentsToDollars` / `samplerDollarsToCents` helpers were deleted).
+  - **🧹 Tab 4 (Marketing & Storytelling):** "Override Storefront Copy" now always renders the five copy fields — disabled and showing the inherited global default (`inheritedCopy`) when OFF, editable when ON.
+  - **🧪 Verified:** `tsc --noEmit` clean, `eslint` clean, `npm test` **328/328**. No new Redis keys; `totalInventory` semantics unchanged (derived + persisted on save).
+
+
 - **2026-09-04 — Products panel refactor for 10k+ SKUs: enum status, bulletproof prices, shared inventory pools, presigned CDN uploads, paginated/batch PM (`products-panel-refactor`):**
   - **🟢 Product status enum.** New self-contained `lib/product-status.ts` defines `ProductStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED'` (plus `statusFromLegacy` / `legacyBooleansFromStatus`). `/api/admin/products` persists a canonical `status` field on every save (derived from the enum when sent, else from the legacy booleans) and projects it back onto `isActive`/`isArchived`/`isUpcoming` so every existing consumer keeps working. The admin editor's three status checkboxes are replaced with a single Status `<select>`.
   - **💲 Bulletproof price gate.** New `lib/price-validation.ts` rejects sentinel/placeholder prices and anything below $0.01 (returns integer cents). `/api/admin/products` POST now 400s with a per-size `blocking` list before the sanity gate; the admin Pricing & Sizes rows show live inline `⚠` errors per price.

@@ -401,16 +401,32 @@ function stripWinnerTiersForFcfs(categories: any[], productCheckoutMode: string)
   });
 }
 
-/** Sampler credit helpers: the admin edits dollars, storage keeps cents. */
-const samplerCentsToDollars = (cents: number | null | undefined): string =>
-  cents === null || cents === undefined ? '' : String(Number(cents) / 100);
+/** Total inventory is DERIVED, never hand-edited: the sum of every active
+ *  variant's Units. Per-size units are the single source of truth; the total
+ *  is displayed read-only and synced back on save. */
+function computedTotalInventory(p: any): number {
+  const cats = Array.isArray(p?.priceCategories) ? p.priceCategories : [];
+  const per = (p?.inventoryPerSize && typeof p.inventoryPerSize === 'object') ? p.inventoryPerSize : {};
+  return cats.reduce((sum: number, c: any) => {
+    const sizeKey = String(c?.size || '').trim();
+    if (!sizeKey) return sum;
+    const v = Number(per[sizeKey]);
+    return sum + (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  }, 0);
+}
 
-const samplerDollarsToCents = (dollars: string): number | null => {
-  const trimmed = String(dollars || '').trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  return Number.isFinite(num) && num >= 0 ? Math.max(0, Math.round(num * 100)) : null;
-};
+/** Effective inherited copy for the storefront-copy override panel: the global
+ *  Settings → Storefront copy value, falling back to the built-in sentence. */
+function inheritedCopy(copy: any, key: string): string {
+  const builtins: Record<string, string> = {
+    urgencyInStock: 'Handmade allocation. Low supply by design.',
+    urgencySoldOut: 'This release is fully spoken for.',
+    statusLive: 'Reserved for collectors moving early, before the allocation tightens further.',
+    statusArchived: 'Archive placement preserves the release as proof of demand and collectability.',
+    mixedFormatRibbon: 'This release mixes formats — {raffle} raffle size(s) and {fcfs} instant-buy size(s). Pick a size above to see its option.',
+  };
+  return String(copy?.[key] || '').trim() || builtins[key] || '';
+}
 
 /** URL-safe slug from a product name (used as the auto-fill for the Slug field). */
 function slugifyName(name: string): string {
@@ -1344,6 +1360,9 @@ export default function AdminPortal() {
   // global inheritance clean (no product-level copy written); ON reveals the
   // per-product copy editor.
   const [overrideStorefrontCopy, setOverrideStorefrontCopy] = useState<boolean>(false);
+  // Live storefront preview — moved OUT of the main flow into a toggleable side
+  // drawer so the form stays compact while the operator can preview on demand.
+  const [previewOpen, setPreviewOpen] = useState<boolean>(false);
   // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -1744,7 +1763,7 @@ export default function AdminPortal() {
       deliveryIncentiveEligibleProductSlugs: [],
       deliveryIncentiveEligibleSizes: [],
       deliveryIncentiveTriggerSizes: [],
-      // Per-size sampler records (trial SKUs) — see Trial sizes & sample credits.
+      // Per-size sampler records (trial SKUs) — mark via the Sample toggle in Variants.
       samplerSizes: [],
       sortOrder: 0,
       categories: [],
@@ -2064,28 +2083,7 @@ export default function AdminPortal() {
     });
   };
 
-  // Update one field on a sampler record (matched by the size's exact name).
-  const updateSampler = (size: string, patch: any) => {
-    setProductForm((prev: any) => {
-      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
-      return {
-        ...prev,
-        samplerSizes: samplers.map((s: any) =>
-          String(s?.size || '').trim().toLowerCase() === String(size || '').trim().toLowerCase() ? { ...s, ...patch } : s,
-        ),
-      };
-    });
-  };
 
-  // Remove a sampler record from the per-sampler panel (matched by name).
-  const removeSamplerByName = (size: string) => {
-    setProductForm((prev: any) => ({
-      ...prev,
-      samplerSizes: (Array.isArray(prev.samplerSizes) ? prev.samplerSizes : []).filter(
-        (s: any) => String(s?.size || '').trim().toLowerCase() !== String(size || '').trim().toLowerCase(),
-      ),
-    }));
-  };
 
   // ===== Handle image/video file uploads =====
   const handleImageFiles = async (files: FileList) => {
@@ -2187,7 +2185,6 @@ export default function AdminPortal() {
     [productForm, rewardsSettings],
   );
   const blockingCount = productIssues.filter((i) => i.severity === 'error').length;
-  const warningCount = productIssues.filter((i) => i.severity === 'warning').length;
   // Whether ANY size resolves to RAFFLE (per-size override wins, else the
   // product-level mode). Drives the FCFS "purge & disable": a product with no
   // raffle sizes hides every raffle-specific control (drop timers, raffle caps,
@@ -2339,6 +2336,9 @@ export default function AdminPortal() {
         maxPerCart: Math.max(1, Number(productForm.maxPerCart) || Number(productForm.maxPerEmail) || 1),
         // Per-size stock (multi-size products keep a separate inventory per size).
         inventoryPerSize: productForm.inventoryPerSize && typeof productForm.inventoryPerSize === 'object' ? productForm.inventoryPerSize : {},
+        // Total inventory is DERIVED from the per-size units — keep the persisted
+        // value in sync so sold-out math and the sanity engine never disagree.
+        totalInventory: computedTotalInventory(productForm),
         // Category tags (admin-managed list lives in Settings → Catalog → Categories).
         categories: Array.isArray(productForm.categories) ? productForm.categories : [],
         // Ensure we send isActive, isArchived, isUpcoming
@@ -4382,10 +4382,6 @@ export default function AdminPortal() {
                 </button>
               </div>
             </div>
-            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage all products. <strong>New products default to hidden</strong> – publish them by setting &quot;Active&quot; to true. Archived and Upcoming are now mutually exclusive, each product can carry its own go-live/countdown timing, and sold-out handling can either stay visible as proof of demand or auto-archive later.
-              {allProducts.length === 0 && ' No products exist yet — click "Seed Defaults" to add placeholder products or "Add Product" to create your own.'}
-            </p>
             
             {productMsg && (
               <p style={{ fontSize: 12, color: productMsg.includes('Error') || productMsg.includes('❌') ? '#f87171' : '#34d399', marginBottom: 10 }}>
@@ -4402,7 +4398,10 @@ export default function AdminPortal() {
                       <span style={{ fontSize: 9, fontWeight: 700, color: '#edb210', marginLeft: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>● Unsaved changes</span>
                     )}
                   </h4>
-                  <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>✕ Close</button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button onClick={() => setPreviewOpen(true)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>👁 Preview</button>
+                    <button onClick={() => { setShowProductForm(false); resetProductForm(); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>✕ Close</button>
+                  </div>
                 </div>
 
                 {/* At-a-glance summary: live status + shape of this product while
@@ -4448,9 +4447,7 @@ export default function AdminPortal() {
                         .filter((p: number) => p > 0 && p !== UNCONFIGURED_PRICE_SENTINEL);
                       const minP = prices.length ? Math.min(...prices) : 0;
                       const maxP = prices.length ? Math.max(...prices) : 0;
-                      const per = productForm.inventoryPerSize || {};
-                      const perSum = Object.keys(per).reduce((s, k) => s + (Number(per[k]) > 0 ? Number(per[k]) : 0), 0);
-                      const invTotal = perSum > 0 ? perSum : (Number(productForm.totalInventory) || 0);
+                      const invTotal = computedTotalInventory(productForm);
                       const catCount = Array.isArray(productForm.categories) ? productForm.categories.length : 0;
                       return (
                         <>
@@ -4466,57 +4463,9 @@ export default function AdminPortal() {
                   </div>
                 </div>
 
-                {/* Live storefront preview — a mini render of the REAL product
-                    page built from the current (unsaved) form + theme + copy.
-                    Updates on every keystroke: images/crops, prices, size modes,
-                    samplers, urgency/status copy, mixed ribbon, notes, sold-out. */}
-                <ProductLivePreview
-                  key={editingProduct || 'new-product'}
-                  product={productForm}
-                  theme={themeSettings}
-                  copy={copySettings}
-                  categories={catalogSettings.categories}
-                />
-
-                {/* ── Math & health check: the admin portal understands what's
-                    going on. Live issues (blocking red / warning amber) update on
-                    every keystroke; a product with ANY blocking issue cannot be
-                    saved (same engine enforced on the server). */}
-                <div style={{ marginBottom: 12, borderRadius: 12, border: blockingCount > 0 ? '1px solid rgba(239,68,68,0.4)' : warningCount > 0 ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(34,197,94,0.3)', background: blockingCount > 0 ? 'rgba(239,68,68,0.06)' : warningCount > 0 ? 'rgba(245,158,11,0.05)' : 'rgba(34,197,94,0.04)', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ fontSize: 13 }}>🧮</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.6px', textTransform: 'uppercase', color: blockingCount > 0 ? '#f87171' : warningCount > 0 ? '#fbbf24' : '#34d399' }}>
-                        Math &amp; health check
-                      </div>
-                      <div style={{ fontSize: 9.5, color: '#8b95a7', marginTop: 1 }}>
-                        {blockingCount > 0
-                          ? `${blockingCount} blocking issue${blockingCount === 1 ? '' : 's'} — this product cannot be saved until fixed.`
-                          : warningCount > 0
-                            ? `${warningCount} warning${warningCount === 1 ? '' : 's'} — review below before going live.`
-                            : 'All math checks pass — nothing exploitable, nothing contradictory.'}
-                      </div>
-                    </div>
-                    {blockingCount > 0 && (
-                      <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.16)', color: '#f87171', letterSpacing: '0.5px' }}>SAVE BLOCKED</span>
-                    )}
-                  </div>
-                  {productIssues.length > 0 ? (
-                    <div style={{ padding: '8px 12px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      {productIssues.map((issue: SanityIssue, idx: number) => (
-                        <div key={`${issue.code}-${idx}`} style={{ display: 'flex', gap: 7, alignItems: 'flex-start', fontSize: 10.5, lineHeight: 1.45 }}>
-                          <span style={{ color: issue.severity === 'error' ? '#f87171' : issue.severity === 'warning' ? '#fbbf24' : '#60a5fa', fontSize: 11, marginTop: 0 }}>{issue.severity === 'error' ? '✖' : issue.severity === 'warning' ? '⚠' : 'ℹ'}</span>
-                          <div>
-                            <span style={{ color: issue.severity === 'error' ? '#fca5a5' : issue.severity === 'warning' ? '#fde68a' : '#93c5fd', fontWeight: 700 }}>{issue.message}</span>
-                            {issue.detail && <div style={{ color: '#8b95a7' }}>{issue.detail}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ padding: '8px 12px', fontSize: 10.5, color: '#34d399' }}>✓ Nothing to flag.</div>
-                  )}
-                </div>
+                {/* Live preview + math & health banner removed from the main flow.
+                    The preview now lives in a toggleable side drawer (👁 Preview),
+                    and blocking errors surface inline + via the Save button. */}
 
                 {/* 4-tab navigator — replaces the old monolithic scroll + sticky
                     quick-jump nav. Each tab is a focused slice of the editor;
@@ -4591,7 +4540,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-basics"
                   title="Basics"
-                  description="What the product is called, its URL, and how it appears on the storefront. Products start hidden — flip “Active (visible)” on when you are ready to publish."
+                  description="Name, URL, and how this product reads on the storefront."
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <div>
@@ -4674,7 +4623,7 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: '#8b95a7' }}>Status</span>
                         <select
-                          title="Lifecycle status. Draft = hidden; Active = visible; Archived = past releases. 'Upcoming' is now a Draft product with a future go-live time."
+                          title="Draft = hidden. Active = visible. Archived = past releases."
                           value={statusFromLegacy(productForm)}
                           onChange={(e) => {
                             const next = normalizeProductStatus(e.target.value);
@@ -4682,15 +4631,11 @@ export default function AdminPortal() {
                           }}
                           style={{ ...inputStyle, width: 168, padding: 6, fontSize: 11 }}
                         >
-                          <option value="DRAFT">Draft (hidden)</option>
-                          <option value="ACTIVE">Active (visible)</option>
+                          <option value="DRAFT">Draft</option>
+                          <option value="ACTIVE">Active</option>
                           <option value="ARCHIVED">Archived</option>
                         </select>
                       </label>
-                      <span style={{ fontSize: 10, color: '#6b7280' }}>Upcoming = Draft with a future go-live time.</span>
-                    </div>
-                    <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                      RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Archived moves the release to the “Past Archives” section without hiding it.
                     </div>
                   </div>
                   </div>
@@ -4700,7 +4645,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-media" collapsible
                   title="Gallery & Images"
-                  description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
+                  description="Drag in photos or videos — the first item is the cover."
                 >
                   <div
                     onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
@@ -4719,7 +4664,7 @@ export default function AdminPortal() {
                       transition: 'border-color 0.15s, background 0.15s',
                     }}
                   >
-                    🖼 Drag &amp; drop media here — uploads go straight to the CDN (or use the file picker below).
+                    🖼 Drag &amp; drop media here, or use the file picker below.
                   </div>
                   <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
                     <input
@@ -4757,7 +4702,7 @@ export default function AdminPortal() {
                   )}
                   {(!productForm.images || productForm.images.length === 0) && (
                     <div style={{ fontSize: 10, color: '#666', marginBottom: 8, border: '1px dashed #2e2e35', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                      No media yet — upload a file or paste a URL above. The seed products ship with a 3-photo gallery so the swipe demo works out of the box.
+                      No media yet — upload a file or paste a URL above.
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -4818,9 +4763,7 @@ export default function AdminPortal() {
                       }
                     />
                   )}
-                  <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 Uploaded media is stored as data URLs (base64) — for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
-                  </div>
+
                 </SectionCard>
                   </>
                 )}
@@ -4831,7 +4774,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-sizes" collapsible
                   title="Pricing, Sizes & Inventory"
-                  description="Each row is one sellable item: name, price, Stripe ID and its own stock. RAFFLE items draw winners; FCFS items sell instantly. “Winners / draw” is a CSV (3,2,2 = 3 on draw 1, 2 on draw 2…). Optionally give items the same sync slug to share one stock pool."
+                  description="Each row is one sellable item — price, Stripe ID, and its own stock."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
                 >
                   {productForm.priceCategories.map((cat: any, idx: number) => {
@@ -4865,8 +4808,18 @@ export default function AdminPortal() {
                       />
                       {(() => {
                         const pv = validatePrice(cat.price);
-                        return pv.ok ? null : (
-                          <span title={pv.error} style={{ fontSize: 9, color: '#f87171', alignSelf: 'center', whiteSpace: 'nowrap' }}>⚠ {pv.error}</span>
+                        if (pv.ok) return null;
+                        const short = pv.error === 'Price is required.' ? 'Price required'
+                          : pv.error === 'Price must be a number.' ? 'Enter a number'
+                          : pv.error === 'Price must be at least $0.01.' ? 'Min $0.01'
+                          : 'Set a real price';
+                        return (
+                          <span
+                            title={pv.error}
+                            style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.4)', padding: '2px 6px', borderRadius: 999, alignSelf: 'center', whiteSpace: 'nowrap' }}
+                          >
+                            ⚠ {short}
+                          </span>
                         );
                       })()}
                       <input
@@ -4937,12 +4890,10 @@ export default function AdminPortal() {
                           />
                         )}
                       </div>
-                      {/* Row 2 — draw / format controls. The "Winners / draw"
-                          input is only meaningful for raffle sizes — an FCFS
-                          (instant-buy) size is never drawn, so it shows a clear
-                          note instead of a confusing winners field. */}
+                      {/* Row 2 — draw controls. Only raffle sizes are ever drawn,
+                          so an FCFS (instant-buy) row unmounts the winners field. */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
-                      {effectiveMode === 'RAFFLE' ? (
+                      {effectiveMode === 'RAFFLE' && (
                         <input
                           type="text"
                           placeholder="Winners / draw (e.g. 3,2,2)"
@@ -4951,10 +4902,6 @@ export default function AdminPortal() {
                           onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
                           style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }}
                         />
-                      ) : (
-                        <span style={{ fontSize: 10, color: '#93c5fd', fontWeight: 700, letterSpacing: '0.4px' }}>
-                          ⚡ Sells instantly at checkout — never drawn
-                        </span>
                       )}
                       <select
                         title="Checkout mode for THIS size. 'Follow product' inherits the product's Checkout Mode — the label shows exactly what it resolves to, so there is no ambiguous 'Auto'. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
@@ -5169,21 +5116,24 @@ export default function AdminPortal() {
                     );
                   })}
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
-                    <span>💡 If STRIPE_PRODUCT_ID is set, the Stripe ID prefills with <code>{defaultStripePriceId}</code> — you can always override it per size. New sizes start at price <code>{UNCONFIGURED_PRICE_SENTINEL}</code> (obviously-wrong sentinel) until you set a real price; checkout refuses to charge it. Toggle <strong>Sample</strong> on a size to turn it into a trial SKU — tune it in the &ldquo;Trial sizes &amp; sample credits&rdquo; panel below. The <strong>Units</strong> field on each size is its own stock; the totals below reconcile them.</span>
+                    <span>💡 If STRIPE_PRODUCT_ID is set, new sizes prefill with <code>{defaultStripePriceId}</code>.</span>
                   </div>
 
-                  {/* ====== Product defaults — fallback for any size whose own
-                       limits are left blank. Each size above is its own item. ====== */}
+                  {/* ====== Product-wide limits — fallback for any size whose own
+                       limit is left blank. Total inventory is DERIVED (read-only). ====== */}
                   <details style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
                     <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
-                      Product defaults (fallback) ▾
+                      Product-wide limits ▾
                     </summary>
                     <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 8px', lineHeight: 1.5 }}>
-                      Each size above is its own item with its own <strong style={{ color: '#aab6c8' }}>Units</strong> + <strong style={{ color: '#aab6c8' }}>Limits</strong>. The values below are only the <strong style={{ color: '#aab6c8' }}>fallback</strong> for a size whose own limit is blank. Total inventory still drives the sold-out state (0 units = sold out while “stay visible” keeps the page up as proof of demand).
+                      These limits apply to any size whose own limit is left blank. Total inventory is calculated from the size units above.
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)
-                        <input type="number" min={0} value={productForm.totalInventory ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (calculated)
+                        <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', width: '100%', marginTop: 3, color: '#9ca3af', background: '#09090b', borderStyle: 'dashed', cursor: 'not-allowed' }}>
+                          <strong style={{ color: '#e4e4e7' }}>{computedTotalInventory(productForm)}</strong>
+                          <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>units · sum of active sizes</span>
+                        </div>
                       </label>
                       {hasRaffleSize && (
                       <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)
@@ -5197,24 +5147,6 @@ export default function AdminPortal() {
                         <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
                       </label>
                     </div>
-                    {/* Live reconciliation: per-size units vs the total. The math
-                        & health check panel also flags a mismatch — this shows the
-                        numbers side by side so it's obvious what to fix. */}
-                    {(() => {
-                      const cats = (productForm.priceCategories || []).filter((c: any) => String(c?.size || '').trim());
-                      const per = productForm.inventoryPerSize || {};
-                      const sum = cats.reduce((s: number, c: any) => s + (Number(per[c.size]) > 0 ? Number(per[c.size]) : 0), 0);
-                      const total = Math.max(0, Number(productForm.totalInventory) || 0);
-                      if (cats.length <= 1) return null;
-                      const mismatch = total > 0 && sum > 0 && sum !== total;
-                      return (
-                        <div style={{ marginTop: 8, fontSize: 10, lineHeight: 1.5, padding: '7px 9px', borderRadius: 8, background: mismatch ? 'rgba(245,158,11,0.07)' : 'rgba(34,197,94,0.06)', border: mismatch ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(34,197,94,0.22)' }}>
-                          {sum > 0
-                            ? <span style={{ color: mismatch ? '#fde68a' : '#4ade80' }}>Per-size units sum to <strong>{sum}</strong> vs Total inventory <strong>{total}</strong>{mismatch ? ' — they disagree. The storefront keys sold-out off the total while live states seed per size; make them match.' : ' — all good.'}</span>
-                            : <span style={{ color: '#8b95a7' }}>No per-size units set — every size falls back to Total inventory ({total}).</span>}
-                        </div>
-                      );
-                    })()}
                   </details>
                 </SectionCard>
                   </>
@@ -5226,7 +5158,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-copy" collapsible
                   title="Customer-facing copy"
-                  description="The exact lines customers read on this product's page. Every field is optional — leave it blank to inherit the global Settings → Storefront copy (which falls back to the built-in default), or write per-product copy here for a product-specific voice."
+                  description="The exact lines customers read on this product's page."
                 >
                   <label style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '8px 10px', borderRadius: 10, background: overrideStorefrontCopy ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.02)', border: overrideStorefrontCopy ? '1px solid rgba(125,211,252,0.4)' : '1px solid #232329', marginBottom: 10 }}>
                     <input
@@ -5246,50 +5178,52 @@ export default function AdminPortal() {
                     />
                     <span>
                       <strong style={{ display: 'block', fontSize: 11.5, color: '#e5e7eb' }}>Override Storefront Copy</strong>
-                      <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = inherit the site-wide Settings → Storefront copy (clean global default). ON = write product-specific lines below.</span>
+                      <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = show the inherited global copy (read-only). ON = write per-product lines.</span>
                     </span>
                   </label>
-                  {overrideStorefrontCopy && (
-                  <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <label style={{ fontSize: 10, color: '#888' }}>
-                      In-stock urgency line (default: “Handmade allocation. Low supply by design.”)
+                      In-stock urgency line
                       <textarea
                         rows={2}
+                        disabled={!overrideStorefrontCopy}
                         placeholder="Handmade allocation. Low supply by design."
-                        value={productForm.urgencyInStock || ''}
+                        value={overrideStorefrontCopy ? (productForm.urgencyInStock || '') : inheritedCopy(copySettings, 'urgencyInStock')}
                         onChange={(e) => setProductForm((p: any) => ({ ...p, urgencyInStock: e.target.value }))}
-                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical', opacity: overrideStorefrontCopy ? 1 : 0.6 }}
                       />
                     </label>
                     <label style={{ fontSize: 10, color: '#888' }}>
-                      Sold-out urgency line (default: “This release is fully spoken for.”)
+                      Sold-out urgency line
                       <textarea
                         rows={2}
+                        disabled={!overrideStorefrontCopy}
                         placeholder="This release is fully spoken for."
-                        value={productForm.urgencySoldOut || ''}
+                        value={overrideStorefrontCopy ? (productForm.urgencySoldOut || '') : inheritedCopy(copySettings, 'urgencySoldOut')}
                         onChange={(e) => setProductForm((p: any) => ({ ...p, urgencySoldOut: e.target.value }))}
-                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical', opacity: overrideStorefrontCopy ? 1 : 0.6 }}
                       />
                     </label>
                     <label style={{ fontSize: 10, color: '#888' }}>
-                      Live status story (default: “Reserved for collectors moving early, before the allocation tightens further.”)
+                      Live status story
                       <textarea
                         rows={2}
+                        disabled={!overrideStorefrontCopy}
                         placeholder="Reserved for collectors moving early, before the allocation tightens further."
-                        value={productForm.statusLive || ''}
+                        value={overrideStorefrontCopy ? (productForm.statusLive || '') : inheritedCopy(copySettings, 'statusLive')}
                         onChange={(e) => setProductForm((p: any) => ({ ...p, statusLive: e.target.value }))}
-                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical', opacity: overrideStorefrontCopy ? 1 : 0.6 }}
                       />
                     </label>
                     <label style={{ fontSize: 10, color: '#888' }}>
-                      Archived status story (default: “Archive placement preserves the release as proof of demand and collectability.”)
+                      Archived status story
                       <textarea
                         rows={2}
+                        disabled={!overrideStorefrontCopy}
                         placeholder="Archive placement preserves the release as proof of demand and collectability."
-                        value={productForm.statusArchived || ''}
+                        value={overrideStorefrontCopy ? (productForm.statusArchived || '') : inheritedCopy(copySettings, 'statusArchived')}
                         onChange={(e) => setProductForm((p: any) => ({ ...p, statusArchived: e.target.value }))}
-                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                        style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical', opacity: overrideStorefrontCopy ? 1 : 0.6 }}
                       />
                     </label>
                   </div>
@@ -5297,10 +5231,11 @@ export default function AdminPortal() {
                     Mixed-format ribbon (only shows when sizes mix raffle + instant-buy). Template tokens: <code>{'{raffle}'}</code> = raffle size count, <code>{'{fcfs}'}</code> = instant-buy count.
                     <textarea
                       rows={2}
+                      disabled={!overrideStorefrontCopy}
                       placeholder="This release mixes formats — {raffle} raffle size(s) and {fcfs} instant-buy size(s). Pick a size above to see its option."
-                      value={productForm.mixedFormatRibbon || ''}
+                      value={overrideStorefrontCopy ? (productForm.mixedFormatRibbon || '') : inheritedCopy(copySettings, 'mixedFormatRibbon')}
                       onChange={(e) => setProductForm((p: any) => ({ ...p, mixedFormatRibbon: e.target.value }))}
-                      style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical' }}
+                      style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', marginTop: 3, resize: 'vertical', opacity: overrideStorefrontCopy ? 1 : 0.6 }}
                     />
                   </label>
                   {/* Enable/disable each block on the product page — "show or hide
@@ -5338,13 +5273,6 @@ export default function AdminPortal() {
                     Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These five lines are the
                     same ones editable site-wide in Settings → Storefront copy; a value here wins for THIS product only.
                   </div>
-                  </>
-                  )}
-                  {!overrideStorefrontCopy && (
-                    <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px dashed #2a2a31' }}>
-                      This product inherits the site-wide <strong style={{ color: '#aab6c8' }}>Settings → Storefront copy</strong> (and its built-in defaults). Flip <strong style={{ color: '#7dd3fc' }}>Override Storefront Copy</strong> on to write per-product lines.
-                    </div>
-                  )}
                 </SectionCard>
                   </>
                 )}
@@ -5355,7 +5283,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-checkout"
                   title="Checkout Mode"
-                  description="The master switch: does this product draw winners (RAFFLE) or sell first-come, first-served (FCFS)? Each size can override this in Variants & Shared Inventory, so one product can mix formats."
+                  description="Draw winners (RAFFLE) or sell first-come, first-served (FCFS)."
                 >
                   <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => {
                     const checkoutMode = e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE';
@@ -5369,7 +5297,7 @@ export default function AdminPortal() {
                     <option value="FCFS">FCFS — first come, first served</option>
                   </select>
                   <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                    Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout. <strong>Per-size override:</strong> each size row in Variants &amp; Shared Inventory has its own mode — leave it on <em>Auto (product)</em> to follow this setting, or mix formats (e.g. sampler = FCFS instant buy, full size = RAFFLE). FCFS sizes are never drawn and charge immediately at checkout.
+                    Each size can override this in Variants &amp; Shared Inventory to mix formats. FCFS sizes charge immediately at checkout.
                   </div>
                   {(() => {
                     const perCat = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
@@ -5407,7 +5335,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-schedule" collapsible
                   title="Drop Schedule"
-                  description="When the release opens and when each raffle round ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle rolls to the next round)."
+                  description="When the release opens — and, for raffles, when each round ends."
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div>
@@ -5549,13 +5477,7 @@ export default function AdminPortal() {
                         </>
                       )}
                       <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '4px 0 0', lineHeight: 1.6 }}>
-                        <strong style={{ color: '#aab6c8' }}>How this works:</strong> the schedule only starts <strong style={{ color: '#aab6c8' }}>AFTER the countdown above ends</strong>. The first raffle round runs on the
-                        &quot;Countdown ends at&quot; time — when that timer hits zero the draw fires, and this cadence takes over, rolling the countdown forward to the next round. Later draws happen on this
-                        cadence while allocation remains, and unselected entries carry over into the next raffle.
-                      </p>
-                      <p style={{ gridColumn: '1 / -1', fontSize: 10, color: '#8b95a7', margin: '2px 0 0', lineHeight: 1.6 }}>
-                        <strong style={{ color: '#aab6c8' }}>Want the raffle to start right at release?</strong> Clear the &quot;Countdown ends at&quot; field above (leave it empty). The first round then starts when
-                        the release goes live (or per the global schedule), and this cadence takes over after that round&apos;s draw.
+                        The cadence starts after the countdown above ends, then repeats while inventory remains.
                       </p>
                     </div>
                   )}
@@ -5584,168 +5506,6 @@ export default function AdminPortal() {
                       <input type="number" min={0} value={productForm.soldOutArchiveDelayHours ?? 24} onChange={(e) => setProductForm((p: any) => ({ ...p, soldOutArchiveDelayHours: Number(e.target.value) }))} style={inputStyle} />
                     </div>
                   </div>
-                </SectionCard>
-                {/* ============ TRIAL SIZES & SAMPLE CREDITS ============ */}
-                <SectionCard
-                  id="pf-trial" collapsible
-                  title="Trial sizes &amp; sample credits"
-                  description="Mark a size as a sampler (trial SKU) in Pricing &amp; Sizes, then fine-tune how each sampler converts. When a sampler order is marked delivered, the buyer gets a one-time credit code bound to their email — so the full size costs &ldquo;the difference&rdquo;. This is the big-brand try-first pattern: every trial SKU tells its own story, never one generic line."
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
-                    <input type="checkbox" checked={productForm.deliveryIncentiveEnabled === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEnabled: e.target.checked }))} style={{ marginTop: 2 }} />
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#e5e7eb' }}>Enable trial credits</div>
-                      <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>Off = no sampler messaging on the storefront and no credit codes issued at delivery.</div>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5, marginTop: -6, marginBottom: 10, padding: '8px 9px', borderRadius: 8, background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)' }}>
-                    💡 <strong>Pair it with mixed formats:</strong> set this sampler&apos;s size mode to <strong style={{ color: '#93c5fd' }}>⚡ FCFS</strong> in Pricing &amp; Sizes above and it becomes an <em>instant-buy trial</em> while the full size keeps running a raffle — exactly the &ldquo;try the sampler, enter the draw for the full bottle&rdquo; pattern.
-                  </div>
-
-                  {productForm.deliveryIncentiveEnabled === true && (
-                    <>
-                      {/* Product-level defaults — every sampler falls back to these.
-                          Collapsed by default so the section stays clean; expand to
-                          fine-tune the shared fallback values. */}
-                      <details style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                        <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
-                          Product defaults ▾
-                        </summary>
-                        <p style={{ fontSize: 10, color: '#8b95a7', margin: '0 0 8px', lineHeight: 1.5 }}>
-                          Every sampler falls back to these when its own field below is left blank — set one sane default, then fine-tune a single size.
-                        </p>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                          <label style={{ fontSize: 10, color: '#888' }}>Default credit value ($)
-                            <input type="number" step="0.01" min={0} value={samplerCentsToDollars(productForm.deliveryIncentiveCreditCents ?? 0)} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCreditCents: samplerDollarsToCents(e.target.value) ?? 0 }))} style={inputStyle} />
-                          </label>
-                    <label style={{ fontSize: 10, color: '#888' }}>Default minimum next order ($)
-                      <input type="number" step="0.01" min={0} value={samplerCentsToDollars(productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0)} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveMinOrderSubtotalCents: samplerDollarsToCents(e.target.value) ?? 0 }))} style={inputStyle} />
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 10, whiteSpace: 'nowrap' }}>
-                        <input type="checkbox" checked={productForm.deliveryIncentiveNeverExpires === true} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveNeverExpires: e.target.checked }))} />
-                        <span>Never expires</span>
-                      </label>
-                      {productForm.deliveryIncentiveNeverExpires !== true && (
-                        <label style={{ fontSize: 10, color: '#888' }}>Default validity (days)
-                          <input type="number" min={1} value={productForm.deliveryIncentiveExpiresDays ?? 60} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveExpiresDays: Number(e.target.value) }))} style={inputStyle} />
-                        </label>
-                      )}
-                    </div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Default code prefix
-                      <input type="text" value={productForm.deliveryIncentiveCodePrefix || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveCodePrefix: e.target.value.toUpperCase() }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible product slugs CSV (default)
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleProductSlugs) ? productForm.deliveryIncentiveEligibleProductSlugs.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
-                    <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Eligible size(s) CSV (default)
-                      <input type="text" value={Array.isArray(productForm.deliveryIncentiveEligibleSizes) ? productForm.deliveryIncentiveEligibleSizes.join(', ') : ''} onChange={(e) => setProductForm((p: any) => ({ ...p, deliveryIncentiveEligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) }))} style={inputStyle} />
-                    </label>
-                        </div>
-                        <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 0', lineHeight: 1.6 }}>
-                          <strong style={{ color: '#aab6c8' }}>Eligible products / sizes</strong> restrict where the generated code can be used (e.g. <code style={{ color: '#cbd5e1' }}>full-size-perfume</code> and <code style={{ color: '#cbd5e1' }}>100ml, 50ml</code>). Blank = the code works anywhere. The generated code looks like <code style={{ color: '#cbd5e1' }}>{String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()}-XXXXX-XXX</code>; letters/numbers only.
-                        </p>
-                      </details>
-
-                      {/* Per-sampler setup — one card per size marked "Sample" in Pricing & Sizes. */}
-                      {(Array.isArray(productForm.samplerSizes) ? productForm.samplerSizes : []).length === 0 ? (
-                        <div style={{ padding: '12px 14px', borderRadius: 10, border: '1px dashed #2e2e35', fontSize: 11, color: '#8b95a7', lineHeight: 1.6 }}>
-                          No samplers yet — flip the <strong style={{ color: '#4ade80' }}>🧪 Sample</strong> toggle on a size in <strong style={{ color: '#cbd5e1' }}>Pricing &amp; Sizes</strong> above, then its setup card appears here. Every sampler gets its own badge, upgrade target and credit.
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {(Array.isArray(productForm.samplerSizes) ? productForm.samplerSizes : []).map((sampler: any, sidx: number) => {
-                            const samplerSizeKey = String(sampler?.size || '').trim();
-                            const otherCats = (productForm.priceCategories || []).filter(
-                              (c: any) => String(c?.size || '').trim().toLowerCase() !== samplerSizeKey.toLowerCase(),
-                            );
-                            const expiryState = sampler?.neverExpires === true ? 'never' : sampler?.neverExpires === false ? 'expires' : 'default';
-                            return (
-                              <div key={`sampler-${samplerSizeKey || sidx}`} style={{ padding: 12, borderRadius: 10, background: '#0b0b0d', border: '1px solid rgba(34,197,94,0.35)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: '#4ade80', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 999, padding: '3px 10px' }}>🧪 {samplerSizeKey || 'Sample size'}</span>
-                                    <span style={{ fontSize: 10, color: '#8b95a7' }}>trial SKU — fields left blank use the product defaults</span>
-                                  </div>
-                                  <button onClick={() => removeSamplerByName(samplerSizeKey)} style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Remove sampler</button>
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                  <label style={{ fontSize: 10, color: '#888' }}>Badge label (shown on the size chip)
-                                    <input type="text" value={sampler?.label || ''} onChange={(e) => updateSampler(samplerSizeKey, { label: e.target.value })} placeholder="Trial / Discovery / Mini" style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888' }}>Credits toward
-                                    <select value={sampler?.fullSize || ''} onChange={(e) => updateSampler(samplerSizeKey, { fullSize: e.target.value })} style={inputStyle}>
-                                      <option value="">Any next order</option>
-                                      {otherCats.map((c: any) => (
-                                        <option key={c.size} value={c.size}>{c.size}</option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888' }}>Credit value ($)
-                                    <input type="number" step="0.01" min={0} value={samplerCentsToDollars(sampler?.creditCents)} onChange={(e) => updateSampler(samplerSizeKey, { creditCents: samplerDollarsToCents(e.target.value) })} placeholder={samplerCentsToDollars(productForm.deliveryIncentiveCreditCents ?? 0) || '0'} style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888' }}>Minimum next order ($)
-                                    <input type="number" step="0.01" min={0} value={samplerCentsToDollars(sampler?.minOrderSubtotalCents)} onChange={(e) => updateSampler(samplerSizeKey, { minOrderSubtotalCents: samplerDollarsToCents(e.target.value) })} placeholder={samplerCentsToDollars(productForm.deliveryIncentiveMinOrderSubtotalCents ?? 0) || '0'} style={inputStyle} />
-                                  </label>
-                                  <label style={{ fontSize: 10, color: '#888' }}>Credit expiry
-                                    <select value={expiryState} onChange={(e) => updateSampler(samplerSizeKey, { neverExpires: e.target.value === 'never' ? true : e.target.value === 'expires' ? false : null })} style={inputStyle}>
-                                      <option value="default">Use product default</option>
-                                      <option value="never">Never expires</option>
-                                      <option value="expires">Expires after N days</option>
-                                    </select>
-                                  </label>
-                                  {expiryState === 'expires' && (
-                                    <label style={{ fontSize: 10, color: '#888' }}>Validity (days)
-                                      <input type="number" min={1} value={sampler?.expiresDays ?? ''} onChange={(e) => updateSampler(samplerSizeKey, { expiresDays: e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 60) })} placeholder={String(productForm.deliveryIncentiveExpiresDays ?? 60)} style={inputStyle} />
-                                    </label>
-                                  )}
-                                  <label style={{ fontSize: 10, color: '#888', gridColumn: '1 / -1' }}>Connect to a standalone sample product (optional)
-                                    <select
-                                      value={sampler?.sampleRefId || ''}
-                                      onChange={(e) => {
-                                        const slug = e.target.value;
-                                        const linked = slug ? (allProducts || []).find((p: any) => p.slug === slug || p.id === slug) : null;
-                                        updateSampler(samplerSizeKey, { sampleRefId: slug || null, sampleRefName: linked ? linked.name : null });
-                                      }}
-                                      style={inputStyle}
-                                    >
-                                      <option value="">Self-contained (no link)</option>
-                                      {(allProducts || []).filter((p: any) => String(p?.id || '') !== String(productForm.id || '')).map((p: any) => (
-                                        <option key={p.id || p.slug} value={p.slug || p.id}>{p.name || p.slug}</option>
-                                      ))}
-                                    </select>
-                                    <span style={{ fontSize: 9, color: '#5d6570', display: 'block', marginTop: 3 }}>
-                                      Links this sampler to a standalone sample product so its price / image / credit stay in sync across listings.{sampler?.sampleRefName ? ` Linked to: ${sampler.sampleRefName}` : ''}
-                                    </span>
-                                  </label>
-                                  <details style={{ gridColumn: '1 / -1', marginTop: 2 }}>
-                                    <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', cursor: 'pointer', userSelect: 'none' }}>Advanced ▾</summary>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-                                      <label style={{ fontSize: 10, color: '#888' }}>Code prefix
-                                        <input type="text" value={sampler?.codePrefix || ''} onChange={(e) => updateSampler(samplerSizeKey, { codePrefix: e.target.value.toUpperCase() })} placeholder={String(productForm.deliveryIncentiveCodePrefix || 'DROP').toUpperCase()} style={inputStyle} />
-                                      </label>
-                                      <label style={{ fontSize: 10, color: '#888' }}>Customer-facing note (optional)
-                                        <input type="text" value={sampler?.note || ''} onChange={(e) => updateSampler(samplerSizeKey, { note: e.target.value })} placeholder="Blank = auto-generated from the size, credit and full-size target" style={inputStyle} />
-                                      </label>
-                                      <label style={{ fontSize: 10, color: '#888' }}>Eligible product slugs CSV
-                                        <input type="text" value={Array.isArray(sampler?.eligibleProductSlugs) ? sampler.eligibleProductSlugs.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleProductSlugs: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
-                                      </label>
-                                      <label style={{ fontSize: 10, color: '#888' }}>Eligible size(s) CSV
-                                        <input type="text" value={Array.isArray(sampler?.eligibleSizes) ? sampler.eligibleSizes.join(', ') : ''} onChange={(e) => updateSampler(samplerSizeKey, { eligibleSizes: e.target.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="Blank = product default" style={inputStyle} />
-                                      </label>
-                                    </div>
-                                  </details>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <p style={{ fontSize: 10, color: '#8b95a7', margin: '8px 0 0', lineHeight: 1.6 }}>
-                        Each credit is a one-time code bound to the buyer&apos;s email, issued when the sampler order is marked <strong style={{ color: '#aab6c8' }}>delivered</strong> in Shipping. <strong style={{ color: '#aab6c8' }}>Never expires</strong> keeps it usable until manually removed; otherwise it lapses after the validity window.
-                      </p>
-                    </>
-                  )}
                 </SectionCard>
                   </>
                 )}
@@ -5781,8 +5541,19 @@ export default function AdminPortal() {
                 )}
 
                 <div style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.92)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.35)' }}>
-                  <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
-                    {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : 'Save Product'}
+                  <button
+                    onClick={saveProduct}
+                    disabled={productActionLoading || imageUploadBusy}
+                    style={{
+                      ...buttonPrimary,
+                      margin: 0,
+                      opacity: imageUploadBusy ? 0.6 : 1,
+                      ...(blockingCount > 0 && !imageUploadBusy && !productActionLoading
+                        ? { background: 'rgba(239,68,68,0.14)', color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' }
+                        : {}),
+                    }}
+                  >
+                    {imageUploadBusy ? 'Uploading…' : productActionLoading ? 'Saving…' : blockingCount > 0 ? 'Save Blocked: Fix highlighted errors' : 'Save Product'}
                   </button>
                   <button onClick={saveProductDefaults} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonGhost, margin: 0 }} title="Save the current checkout mode, size template and delivery-incentive defaults so new products pre-fill with them.">
                     💾 Save as default
@@ -5805,6 +5576,36 @@ export default function AdminPortal() {
                         : 'No unsaved changes.'}
                   </span>
                 </div>
+
+                {/* Live preview side drawer — opened via the 👁 Preview button. */}
+                {previewOpen && (
+                  <div
+                    onClick={() => setPreviewOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+                  >
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        position: 'absolute', top: 0, right: 0, height: '100%', width: 420,
+                        maxWidth: '92vw', overflowY: 'auto', background: '#0d0d11',
+                        borderLeft: '1px solid #232329', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
+                        padding: '14px 16px 24px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: '#e4e4e7' }}>👁 Live Preview</span>
+                        <button onClick={() => setPreviewOpen(false)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>✕ Close</button>
+                      </div>
+                      <ProductLivePreview
+                        key={editingProduct || 'new-product'}
+                        product={productForm}
+                        theme={themeSettings}
+                        copy={copySettings}
+                        categories={catalogSettings.categories}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
