@@ -172,6 +172,9 @@ function productNameFromPoolKeyLike(key: string, prefix: string): string {
 /** Product id from an `ops:live_state` field (`<productId>-<slug>:<size>`).
  *  The slug segment is unpredictable, so match against the known id set. */
 function liveStateMatchesAnyProduct(field: string, productIds: Set<string>): boolean {
+  // Shared inventory pools (`shared:<slug>`) are cross-product and must never
+  // be pruned as orphans — a pool survives as long as any product references it.
+  if (field.startsWith('shared:')) return true;
   const colon = field.lastIndexOf(':');
   const left = colon > 0 ? field.slice(0, colon) : field;
   for (const id of productIds) {

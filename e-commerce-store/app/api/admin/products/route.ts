@@ -22,7 +22,7 @@ import {
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { resolveDefaultStripePriceId } from '@/services/config/platform-settings';
-import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs, getSizeCheckoutMode, normalizeInventorySyncSlug } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
 import { appendAudit } from '@/app/api/admin/audit/route';
@@ -448,6 +448,22 @@ export async function POST(request: Request) {
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
+  // ── Structural normalization (defense in depth so an invalid config can
+  //    NEVER reach production, even if the admin UI misses it):
+  //    1. FCFS sizes are never drawn, so any "Winners / draw" on them is
+  //       meaningless and stripped (this makes the "winners on FCFS" warning
+  //       impossible rather than just flagged).
+  //    2. A shared-inventory sync slug is normalized to a URL-safe token (or
+  //       dropped when blank) so cross-product pools match reliably.
+  product.priceCategories = (Array.isArray(product.priceCategories) ? product.priceCategories : []).map((c: any) => {
+    const out = { ...(c || {}) };
+    if (getSizeCheckoutMode(product, out.size) === 'FCFS') delete out.winnerTiers;
+    const syncSlug = normalizeInventorySyncSlug(out.inventorySyncSlug);
+    if (syncSlug) out.inventorySyncSlug = syncSlug;
+    else delete out.inventorySyncSlug;
+    return out;
+  });
 
   // ── Smart-math gate: the SAME pure engine the admin editor previews. An
   // exploitable/broken product ('error' severity) can NEVER reach production —

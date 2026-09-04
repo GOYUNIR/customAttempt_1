@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits } from '../lib/checkout-mode.ts';
+import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from '../lib/checkout-mode.ts';
 
 // A mixed-format product: sampler sells instantly (FCFS), full size runs a raffle.
 const MIXED = {
@@ -121,4 +121,31 @@ test('resolveSizeLimits: per-size values win, product-level fallback otherwise',
   assert.equal(minimal.maxPerCart, 1);
   assert.equal(minimal.maxRaffleAllocationLimit, 0);
   assert.equal(minimal.inventory, 0);
+});
+
+test('shared inventory: normalizeInventorySyncSlug produces a stable token', () => {
+  assert.equal(normalizeInventorySyncSlug('  Black Tee / M  '), 'black-tee-m');
+  assert.equal(normalizeInventorySyncSlug('SAME_SLUG'), 'same-slug');
+  assert.equal(normalizeInventorySyncSlug(''), '');
+  assert.equal(normalizeInventorySyncSlug(null), '');
+});
+
+test('shared inventory: resolveInventorySyncSlug finds a size’s slug', () => {
+  const product = {
+    checkoutMode: 'RAFFLE',
+    priceCategories: [
+      { size: 'Standard', price: 95, inventorySyncSlug: 'black-tee' },
+      { size: 'Limited', price: 150 },
+    ],
+  };
+  assert.equal(resolveInventorySyncSlug(product, 'Standard'), 'black-tee');
+  assert.equal(resolveInventorySyncSlug(product, 'Limited'), '');
+  assert.equal(resolveInventorySyncSlug(product, 'Missing'), '');
+  assert.equal(resolveInventorySyncSlug(product, ''), '');
+});
+
+test('shared inventory: sharedInventoryField uses the shared: prefix', () => {
+  assert.equal(sharedInventoryField('black-tee'), 'shared:black-tee');
+  assert.equal(sharedInventoryField('Black Tee!'), 'shared:black-tee');
+  assert.equal(sharedInventoryField(''), '');
 });

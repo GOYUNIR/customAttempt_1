@@ -84,3 +84,46 @@ export function resolveSizeLimits(product: any, size?: string | null): {
     inventory: perSizeStock > 0 ? perSizeStock : productStock,
   };
 }
+
+/**
+ * Normalize a user-typed shared-inventory sync slug into a stable URL-safe
+ * token. Shared slugs are OPTIONAL per size: when two (or more) sizes carry
+ * the same slug they draw from ONE shared stock pool instead of their own.
+ * Leave blank = this size keeps its own independent inventory.
+ */
+export function normalizeInventorySyncSlug(value: unknown): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+/**
+ * Resolve the optional shared-inventory sync slug for ONE size. A size's own
+ * `inventorySyncSlug` wins; there is no product-level fallback — sharing is
+ * opt-in per item, because physical items are distinct SKUs with distinct
+ * stock unless the operator explicitly links them.
+ */
+export function resolveInventorySyncSlug(product: any, size?: string | null): string {
+  const key = String(size || '').trim().toLowerCase();
+  if (!key || !Array.isArray(product?.priceCategories)) return '';
+  const category = (product.priceCategories as any[]).find(
+    (c) => String(c?.size || '').trim().toLowerCase() === key,
+  );
+  return normalizeInventorySyncSlug(category?.inventorySyncSlug);
+}
+
+/**
+ * The live-state field name for a SHARED inventory pool. Shared pools live in
+ * the same `ops:live_state` hash but under a `shared:<slug>` field so every
+ * size/product that references the slug reads and writes the same counter —
+ * which means the existing checkout/draw/webhook decrements "just work"
+ * across products with zero per-call-site changes.
+ */
+export function sharedInventoryField(slug: string): string {
+  const safe = normalizeInventorySyncSlug(slug);
+  return safe ? `shared:${safe}` : '';
+}

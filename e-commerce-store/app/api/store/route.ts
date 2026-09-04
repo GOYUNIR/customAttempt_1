@@ -12,7 +12,7 @@ import {
   OVERRIDE_SOCIAL_PROOF_FIELD,
 } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories, normalizeSizeConfigs, resolveSizeNextAnchorMs, sizeConfigKey, resolveSizeReleaseEndsAt } from '@/lib/storefront-config';
+import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories, normalizeSizeConfigs, resolveSizeNextAnchorMs, sizeConfigKey, resolveSizeReleaseEndsAt, normalizeInventorySyncSlug } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
@@ -26,6 +26,8 @@ type PublicPriceCategory = {
   price: number;
   /** Per-size checkout mode ('RAFFLE' | 'FCFS'); a product can mix formats. */
   checkoutMode?: 'RAFFLE' | 'FCFS';
+  /** Optional shared-inventory sync slug — sizes with the same slug share one stock pool. */
+  inventorySyncSlug?: string;
 };
 
 type PublicStoreProduct = {
@@ -162,6 +164,9 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
         if (mode === 'RAFFLE' || mode === 'FCFS') return mode;
         return undefined;
       })(),
+      // Shared-inventory sync slug — carried through so the storefront can fold
+      // this size's shared pool into the product's aggregate remaining stock.
+      inventorySyncSlug: normalizeInventorySyncSlug(category?.inventorySyncSlug) || undefined,
     })),
     // Category tags from the admin-managed list (Settings → Catalog).
     categories: Array.isArray(raw?.categories) ? raw.categories.map(String) : [],

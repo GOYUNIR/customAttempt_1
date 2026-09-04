@@ -8,7 +8,7 @@ import {
   STORE_CONFIG_KEY,
   listLiveStates,
   getLiveProductState,
-  liveStateField,
+  liveStateFieldFor,
   PROCESSED_SESSIONS_KEY,
   ENTRY_EMAIL_SENT_KEY,
   type LiveStateRecord,
@@ -401,7 +401,7 @@ export async function GET(request: Request) {
       for (const state of liveStates) existingByField.set(String(state.productId), state);
 
       const missing = expected.filter(({ product, size }) => {
-        const field = liveStateField(product.id, product.slug, size);
+        const field = liveStateFieldFor(product, size);
         return !existingByField.has(field);
       });
 

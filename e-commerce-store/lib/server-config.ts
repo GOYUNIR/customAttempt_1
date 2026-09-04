@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
-import { UNCONFIGURED_PRICE_SENTINEL, resolveSizeLimits } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from '@/lib/storefront-config';
 import {
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
@@ -134,6 +134,20 @@ export function liveStateField(productId: string, slug: string, size: string) {
   return `${productId}-${safeSlug}:${size}`;
 }
 
+/**
+ * The live-state field for one size, honouring the optional shared-inventory
+ * sync slug. Shared sizes collapse onto a single `shared:<slug>` field so
+ * every product that references the slug reads/writes the same counter.
+ */
+export function liveStateFieldFor(
+  product: { id: string; slug: string; priceCategories?: Array<{ size?: string; inventorySyncSlug?: string }> },
+  size: string,
+): string {
+  const syncSlug = resolveInventorySyncSlug(product, size);
+  if (syncSlug) return sharedInventoryField(syncSlug);
+  return liveStateField(product.id, product.slug, size);
+}
+
 export interface LiveStateRecord {
   productId: string;
   sourceProductId?: string;
@@ -146,6 +160,9 @@ export interface LiveStateRecord {
   winnersPerDraw: number;
   drawsCompleted: number;
   salesCompleted: number;
+  /** Set on SHARED inventory pools: the slug this record backs (multiple
+   *  products/sizes may reference it). Absent on normal per-size records. */
+  inventorySyncSlug?: string;
 }
 
 /** Resolve the real catalog product id from a live-state record/hash field. */
@@ -175,6 +192,10 @@ export function aggregateLiveInventoryByProduct(
 ): Map<string, { inventoryRemaining: number; totalInventory: number }> {
   const liveStatesByProduct = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
   for (const state of liveStates) {
+    // Shared inventory pools (`shared:<slug>`) are cross-product — they are NOT
+    // attributed to any single product here. `findLiveInventoryForProduct`
+    // folds them in per product by matching its sizes' sync slugs.
+    if (state.inventorySyncSlug) continue;
     const key = resolveLiveStateSourceProductId(state);
     if (!key) continue;
     const existing = liveStatesByProduct.get(key) || { inventoryRemaining: 0, totalInventory: 0 };
@@ -188,16 +209,18 @@ export function aggregateLiveInventoryByProduct(
 
 export function findLiveInventoryForProduct(
   liveStatesByProduct: Map<string, { inventoryRemaining: number; totalInventory: number }>,
-  product: { id?: string; slug?: string },
+  product: { id?: string; slug?: string; priceCategories?: Array<{ size?: string; inventorySyncSlug?: string }> },
   liveStates?: LiveStateRecord[],
 ): { inventoryRemaining: number; totalInventory: number } | null {
   const byId = product.id ? liveStatesByProduct.get(String(product.id)) : null;
-  if (byId) return byId;
 
-  if (liveStates && product.slug) {
-    const matching = liveStates.filter((state) => String(state.slug || '') === String(product.slug));
+  let bySlug: { inventoryRemaining: number; totalInventory: number } | null = null;
+  if (!byId && liveStates && product.slug) {
+    const matching = liveStates.filter(
+      (state) => !state.inventorySyncSlug && String(state.slug || '') === String(product.slug),
+    );
     if (matching.length > 0) {
-      return matching.reduce(
+      bySlug = matching.reduce(
         (acc, state) => ({
           inventoryRemaining: acc.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining || 0)),
           totalInventory: acc.totalInventory + Math.max(0, Number(state.totalInventory || 0)),
@@ -207,7 +230,34 @@ export function findLiveInventoryForProduct(
     }
   }
 
-  return null;
+  const base = byId || bySlug;
+
+  // Fold in shared pools: each size that carries a sync slug pulls that pool's
+  // remaining/total into this product's aggregate. Dedupe by slug so two sizes
+  // sharing one slug are only counted once.
+  const shared = { inventoryRemaining: 0, totalInventory: 0 };
+  if (liveStates && Array.isArray(product.priceCategories)) {
+    const slugs = new Set<string>();
+    for (const cat of product.priceCategories) {
+      const slug = normalizeInventorySyncSlug(cat?.inventorySyncSlug);
+      if (slug) slugs.add(slug);
+    }
+    for (const state of liveStates) {
+      const slug = normalizeInventorySyncSlug(state.inventorySyncSlug);
+      if (slug && slugs.has(slug)) {
+        shared.inventoryRemaining += Math.max(0, Number(state.inventoryRemaining) || 0);
+        shared.totalInventory += Math.max(0, Number(state.totalInventory) || 0);
+      }
+    }
+  }
+
+  const hasBase = base !== null;
+  const hasShared = shared.inventoryRemaining > 0 || shared.totalInventory > 0;
+  if (!hasBase && !hasShared) return null;
+  return {
+    inventoryRemaining: (base?.inventoryRemaining ?? 0) + shared.inventoryRemaining,
+    totalInventory: (base?.totalInventory ?? 0) + shared.totalInventory,
+  };
 }
 
 function normalizeWinners(value: unknown, fallback = 1): number {
@@ -219,11 +269,23 @@ function normalizeWinners(value: unknown, fallback = 1): number {
 
 export async function getOrSeedLiveState(
   redis: StorageClient,
-  product: { id: string; name: string; slug: string; maxRaffleAllocationLimit: number; totalInventory?: number; inventoryPerSize?: Record<string, number> },
+  product: {
+    id: string;
+    name: string;
+    slug: string;
+    maxRaffleAllocationLimit: number;
+    totalInventory?: number;
+    inventoryPerSize?: Record<string, number>;
+    priceCategories?: Array<{ size?: string; inventorySyncSlug?: string }>;
+  },
   size: string,
   winnersPerDraw: number,
 ): Promise<LiveStateRecord> {
-  const field = liveStateField(product.id, product.slug, size);
+  // A size that opts into a shared-inventory slug reads/writes one pool with
+  // every other size carrying the same slug (across products). Otherwise it is
+  // its own independent live state.
+  const syncSlug = resolveInventorySyncSlug(product, size);
+  const field = syncSlug ? sharedInventoryField(syncSlug) : liveStateField(product.id, product.slug, size);
   const raw = await redis.hget(LIVE_STATE_KEY, field);
   const existing = safeParseRedisItem<LiveStateRecord>(raw);
   // Per-size inventory wins when the operator set it in /admin (2 different
@@ -248,14 +310,15 @@ export async function getOrSeedLiveState(
     if (expectedSeed > 0 && storedTotal === 0 && storedRemaining === 0 && noActivity) {
       const healed: LiveStateRecord = {
         ...existing,
-        sourceProductId: existing.sourceProductId || String(product.id || ''),
+        sourceProductId: syncSlug ? '' : (existing.sourceProductId || String(product.id || '')),
         productName: existing.productName || product.name,
-        slug: existing.slug || product.slug,
+        slug: syncSlug ? '' : (existing.slug || product.slug),
         size,
         isActive: true,
         totalInventory: expectedSeed,
         inventoryRemaining: expectedSeed,
         winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
+        inventorySyncSlug: syncSlug || existing.inventorySyncSlug,
       };
       await redis.hset(LIVE_STATE_KEY, { [field]: JSON.stringify(healed) });
       return healed;
@@ -263,11 +326,12 @@ export async function getOrSeedLiveState(
 
     return {
       ...existing,
-      sourceProductId: existing.sourceProductId || String(product.id || ''),
+      sourceProductId: syncSlug ? '' : (existing.sourceProductId || String(product.id || '')),
       productName: existing.productName || product.name,
-      slug: existing.slug || product.slug,
+      slug: syncSlug ? '' : (existing.slug || product.slug),
       size,
       winnersPerDraw: normalizeWinners(existing.winnersPerDraw, winnersPerDraw),
+      inventorySyncSlug: syncSlug || existing.inventorySyncSlug,
     };
   }
   // Live inventory mirrors the product's real stock. FCFS products keep
@@ -278,9 +342,9 @@ export async function getOrSeedLiveState(
   const seedInventory = raffleLimit > 0 ? raffleLimit : stock;
   const seed: LiveStateRecord = {
     productId: field,
-    sourceProductId: String(product.id || ''),
-    productName: product.name,
-    slug: product.slug,
+    sourceProductId: syncSlug ? '' : String(product.id || ''),
+    productName: syncSlug ? '' : product.name,
+    slug: syncSlug ? '' : product.slug,
     size,
     isActive: true,
     totalInventory: seedInventory,
@@ -288,6 +352,7 @@ export async function getOrSeedLiveState(
     winnersPerDraw: normalizeWinners(winnersPerDraw, 1),
     drawsCompleted: 0,
     salesCompleted: 0,
+    inventorySyncSlug: syncSlug || undefined,
   };
   await redis.hset(LIVE_STATE_KEY, { [field]: JSON.stringify(seed) });
   return seed;
@@ -296,7 +361,11 @@ export async function getOrSeedLiveState(
 export async function saveLiveState(redis: StorageClient, state: LiveStateRecord) {
   const normalized: LiveStateRecord = {
     ...state,
-    sourceProductId: String(state.sourceProductId || resolveLiveStateSourceProductId(state) || ''),
+    // Shared inventory pools must never be attributed to a single product —
+    // keep their source id empty so they stay cross-product.
+    sourceProductId: state.inventorySyncSlug
+      ? ''
+      : String(state.sourceProductId || resolveLiveStateSourceProductId(state) || ''),
     winnersPerDraw: normalizeWinners(state.winnersPerDraw, 1),
     inventoryRemaining: Math.max(0, Number(state.inventoryRemaining) || 0),
     totalInventory: Math.max(0, Number(state.totalInventory) || 0),
@@ -344,7 +413,15 @@ export async function getLiveProductState(redis: StorageClient, productOrId: any
       if (fourth.slug) slug = String(fourth.slug);
     }
   }
-  const state = await getOrSeedLiveState(redis, { id, name, slug, maxRaffleAllocationLimit: seedInv, totalInventory: seedInv, inventoryPerSize: (productOrId && typeof productOrId === 'object' ? productOrId.inventoryPerSize : undefined) }, size, winners);
+  const state = await getOrSeedLiveState(redis, {
+    id,
+    name,
+    slug,
+    maxRaffleAllocationLimit: seedInv,
+    totalInventory: seedInv,
+    inventoryPerSize: (productOrId && typeof productOrId === 'object' ? productOrId.inventoryPerSize : undefined),
+    priceCategories: (productOrId && typeof productOrId === 'object' && Array.isArray(productOrId.priceCategories) ? productOrId.priceCategories : undefined),
+  }, size, winners);
   if (!isActive) { state.isActive = false; await saveLiveState(redis, state); }
   return state;
 }
@@ -854,6 +931,10 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
   if (Number.isFinite(maxPerEmail) && maxPerEmail >= 1) out.maxPerEmail = Math.floor(maxPerEmail);
   if (Number.isFinite(maxPerCart) && maxPerCart >= 1) out.maxPerCart = Math.floor(maxPerCart);
   if (Number.isFinite(maxRaffleAllocationLimit) && maxRaffleAllocationLimit >= 0) out.maxRaffleAllocationLimit = Math.floor(maxRaffleAllocationLimit);
+  // Preserve the optional shared-inventory sync slug so `loadProducts` (admin
+  // list + auto-draw + catalog status) still resolves a size's shared pool.
+  const syncSlug = normalizeInventorySyncSlug(category?.inventorySyncSlug);
+  if (syncSlug) out.inventorySyncSlug = syncSlug;
   return out;
 }
 

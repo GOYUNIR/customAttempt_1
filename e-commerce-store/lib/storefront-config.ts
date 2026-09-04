@@ -49,7 +49,7 @@ export interface StorefrontProduct {
   price100ml?: number;
   stripeId50ml?: string;
   stripeId100ml?: string;
-  priceCategories?: Array<{ size: string; price: number; stripeId?: string; winnerTiers?: string | number[] }>;
+  priceCategories?: Array<{ size: string; price: number; stripeId?: string; winnerTiers?: string | number[]; checkoutMode?: 'RAFFLE' | 'FCFS'; inventorySyncSlug?: string }>;
   maxRaffleAllocationLimit: number;
   isActive?: boolean;
   isArchived?: boolean;
@@ -736,7 +736,7 @@ export function isConfiguredPrice(price: unknown): boolean {
 // implementation lives in lib/checkout-mode.ts (self-contained for the node
 // test runner); this re-export keeps every existing `@/lib/storefront-config`
 // import working.
-export { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits } from './checkout-mode';
+export { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from './checkout-mode';
 
 export function getProductPrice(product: StorefrontProduct, size: string): number {
   const category = findPriceCategory(product, size);

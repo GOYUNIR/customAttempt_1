@@ -375,6 +375,28 @@ function normalizeWinnerTiersCsv(value: string): string {
   return nums.length > 0 ? nums.join(',') : '1';
 }
 
+/** Effective sale mode for ONE size: its own override wins, otherwise the
+ *  product-level checkout mode decides (RAFFLE is the default). */
+function effectiveSizeCheckoutMode(product: any, cat: any): 'RAFFLE' | 'FCFS' {
+  const mode = String(cat?.checkoutMode || '').trim().toUpperCase();
+  if (mode === 'FCFS') return 'FCFS';
+  if (mode === 'RAFFLE') return 'RAFFLE';
+  return product?.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+}
+
+/** FCFS sizes are never drawn, so a "Winners / draw" value on them is
+ *  meaningless. Strip it so that invalid state can never even exist — the
+ *  "winners on FCFS" sanity warning becomes impossible, not just flagged. */
+function stripWinnerTiersForFcfs(categories: any[], productCheckoutMode: string): any[] {
+  return (categories || []).map((cat: any) => {
+    const effective = effectiveSizeCheckoutMode({ checkoutMode: productCheckoutMode }, cat);
+    if (effective !== 'FCFS') return cat;
+    const out = { ...cat };
+    delete out.winnerTiers;
+    return out;
+  });
+}
+
 /** Sampler credit helpers: the admin edits dollars, storage keeps cents. */
 const samplerCentsToDollars = (cents: number | null | undefined): string =>
   cents === null || cents === undefined ? '' : String(Number(cents) / 100);
@@ -1337,8 +1359,11 @@ export default function AdminPortal() {
   // Mandatory customer signup email verification (2FA). Stored under
   // store:config.requireSignup2FA. Defaults to ON (secure).
   const [requireSignup2FA, setRequireSignup2FA] = useState(true);
-  // AI settings assistant (Settings tab) — natural-language toggles bounded by
-  // /api/admin/ai-settings' allowlist.
+  // Admin Portal Helper (top-of-portal AI) input + busy/message state. The
+  // helper has two permission modes — 'inquiry' (tell-only) and 'edit'
+  // (propose bounded changes, explicit confirm to apply) — and is the single
+  // AI surface in the portal, so the settings-only assistant was removed as
+  // redundant.
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiAssistantBusy, setAiAssistantBusy] = useState(false);
   const [aiAssistantMsg, setAiAssistantMsg] = useState('');
@@ -1742,6 +1767,10 @@ export default function AdminPortal() {
       if (typeof d.deliveryIncentiveCodePrefix === 'string') fresh.deliveryIncentiveCodePrefix = d.deliveryIncentiveCodePrefix;
     }
 
+    // A size that resolves to FCFS is never drawn — strip any winners so the
+    // new-product form can't start in the invalid "winners on FCFS" state.
+    fresh.priceCategories = stripWinnerTiersForFcfs(fresh.priceCategories, fresh.checkoutMode);
+
     setProductForm(fresh);
     setProductFormSnapshot(JSON.stringify(fresh));
     setEditingProduct(null);
@@ -1829,6 +1858,9 @@ export default function AdminPortal() {
       // Ensure default hidden if new
       isActive: product.isActive !== undefined ? product.isActive : false,
     };
+    // FCFS sizes are never drawn — drop any inherited "Winners / draw" so the
+    // editor can't display (and the server can't save) that invalid combo.
+    form.priceCategories = stripWinnerTiersForFcfs(form.priceCategories, form.checkoutMode);
     setProductForm(form);
     setProductFormSnapshot(JSON.stringify(form));
     setShowProductForm(true);
@@ -1858,6 +1890,10 @@ export default function AdminPortal() {
       categories: Array.isArray(product.categories) ? product.categories : [],
       inventoryPerSize: product.inventoryPerSize && typeof product.inventoryPerSize === 'object' ? product.inventoryPerSize : {},
     };
+    form.priceCategories = stripWinnerTiersForFcfs(
+      Array.isArray(product.priceCategories) ? product.priceCategories : [],
+      String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE',
+    );
     setEditingProduct(null);
     setProductForm(form);
     setProductFormSnapshot(JSON.stringify(form));
@@ -1900,6 +1936,13 @@ export default function AdminPortal() {
       const updated = [...prev.priceCategories];
       const previousSize = String(updated[index]?.size || '').trim();
       updated[index] = { ...updated[index], [field]: value };
+      // FCFS sizes are never drawn — when a size switches to FCFS (or back to
+      // "follow product" on an FCFS product), drop its winners so the invalid
+      // "winners on FCFS" state can never be created in the editor.
+      if (field === 'checkoutMode') {
+        const effective = effectiveSizeCheckoutMode(prev, updated[index]);
+        if (effective === 'FCFS') delete updated[index].winnerTiers;
+      }
       // Keep sampler records attached when a sampler size is renamed, and point
       // any "credits toward" target at the new name if it referenced this size.
       if (field === 'size') {
@@ -3031,32 +3074,6 @@ export default function AdminPortal() {
       setSettingsMsg('Connection failed: ' + err.message);
     }
     setSettingsSaving(false);
-  };
-
-  // Run a natural-language setting change through the bounded AI assistant, then
-  // re-sync the local settings state so the toggles reflect what changed.
-  const runAiSettings = async () => {
-    if (!aiInstruction.trim()) return;
-    setAiAssistantBusy(true);
-    setAiAssistantMsg('');
-    try {
-      const res = await adminFetch('/api/admin/ai-settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, instruction: aiInstruction.trim() }),
-      });
-      const data = await readAdminJson(res);
-      if (res.ok && data?.ok) {
-        setAiAssistantMsg(data.message || 'Done.');
-        setAiInstruction('');
-        showToast('AI · Settings updated');
-        await fetchSettings();
-      } else {
-        setAiAssistantMsg(data?.error || 'The AI assistant could not apply that.');
-      }
-    } catch (err: any) {
-      setAiAssistantMsg('Connection failed: ' + (err?.message || err));
-    }
-    setAiAssistantBusy(false);
   };
 
   // Admin Portal Helper — run an inquiry (tell-only) or edit (propose) request.
@@ -4584,7 +4601,14 @@ export default function AdminPortal() {
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Checkout Mode</label>
-                    <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => ({ ...p, checkoutMode: e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE' }))} style={inputStyle}>
+                    <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => {
+                      const checkoutMode = e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE';
+                      // Switching the product to FCFS makes "follow product" sizes
+                      // instant-buy — strip their winners so that invalid state
+                      // can't exist.
+                      const priceCategories = stripWinnerTiersForFcfs(p.priceCategories, checkoutMode);
+                      return { ...p, checkoutMode, priceCategories };
+                    })} style={inputStyle}>
                       <option value="RAFFLE">RAFFLE — draw winners when the countdown ends</option>
                       <option value="FCFS">FCFS — first come, first served</option>
                     </select>
@@ -4779,7 +4803,7 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-sizes" collapsible
                   title="Pricing, Sizes & Inventory"
-                  description="Define each size/variant as its own item — price, Stripe ID, its own stock (Units), its own purchase limits (max/email, max/cart, raffle cap), winner tiers and its own raffle timer. “Winners / draw” is a CSV like 3,2,2 = 3 winners on draw 1, 2 on draw 2, etc. Product-level defaults (fallback) live in the collapsed panel below."
+                  description="Each row is one sellable item: name, price, Stripe ID and its own stock. RAFFLE items draw winners; FCFS items sell instantly. “Winners / draw” is a CSV (3,2,2 = 3 on draw 1, 2 on draw 2…). Optionally give items the same sync slug to share one stock pool."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
                 >
                   {productForm.priceCategories.map((cat: any, idx: number) => {
@@ -4834,6 +4858,14 @@ export default function AdminPortal() {
                         value={cat.stripeId}
                         onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
                         style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Sync slug (optional)"
+                        title="Optional shared-stock key. Give two or more items the SAME slug to draw from one shared inventory pool — e.g. the same physical SKU listed twice. Leave blank for this item to keep its own independent stock."
+                        value={cat.inventorySyncSlug || ''}
+                        onChange={(e) => updatePriceCategory(idx, 'inventorySyncSlug', e.target.value)}
+                        style={{ ...inputStyle, width: 132, padding: 6, fontSize: 10, color: cat.inventorySyncSlug ? '#7dd3fc' : undefined }}
                       />
                       </div>
                       {/* Row 1b — per-item limits. Each size is its own item, so
@@ -4932,7 +4964,7 @@ export default function AdminPortal() {
                             {(() => {
                               const tiers = Array.isArray(cat.winnerTiers) ? cat.winnerTiers : String(cat.winnerTiers ?? '').split(',').map((t) => t.trim()).filter(Boolean);
                               const firstTier = Number(tiers?.[0]) > 0 ? Number(tiers[0]) : null;
-                              return firstTier ? <>draws <strong style={{ color: '#d4d4d8' }}>{firstTier}</strong> winner{firstTier === 1 ? '' : 's'} on draw 1</> : <>winner count set below</>;
+                              return firstTier ? <>draws <strong style={{ color: '#d4d4d8' }}>{firstTier}</strong> winner{firstTier === 1 ? '' : 's'} on draw 1</> : <>set a winner count</>;
                             })()}
                             {sizeHasOwnConfig ? ' · owns its timer' : ' · inherits product timer'}
                           </>
@@ -7640,27 +7672,6 @@ export default function AdminPortal() {
                   />
                   <span style={{ fontSize: 10, color: '#666' }}>Leave empty for the default copy. You can also use {`{giftPercent}`} to insert the gift-discount percentage.</span>
                 </label>
-              </div>
-
-              <h4 style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>AI Settings Assistant</h4>
-              <div style={{ padding: 12, borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid #2a2a30', marginBottom: 8 }}>
-                <p style={{ fontSize: 10.5, color: '#888', margin: '0 0 8px', lineHeight: 1.5 }}>
-                  Describe a setting change in plain English (e.g. “turn off signup email verification” or “hide the social-proof caption”) and the AI applies it. Only the toggles listed below are changeable — anything else is refused.
-                </p>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    value={aiInstruction}
-                    onChange={(e) => setAiInstruction(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runAiSettings(); } }}
-                    placeholder="e.g. Turn off signup email verification"
-                    style={{ ...inputStyle, flex: 1, minWidth: 220 }}
-                  />
-                  <button onClick={runAiSettings} style={buttonPrimary} disabled={aiAssistantBusy || !aiInstruction.trim()}>
-                    {aiAssistantBusy ? 'Applying…' : 'Apply with AI'}
-                  </button>
-                </div>
-                {aiAssistantMsg && <p style={{ fontSize: 11, color: aiAssistantMsg.startsWith('Updated') ? '#34d399' : '#fca5a5', margin: '8px 0 0' }}>{aiAssistantMsg}</p>}
               </div>
 
               <h4 id="settings-gallery" style={{ fontSize: 11, color: '#aaa', margin: '16px 0 8px', textTransform: 'uppercase' }}>Product Gallery</h4>
