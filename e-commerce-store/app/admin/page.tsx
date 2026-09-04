@@ -229,44 +229,46 @@ function Pill({ children, color = '#a1a1aa', background = 'rgba(161,161,170,0.12
   );
 }
 
-/** Quick-jump targets for the product editor form (id → pill label). Each id
- *  is set on the matching SectionCard so the operator can hop straight to the
- *  section they need instead of scrolling the whole form. */
-const PRODUCT_FORM_SECTIONS: [string, string][] = [
-  ['pf-basics', 'Basics'],
-  ['pf-media', 'Media'],
-  ['pf-sizes', 'Pricing & sizes'],
-  ['pf-copy', 'Copy'],
-  ['pf-schedule', 'Schedule'],
-  ['pf-soldout', 'Sold-out'],
-  ['pf-trial', 'Trial sizes'],
-  ['pf-notes', 'Notes'],
+/** The four focused tabs of the product editor. Replaces the old monolithic
+ *  scroll + sticky quick-jump nav — each tab groups related controls so an
+ *  operator works on one concern at a time. */
+const PRODUCT_TABS: { id: string; label: string; icon: string; hint: string }[] = [
+  { id: 'catalog', label: 'Core Catalog & Media', icon: '🖼', hint: 'Title, slug, category, description + CDN uploader' },
+  { id: 'variants', label: 'Variants & Shared Inventory', icon: '🧮', hint: 'Sizes, prices, Stripe IDs, units, shared stock' },
+  { id: 'drop', label: 'Drop & Purchase Rules', icon: '🎟', hint: 'Checkout mode, drop timing, raffle rules' },
+  { id: 'marketing', label: 'Marketing & Storytelling', icon: '✨', hint: 'Story cards + storefront copy overrides' },
 ];
 
-/** Map a sanity-issue `code` to the product-form section it lives in, so the
- *  sticky section nav can surface exactly where a problem is instead of making
- *  the operator hunt through the whole form. '' = not section-specific. */
-function sectionForSanityCode(code: string): string {
+/** Map a sanity-issue `code` to the product-editor TAB it lives in, so the tab
+ *  nav can surface exactly where a problem is. '' = not tab-specific. */
+function tabForSanityCode(code: string): string {
   if (
-    ['no_sizes', 'duplicate_size', 'empty_price', 'winners_on_fcfs', 'raffle_oversell', 'no_stripe', 'inventory_stale_keys', 'inventory_mismatch', 'max_per_email_over_inventory', 'no_inventory'].includes(code)
-  ) return 'pf-sizes';
-  if (['sampler_no_markers', 'sampler_arbitrage', 'sampler_free_full', 'sampler_min_order_low', 'sampler_stale_target'].includes(code)) return 'pf-trial';
-  if (['go_live_after_end', 'released_in_past'].includes(code)) return 'pf-schedule';
+    ['no_sizes', 'duplicate_size', 'empty_price', 'no_stripe', 'inventory_stale_keys', 'inventory_mismatch', 'max_per_email_over_inventory', 'no_inventory'].includes(code)
+  ) return 'variants';
+  if (['sampler_no_markers', 'sampler_arbitrage', 'sampler_free_full', 'sampler_min_order_low', 'sampler_stale_target'].includes(code)) return 'variants';
+  if (['winners_on_fcfs', 'raffle_oversell', 'go_live_after_end', 'released_in_past'].includes(code)) return 'drop';
   return '';
 }
 
-/** True when a section has its essential content, so the nav can show a subtle
- *  ✓ instead of only error badges. Pure + cheap (runs on every keystroke). */
-function isSectionComplete(id: string, p: any): boolean {
+/** True when a tab has its essential content, so the nav can show a subtle ✓. */
+function isTabComplete(id: string, p: any): boolean {
   switch (id) {
-    case 'pf-basics': return Boolean(String(p?.name || '').trim());
-    case 'pf-media': return Array.isArray(p?.images) && p.images.length > 0;
-    case 'pf-sizes': return Array.isArray(p?.priceCategories) && p.priceCategories.length > 0 && p.priceCategories.some((c: any) => Number(c?.price) > 0);
-    case 'pf-schedule': return Boolean(p?.goLiveAt || p?.releaseEndsAt || p?.customDropSchedule);
-    case 'pf-trial': return p?.deliveryIncentiveEnabled !== true || (Array.isArray(p?.samplerSizes) && p.samplerSizes.length > 0);
-    case 'pf-notes': return Array.isArray(p?.notes) && p.notes.length > 0;
+    case 'catalog': return Boolean(String(p?.name || '').trim()) && Array.isArray(p?.images) && p.images.length > 0;
+    case 'variants': return Array.isArray(p?.priceCategories) && p.priceCategories.length > 0 && p.priceCategories.some((c: any) => Number(c?.price) > 0);
     default: return false;
   }
+}
+
+/** Whether a saved product carries any storefront-copy override — used to seed
+ *  the "Override Storefront Copy" toggle on open. */
+function productOverridesStorefrontCopy(product: any): boolean {
+  return Boolean(
+    (product?.urgencyInStock && String(product.urgencyInStock).trim()) ||
+    (product?.urgencySoldOut && String(product.urgencySoldOut).trim()) ||
+    (product?.statusLive && String(product.statusLive).trim()) ||
+    (product?.statusArchived && String(product.statusArchived).trim()) ||
+    (product?.mixedFormatRibbon && String(product.mixedFormatRibbon).trim()),
+  );
 }
 
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
@@ -1335,9 +1337,13 @@ export default function AdminPortal() {
   const [dragActive, setDragActive] = useState(false);
   // Which gallery media's crop editor is expanded (null = none).
   const [cropEditorIdx, setCropEditorIdx] = useState<number | null>(null);
-  // Which product-form section is currently in view (drives the sticky nav's
-  // active pill) — set by an IntersectionObserver while the editor is open.
-  const [activeProductSection, setActiveProductSection] = useState<string>('pf-basics');
+  // Which of the four product-editor tabs is open. Replaces the old monolithic
+  // scroll + sticky quick-jump nav — each tab is a focused slice of the form.
+  const [activeProductTab, setActiveProductTab] = useState<string>('catalog');
+  // Explicit "override the global default" switch for storefront copy. OFF keeps
+  // global inheritance clean (no product-level copy written); ON reveals the
+  // per-product copy editor.
+  const [overrideStorefrontCopy, setOverrideStorefrontCopy] = useState<boolean>(false);
   // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -1781,6 +1787,8 @@ export default function AdminPortal() {
     setEditingNoteIdx(null);
     setNoteForm({ label: '', name: '', text: '' });
     setImageInput('');
+    setActiveProductTab('catalog');
+    setOverrideStorefrontCopy(false);
   };
 
   const editProduct = (product: any) => {
@@ -1865,6 +1873,8 @@ export default function AdminPortal() {
     // FCFS sizes are never drawn — drop any inherited "Winners / draw" so the
     // editor can't display (and the server can't save) that invalid combo.
     form.priceCategories = stripWinnerTiersForFcfs(form.priceCategories, form.checkoutMode);
+    setActiveProductTab('catalog');
+    setOverrideStorefrontCopy(productOverridesStorefrontCopy(product));
     setProductForm(form);
     setProductFormSnapshot(JSON.stringify(form));
     setShowProductForm(true);
@@ -1899,6 +1909,8 @@ export default function AdminPortal() {
       String(product.checkoutMode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE',
     );
     setEditingProduct(null);
+    setActiveProductTab('catalog');
+    setOverrideStorefrontCopy(productOverridesStorefrontCopy(product));
     setProductForm(form);
     setProductFormSnapshot(JSON.stringify(form));
     setShowProductForm(true);
@@ -2176,47 +2188,33 @@ export default function AdminPortal() {
   );
   const blockingCount = productIssues.filter((i) => i.severity === 'error').length;
   const warningCount = productIssues.filter((i) => i.severity === 'warning').length;
+  // Whether ANY size resolves to RAFFLE (per-size override wins, else the
+  // product-level mode). Drives the FCFS "purge & disable": a product with no
+  // raffle sizes hides every raffle-specific control (drop timers, raffle caps,
+  // winner tiers) so it can't hold dead state.
+  const hasRaffleSize = useMemo(
+    () => Array.isArray(productForm.priceCategories) && productForm.priceCategories.some((c: any) => effectiveSizeCheckoutMode(productForm, c) === 'RAFFLE'),
+    [productForm],
+  );
   const rewardsIssues: SanityIssue[] = useMemo(
     () => sortSanityIssues(checkRewardsSanity(rewardsSettings)),
     [rewardsSettings],
   );
 
-  // Per-section issue tallies for the sticky product-form nav (error = blocking
-  // red, warning = amber). The same live `productIssues` list that powers the
-  // "Math & health check" panel is bucketed by section so the operator can see
-  // WHERE to scroll without reading every issue first.
-  const sectionIssueCounts = useMemo(() => {
+  // Per-tab issue tallies for the 4-tab product editor (error = blocking red,
+  // warning = amber). Bucketed by tab so the operator sees WHERE a problem is
+  // without reading every issue first.
+  const tabIssueCounts = useMemo(() => {
     const counts: Record<string, { error: number; warning: number }> = {};
     for (const issue of productIssues) {
-      const sec = sectionForSanityCode(issue.code);
-      if (!sec) continue;
-      counts[sec] = counts[sec] || { error: 0, warning: 0 };
-      if (issue.severity === 'error') counts[sec].error += 1;
-      else if (issue.severity === 'warning') counts[sec].warning += 1;
+      const tab = tabForSanityCode(issue.code);
+      if (!tab) continue;
+      counts[tab] = counts[tab] || { error: 0, warning: 0 };
+      if (issue.severity === 'error') counts[tab].error += 1;
+      else if (issue.severity === 'warning') counts[tab].warning += 1;
     }
     return counts;
   }, [productIssues]);
-
-  // Track the section currently in view while the product editor is open so the
-  // sticky nav can highlight it. Re-observes whenever the editor opens or the
-  // product being edited changes (sections re-render under a new tree).
-  useEffect(() => {
-    if (!showProductForm) return;
-    const els = PRODUCT_FORM_SECTIONS
-      .map(([id]) => document.getElementById(id))
-      .filter((el): el is HTMLElement => Boolean(el));
-    if (els.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) setActiveProductSection(entry.target.id);
-        }
-      },
-      { rootMargin: '-96px 0px -72% 0px', threshold: 0 },
-    );
-    els.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [showProductForm, editingProduct]);
 
   // Persist the current product form's reusable shape as the DEFAULT template for
   // future products (checkout mode, size template, delivery-incentive defaults).
@@ -4520,22 +4518,20 @@ export default function AdminPortal() {
                   )}
                 </div>
 
-                {/* Sticky section navigator — smarter than a plain pill row: it
-                    highlights the section in view, surfaces live per-section issue
-                    counts (so you see WHERE to fix something without reading every
-                    issue), ticks off completed sections, and jumps straight to the
-                    first problem. Sticky below the fixed storefront header. */}
+                {/* 4-tab navigator — replaces the old monolithic scroll + sticky
+                    quick-jump nav. Each tab is a focused slice of the editor;
+                    per-tab issue counts + ✓ completion mirror the old pills. */}
                 <div style={{ position: 'sticky', top: 92, zIndex: 10, marginBottom: 12, padding: '8px 10px', borderRadius: 14, background: 'rgba(13,13,17,0.96)', border: '1px solid #232329', boxShadow: '0 8px 22px rgba(0,0,0,0.3)', backdropFilter: 'blur(10px)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                     <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: '#71717a' }}>Sections</span>
                     {(() => {
                       const firstIssue = productIssues[0];
                       if (!firstIssue) return null;
-                      const target = sectionForSanityCode(firstIssue.code);
+                      const target = tabForSanityCode(firstIssue.code);
                       if (!target) return null;
                       return (
                         <button
-                          onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          onClick={() => setActiveProductTab(target)}
                           style={{ fontSize: 9.5, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 999, padding: '3px 9px', cursor: 'pointer' }}
                         >
                           ⟶ Fix first issue
@@ -4543,48 +4539,57 @@ export default function AdminPortal() {
                       );
                     })()}
                   </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {PRODUCT_FORM_SECTIONS.map(([id, label]) => {
-                      const counts = sectionIssueCounts[id];
-                      const active = activeProductSection === id;
-                      const done = isSectionComplete(id, productForm);
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                    {PRODUCT_TABS.map((tab) => {
+                      const counts = tabIssueCounts[tab.id];
+                      const active = activeProductTab === tab.id;
+                      const done = isTabComplete(tab.id, productForm);
                       const clean = !counts || (counts.error === 0 && counts.warning === 0);
                       return (
                         <button
-                          key={id}
-                          onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveProductTab(tab.id)}
                           style={{
                             ...buttonGhost,
-                            padding: '4px 9px',
-                            fontSize: 9.5,
-                            borderRadius: 999,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            border: active ? '1px solid rgba(125,211,252,0.6)' : undefined,
-                            background: active ? 'rgba(125,211,252,0.12)' : undefined,
-                            color: active ? '#7dd3fc' : undefined,
+                            padding: '7px 9px',
+                            fontSize: 10,
+                            borderRadius: 10,
+                            textAlign: 'left',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: 3,
+                            border: active ? '1px solid rgba(125,211,252,0.6)' : '1px solid #232329',
+                            background: active ? 'rgba(125,211,252,0.12)' : 'rgba(255,255,255,0.02)',
+                            color: active ? '#7dd3fc' : '#a1a1aa',
                           }}
                         >
-                          {label}
-                          {counts && counts.error > 0 && (
-                            <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(239,68,68,0.18)', color: '#f87171' }}>{counts.error}</span>
-                          )}
-                          {counts && counts.error === 0 && counts.warning > 0 && (
-                            <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>{counts.warning}</span>
-                          )}
-                          {done && clean && (
-                            <span style={{ fontSize: 9, color: '#34d399', fontWeight: 800 }}>✓</span>
-                          )}
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 700 }}>
+                            <span>{tab.icon}</span>
+                            {tab.label}
+                            {counts && counts.error > 0 && (
+                              <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(239,68,68,0.18)', color: '#f87171' }}>{counts.error}</span>
+                            )}
+                            {counts && counts.error === 0 && counts.warning > 0 && (
+                              <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>{counts.warning}</span>
+                            )}
+                            {done && clean && (
+                              <span style={{ fontSize: 9, color: '#34d399', fontWeight: 800 }}>✓</span>
+                            )}
+                          </span>
+                          <span style={{ fontSize: 8.5, color: '#71717a', fontWeight: 500, lineHeight: 1.35 }}>{tab.hint}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* ============ BASICS ============ */}
+                {activeProductTab === 'catalog' && (
+                  <>
+                {/* ============ TAB 1 — CORE CATALOG & MEDIA ============ */}
                 <SectionCard
-                  id="pf-basics" collapsible
+                  id="pf-basics"
                   title="Basics"
                   description="What the product is called, its URL, and how it appears on the storefront. Products start hidden — flip “Active (visible)” on when you are ready to publish."
                 >
@@ -4635,48 +4640,6 @@ export default function AdminPortal() {
                       onChange={(e) => setProductForm((p: any) => ({ ...p, desc: e.target.value }))}
                       style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', resize: 'vertical' }}
                     />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Checkout Mode</label>
-                    <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => {
-                      const checkoutMode = e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE';
-                      // Switching the product to FCFS makes "follow product" sizes
-                      // instant-buy — strip their winners so that invalid state
-                      // can't exist.
-                      const priceCategories = stripWinnerTiersForFcfs(p.priceCategories, checkoutMode);
-                      return { ...p, checkoutMode, priceCategories };
-                    })} style={inputStyle}>
-                      <option value="RAFFLE">RAFFLE — draw winners when the countdown ends</option>
-                      <option value="FCFS">FCFS — first come, first served</option>
-                    </select>
-                    <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                      Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout. <strong>Per-size override:</strong> each size row in Pricing &amp; Sizes has its own mode — leave it on <em>Auto (product)</em> to follow this setting, or mix formats (e.g. sampler = FCFS instant buy, full size = RAFFLE). FCFS sizes are never drawn and charge immediately at checkout.
-                    </div>
-                    {(() => {
-                      const perCat = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
-                      const overrides = perCat.filter((c: any) => String(c?.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(c?.checkoutMode || '').toUpperCase() === 'FCFS');
-                      const raffleOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'RAFFLE').length;
-                      const fcfsOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'FCFS').length;
-                      const productDefault = productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
-                      const autoRaffle = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'RAFFLE').length;
-                      const autoFcfs = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'FCFS').length;
-                      const totalRaffle = raffleOverrides + autoRaffle;
-                      const totalFcfs = fcfsOverrides + autoFcfs;
-                      const mixed = totalRaffle > 0 && totalFcfs > 0;
-                      return (
-                        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
-                          <span style={{ padding: '3px 8px', borderRadius: 999, background: mixed ? 'rgba(168,85,247,0.14)' : (totalRaffle > 0 ? 'rgba(245,158,11,0.14)' : 'rgba(59,130,246,0.14)'), border: mixed ? '1px solid rgba(168,85,247,0.4)' : (totalRaffle > 0 ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(59,130,246,0.4)'), color: mixed ? '#c084fc' : (totalRaffle > 0 ? '#fbbf24' : '#93c5fd'), fontWeight: 700 }}>
-                            {mixed ? 'MIXED FORMAT' : totalRaffle > 0 ? 'RAFFLE' : 'FCFS'}
-                          </span>
-                          <span style={{ color: '#8b95a7' }}>
-                            {totalRaffle > 0 ? <span style={{ color: '#fbbf24' }}>🎟 {totalRaffle} raffle</span> : null}
-                            {totalRaffle > 0 && totalFcfs > 0 ? ' · ' : ''}
-                            {totalFcfs > 0 ? <span style={{ color: '#93c5fd' }}>⚡ {totalFcfs} instant-buy</span> : null}
-                            {overrides.length > 0 ? <span style={{ color: '#555' }}> ({overrides.length} size override{overrides.length === 1 ? '' : 's'})</span> : null}
-                          </span>
-                        </div>
-                      );
-                    })()}
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
@@ -4859,8 +4822,12 @@ export default function AdminPortal() {
                     <span>💡 Uploaded media is stored as data URLs (base64) — for production, consider using cloud storage. The prefix (folder name) is set from the slug.</span>
                   </div>
                 </SectionCard>
+                  </>
+                )}
 
-                {/* ============ PRICING & SIZES ============ */}
+                {activeProductTab === 'variants' && (
+                  <>
+                {/* ============ TAB 2 — VARIANTS & SHARED INVENTORY ============ */}
                 <SectionCard
                   id="pf-sizes" collapsible
                   title="Pricing, Sizes & Inventory"
@@ -5218,9 +5185,11 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 10, color: '#888' }}>Total inventory (units)
                         <input type="number" min={0} value={productForm.totalInventory ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, totalInventory: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
                       </label>
+                      {hasRaffleSize && (
                       <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)
                         <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
                       </label>
+                      )}
                       <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)
                         <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
                       </label>
@@ -5248,13 +5217,40 @@ export default function AdminPortal() {
                     })()}
                   </details>
                 </SectionCard>
+                  </>
+                )}
 
-                {/* ============ CUSTOMER-FACING COPY ============ */}
+                {activeProductTab === 'marketing' && (
+                  <>
+                {/* ============ TAB 4 — STOREFRONT COPY OVERRIDE ============ */}
                 <SectionCard
                   id="pf-copy" collapsible
                   title="Customer-facing copy"
                   description="The exact lines customers read on this product's page. Every field is optional — leave it blank to inherit the global Settings → Storefront copy (which falls back to the built-in default), or write per-product copy here for a product-specific voice."
                 >
+                  <label style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '8px 10px', borderRadius: 10, background: overrideStorefrontCopy ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.02)', border: overrideStorefrontCopy ? '1px solid rgba(125,211,252,0.4)' : '1px solid #232329', marginBottom: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={overrideStorefrontCopy}
+                      onChange={(e) => {
+                        setOverrideStorefrontCopy(e.target.checked);
+                        if (!e.target.checked) {
+                          setProductForm((p: any) => ({
+                            ...p,
+                            urgencyInStock: '', urgencySoldOut: '', statusLive: '', statusArchived: '', mixedFormatRibbon: '',
+                            showUrgencyLine: true, showStatusLine: true, showNotesSection: true, showMixedRibbon: true,
+                          }));
+                        }
+                      }}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span>
+                      <strong style={{ display: 'block', fontSize: 11.5, color: '#e5e7eb' }}>Override Storefront Copy</strong>
+                      <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = inherit the site-wide Settings → Storefront copy (clean global default). ON = write product-specific lines below.</span>
+                    </span>
+                  </label>
+                  {overrideStorefrontCopy && (
+                  <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <label style={{ fontSize: 10, color: '#888' }}>
                       In-stock urgency line (default: “Handmade allocation. Low supply by design.”)
@@ -5342,6 +5338,69 @@ export default function AdminPortal() {
                     Type Enter for a real line break — the storefront renders these lines with <code>white-space: pre-line</code>. These five lines are the
                     same ones editable site-wide in Settings → Storefront copy; a value here wins for THIS product only.
                   </div>
+                  </>
+                  )}
+                  {!overrideStorefrontCopy && (
+                    <div style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5, padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px dashed #2a2a31' }}>
+                      This product inherits the site-wide <strong style={{ color: '#aab6c8' }}>Settings → Storefront copy</strong> (and its built-in defaults). Flip <strong style={{ color: '#7dd3fc' }}>Override Storefront Copy</strong> on to write per-product lines.
+                    </div>
+                  )}
+                </SectionCard>
+                  </>
+                )}
+
+                {activeProductTab === 'drop' && (
+                  <>
+                {/* ============ TAB 3 — DROP & PURCHASE RULES ============ */}
+                <SectionCard
+                  id="pf-checkout"
+                  title="Checkout Mode"
+                  description="The master switch: does this product draw winners (RAFFLE) or sell first-come, first-served (FCFS)? Each size can override this in Variants & Shared Inventory, so one product can mix formats."
+                >
+                  <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => {
+                    const checkoutMode = e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE';
+                    // Switching the product to FCFS makes "follow product" sizes
+                    // instant-buy — strip their winners so that invalid state
+                    // can't exist.
+                    const priceCategories = stripWinnerTiersForFcfs(p.priceCategories, checkoutMode);
+                    return { ...p, checkoutMode, priceCategories };
+                  })} style={inputStyle}>
+                    <option value="RAFFLE">RAFFLE — draw winners when the countdown ends</option>
+                    <option value="FCFS">FCFS — first come, first served</option>
+                  </select>
+                  <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
+                    Raffle keeps the release selective. FCFS supports immediate conversion. Upcoming and archived FCFS items can also surface a reserve option so collectors can signal intent without forcing a checkout. <strong>Per-size override:</strong> each size row in Variants &amp; Shared Inventory has its own mode — leave it on <em>Auto (product)</em> to follow this setting, or mix formats (e.g. sampler = FCFS instant buy, full size = RAFFLE). FCFS sizes are never drawn and charge immediately at checkout.
+                  </div>
+                  {(() => {
+                    const perCat = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
+                    const overrides = perCat.filter((c: any) => String(c?.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(c?.checkoutMode || '').toUpperCase() === 'FCFS');
+                    const raffleOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'RAFFLE').length;
+                    const fcfsOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'FCFS').length;
+                    const productDefault = productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+                    const autoRaffle = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'RAFFLE').length;
+                    const autoFcfs = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'FCFS').length;
+                    const totalRaffle = raffleOverrides + autoRaffle;
+                    const totalFcfs = fcfsOverrides + autoFcfs;
+                    const mixed = totalRaffle > 0 && totalFcfs > 0;
+                    return (
+                      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
+                        <span style={{ padding: '3px 8px', borderRadius: 999, background: mixed ? 'rgba(168,85,247,0.14)' : (totalRaffle > 0 ? 'rgba(245,158,11,0.14)' : 'rgba(59,130,246,0.14)'), border: mixed ? '1px solid rgba(168,85,247,0.4)' : (totalRaffle > 0 ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(59,130,246,0.4)'), color: mixed ? '#c084fc' : (totalRaffle > 0 ? '#fbbf24' : '#93c5fd'), fontWeight: 700 }}>
+                          {mixed ? 'MIXED FORMAT' : totalRaffle > 0 ? 'RAFFLE' : 'FCFS'}
+                        </span>
+                        <span style={{ color: '#8b95a7' }}>
+                          {totalRaffle > 0 ? <span style={{ color: '#fbbf24' }}>🎟 {totalRaffle} raffle</span> : null}
+                          {totalRaffle > 0 && totalFcfs > 0 ? ' · ' : ''}
+                          {totalFcfs > 0 ? <span style={{ color: '#93c5fd' }}>⚡ {totalFcfs} instant-buy</span> : null}
+                          {overrides.length > 0 ? <span style={{ color: '#555' }}> ({overrides.length} size override{overrides.length === 1 ? '' : 's'})</span> : null}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {!hasRaffleSize && (
+                    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
+                      ⚡ Fully FCFS — every size sells instantly at checkout. All raffle-specific controls (draw timers, winner tiers, raffle caps) are hidden and disabled below.
+                    </div>
+                  )}
                 </SectionCard>
 
                 {/* ============ DROP SCHEDULE ============ */}
@@ -5355,11 +5414,20 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 10, color: '#888' }}>Go live at (upcoming auto-activates)</label>
                       <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
                     </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at (draw moment)</label>
-                      <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
-                    </div>
+                    {hasRaffleSize && (
+                      <div>
+                        <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at (draw moment)</label>
+                        <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
+                      </div>
+                    )}
                   </div>
+                  {!hasRaffleSize && (
+                    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
+                      ⚡ No raffle sizes — there is no draw countdown or recurring schedule. “Go live at” still controls when the page unlocks.
+                    </div>
+                  )}
+                  {hasRaffleSize && (
+                  <>
                   {/* Live schedule preview — the admin understands what the clock will
                       do so the operator never has to imagine the cadence. */}
                   {(() => {
@@ -5395,7 +5463,7 @@ export default function AdminPortal() {
                       the "new raffle" timer. Leave disabled to inherit the global
                       schedule from Draws → Automation. */}
                   <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                    <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <label style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
                       <input
                         type="checkbox"
                         checked={!!productForm.customDropSchedule}
@@ -5415,8 +5483,12 @@ export default function AdminPortal() {
                               }
                             : null,
                         }))}
+                        style={{ marginTop: 2 }}
                       />
-                      <span>Repeat this raffle on a schedule while inventory remains</span>
+                      <span>
+                        <strong style={{ display: 'block', fontSize: 11.5, color: '#e5e7eb' }}>Override Drop Rules</strong>
+                        <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = inherit the global schedule from Draws → Automation. ON = repeat this raffle on its own cadence while inventory remains.</span>
+                      </span>
                     </label>
                     {productForm.customDropSchedule && (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
@@ -5488,6 +5560,8 @@ export default function AdminPortal() {
                     </div>
                   )}
                 </div>
+                  </>
+                  )}
                 </SectionCard>
 
                 {/* ============ SOLD-OUT BEHAVIOR ============ */}
@@ -5673,8 +5747,12 @@ export default function AdminPortal() {
                     </>
                   )}
                 </SectionCard>
+                  </>
+                )}
 
-                {/* ============ NOTES ============ */}
+                {activeProductTab === 'marketing' && (
+                  <>
+                {/* ============ TAB 4 — STORY CARDS ============ */}
                 <SectionCard
                   id="pf-notes" collapsible
                   title="Notes"
@@ -5699,8 +5777,8 @@ export default function AdminPortal() {
                     {editingNoteIdx !== null && <button onClick={() => { setEditingNoteIdx(null); setNoteForm({ label: '', name: '', text: '' }); }} style={{ ...buttonGhost, padding: '6px 12px', fontSize: 11 }}>Cancel</button>}
                   </div>
                 </SectionCard>
-
-
+                  </>
+                )}
 
                 <div style={{ position: 'sticky', bottom: 12, zIndex: 20, display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 14, background: 'rgba(18,18,22,0.92)', border: '1px solid #2a2a30', boxShadow: '0 8px 28px rgba(0,0,0,0.35)' }}>
                   <button onClick={saveProduct} disabled={productActionLoading || imageUploadBusy} style={{ ...buttonPrimary, margin: 0, opacity: imageUploadBusy ? 0.6 : 1 }}>
