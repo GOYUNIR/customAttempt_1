@@ -157,24 +157,41 @@ function readableOn(bg: string | undefined | null): string {
 
 /** Section wrapper used across the admin — consistent card header + helper
  *  copy so every group (product form, settings) reads like a clean settings
- *  page instead of a wall of inputs. */
-function SectionCard({ title, description, children, action, id }: {
+ *  page instead of a wall of inputs. Pass `collapsible` to give a long group
+ *  (the product editor sections) a ▾/▸ toggle so the form can be collapsed
+ *  down to just the parts the operator is working on. */
+function SectionCard({ title, description, children, action, id, collapsible = false }: {
   title: string;
   description?: string;
   children: React.ReactNode;
   action?: React.ReactNode;
   id?: string;
+  collapsible?: boolean;
 }) {
+  const [open, setOpen] = useState(true);
   return (
     <div id={id} style={{ background: '#0d0d11', border: '1px solid #232329', borderRadius: 14, padding: 14, marginBottom: 12, scrollMarginTop: 96 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: description || action ? 8 : 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: (description || action) && open ? 8 : 0 }}>
         <h5 style={{ fontSize: 11, color: '#e4e4e7', margin: 0, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase' }}>
           {title}
         </h5>
-        {action}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {action}
+          {collapsible && (
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              title={open ? 'Collapse section' : 'Expand section'}
+              style={{ background: 'transparent', border: 'none', color: '#71717a', fontSize: 12, cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+            >
+              {open ? '▾' : '▸'}
+            </button>
+          )}
+        </div>
       </div>
-      {description && <p style={{ fontSize: 10, color: '#8b8b94', margin: '0 0 10px', lineHeight: 1.5 }}>{description}</p>}
-      {children}
+      {open && description && <p style={{ fontSize: 10, color: '#8b8b94', margin: '0 0 10px', lineHeight: 1.5 }}>{description}</p>}
+      {open && children}
     </div>
   );
 }
@@ -216,13 +233,39 @@ function Pill({ children, color = '#a1a1aa', background = 'rgba(161,161,170,0.12
 const PRODUCT_FORM_SECTIONS: [string, string][] = [
   ['pf-basics', 'Basics'],
   ['pf-media', 'Media'],
-  ['pf-sizes', 'Pricing, sizes & inventory'],
+  ['pf-sizes', 'Pricing & sizes'],
   ['pf-copy', 'Copy'],
-  ['pf-schedule', 'Drop schedule'],
+  ['pf-schedule', 'Schedule'],
   ['pf-soldout', 'Sold-out'],
   ['pf-trial', 'Trial sizes'],
   ['pf-notes', 'Notes'],
 ];
+
+/** Map a sanity-issue `code` to the product-form section it lives in, so the
+ *  sticky section nav can surface exactly where a problem is instead of making
+ *  the operator hunt through the whole form. '' = not section-specific. */
+function sectionForSanityCode(code: string): string {
+  if (
+    ['no_sizes', 'duplicate_size', 'empty_price', 'winners_on_fcfs', 'raffle_oversell', 'no_stripe', 'inventory_stale_keys', 'inventory_mismatch', 'max_per_email_over_inventory', 'no_inventory'].includes(code)
+  ) return 'pf-sizes';
+  if (['sampler_no_markers', 'sampler_arbitrage', 'sampler_free_full', 'sampler_min_order_low', 'sampler_stale_target'].includes(code)) return 'pf-trial';
+  if (['go_live_after_end', 'released_in_past'].includes(code)) return 'pf-schedule';
+  return '';
+}
+
+/** True when a section has its essential content, so the nav can show a subtle
+ *  ✓ instead of only error badges. Pure + cheap (runs on every keystroke). */
+function isSectionComplete(id: string, p: any): boolean {
+  switch (id) {
+    case 'pf-basics': return Boolean(String(p?.name || '').trim());
+    case 'pf-media': return Array.isArray(p?.images) && p.images.length > 0;
+    case 'pf-sizes': return Array.isArray(p?.priceCategories) && p.priceCategories.length > 0 && p.priceCategories.some((c: any) => Number(c?.price) > 0);
+    case 'pf-schedule': return Boolean(p?.goLiveAt || p?.releaseEndsAt || p?.customDropSchedule);
+    case 'pf-trial': return p?.deliveryIncentiveEnabled !== true || (Array.isArray(p?.samplerSizes) && p.samplerSizes.length > 0);
+    case 'pf-notes': return Array.isArray(p?.notes) && p.notes.length > 0;
+    default: return false;
+  }
+}
 
 /** Quick-jump targets for the Settings tab (id → pill label). Keeps the long
  *  settings page navigable without hunting through the whole form. */
@@ -1266,6 +1309,9 @@ export default function AdminPortal() {
   const [imageUploadLabel, setImageUploadLabel] = useState('');
   // Which gallery media's crop editor is expanded (null = none).
   const [cropEditorIdx, setCropEditorIdx] = useState<number | null>(null);
+  // Which product-form section is currently in view (drives the sticky nav's
+  // active pill) — set by an IntersectionObserver while the editor is open.
+  const [activeProductSection, setActiveProductSection] = useState<string>('pf-basics');
   // ===== Users state =====
   const [users, setUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -2057,6 +2103,43 @@ export default function AdminPortal() {
     () => sortSanityIssues(checkRewardsSanity(rewardsSettings)),
     [rewardsSettings],
   );
+
+  // Per-section issue tallies for the sticky product-form nav (error = blocking
+  // red, warning = amber). The same live `productIssues` list that powers the
+  // "Math & health check" panel is bucketed by section so the operator can see
+  // WHERE to scroll without reading every issue first.
+  const sectionIssueCounts = useMemo(() => {
+    const counts: Record<string, { error: number; warning: number }> = {};
+    for (const issue of productIssues) {
+      const sec = sectionForSanityCode(issue.code);
+      if (!sec) continue;
+      counts[sec] = counts[sec] || { error: 0, warning: 0 };
+      if (issue.severity === 'error') counts[sec].error += 1;
+      else if (issue.severity === 'warning') counts[sec].warning += 1;
+    }
+    return counts;
+  }, [productIssues]);
+
+  // Track the section currently in view while the product editor is open so the
+  // sticky nav can highlight it. Re-observes whenever the editor opens or the
+  // product being edited changes (sections re-render under a new tree).
+  useEffect(() => {
+    if (!showProductForm) return;
+    const els = PRODUCT_FORM_SECTIONS
+      .map(([id]) => document.getElementById(id))
+      .filter((el): el is HTMLElement => Boolean(el));
+    if (els.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) setActiveProductSection(entry.target.id);
+        }
+      },
+      { rootMargin: '-96px 0px -72% 0px', threshold: 0 },
+    );
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [showProductForm, editingProduct]);
 
   // Persist the current product form's reusable shape as the DEFAULT template for
   // future products (checkout mode, size template, delivery-incentive defaults).
@@ -4383,24 +4466,71 @@ export default function AdminPortal() {
                   )}
                 </div>
 
-                {/* Quick-jump nav so the long product form is navigable. Sticky at
-                    top: 92 (below the fixed storefront header) so the section pills
-                    stay reachable no matter how deep into the form you scroll. */}
-                <div style={{ position: 'sticky', top: 92, zIndex: 10, display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12, padding: '6px 8px', borderRadius: 999, background: 'rgba(13,13,17,0.94)', border: '1px solid #232329', boxShadow: '0 6px 18px rgba(0,0,0,0.25)' }}>
-                  {PRODUCT_FORM_SECTIONS.map(([id, label]) => (
-                    <button
-                      key={id}
-                      onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                      style={{ ...buttonGhost, padding: '4px 10px', fontSize: 9.5, borderRadius: 999 }}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                {/* Sticky section navigator — smarter than a plain pill row: it
+                    highlights the section in view, surfaces live per-section issue
+                    counts (so you see WHERE to fix something without reading every
+                    issue), ticks off completed sections, and jumps straight to the
+                    first problem. Sticky below the fixed storefront header. */}
+                <div style={{ position: 'sticky', top: 92, zIndex: 10, marginBottom: 12, padding: '8px 10px', borderRadius: 14, background: 'rgba(13,13,17,0.96)', border: '1px solid #232329', boxShadow: '0 8px 22px rgba(0,0,0,0.3)', backdropFilter: 'blur(10px)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: '#71717a' }}>Sections</span>
+                    {(() => {
+                      const firstIssue = productIssues[0];
+                      if (!firstIssue) return null;
+                      const target = sectionForSanityCode(firstIssue.code);
+                      if (!target) return null;
+                      return (
+                        <button
+                          onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          style={{ fontSize: 9.5, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 999, padding: '3px 9px', cursor: 'pointer' }}
+                        >
+                          ⟶ Fix first issue
+                        </button>
+                      );
+                    })()}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {PRODUCT_FORM_SECTIONS.map(([id, label]) => {
+                      const counts = sectionIssueCounts[id];
+                      const active = activeProductSection === id;
+                      const done = isSectionComplete(id, productForm);
+                      const clean = !counts || (counts.error === 0 && counts.warning === 0);
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          style={{
+                            ...buttonGhost,
+                            padding: '4px 9px',
+                            fontSize: 9.5,
+                            borderRadius: 999,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            border: active ? '1px solid rgba(125,211,252,0.6)' : undefined,
+                            background: active ? 'rgba(125,211,252,0.12)' : undefined,
+                            color: active ? '#7dd3fc' : undefined,
+                          }}
+                        >
+                          {label}
+                          {counts && counts.error > 0 && (
+                            <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(239,68,68,0.18)', color: '#f87171' }}>{counts.error}</span>
+                          )}
+                          {counts && counts.error === 0 && counts.warning > 0 && (
+                            <span style={{ minWidth: 14, textAlign: 'center', fontSize: 8.5, fontWeight: 800, lineHeight: '14px', padding: '0 4px', borderRadius: 999, background: 'rgba(245,158,11,0.16)', color: '#fbbf24' }}>{counts.warning}</span>
+                          )}
+                          {done && clean && (
+                            <span style={{ fontSize: 9, color: '#34d399', fontWeight: 800 }}>✓</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* ============ BASICS ============ */}
                 <SectionCard
-                  id="pf-basics"
+                  id="pf-basics" collapsible
                   title="Basics"
                   description="What the product is called, its URL, and how it appears on the storefront. Products start hidden — flip “Active (visible)” on when you are ready to publish."
                 >
@@ -4539,7 +4669,7 @@ export default function AdminPortal() {
 
                 {/* ============ MEDIA & GALLERY ============ */}
                 <SectionCard
-                  id="pf-media"
+                  id="pf-media" collapsible
                   title="Gallery & Images"
                   description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
                 >
@@ -4647,7 +4777,7 @@ export default function AdminPortal() {
 
                 {/* ============ PRICING & SIZES ============ */}
                 <SectionCard
-                  id="pf-sizes"
+                  id="pf-sizes" collapsible
                   title="Pricing, Sizes & Inventory"
                   description="Define each size/variant as its own item — price, Stripe ID, its own stock (Units), its own purchase limits (max/email, max/cart, raffle cap), winner tiers and its own raffle timer. “Winners / draw” is a CSV like 3,2,2 = 3 winners on draw 1, 2 on draw 2, etc. Product-level defaults (fallback) live in the collapsed panel below."
                   action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
@@ -5022,7 +5152,7 @@ export default function AdminPortal() {
 
                 {/* ============ CUSTOMER-FACING COPY ============ */}
                 <SectionCard
-                  id="pf-copy"
+                  id="pf-copy" collapsible
                   title="Customer-facing copy"
                   description="The exact lines customers read on this product's page. Every field is optional — leave it blank to inherit the global Settings → Storefront copy (which falls back to the built-in default), or write per-product copy here for a product-specific voice."
                 >
@@ -5117,7 +5247,7 @@ export default function AdminPortal() {
 
                 {/* ============ DROP SCHEDULE ============ */}
                 <SectionCard
-                  id="pf-schedule"
+                  id="pf-schedule" collapsible
                   title="Drop Schedule"
                   description="When the release opens and when each raffle round ends. Upcoming products auto-activate at the go-live moment; the countdown end is when a raffle draws (or a recurring raffle rolls to the next round)."
                 >
@@ -5263,7 +5393,7 @@ export default function AdminPortal() {
 
                 {/* ============ SOLD-OUT BEHAVIOR ============ */}
                 <SectionCard
-                  id="pf-soldout"
+                  id="pf-soldout" collapsible
                   title="Sold-out behavior"
                   description="What happens to the product page when every unit is allocated. “Stay visible” keeps momentum as social proof; archiving moves the release to Past Archives."
                 >
@@ -5284,7 +5414,7 @@ export default function AdminPortal() {
                 </SectionCard>
                 {/* ============ TRIAL SIZES & SAMPLE CREDITS ============ */}
                 <SectionCard
-                  id="pf-trial"
+                  id="pf-trial" collapsible
                   title="Trial sizes &amp; sample credits"
                   description="Mark a size as a sampler (trial SKU) in Pricing &amp; Sizes, then fine-tune how each sampler converts. When a sampler order is marked delivered, the buyer gets a one-time credit code bound to their email — so the full size costs &ldquo;the difference&rdquo;. This is the big-brand try-first pattern: every trial SKU tells its own story, never one generic line."
                 >
@@ -5447,7 +5577,7 @@ export default function AdminPortal() {
 
                 {/* ============ NOTES ============ */}
                 <SectionCard
-                  id="pf-notes"
+                  id="pf-notes" collapsible
                   title="Notes"
                   description="Scrollable story cards on the product page (“Why this drop matters”, “How it works”, …). Label is the small eyebrow, name the heading, text the body."
                 >

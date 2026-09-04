@@ -43,12 +43,84 @@ const MAX_IMAGE_BYTES = 1_000_000;
 const FETCH_TIMEOUT_MS = 4_000;
 const remoteImageCache = new Map<string, { dataUrl: string; expiresAt: number }>();
 
+/** Hostname of the configured site URL ('' when unset). Used to detect a
+ *  SELF-fetch — round-tripping our own public origin through the edge. */
+function siteOrigin(): string {
+  try {
+    const site = getSiteUrl();
+    if (site) return new URL(site).hostname.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
 /**
- * Fetch a remote/relative image and return it as a `data:` URL, or '' on any
- * failure (never throws). Results are cached in-process for 60s so the card
- * route stays fast on warm instances.
+ * True when `url` points at the store's OWN deployed domain. Fetching your own
+ * origin server-side is exactly what Cloudflare's bot protection (and similar
+ * edge WAFs) flag — it answers with a "Cloudflare Ray ID …" managed-challenge
+ * HTML page instead of the image. We must NEVER HTTP-round-trip our own origin.
+ */
+function isSelfOrigin(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const self = siteOrigin();
+    return Boolean(self) && host === self;
+  } catch {
+    return false;
+  }
+}
+
+/** Map a public-file path to an image MIME type; '' for anything non-image. */
+function mimeForPath(p: string): string {
+  const ext = String(p.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    bmp: 'image/bmp',
+    avif: 'image/avif',
+    ico: 'image/x-icon',
+  };
+  return map[ext] || '';
+}
+
+/**
+ * Read a `public/` asset (root-relative path) from the LOCAL filesystem and
+ * return it as a `data:` URL — the correct, challenge-free replacement for
+ * self-fetching `https://self/…`. Only works on the Node runtime (Vercel /
+ * `next dev` / `next start`); on Workers (no `public/` dir) it returns '' so
+ * the card/favicon falls back to text-only instead of self-fetching the edge.
+ */
+async function readPublicFileAsDataUrl(pathname: string): Promise<string> {
+  const rel = String(pathname || '').replace(/^\/+/, '');
+  if (!rel || rel.split('/').some((seg) => seg === '..' || seg === '.')) return '';
+  const mime = mimeForPath(rel);
+  if (!mime) return '';
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const path = await import('node:path');
+    const root = path.resolve(process.cwd(), 'public');
+    const abs = path.join(root, rel);
+    if (!abs.startsWith(root + path.sep)) return ''; // traversal guard
+    const buf = await readFile(abs);
+    if (!buf.byteLength || buf.byteLength > MAX_IMAGE_BYTES) return '';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Fetch a REMOTE image and return it as a `data:` URL, or '' on any failure
+ * (never throws). Results are cached in-process for 60s. Self-origin URLs are
+ * refused here as defense-in-depth — callers must resolve those locally.
  */
 export async function fetchImageAsDataUrl(url: string): Promise<string> {
+  if (isSelfOrigin(url)) return ''; // never self-fetch through our own edge
   const cached = remoteImageCache.get(url);
   if (cached && cached.expiresAt > Date.now()) return cached.dataUrl;
   try {
@@ -75,14 +147,34 @@ export async function fetchImageAsDataUrl(url: string): Promise<string> {
 
 /**
  * Resolve an admin image value to something satori can ALWAYS render:
- * data URLs pass through, remote/relative images are fetched and converted to
- * data URLs, and anything invalid/broken becomes '' (callers fall back to
- * text-only rendering instead of 500ing the route).
+ *   - `data:image/…` passes straight through,
+ *   - root-relative `/images/…` paths are read from the LOCAL `public/` dir
+ *     (never self-fetched through the deployed/Cloudflare URL),
+ *   - absolute URLs are fetched ONLY when they point elsewhere; a same-origin
+ *     absolute URL is resolved from `public/` locally instead,
+ *   - anything invalid/broken becomes '' (callers fall back to text-only).
  */
 export async function resolveBrandImageForSatori(raw: unknown): Promise<string> {
-  const resolved = await resolveBrandImageSource(raw);
-  if (!resolved) return '';
-  if (/^data:image\//i.test(resolved)) return resolved;
-  return fetchImageAsDataUrl(resolved);
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^data:image\//i.test(value)) return value;
+
+  if (value.startsWith('/')) {
+    return readPublicFileAsDataUrl(value);
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    if (isSelfOrigin(value)) {
+      // Same-origin absolute URL — read its public path locally, no self-fetch.
+      try {
+        return readPublicFileAsDataUrl(new URL(value).pathname);
+      } catch {
+        return '';
+      }
+    }
+    return fetchImageAsDataUrl(value);
+  }
+
+  return '';
 }
 
