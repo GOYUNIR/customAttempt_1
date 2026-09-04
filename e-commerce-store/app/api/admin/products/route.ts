@@ -22,10 +22,14 @@ import {
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { resolveDefaultStripePriceId } from '@/services/config/platform-settings';
-import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs, getSizeCheckoutMode, normalizeInventorySyncSlug } from '@/lib/storefront-config';
+import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs, getSizeCheckoutMode } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
 import { checkProductSanity, sortSanityIssues } from '@/lib/product-sanity';
 import { appendAudit } from '@/app/api/admin/audit/route';
+import { normalizeProductStatus, statusFromLegacy, legacyBooleansFromStatus } from '@/lib/product-status';
+import { validatePriceCategories } from '@/lib/price-validation';
+import { bindInventoryPoolToCategories } from '@/lib/inventory-pool';
+import { queryProducts } from '@/lib/product-query';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +109,9 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
   product.isUpcoming = toBool(product.isUpcoming, false);
   if (product.isArchived) product.isUpcoming = false;
   if (product.isUpcoming) product.isArchived = false;
+  // Persist the canonical status enum alongside the legacy booleans so every
+  // read path can resolve state from a single field (and the two never drift).
+  product.status = statusFromLegacy(product);
 
   // Products live ONLY in store:products. No mirror hashes to maintain —
   // active/archived/upcoming are derived by filtering at read time.
@@ -188,9 +195,34 @@ export async function GET(request: Request) {
   if (!includeArchived) {
     products = products.filter((p: any) => !p.isArchived && !p.isUpcoming);
   }
-  // Prefill the product form with the admin-saved default price ID (falls back
-  // to STRIPE_PRODUCT_ID, then the obvious placeholder).
+
+  // ── High-volume mode (opt-in): when `page` is present, run server-side
+  //    pagination + instant fuzzy search + faceted filters so a 10k+ SKU
+  //    catalog is never shipped whole to the admin browser.
   const resolvedDefault = await resolveDefaultStripePriceId().catch(() => '');
+  const pageParam = url.searchParams.get('page');
+
+  if (pageParam !== null) {
+    const result = queryProducts(products, {
+      search: url.searchParams.get('search') || '',
+      status: url.searchParams.get('status') || '',
+      category: url.searchParams.get('category') || '',
+      checkoutMode: url.searchParams.get('checkoutMode') || '',
+      hasInventoryPool: url.searchParams.get('hasInventoryPool') || undefined,
+      page: Number(pageParam) || 1,
+      pageSize: Number(url.searchParams.get('pageSize')) || 25,
+    });
+    return NextResponse.json({
+      products: result.items,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages: result.totalPages,
+      hasMore: result.hasMore,
+      defaultStripePriceId: resolvedDefault || defaultStripePriceId(),
+    });
+  }
+
   return NextResponse.json({ products, defaultStripePriceId: resolvedDefault || defaultStripePriceId() });
 }
 
@@ -449,21 +481,42 @@ export async function POST(request: Request) {
     updatedAt: new Date().toISOString(),
   };
 
+  // ── Status enum (canonical): an explicit `status` in the request wins; else
+  //    derive from the legacy booleans, then project back so the enum and the
+  //    three booleans can never disagree.
+  const requestedStatus = normalizeProductStatus(
+    body.status,
+    statusFromLegacy({ status: existing?.status, isActive: product.isActive, isArchived: product.isArchived, isUpcoming: product.isUpcoming }),
+  );
+  (product as any).status = requestedStatus;
+  const legacyStatus = legacyBooleansFromStatus(requestedStatus);
+  product.isActive = legacyStatus.isActive;
+  product.isArchived = legacyStatus.isArchived;
+  product.isUpcoming = legacyStatus.isUpcoming;
+
   // ── Structural normalization (defense in depth so an invalid config can
   //    NEVER reach production, even if the admin UI misses it):
   //    1. FCFS sizes are never drawn, so any "Winners / draw" on them is
   //       meaningless and stripped (this makes the "winners on FCFS" warning
   //       impossible rather than just flagged).
-  //    2. A shared-inventory sync slug is normalized to a URL-safe token (or
-  //       dropped when blank) so cross-product pools match reliably.
+  //    2. Shared-inventory sync slugs are normalized to URL-safe tokens and
+  //       bound to a canonical `inventoryPoolId` (the write-time bind step).
   product.priceCategories = (Array.isArray(product.priceCategories) ? product.priceCategories : []).map((c: any) => {
     const out = { ...(c || {}) };
     if (getSizeCheckoutMode(product, out.size) === 'FCFS') delete out.winnerTiers;
-    const syncSlug = normalizeInventorySyncSlug(out.inventorySyncSlug);
-    if (syncSlug) out.inventorySyncSlug = syncSlug;
-    else delete out.inventorySyncSlug;
     return out;
   });
+  product.priceCategories = bindInventoryPoolToCategories(product.priceCategories);
+
+  // ── Bulletproof price gate: no sentinel / placeholder / zero / sub-cent
+  //    prices may ever reach the catalog. A 400 lists every offending size.
+  const priceCheck = validatePriceCategories(product.priceCategories);
+  if (!priceCheck.ok) {
+    return NextResponse.json({
+      error: priceCheck.errors[0].error,
+      blocking: priceCheck.errors.map((e) => `${e.size}: ${e.error}`),
+    }, { status: 400 });
+  }
 
   // ── Smart-math gate: the SAME pure engine the admin editor previews. An
   // exploitable/broken product ('error' severity) can NEVER reach production —

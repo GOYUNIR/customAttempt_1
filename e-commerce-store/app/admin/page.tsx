@@ -12,6 +12,8 @@ import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib/storefront-config';
 import { isVideoMedia, pickCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, splitCropEntry, cropEntryFromPair, type MediaCrop, type CropEntry } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
+import { statusFromLegacy, legacyBooleansFromStatus, normalizeProductStatus } from '@/lib/product-status';
+import { validatePrice } from '@/lib/price-validation';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 
@@ -1329,6 +1331,8 @@ export default function AdminPortal() {
   // save the product with a half-finished image list.
   const [imageUploadBusy, setImageUploadBusy] = useState(false);
   const [imageUploadLabel, setImageUploadLabel] = useState('');
+  // True while the operator drags files over the gallery dropzone.
+  const [dragActive, setDragActive] = useState(false);
   // Which gallery media's crop editor is expanded (null = none).
   const [cropEditorIdx, setCropEditorIdx] = useState<number | null>(null);
   // Which product-form section is currently in view (drives the sticky nav's
@@ -2095,9 +2099,39 @@ export default function AdminPortal() {
         const file = fileArray[i];
         setImageUploadLabel(`Uploading ${file.name} (${i + 1}/${fileArray.length})…`);
         const compressed = await compressImageFile(file);
+
+        // ── In-panel CDN path first: get a presigned S3/R2 PUT URL and upload
+        //    directly to object storage, persisting the public URL (no base64).
+        let storedUrl: string | null = null;
+        const slug = String(productForm.slug || '').trim().toLowerCase() || editingProduct;
+        try {
+          const presign = await adminFetch('/api/admin/media/presign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password, filename: compressed.name, contentType: compressed.type || 'application/octet-stream', slug }),
+          });
+          if (presign.ok) {
+            const pdata = await presign.json();
+            const put = await fetch(pdata.uploadUrl, { method: 'PUT', headers: { 'Content-Type': pdata.contentType || compressed.type || 'application/octet-stream' }, body: compressed });
+            if (put.ok) storedUrl = pdata.publicUrl || pdata.objectUrl;
+          }
+        } catch { /* presign unavailable — fall through to the base64 path */ }
+
+        if (storedUrl) {
+          // Keep the crop list aligned with the media list — a new item always
+          // starts at the default (full-image) crop.
+          setProductForm((prev: any) => {
+            const nextImages = [...(prev.images || []), storedUrl as string];
+            const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP)), DEFAULT_CROP];
+            return { ...prev, images: nextImages, crops: nextCrops };
+          });
+          uploaded += 1;
+          continue;
+        }
+
+        // Legacy base64 fallback (object storage not configured): preview first,
+        // then upload — and keep the preview even if the endpoint is blocked.
         const previewUrl = await fileToDataURL(compressed);
-        // Keep the crop list aligned with the media list — a new item always
-        // starts at the default (full-image) crop.
         setProductForm((prev: any) => {
           const nextImages = [...(prev.images || []), previewUrl];
           const nextCrops = [...(Array.isArray(prev.crops) ? prev.crops : prev.images.map(() => DEFAULT_CROP)), DEFAULT_CROP];
@@ -2300,6 +2334,9 @@ export default function AdminPortal() {
         checkoutMode: productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE',
         isRaffle: productForm.checkoutMode !== 'FCFS',
         productType: productForm.checkoutMode === 'FCFS' ? 'fcfs' : 'raffle',
+        // Canonical lifecycle enum (DRAFT | ACTIVE | ARCHIVED) — the legacy
+        // isActive/isArchived/isUpcoming booleans are derived from it server-side.
+        status: statusFromLegacy(productForm),
         maxPerEmail: Math.max(1, Number(productForm.maxPerEmail) || 1),
         maxPerCart: Math.max(1, Number(productForm.maxPerCart) || Number(productForm.maxPerEmail) || 1),
         // Per-size stock (multi-size products keep a separate inventory per size).
@@ -4670,19 +4707,24 @@ export default function AdminPortal() {
                     </div>
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
                       <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="checkbox" checked={productForm.isActive} onChange={(e) => setProductForm((p: any) => ({ ...p, isActive: e.target.checked }))} />
-                        <span title="If checked, product is visible on the storefront (if not hidden by other flags).">Active (visible)</span>
+                        <span style={{ color: '#8b95a7' }}>Status</span>
+                        <select
+                          title="Lifecycle status. Draft = hidden; Active = visible; Archived = past releases. 'Upcoming' is now a Draft product with a future go-live time."
+                          value={statusFromLegacy(productForm)}
+                          onChange={(e) => {
+                            const next = normalizeProductStatus(e.target.value);
+                            setProductForm((p: any) => ({ ...p, status: next, ...legacyBooleansFromStatus(next) }));
+                          }}
+                          style={{ ...inputStyle, width: 168, padding: 6, fontSize: 11 }}
+                        >
+                          <option value="DRAFT">Draft (hidden)</option>
+                          <option value="ACTIVE">Active (visible)</option>
+                          <option value="ARCHIVED">Archived</option>
+                        </select>
                       </label>
-                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="checkbox" checked={productForm.isArchived} onChange={(e) => setProductForm((p: any) => ({ ...p, isArchived: e.target.checked, isUpcoming: e.target.checked ? false : p.isUpcoming }))} />
-                        <span title="Moves to archive section – product remains visible.">Archived</span>
-                      </label>
-                      <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="checkbox" checked={productForm.isUpcoming} onChange={(e) => setProductForm((p: any) => ({ ...p, isUpcoming: e.target.checked, isArchived: e.target.checked ? false : p.isArchived }))} />
-                        <span title="Shows in upcoming section – product remains visible.">Upcoming</span>
-                      </label>
+                      <span style={{ fontSize: 10, color: '#6b7280' }}>Upcoming = Draft with a future go-live time.</span>
                     </div>
                     <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
                       RAFFLE is best for scarcity, list building, and selective access. FCFS is best for immediate conversion. Upcoming builds anticipation with an automatic go-live moment. Archived moves the release to the “Past Archives” section without hiding it.
@@ -4697,6 +4739,25 @@ export default function AdminPortal() {
                   title="Gallery & Images"
                   description="Product photos are swipeable on the product page. Upload images or videos, or paste a media URL — the first item is the cover. Click the crop button on any photo to see exactly how it will be framed on desktop and mobile."
                 >
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+                    onDragLeave={() => setDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragActive(false);
+                      if (e.dataTransfer?.files?.length) handleImageFiles(e.dataTransfer.files);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      marginBottom: 8, padding: '16px 12px', borderRadius: 10,
+                      border: `1px dashed ${dragActive ? '#7dd3fc' : '#2e2e35'}`,
+                      background: dragActive ? 'rgba(125,211,252,0.08)' : 'transparent',
+                      color: '#8b95a7', fontSize: 11, cursor: 'pointer', textAlign: 'center',
+                      transition: 'border-color 0.15s, background 0.15s',
+                    }}
+                  >
+                    🖼 Drag &amp; drop media here — uploads go straight to the CDN (or use the file picker below).
+                  </div>
                   <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
                     <input
                       type="file"
@@ -4835,6 +4896,12 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
                         style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11 }}
                       />
+                      {(() => {
+                        const pv = validatePrice(cat.price);
+                        return pv.ok ? null : (
+                          <span title={pv.error} style={{ fontSize: 9, color: '#f87171', alignSelf: 'center', whiteSpace: 'nowrap' }}>⚠ {pv.error}</span>
+                        );
+                      })()}
                       <input
                         type="number"
                         min={0}
