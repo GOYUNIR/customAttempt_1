@@ -8,10 +8,11 @@ import {
   legacyBooleansFromStatus,
 } from '../lib/product-status.ts';
 
-test('status enum contains exactly DRAFT, ACTIVE, ARCHIVED', () => {
-  assert.deepEqual([...PRODUCT_STATUSES], ['DRAFT', 'ACTIVE', 'ARCHIVED']);
+test('status enum contains exactly DRAFT, ACTIVE, UPCOMING, ARCHIVED', () => {
+  assert.deepEqual([...PRODUCT_STATUSES], ['DRAFT', 'ACTIVE', 'UPCOMING', 'ARCHIVED']);
   assert.equal(isProductStatus('DRAFT'), true);
   assert.equal(isProductStatus('ACTIVE'), true);
+  assert.equal(isProductStatus('UPCOMING'), true);
   assert.equal(isProductStatus('ARCHIVED'), true);
   assert.equal(isProductStatus('LIVE'), false);
   assert.equal(isProductStatus(null), false);
@@ -34,9 +35,9 @@ test('statusFromLegacy: archived is terminal (highest precedence)', () => {
   assert.equal(statusFromLegacy({ isArchived: 'true' }), 'ARCHIVED');
 });
 
-test('statusFromLegacy: upcoming maps to DRAFT (hidden, not live)', () => {
-  assert.equal(statusFromLegacy({ isUpcoming: true }), 'DRAFT');
-  assert.equal(statusFromLegacy({ isUpcoming: true, isActive: true }), 'DRAFT');
+test('statusFromLegacy: upcoming maps to UPCOMING (hidden, scheduled)', () => {
+  assert.equal(statusFromLegacy({ isUpcoming: true }), 'UPCOMING');
+  assert.equal(statusFromLegacy({ isUpcoming: true, isActive: true }), 'UPCOMING');
 });
 
 test('statusFromLegacy: active vs hidden defaults', () => {
@@ -48,5 +49,6 @@ test('statusFromLegacy: active vs hidden defaults', () => {
 test('legacyBooleansFromStatus are mutually exclusive', () => {
   assert.deepEqual(legacyBooleansFromStatus('DRAFT'), { isActive: false, isArchived: false, isUpcoming: false });
   assert.deepEqual(legacyBooleansFromStatus('ACTIVE'), { isActive: true, isArchived: false, isUpcoming: false });
+  assert.deepEqual(legacyBooleansFromStatus('UPCOMING'), { isActive: false, isArchived: false, isUpcoming: true });
   assert.deepEqual(legacyBooleansFromStatus('ARCHIVED'), { isActive: false, isArchived: true, isUpcoming: false });
 });

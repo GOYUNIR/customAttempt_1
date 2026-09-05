@@ -32,6 +32,9 @@ export type SanityIssue = {
   message: string;
   /** Optional longer plain-English explanation + suggested fix. */
   detail?: string;
+  /** Optional DOM id of the exact input this issue points at, so the admin can
+   *  scroll + focus the offending field directly ("Fix first issue"). */
+  fieldId?: string;
 };
 
 /** Parsed winner-tier CSV ("3,2,2") or numeric array → the list of per-draw counts. */
@@ -89,12 +92,14 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
     issues.push({
       severity: 'error',
       code: 'no_sizes',
+      fieldId: 'pf-sizes',
       message: 'Add at least one size with a price.',
       detail: 'A product with no Pricing & Sizes rows cannot be sold or entered. Add a size in Pricing & Sizes.',
     });
   } else {
     const seen = new Map<string, number>();
-    for (const cat of cats) {
+    for (let i = 0; i < cats.length; i++) {
+      const cat = cats[i];
       const size = String(cat?.size || '').trim();
       const key = size.toLowerCase();
       const price = Math.max(0, Number(cat?.price) || 0);
@@ -107,26 +112,29 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
         issues.push({
           severity: 'error',
           code: 'duplicate_size',
+          fieldId: `pf-size-${i}`,
           message: `Duplicate size “${size}” (same as size #${first + 1}).`,
           detail: 'Two sizes with the same label will share one pool and confuse the storefront. Rename one of them.',
         });
       } else {
-        seen.set(key, cats.findIndex((c: any) => String(c?.size || '').trim().toLowerCase() === key) + 1);
+        seen.set(key, i + 1);
       }
 
-      if (price <= 0 || price >= 9999999) {
+      if (price < 0.01 || price >= 9999999) {
         issues.push({
           severity: 'error',
           code: 'empty_price',
+          fieldId: `pf-price-${i}`,
           message: `Size “${size || `#${seen.size}`}” has no real price yet.`,
-          detail: 'A $0 (or placeholder) price lets customers buy/enter for free. Set a real price or remove the size.',
+          detail: 'A $0 (or placeholder) price lets customers buy/enter for free. Set a real price of at least $0.01 or remove the size.',
         });
       }
     }
   }
 
   // ── Draw math: a raffle can never oversell its inventory ─────────────────
-  for (const cat of cats) {
+  for (let i = 0; i < cats.length; i++) {
+    const cat = cats[i];
     const size = String(cat?.size || '').trim();
     if (!size) continue;
     const key = size.toLowerCase();
@@ -138,6 +146,7 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
       issues.push({
         severity: 'warning',
         code: 'winners_on_fcfs',
+        fieldId: `pf-winnerstiers-${i}`,
         message: `Size “${size}” sells instantly (FCFS) but has winners configured.`,
         detail: 'FCFS sizes are never drawn, so the “Winners / draw” value is ignored. Clear it to avoid confusion.',
       });
@@ -152,6 +161,7 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
           issues.push({
             severity: 'error',
             code: 'raffle_oversell',
+            fieldId: `pf-winnerstiers-${i}`,
             message: `Size “${size}” draws ${totalWinners} winners total but only has ${pool} unit${pool === 1 ? '' : 's'} of stock.`,
             detail: `The winner tiers CSV (${parseWinnerTiers(cat?.winnerTiers).join(', ')}) sums to ${totalWinners}, which exceeds the ${pool} available. A raffle can never give away more units than exist — lower the tiers or raise inventory.`,
           });
@@ -159,6 +169,7 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
           issues.push({
             severity: 'error',
             code: 'raffle_oversell',
+            fieldId: `pf-winnerstiers-${i}`,
             message: `Size “${size}” draws ${totalWinners} winners but total inventory is only ${totalInventory}.`,
             detail: 'No per-size stock is set, so the total inventory is the pool. The winners exceed it.',
           });
@@ -277,16 +288,40 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
     issues.push({
       severity: 'error',
       code: 'go_live_after_end',
+      fieldId: 'pf-goliveat',
       message: '“Go live at” is after (or equal to) “Countdown ends at”.',
       detail: 'The release opens after its raffle already ended — it can never go live. Set the countdown end later than go-live.',
     });
   }
+
+  // ── Upcoming lifecycle: a scheduled release must know when to open ────────
+  if (product?.isUpcoming) {
+    if (!Number.isFinite(goLiveMs)) {
+      issues.push({
+        severity: 'error',
+        code: 'upcoming_no_golive',
+        fieldId: 'pf-goliveat',
+        message: 'An Upcoming release needs a “Go live at” time.',
+        detail: 'Upcoming schedules the release to publish automatically. Set “Go live at” so it knows when to open.',
+      });
+    } else if (goLiveMs < now) {
+      issues.push({
+        severity: 'warning',
+        code: 'upcoming_golive_past',
+        fieldId: 'pf-goliveat',
+        message: '“Go live at” is in the past — this release is ready to publish now.',
+        detail: 'Move “Go live at” to the future, or switch the status to Active to publish immediately.',
+      });
+    }
+  }
+
   const hasRecurring = Boolean(product?.customDropSchedule) || Object.values(product?.sizeConfigs || {}).some((cfg: any) => Boolean(cfg?.customDropSchedule));
   const isActive = product?.isActive !== false && !product?.isArchived;
   if (isActive && !product?.isUpcoming && Number.isFinite(releaseEndsMs) && releaseEndsMs < now && !hasRecurring) {
     issues.push({
       severity: 'warning',
       code: 'released_in_past',
+      fieldId: 'pf-releaseends',
       message: '“Countdown ends at” is in the past and there is no recurring schedule.',
       detail: 'The next page load will draw/close this pool immediately. If that was intended (a one-shot drop), archive it or set a future timer.',
     });

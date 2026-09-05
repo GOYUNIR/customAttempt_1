@@ -26,7 +26,6 @@ import {
   cardSheen,
   cardShadowStyle,
   contentSpacingScale,
-  UNCONFIGURED_PRICE_SENTINEL,
 } from '@/lib/storefront-config';
 import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
 import { isVideoMedia, pickCrop, coverStyle, DEFAULT_CROP } from '@/lib/media';
@@ -59,6 +58,20 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
   const radius = themeRadiusNumber(theme, 26);
   const spacing = contentSpacingScale(theme);
   const radiusSm = Math.max(8, Math.round(radius * 0.7));
+
+  // Clean status-badge chip used under the preview card (replaces the old
+  // verbose "Legend" debug dump).
+  const statusBadge = (color: string, bg: string) => ({
+    fontSize: 8,
+    fontWeight: 800,
+    letterSpacing: '0.6px',
+    textTransform: 'uppercase' as const,
+    padding: '3px 8px',
+    borderRadius: 999,
+    color,
+    background: bg,
+    border: `1px solid ${color}`,
+  });
 
   const priceCat = cats.find((c: any) => String(c?.size || '').trim().toLowerCase() === String(selectedSize || '').trim().toLowerCase());
   const price = Number(priceCat?.price) || 0;
@@ -322,12 +335,16 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
               )}
             </div>
           </div>
-          {/* Legend: what the math decided, so the operator knows before saving */}
-          <div style={{ width: CARD_W, margin: '10px auto 0', fontSize: 9, color: '#8b8b94', lineHeight: 1.7 }}>
-            <div><strong style={{ color: '#c4c4cc' }}>{cats.length}</strong> size{cats.length === 1 ? '' : 's'} · “{selectedSize}” is <strong style={{ color: canCheckoutDirect ? '#93c5fd' : '#fbbf24' }}>{canCheckoutDirect ? 'FCFS — instant buy' : 'RAFFLE'}</strong></div>
-            <div>Sold-out state: <strong style={{ color: soldOut ? '#f87171' : '#34d399' }}>{soldOut ? 'shows as SOLD OUT' : 'open for entry'}</strong>{totalInventory === 0 ? ' — 0 inventory with “stay visible” = sold out' : ` (inventory ${totalInventory})`}</div>
-            <div>Price: {priceConfigured ? `$${price.toFixed(2)}` : 'not configured — checkout refuses until set'}{price > 0 && price >= UNCONFIGURED_PRICE_SENTINEL ? ' (sentinel)' : ''}</div>
-            <div>Countdown appears when {product.isUpcoming ? 'go-live' : 'countdown end'} is set; the real page also ticks a live timer.</div>
+          {/* Status badges — a clean, at-a-glance widget instead of raw debug text */}
+          <div style={{ width: CARD_W, margin: '10px auto 0', display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span style={statusBadge(canCheckoutDirect ? '#93c5fd' : '#fbbf24', canCheckoutDirect ? 'rgba(59,130,246,0.14)' : 'rgba(245,158,11,0.14)')}>
+              {canCheckoutDirect ? 'FCFS' : 'RAFFLE'}
+            </span>
+            {hasMixed && <span style={statusBadge('#d8b4fe', 'rgba(168,85,247,0.14)')}>MIXED</span>}
+            {soldOut && <span style={statusBadge('#f87171', 'rgba(239,68,68,0.14)')}>SOLD OUT</span>}
+            {product.isUpcoming && <span style={statusBadge('#60a5fa', 'rgba(59,130,246,0.14)')}>UPCOMING</span>}
+            {product.isArchived && <span style={statusBadge('#fbbf24', 'rgba(245,158,11,0.14)')}>ARCHIVED</span>}
+            {!soldOut && !product.isUpcoming && !product.isArchived && <span style={statusBadge('#34d399', 'rgba(52,211,153,0.14)')}>LIVE NOW</span>}
           </div>
         </div>
       </div>

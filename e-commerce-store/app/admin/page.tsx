@@ -242,12 +242,32 @@ const PRODUCT_TABS: { id: string; label: string; icon: string; hint: string }[] 
 /** Map a sanity-issue `code` to the product-editor TAB it lives in, so the tab
  *  nav can surface exactly where a problem is. '' = not tab-specific. */
 function tabForSanityCode(code: string): string {
+  if (code === 'name_required' || code === 'slug_required') return 'catalog';
   if (
     ['no_sizes', 'duplicate_size', 'empty_price', 'no_stripe', 'inventory_stale_keys', 'inventory_mismatch', 'max_per_email_over_inventory', 'no_inventory'].includes(code)
   ) return 'variants';
   if (['sampler_no_markers', 'sampler_arbitrage', 'sampler_free_full', 'sampler_min_order_low', 'sampler_stale_target'].includes(code)) return 'variants';
-  if (['winners_on_fcfs', 'raffle_oversell', 'go_live_after_end', 'released_in_past'].includes(code)) return 'drop';
+  if (['winners_on_fcfs', 'raffle_oversell', 'go_live_after_end', 'released_in_past', 'upcoming_no_golive', 'upcoming_golive_past'].includes(code)) return 'drop';
   return '';
+}
+
+/** Map a sanity-issue `code` to a fallback DOM field id when the issue doesn't
+ *  already carry a precise `fieldId` (see lib/product-sanity). Used by the
+ *  "Fix first issue" jump so a blocked Save always lands on the right input. */
+function fieldIdForSanityCode(code: string): string {
+  switch (code) {
+    case 'name_required': return 'pf-name';
+    case 'slug_required': return 'pf-slug';
+    case 'no_sizes': return 'pf-sizes';
+    case 'duplicate_size': return 'pf-size-0';
+    case 'empty_price': return 'pf-price-0';
+    case 'raffle_oversell': return 'pf-winnerstiers-0';
+    case 'upcoming_no_golive':
+    case 'upcoming_golive_past':
+    case 'go_live_after_end': return 'pf-goliveat';
+    case 'released_in_past': return 'pf-releaseends';
+    default: return '';
+  }
 }
 
 /** True when a tab has its essential content, so the nav can show a subtle ✓. */
@@ -464,6 +484,13 @@ const inputStyle: React.CSSProperties = {
   color: '#fff',
   fontSize: 13,
   boxSizing: 'border-box',
+};
+
+/** Red border + soft glow for invalid inputs (mirrors Tailwind's
+ *  `border-red-500 ring-2 ring-red-200`). */
+const errorFieldStyle: React.CSSProperties = {
+  border: '1px solid #ef4444',
+  boxShadow: '0 0 0 3px rgba(239,68,68,0.18)',
 };
 
 /** A searchable font dropdown for Settings → Font Family (and the top-bar name
@@ -2184,7 +2211,21 @@ export default function AdminPortal() {
     () => sortSanityIssues(checkProductSanity(productForm, { rewards: rewardsSettings })),
     [productForm, rewardsSettings],
   );
-  const blockingCount = productIssues.filter((i) => i.severity === 'error').length;
+  // Name is validated separately from the sanity engine (it has no math angle),
+  // but it's still a hard Save blocker — fold it into the blocking count so the
+  // Save button and "Fix first issue" both reflect it.
+  const missingName = !String(productForm.name || '').trim();
+  const blockingCount = productIssues.filter((i) => i.severity === 'error').length + (missingName ? 1 : 0);
+
+  // Set of DOM ids for every blocking field, so invalid inputs get a red border.
+  const invalidFieldIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const issue of productIssues) {
+      if (issue.severity !== 'error' || !issue.fieldId) continue;
+      set.add(issue.fieldId);
+    }
+    return set;
+  }, [productIssues]);
   // Whether ANY size resolves to RAFFLE (per-size override wins, else the
   // product-level mode). Drives the FCFS "purge & disable": a product with no
   // raffle sizes hides every raffle-specific control (drop timers, raffle caps,
@@ -2212,6 +2253,37 @@ export default function AdminPortal() {
     }
     return counts;
   }, [productIssues]);
+
+  // ── Validation error targeting ─────────────────────────────────────────────
+  // Switches to the right tab, then smooth-scrolls to and focuses the EXACT
+  // offending input. Used by "Fix first issue" AND by a blocked Save so an
+  // operator is always dropped straight onto the field that needs fixing.
+  const focusField = useCallback((tabId: string, fieldId: string) => {
+    setActiveProductTab(tabId);
+    // Give React a frame to mount/switch the tab before measuring + scrolling.
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        const el = document.getElementById(fieldId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          (el as HTMLElement).focus?.({ preventScroll: true });
+        }
+      }, 90);
+    });
+  }, []);
+
+  const focusIssue = useCallback((issue: SanityIssue) => {
+    const tabId = tabForSanityCode(issue.code);
+    const fieldId = issue.fieldId || fieldIdForSanityCode(issue.code);
+    if (tabId && fieldId) focusField(tabId, fieldId);
+    else if (tabId) setActiveProductTab(tabId);
+  }, [focusField]);
+
+  // The single most important thing to fix right now (name first, then the first
+  // blocking sanity error) — drives the "⟶ Fix first issue" pill.
+  const firstBlockingIssue: SanityIssue | null = missingName
+    ? { severity: 'error', code: 'name_required', message: 'Product name is required.', fieldId: 'pf-name' }
+    : (productIssues.find((i) => i.severity === 'error') || null);
 
   // Persist the current product form's reusable shape as the DEFAULT template for
   // future products (checkout mode, size template, delivery-incentive defaults).
@@ -2272,7 +2344,8 @@ export default function AdminPortal() {
     // ── Mistake-proof validation (friendly inline messages, never a bare alert) ──
     const name = String(productForm.name || '').trim();
     if (!name) {
-      setProductMsg('❌ Product name is required.');
+      focusField('catalog', 'pf-name');
+      setProductMsg('Add a product name before saving.');
       showToast('Product name is required');
       return;
     }
@@ -2280,7 +2353,8 @@ export default function AdminPortal() {
     const autoSlug = slugifyName(name);
     const slug = String(productForm.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || autoSlug;
     if (!slug) {
-      setProductMsg('❌ A URL slug is required (or auto-generated from the name).');
+      focusField('catalog', 'pf-slug');
+      setProductMsg('Add a URL slug (or a name to auto-generate one) before saving.');
       showToast('Slug is required');
       return;
     }
@@ -2296,7 +2370,8 @@ export default function AdminPortal() {
         return true;
       });
     if (priceCategories.length === 0) {
-      setProductMsg('❌ Add at least one size with a price (e.g. 50ml / 100ml).');
+      focusField('variants', 'pf-sizes');
+      setProductMsg('Add at least one size with a price before saving.');
       showToast('At least one size + price is required');
       return;
     }
@@ -2307,8 +2382,9 @@ export default function AdminPortal() {
     const blockers = sanity.filter((i) => i.severity === 'error');
     if (blockers.length > 0) {
       const first = blockers[0];
-      setProductMsg(`❌ Can't save — ${first.message}${first.detail ? ` ${first.detail}` : ''} (${blockers.length} blocking issue${blockers.length === 1 ? '' : 's'})`);
-      showToast(`Blocked: ${first.message}`);
+      focusIssue(first);
+      setProductMsg(`Fix ${blockers.length > 1 ? `${blockers.length} issues` : 'this issue'} to save — ${first.message}`);
+      showToast(`Fix this to save: ${first.message}`);
       return;
     }
     setProductMsg('');
@@ -4474,13 +4550,13 @@ export default function AdminPortal() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                     <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase', color: '#71717a' }}>Sections</span>
                     {(() => {
-                      const firstIssue = productIssues[0];
+                      const firstIssue = firstBlockingIssue;
                       if (!firstIssue) return null;
                       const target = tabForSanityCode(firstIssue.code);
                       if (!target) return null;
                       return (
                         <button
-                          onClick={() => setActiveProductTab(target)}
+                          onClick={() => focusIssue(firstIssue)}
                           style={{ fontSize: 9.5, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 999, padding: '3px 9px', cursor: 'pointer' }}
                         >
                           ⟶ Fix first issue
@@ -4546,6 +4622,7 @@ export default function AdminPortal() {
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Name *</label>
                     <input
+                      id="pf-name"
                       type="text"
                       placeholder="Product name"
                       value={productForm.name}
@@ -4559,12 +4636,13 @@ export default function AdminPortal() {
                           return { ...p, name, slug: nextSlug, _slugAuto: shouldAutoSlug };
                         });
                       }}
-                      style={inputStyle}
+                      style={{ ...inputStyle, ...(missingName ? errorFieldStyle : {}) }}
                     />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#888' }}>Slug (URL) – auto‑generated from name</label>
                     <input
+                      id="pf-slug"
                       type="text"
                       placeholder="slug (e.g. elysian-white)"
                       value={productForm.slug}
@@ -4623,7 +4701,7 @@ export default function AdminPortal() {
                       <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: '#8b95a7' }}>Status</span>
                         <select
-                          title="Draft = hidden. Active = visible. Archived = past releases."
+                          title="Draft = hidden. Active = live now. Upcoming = hidden until its Go live at time. Archived = past releases."
                           value={statusFromLegacy(productForm)}
                           onChange={(e) => {
                             const next = normalizeProductStatus(e.target.value);
@@ -4633,9 +4711,15 @@ export default function AdminPortal() {
                         >
                           <option value="DRAFT">Draft</option>
                           <option value="ACTIVE">Active</option>
+                          <option value="UPCOMING">Upcoming</option>
                           <option value="ARCHIVED">Archived</option>
                         </select>
                       </label>
+                      {statusFromLegacy(productForm) === 'UPCOMING' && (
+                        <span style={{ fontSize: 10, color: '#60a5fa', lineHeight: 1.5 }}>
+                          ⏰ Upcoming schedules this release to publish automatically — set <strong>Go live at</strong> in the Drop Schedule so it knows when to open.
+                        </span>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -4793,18 +4877,20 @@ export default function AdminPortal() {
                         {/* Row 1 — identity + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                       <input
+                        id={`pf-size-${idx}`}
                         type="text"
                         placeholder="Size (e.g. Standard)"
                         value={cat.size}
                         onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
-                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11 }}
+                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
                       />
                       <input
+                        id={`pf-price-${idx}`}
                         type="number"
                         placeholder="Price ($)"
                         value={cat.price}
                         onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
-                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11 }}
+                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}) }}
                       />
                       {(() => {
                         const pv = validatePrice(cat.price);
@@ -4895,12 +4981,13 @@ export default function AdminPortal() {
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
                       {effectiveMode === 'RAFFLE' && (
                         <input
+                          id={`pf-winnerstiers-${idx}`}
                           type="text"
                           placeholder="Winners / draw (e.g. 3,2,2)"
                           title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
                           value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
                           onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11 }}
+                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
                         />
                       )}
                       <select
@@ -5339,13 +5426,21 @@ export default function AdminPortal() {
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Go live at (upcoming auto-activates)</label>
-                      <input type="datetime-local" value={productForm.goLiveAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))} style={inputStyle} />
+                      <label style={{ fontSize: 10, color: statusFromLegacy(productForm) === 'UPCOMING' ? '#60a5fa' : '#888' }}>
+                        {statusFromLegacy(productForm) === 'UPCOMING' ? 'Go live at (required for Upcoming)' : 'Go live at (upcoming auto-activates)'}
+                      </label>
+                      <input
+                        id="pf-goliveat"
+                        type="datetime-local"
+                        value={productForm.goLiveAt || ''}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))}
+                        style={{ ...inputStyle, ...(statusFromLegacy(productForm) === 'UPCOMING' && !String(productForm.goLiveAt || '').trim() ? errorFieldStyle : {}) }}
+                      />
                     </div>
                     {hasRaffleSize && (
                       <div>
                         <label style={{ fontSize: 10, color: '#888' }}>Countdown ends at (draw moment)</label>
-                        <input type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
+                        <input id="pf-releaseends" type="datetime-local" value={productForm.releaseEndsAt || ''} onChange={(e) => setProductForm((p: any) => ({ ...p, releaseEndsAt: e.target.value }))} style={inputStyle} />
                       </div>
                     )}
                   </div>
@@ -5415,7 +5510,7 @@ export default function AdminPortal() {
                       />
                       <span>
                         <strong style={{ display: 'block', fontSize: 11.5, color: '#e5e7eb' }}>Override Drop Rules</strong>
-                        <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = inherit the global schedule from Draws → Automation. ON = repeat this raffle on its own cadence while inventory remains.</span>
+                        <span style={{ fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>OFF = follow the global draw schedule. ON = give this raffle its own repeat schedule while inventory remains.</span>
                       </span>
                     </label>
                     {productForm.customDropSchedule && (
@@ -5586,9 +5681,9 @@ export default function AdminPortal() {
                     <div
                       onClick={(e) => e.stopPropagation()}
                       style={{
-                        position: 'absolute', top: 0, right: 0, height: '100%', width: 420,
+                        position: 'absolute', top: 64, right: 0, height: 'calc(100vh - 64px)', width: 420,
                         maxWidth: '92vw', overflowY: 'auto', background: '#0d0d11',
-                        borderLeft: '1px solid #232329', boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
+                        borderLeft: '1px solid #232329', borderTopLeftRadius: 14, boxShadow: '-12px 0 40px rgba(0,0,0,0.5)',
                         padding: '14px 16px 24px',
                       }}
                     >

@@ -62,8 +62,8 @@ export async function POST(request: Request) {
 
     if (action === 'setStatus') {
       const raw = String(body?.status || '').trim().toUpperCase();
-      if (raw !== 'DRAFT' && raw !== 'ACTIVE' && raw !== 'ARCHIVED') {
-        return NextResponse.json({ error: 'status must be DRAFT, ACTIVE or ARCHIVED' }, { status: 400 });
+      if (raw !== 'DRAFT' && raw !== 'ACTIVE' && raw !== 'UPCOMING' && raw !== 'ARCHIVED') {
+        return NextResponse.json({ error: 'status must be DRAFT, ACTIVE, UPCOMING or ARCHIVED' }, { status: 400 });
       }
       const finalStatus = normalizeProductStatus(raw);
       for (const product of targets) {

@@ -4,8 +4,9 @@
  * Replaces the legacy `isActive` / `isArchived` / `isUpcoming` boolean triple
  * with one strict enum:
  *
- *   - 'DRAFT'     — hidden, not yet live (replaces "hidden" + "upcoming").
+ *   - 'DRAFT'     — hidden, not yet live.
  *   - 'ACTIVE'    — visible on the storefront.
+ *   - 'UPCOMING'  — hidden but scheduled; publishes automatically at `goLiveAt`.
  *   - 'ARCHIVED'  — retired (kept for history, never rendered as live).
  *
  * Redis is the primary store (not a SQL DB), so the "DB enum" is enforced at
@@ -17,18 +18,19 @@
  * client, and the API routes all import the same logic.
  */
 
-export const PRODUCT_STATUSES = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
+export const PRODUCT_STATUSES = ['DRAFT', 'ACTIVE', 'UPCOMING', 'ARCHIVED'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
 export const PRODUCT_STATUS_LABELS: Record<ProductStatus, string> = {
   DRAFT: 'Draft (hidden)',
   ACTIVE: 'Active (visible)',
+  UPCOMING: 'Upcoming (scheduled)',
   ARCHIVED: 'Archived',
 };
 
 /** Type guard for the enum. */
 export function isProductStatus(value: unknown): value is ProductStatus {
-  return value === 'DRAFT' || value === 'ACTIVE' || value === 'ARCHIVED';
+  return value === 'DRAFT' || value === 'ACTIVE' || value === 'UPCOMING' || value === 'ARCHIVED';
 }
 
 /** Normalize an arbitrary value to a valid status (falls back to `fallback`). */
@@ -43,7 +45,7 @@ export function normalizeProductStatus(value: unknown, fallback: ProductStatus =
  * resolved deterministically:
  *
  *   - archived  → ARCHIVED (highest precedence — it's terminal).
- *   - upcoming  → DRAFT    (hidden, not yet live).
+ *   - upcoming  → UPCOMING (hidden, scheduled to publish).
  *   - isActive !== false → ACTIVE, else DRAFT.
  */
 export function statusFromLegacy(input: {
@@ -54,7 +56,7 @@ export function statusFromLegacy(input: {
 } = {}): ProductStatus {
   if (isProductStatus(input.status)) return input.status;
   if (input.isArchived === true || input.isArchived === 'true') return 'ARCHIVED';
-  if (input.isUpcoming === true || input.isUpcoming === 'true') return 'DRAFT';
+  if (input.isUpcoming === true || input.isUpcoming === 'true') return 'UPCOMING';
   return input.isActive === false || input.isActive === 'false' ? 'DRAFT' : 'ACTIVE';
 }
 
@@ -71,6 +73,8 @@ export function legacyBooleansFromStatus(status: ProductStatus): {
   switch (status) {
     case 'ARCHIVED':
       return { isActive: false, isArchived: true, isUpcoming: false };
+    case 'UPCOMING':
+      return { isActive: false, isArchived: false, isUpcoming: true };
     case 'DRAFT':
       return { isActive: false, isArchived: false, isUpcoming: false };
     case 'ACTIVE':
