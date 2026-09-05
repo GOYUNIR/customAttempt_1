@@ -12,7 +12,7 @@ import {
 } from '@/lib/product-status';
 import { bindInventoryPoolToCategories, resolveInventoryPoolId } from '@/lib/inventory-pool';
 import { normalizeCategories } from '@/lib/storefront-config';
-import { queryProducts } from '@/lib/product-query';
+import { filterProducts } from '@/lib/product-query';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
 /**
@@ -144,14 +144,12 @@ export async function GET(request: Request) {
       const ids = new Set(idsParam.split(',').map((s) => s.trim()).filter(Boolean));
       products = products.filter((p: any) => ids.has(String(p?.id)));
     } else {
-      products = queryProducts(products, {
+      products = filterProducts(products, {
         search: url.searchParams.get('search') || '',
         status: url.searchParams.get('status') || '',
         category: url.searchParams.get('category') || '',
         checkoutMode: url.searchParams.get('checkoutMode') || '',
-        page: 1,
-        pageSize: 100000,
-      }).items;
+      });
     }
 
     const header = [

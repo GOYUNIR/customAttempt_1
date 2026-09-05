@@ -22,7 +22,8 @@ import { statusFromLegacy, legacyBooleansFromStatus, normalizeProductStatus } fr
 import { validatePrice } from '@/lib/price-validation';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
-import { findInventorySyncSource } from '@/lib/checkout-mode';
+import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
+import { COMMERCE_MODES, COMMERCE_MODE_META, sanitizeCommerceMode } from '@/lib/commerce-modes';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -80,6 +81,46 @@ function typeLabel(type: string | undefined) {
     ADMIN_NOTE: 'Admin Note',
   };
   return map[type || ''] || type || 'Unknown';
+}
+
+/** A small controlled JSON-object editor for the universal commerce-mode config
+ *  blocks (`accessRule` / `billingRule` / `scheduleConfig`). Stores text locally
+ *  while typing, then commits a parsed object on blur. */
+function CommerceJsonField({ value, onChange }: { value: unknown; onChange: (obj: Record<string, unknown>) => void }) {
+  const serialize = (v: unknown): string => {
+    const obj = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+    try { return JSON.stringify(obj, null, 2); } catch { return '{}'; }
+  };
+  const [text, setText] = useState<string>(serialize(value));
+  const lastExternal = useRef<unknown>(value);
+
+  useEffect(() => {
+    // Resync only when the external value identity changed (e.g. switching
+    // products), never on a keystroke.
+    if (lastExternal.current !== value) {
+      lastExternal.current = value;
+      setText(serialize(value));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return (
+    <textarea
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        try {
+          const parsed = JSON.parse(text || '{}');
+          onChange(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {});
+        } catch {
+          /* keep the last committed value; leave the text for correction */
+        }
+      }}
+      rows={4}
+      spellCheck={false}
+      style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #232329', background: '#0b0b0d', color: '#e4e4e7', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 10, lineHeight: 1.5 }}
+    />
+  );
 }
 
 // Streamer-mode masks are FIXED-LENGTH bullet strings (never derived from the
@@ -1824,6 +1865,12 @@ export default function AdminPortal() {
       goLiveAt: '',
       releaseEndsAt: '',
       customDropSchedule: null,
+      // Universal commerce mode + flexible JSON blocks (accessRule / billingRule /
+      // scheduleConfig). Empty mode = derive from the legacy checkout mode.
+      commerceMode: '',
+      accessRule: {},
+      billingRule: {},
+      scheduleConfig: {},
       // Per-size raffle configs — "customize each raffle differently". Keyed by
       // normalized size label; each entry can carry its own releaseEndsAt + schedule.
       sizeConfigs: {},
@@ -4896,10 +4943,6 @@ export default function AdminPortal() {
                       style={{ ...inputStyle, display: 'block', width: '100%', fontFamily: 'inherit', resize: 'vertical' }}
                     />
                   </div>
-                  <div>
-                    <label style={{ fontSize: 10, color: '#888' }}>Sort Order (lower = appears first)</label>
-                    <input type="number" placeholder="0" value={productForm.sortOrder} onChange={(e) => setProductForm((p: any) => ({ ...p, sortOrder: Number(e.target.value) }))} style={inputStyle} />
-                  </div>
                   <div style={{ gridColumn: '1 / -1' }}>
                     <label style={{ fontSize: 10, color: '#888' }}>Categories (customers filter the catalog by these)</label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
@@ -5121,38 +5164,44 @@ export default function AdminPortal() {
                     const synced = syncEnabled && Boolean(syncSource);
                     return (
                       <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
-                        {/* Row 0 — Inventory Sync Slug (first prompt) */}
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: 8, borderRadius: 8, background: synced ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.02)', border: synced ? '1px solid rgba(125,211,252,0.4)' : '1px solid #232329' }}>
-                          <label style={{ fontSize: 10, display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            <input
-                              type="checkbox"
-                              checked={syncEnabled}
-                              onChange={(e) => setCategorySyncEnabled(idx, e.target.checked)}
-                            />
-                            Sync with existing slug?
-                          </label>
-                          {syncEnabled && (
-                            <input
-                              type="text"
-                              placeholder="Inventory Sync Slug"
-                              title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool."
-                              value={cat.inventorySyncSlug || ''}
-                              onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
-                              style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11, color: synced ? '#7dd3fc' : undefined }}
-                            />
-                          )}
-                          {synced && (
-                            <>
-                              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(125,211,252,0.16)', border: '1px solid rgba(125,211,252,0.5)', color: '#7dd3fc' }}>
-                                Synced with {syncSlug}
-                              </span>
-                              <button type="button" onClick={() => unlinkInventorySyncSlug(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10, color: '#fbbf24', borderColor: '#f59e0b' }}>Unlink</button>
-                            </>
-                          )}
-                          {syncEnabled && !synced && Boolean(cat.inventorySyncSlug) && (
-                            <span style={{ fontSize: 9, color: '#8b95a7' }}>No existing slug found — this starts a new shared pool.</span>
-                          )}
-                        </div>
+                        {/* Row 0 — Inventory Sync Slug. When a variant is linked to an
+                            existing shared pool the checkbox + input are fully hidden and
+                            replaced by a clean "Synced with [slug]" card + Unlink. */}
+                        {synced ? (
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: '9px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.4)' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#7dd3fc', letterSpacing: '0.3px' }}>
+                              🔗 Synced with <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#bae6fd' }}>{syncSlug}</span>
+                            </span>
+                            <span style={{ fontSize: 9.5, color: '#8b95a7', lineHeight: 1.4 }}>
+                              Inherits price, stock, SKU, Stripe ID &amp; limits from the shared pool.
+                            </span>
+                            <button type="button" onClick={() => unlinkInventorySyncSlug(idx)} style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, color: '#fbbf24', borderColor: '#f59e0b' }}>Unlink</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid #232329' }}>
+                            <label style={{ fontSize: 10, display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              <input
+                                type="checkbox"
+                                checked={syncEnabled}
+                                onChange={(e) => setCategorySyncEnabled(idx, e.target.checked)}
+                              />
+                              Sync with existing slug?
+                            </label>
+                            {syncEnabled && (
+                              <input
+                                type="text"
+                                placeholder="Inventory Sync Slug"
+                                title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool."
+                                value={cat.inventorySyncSlug || ''}
+                                onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
+                                style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11 }}
+                              />
+                            )}
+                            {syncEnabled && Boolean(cat.inventorySyncSlug) && (
+                              <span style={{ fontSize: 9, color: '#8b95a7' }}>No existing slug found — this starts a new shared pool.</span>
+                            )}
+                          </div>
+                        )}
                         {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
@@ -5231,9 +5280,8 @@ export default function AdminPortal() {
                       />
                       </div>
                       {/* Row 1b — per-item limits. Each option/SKU is its own item, so
-                          its purchase caps + raffle cap live here (blank falls
-                          back to the product defaults in the panel below). 0 or
-                          blank = Unlimited. */}
+                          its purchase caps + raffle cap live here. 0 or blank =
+                          Unlimited. */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
                         <span style={{ fontSize: 9, color: '#5d6570', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', minWidth: 96 }}>Limits</span>
                         <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
@@ -5241,7 +5289,7 @@ export default function AdminPortal() {
                             type="number"
                             min={0}
                             placeholder="Max / email"
-                            title="Max per email for THIS option (0 or blank = unlimited, blank = product default)."
+                            title="Max per email for THIS option (0 or blank = unlimited)."
                             value={cat.maxPerEmail ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
                             disabled={synced}
@@ -5254,7 +5302,7 @@ export default function AdminPortal() {
                             type="number"
                             min={0}
                             placeholder="Max / cart"
-                            title="Max in cart per email for THIS option (0 or blank = unlimited, blank = product default)."
+                            title="Max in cart per email for THIS option (0 or blank = unlimited)."
                             value={cat.maxPerCart ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
                             disabled={synced}
@@ -5268,7 +5316,7 @@ export default function AdminPortal() {
                               type="number"
                               min={0}
                               placeholder="Raffle cap (0 = unlimited)"
-                              title="Max raffle allocation for THIS option (0 or blank = unlimited, blank = product default)."
+                              title="Max raffle allocation for THIS option (0 or blank = unlimited)."
                               value={cat.maxRaffleAllocationLimit ?? ''}
                               onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
                               disabled={synced}
@@ -5677,43 +5725,26 @@ export default function AdminPortal() {
                 <SectionCard
                   id="pf-checkout"
                   title="Checkout Mode"
-                  description="Draw winners (RAFFLE) or sell first-come, first-served (FCFS)."
+                  description="Derived automatically from each variant's mode in Variants & Shared Inventory."
                 >
-                  <select value={productForm.checkoutMode || 'RAFFLE'} onChange={(e) => setProductForm((p: any) => {
-                    const checkoutMode = e.target.value === 'FCFS' ? 'FCFS' : 'RAFFLE';
-                    // Switching the product to FCFS makes "follow product" sizes
-                    // instant-buy — strip their winners so that invalid state
-                    // can't exist.
-                    const priceCategories = stripWinnerTiersForFcfs(p.priceCategories, checkoutMode);
-                    return { ...p, checkoutMode, priceCategories };
-                  })} style={inputStyle}>
-                    <option value="RAFFLE">RAFFLE — draw winners when the countdown ends</option>
-                    <option value="FCFS">FCFS — first come, first served</option>
-                  </select>
-                  <div style={{ marginTop: 6, padding: '8px 9px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                    Each size can override this in Variants &amp; Shared Inventory to mix formats. FCFS sizes charge immediately at checkout.
+                  <div style={{ padding: '8px 10px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
+                    Each variant's mode is set in <strong style={{ color: '#cbd5e1' }}>Variants &amp; Shared Inventory</strong>. This summary is read-only and updates automatically.
                   </div>
                   {(() => {
-                    const perCat = Array.isArray(productForm.priceCategories) ? productForm.priceCategories : [];
-                    const overrides = perCat.filter((c: any) => String(c?.checkoutMode || '').toUpperCase() === 'RAFFLE' || String(c?.checkoutMode || '').toUpperCase() === 'FCFS');
-                    const raffleOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'RAFFLE').length;
-                    const fcfsOverrides = overrides.filter((c: any) => String(c.checkoutMode).toUpperCase() === 'FCFS').length;
-                    const productDefault = productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
-                    const autoRaffle = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'RAFFLE').length;
-                    const autoFcfs = perCat.filter((c: any) => !String(c?.checkoutMode || '').trim() && productDefault === 'FCFS').length;
-                    const totalRaffle = raffleOverrides + autoRaffle;
-                    const totalFcfs = fcfsOverrides + autoFcfs;
-                    const mixed = totalRaffle > 0 && totalFcfs > 0;
+                    const modes = sizeCheckoutModes(productForm);
+                    const values = Object.values(modes) as ('RAFFLE' | 'FCFS')[];
+                    const raffle = values.filter((m) => m === 'RAFFLE').length;
+                    const fcfs = values.filter((m) => m === 'FCFS').length;
+                    const summary = fcfs === 0 ? '🎟 Raffle' : raffle === 0 ? '⚡ FCFS' : '🔀 Mixed';
                     return (
-                      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
-                        <span style={{ padding: '3px 8px', borderRadius: 999, background: mixed ? 'rgba(168,85,247,0.14)' : (totalRaffle > 0 ? 'rgba(245,158,11,0.14)' : 'rgba(59,130,246,0.14)'), border: mixed ? '1px solid rgba(168,85,247,0.4)' : (totalRaffle > 0 ? '1px solid rgba(245,158,11,0.4)' : '1px solid rgba(59,130,246,0.4)'), color: mixed ? '#c084fc' : (totalRaffle > 0 ? '#fbbf24' : '#93c5fd'), fontWeight: 700 }}>
-                          {mixed ? 'MIXED FORMAT' : totalRaffle > 0 ? 'RAFFLE' : 'FCFS'}
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ padding: '6px 14px', borderRadius: 999, fontSize: 14, fontWeight: 800, letterSpacing: '0.5px', background: summary === '🔀 Mixed' ? 'rgba(168,85,247,0.16)' : summary === '⚡ FCFS' ? 'rgba(59,130,246,0.16)' : 'rgba(245,158,11,0.16)', border: summary === '🔀 Mixed' ? '1px solid rgba(168,85,247,0.5)' : summary === '⚡ FCFS' ? '1px solid rgba(59,130,246,0.5)' : '1px solid rgba(245,158,11,0.5)', color: summary === '🔀 Mixed' ? '#c084fc' : summary === '⚡ FCFS' ? '#93c5fd' : '#fbbf24' }}>
+                          {summary}
                         </span>
-                        <span style={{ color: '#8b95a7' }}>
-                          {totalRaffle > 0 ? <span style={{ color: '#fbbf24' }}>🎟 {totalRaffle} raffle</span> : null}
-                          {totalRaffle > 0 && totalFcfs > 0 ? ' · ' : ''}
-                          {totalFcfs > 0 ? <span style={{ color: '#93c5fd' }}>⚡ {totalFcfs} instant-buy</span> : null}
-                          {overrides.length > 0 ? <span style={{ color: '#555' }}> ({overrides.length} size override{overrides.length === 1 ? '' : 's'})</span> : null}
+                        <span style={{ fontSize: 11, color: '#8b95a7' }}>
+                          {raffle > 0 ? <span style={{ color: '#fbbf24' }}>🎟 {raffle} raffle</span> : null}
+                          {raffle > 0 && fcfs > 0 ? ' · ' : ''}
+                          {fcfs > 0 ? <span style={{ color: '#93c5fd' }}>⚡ {fcfs} instant-buy</span> : null}
                         </span>
                       </div>
                     );
@@ -5723,6 +5754,43 @@ export default function AdminPortal() {
                       ⚡ Fully FCFS — every size sells instantly at checkout. All raffle-specific controls (draw timers, winner tiers, raffle caps) are hidden and disabled below.
                     </div>
                   )}
+                </SectionCard>
+
+                {/* ============ UNIVERSAL COMMERCE MODE (optional) ============ */}
+                <SectionCard
+                  id="pf-commerce"
+                  collapsible
+                  title="Universal commerce mode"
+                  description="Optional — map this release to one of 10 commerce primitives using flexible accessRule / billingRule / scheduleConfig JSON. Leave empty to keep the default checkout-mode behaviour."
+                >
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: '#888' }}>Commerce mode (empty = derived from checkout mode)</label>
+                      <select
+                        value={String(productForm.commerceMode || '')}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, commerceMode: sanitizeCommerceMode(e.target.value) || '' }))}
+                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                      >
+                        <option value="">— Derived from checkout mode —</option>
+                        {COMMERCE_MODES.map((mode) => (
+                          <option key={mode} value={mode}>{COMMERCE_MODE_META[mode].label}</option>
+                        ))}
+                      </select>
+                      {(() => {
+                        const m = sanitizeCommerceMode(productForm.commerceMode);
+                        return m ? <p style={{ fontSize: 10, color: '#8b95a7', margin: '4px 0 0' }}>{COMMERCE_MODE_META[m].description}</p> : null;
+                      })()}
+                    </div>
+                    {(['accessRule', 'billingRule', 'scheduleConfig'] as const).map((block) => (
+                      <div key={block}>
+                        <label style={{ fontSize: 10, color: '#888' }}>{block} (JSON)</label>
+                        <CommerceJsonField
+                          value={(productForm as any)[block]}
+                          onChange={(obj) => setProductForm((p: any) => ({ ...p, [block]: obj }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </SectionCard>
 
                 {/* ============ DROP SCHEDULE ============ */}
@@ -6132,8 +6200,8 @@ export default function AdminPortal() {
                           <option value="UPCOMING">Upcoming</option>
                           <option value="ARCHIVED">Archived</option>
                         </select>
-                        <button onClick={() => moveProductOrder(product, -1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>↑ Up</button>
-                        <button onClick={() => moveProductOrder(product, 1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>↓ Down</button>
+                        <button onClick={() => moveProductOrder(product, -1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>▲ Up</button>
+                        <button onClick={() => moveProductOrder(product, 1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>▼ Down</button>
                         <button onClick={() => duplicateProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>⧉ Duplicate</button>
                         <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>

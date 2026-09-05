@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { UNCONFIGURED_PRICE_SENTINEL, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from '@/lib/storefront-config';
+import { sanitizeCommerceMode, normalizeAccessRule, normalizeBillingRule, normalizeScheduleConfig } from '@/lib/commerce-modes';
 import {
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
@@ -931,10 +932,26 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
   if (Number.isFinite(maxPerEmail) && maxPerEmail >= 1) out.maxPerEmail = Math.floor(maxPerEmail);
   if (Number.isFinite(maxPerCart) && maxPerCart >= 1) out.maxPerCart = Math.floor(maxPerCart);
   if (Number.isFinite(maxRaffleAllocationLimit) && maxRaffleAllocationLimit >= 0) out.maxRaffleAllocationLimit = Math.floor(maxRaffleAllocationLimit);
-  // Preserve the optional shared-inventory sync slug so `loadProducts` (admin
-  // list + auto-draw + catalog status) still resolves a size's shared pool.
-  const syncSlug = normalizeInventorySyncSlug(category?.inventorySyncSlug);
-  if (syncSlug) out.inventorySyncSlug = syncSlug;
+  // Preserve the optional shared-inventory sync slug AND its canonical pool id
+  // so `loadProducts` (admin list + auto-draw + catalog status) still resolves a
+  // size's shared pool after a reload. Dropping `inventoryPoolId` here was what
+  // made it silently revert on the next save (a reorder/status-change re-persists
+  // the loaded product without the id, permanently un-linking the pool).
+  const syncSlug = normalizeInventorySyncSlug(category?.inventorySyncSlug || category?.inventoryPoolId);
+  if (syncSlug) {
+    out.inventorySyncSlug = syncSlug;
+    out.inventoryPoolId = syncSlug;
+  }
+  // Preserve an optional per-variant universal commerce mode + JSON blocks so
+  // the admin editor's commerce panel round-trips through `loadProducts`.
+  const variantCommerceMode = sanitizeCommerceMode(category?.commerceMode);
+  if (variantCommerceMode) out.commerceMode = variantCommerceMode;
+  const accessRule = normalizeAccessRule(category?.accessRule);
+  const billingRule = normalizeBillingRule(category?.billingRule);
+  const scheduleConfig = normalizeScheduleConfig(category?.scheduleConfig);
+  if (Object.keys(accessRule).length > 0) out.accessRule = accessRule;
+  if (Object.keys(billingRule).length > 0) out.billingRule = billingRule;
+  if (Object.keys(scheduleConfig).length > 0) out.scheduleConfig = scheduleConfig;
   return out;
 }
 

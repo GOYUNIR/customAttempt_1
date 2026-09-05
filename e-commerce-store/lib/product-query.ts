@@ -23,7 +23,7 @@ export interface ProductQuery {
   hasInventoryPool?: string | boolean;
   /** 1-based page number. */
   page?: number;
-  /** Items per page (1..100, default 25). */
+  /** Items per page (1..200, default 25). */
   pageSize?: number;
 }
 
@@ -84,7 +84,8 @@ function sortProducts(list: any[]): any[] {
   );
 }
 
-export function queryProducts(products: unknown[], q: ProductQuery = {}): ProductQueryResult {
+/** Filter + sort the catalog WITHOUT pagination (used by batch/CSV export). */
+export function filterProducts(products: unknown[], q: ProductQuery = {}): any[] {
   const list = Array.isArray(products) ? products : [];
   const search = String(q.search || '').trim();
   const status = String(q.status || '').trim().toUpperCase();
@@ -92,7 +93,7 @@ export function queryProducts(products: unknown[], q: ProductQuery = {}): Produc
   const checkoutMode = String(q.checkoutMode || '').trim().toUpperCase();
   const hasPool = q.hasInventoryPool === true || q.hasInventoryPool === 'true';
 
-  let filtered = list.filter((p: any) => {
+  const filtered = list.filter((p: any) => {
     if (search && !fuzzyMatch(search, searchableText(p))) return false;
     if (status && status !== 'ALL' && statusFromLegacy(p) !== status) return false;
     if (category && !asList(p?.categories).some((c) => c.toLowerCase() === category)) return false;
@@ -108,10 +109,15 @@ export function queryProducts(products: unknown[], q: ProductQuery = {}): Produc
     return true;
   });
 
-  filtered = sortProducts(filtered);
+  return sortProducts(filtered);
+}
 
+export function queryProducts(products: unknown[], q: ProductQuery = {}): ProductQueryResult {
+  const filtered = filterProducts(products, q);
   const total = filtered.length;
-  const pageSize = Math.max(1, Math.min(100, Number(q.pageSize) || 25));
+  // pageSize capped at 200: large enough for the admin list to be useful, but
+  // small enough to keep a Cloudflare Worker CPU well under its 50ms budget.
+  const pageSize = Math.max(1, Math.min(200, Number(q.pageSize) || 25));
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.max(1, Math.min(totalPages, Number(q.page) || 1));
   const start = (page - 1) * pageSize;

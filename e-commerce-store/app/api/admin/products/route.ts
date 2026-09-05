@@ -30,6 +30,7 @@ import { normalizeProductStatus, statusFromLegacy, legacyBooleansFromStatus } fr
 import { validatePriceCategories } from '@/lib/price-validation';
 import { bindInventoryPoolToCategories } from '@/lib/inventory-pool';
 import { queryProducts } from '@/lib/product-query';
+import { sanitizeCommerceMode, normalizeAccessRule, normalizeBillingRule, normalizeScheduleConfig } from '@/lib/commerce-modes';
 
 export const dynamic = 'force-dynamic';
 
@@ -394,6 +395,16 @@ export async function POST(request: Request) {
         const out = { ...(c || {}) };
         if (mode !== 'RAFFLE' && mode !== 'FCFS') delete out.checkoutMode;
         else out.checkoutMode = mode;
+        // Preserve an optional per-variant universal commerce mode + JSON blocks
+        // (normalized so only valid values survive a save).
+        const variantCommerceMode = sanitizeCommerceMode(out.commerceMode);
+        if (out.commerceMode !== undefined) {
+          if (variantCommerceMode) out.commerceMode = variantCommerceMode;
+          else delete out.commerceMode;
+        }
+        if (out.accessRule !== undefined) out.accessRule = normalizeAccessRule(out.accessRule);
+        if (out.billingRule !== undefined) out.billingRule = normalizeBillingRule(out.billingRule);
+        if (out.scheduleConfig !== undefined) out.scheduleConfig = normalizeScheduleConfig(out.scheduleConfig);
         // Normalize per-item limits: keep only finite, in-range numbers; drop
         // otherwise so the product-level fallback takes over.
         const maxPerEmail = Number(out.maxPerEmail);
@@ -455,6 +466,17 @@ export async function POST(request: Request) {
     winnerTiers: Array.isArray(body.winnerTiers) ? body.winnerTiers : (existing?.winnerTiers || [0]),
     goLiveAt: has('goLiveAt') ? String(body.goLiveAt || '') : (existing?.goLiveAt || ''),
     releaseEndsAt: has('releaseEndsAt') ? String(body.releaseEndsAt || '') : (existing?.releaseEndsAt || ''),
+    // Universal commerce mode + flexible JSON blocks (accessRule / billingRule /
+    // scheduleConfig). Optional: empty mode = derive from the legacy checkout
+    // mode. Each block is coerced to a plain object so a bad payload can never
+    // write a non-JSON value into the catalog.
+    commerceMode: (() => {
+      const raw = has('commerceMode') ? body.commerceMode : existing?.commerceMode;
+      return sanitizeCommerceMode(raw) || '';
+    })(),
+    accessRule: has('accessRule') ? normalizeAccessRule(body.accessRule) : normalizeAccessRule(existing?.accessRule),
+    billingRule: has('billingRule') ? normalizeBillingRule(body.billingRule) : normalizeBillingRule(existing?.billingRule),
+    scheduleConfig: has('scheduleConfig') ? normalizeScheduleConfig(body.scheduleConfig) : normalizeScheduleConfig(existing?.scheduleConfig),
     customDropSchedule: has('customDropSchedule')
       ? (body.customDropSchedule && typeof body.customDropSchedule === 'object' && Object.keys(body.customDropSchedule).length > 0
           ? body.customDropSchedule

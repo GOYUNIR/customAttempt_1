@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { queryProducts } from '../lib/product-query.ts';
+import { queryProducts, filterProducts } from '../lib/product-query.ts';
 
 const makeProducts = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -73,9 +73,18 @@ test('hasInventoryPool filter', () => {
   assert.equal(queryProducts(products, { hasInventoryPool: 'true' }).items[0].name, 'Pooled');
 });
 
-test('page clamps to totalPages and pageSize clamps to 100', () => {
+test('page clamps to totalPages and pageSize clamps to 200', () => {
   const products = makeProducts(5);
   const over = queryProducts(products, { page: 99, pageSize: 25 });
   assert.equal(over.page, 1);
   assert.equal(over.items.length, 5);
+  // A requested pageSize above the ceiling is clamped to 200, not 100.
+  const big = queryProducts(products, { page: 1, pageSize: 100000 });
+  assert.equal(big.pageSize, 200);
+});
+
+test('filterProducts returns the full filtered list without pagination', () => {
+  const products = makeProducts(30);
+  const all = filterProducts(products, { search: 'product' });
+  assert.equal(all.length, 30);
 });
