@@ -1799,6 +1799,7 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
+  
   // ===== UPDATED fetchProducts to handle priceCategories =====
   const fetchProducts = async () => {
     setProductsLoading(true);
