@@ -315,6 +315,31 @@ export async function POST(request: Request) {
     } catch {}
     return NextResponse.json({ success: true, product });
   }
+  if (action === 'reorderAll') {
+    // Re-index the ENTIRE catalog's sortOrder in one atomic write. `orders` is
+    // [{ id, sortOrder }] where sortOrder is already sequential (0, 1, 2, …).
+    const orders = Array.isArray(body.orders) ? body.orders : [];
+    if (orders.length === 0) return NextResponse.json({ error: 'No orders provided' }, { status: 400 });
+    const writes: Record<string, string> = {};
+    let reordered = 0;
+    for (const item of orders) {
+      const id = String(item?.id || '');
+      const product = allProducts[id];
+      if (!product) continue;
+      const next = Number(item?.sortOrder);
+      if (!Number.isFinite(next)) continue;
+      product.sortOrder = next;
+      product.updatedAt = new Date().toISOString();
+      product.status = statusFromLegacy(product);
+      writes[id] = JSON.stringify(product);
+      reordered += 1;
+    }
+    if (reordered > 0) await redis.hset(PRODUCTS_KEY, writes);
+    try {
+      await appendAudit(redis, { action: 'PRODUCTS_REORDERED', detail: `${reordered} products re-indexed`, actor: 'admin' });
+    } catch {}
+    return NextResponse.json({ success: true, reordered });
+  }
   if (action === 'setStatus') {
     const product = allProducts[body.id];
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });

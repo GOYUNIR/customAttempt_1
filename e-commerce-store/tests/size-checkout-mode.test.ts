@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField, isSyncedSourceReleased } from '../lib/checkout-mode.ts';
+import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField, isSyncedSourceReleased, categoryMatchesInventorySyncSlug, productMatchesInventorySyncSlug, findInventorySyncSource } from '../lib/checkout-mode.ts';
 
 // A mixed-format product: sampler sells instantly (FCFS), full size runs a raffle.
 const MIXED = {
@@ -180,4 +180,85 @@ test('shared inventory: isSyncedSourceReleased only when another LIVE product ow
 
   // A size without a slug never reports a released source.
   assert.equal(isSyncedSourceReleased({ id: 'x', priceCategories: [{ size: 'A' }] }, 'A', [liveSource]), false);
+});
+
+test('shared inventory: category/product slug matchers are case-insensitive + trimmed', () => {
+  const cat = { size: 'Standard', inventorySyncSlug: '  Black Tee ' };
+  assert.equal(categoryMatchesInventorySyncSlug(cat, 'BLACK-TEE'), true);
+  assert.equal(categoryMatchesInventorySyncSlug(cat, 'black tee'), true);
+  assert.equal(categoryMatchesInventorySyncSlug({ size: 'Standard', inventoryPoolId: 'black-tee' }, 'Black Tee'), true);
+  assert.equal(categoryMatchesInventorySyncSlug({ size: 'Standard' }, 'black-tee'), false);
+
+  const product = { id: 'p1', slug: '  Black Tee  ' };
+  assert.equal(productMatchesInventorySyncSlug(product, 'BLACK-TEE'), true);
+  assert.equal(productMatchesInventorySyncSlug(product, 'p1'), true);
+  assert.equal(productMatchesInventorySyncSlug({ id: 'p2', slug: 'other' }, 'black-tee'), false);
+});
+
+test('shared inventory: findInventorySyncSource finds a sibling variant in the active editor', () => {
+  const current = {
+    id: 'p',
+    slug: 'p',
+    priceCategories: [
+      { size: 'Standard', price: 95, inventorySyncSlug: 'black-tee' },
+      { size: 'Limited', price: 150 },
+    ],
+  };
+  const found = findInventorySyncSource('black-tee', [], current, 1);
+  assert.ok(found);
+  assert.equal(found.category.size, 'Standard');
+  assert.equal(found.matchedBy, 'variant');
+});
+
+test('shared inventory: findInventorySyncSource matches a variant slug across the catalog', () => {
+  const current = { id: 'p-edit', slug: 'editor', priceCategories: [{ size: 'Standard', price: 10 }] };
+  const catalog = [
+    { id: 'p-other', slug: 'other', priceCategories: [{ size: 'Standard', price: 95, inventorySyncSlug: 'Black Tee' }] },
+  ];
+  const found = findInventorySyncSource('black tee', catalog, current, 0);
+  assert.ok(found);
+  assert.equal(found.product.id, 'p-other');
+  assert.equal(found.category.inventorySyncSlug, 'Black Tee');
+  assert.equal(found.matchedBy, 'variant');
+});
+
+test('shared inventory: findInventorySyncSource matches a product slug across the catalog', () => {
+  const current = { id: 'p-edit', slug: 'editor', priceCategories: [{ size: 'Limited', price: 10 }] };
+  const catalog = [
+    {
+      id: 'p-source',
+      slug: 'black-tee',
+      priceCategories: [
+        { size: 'Standard', price: 95 },
+        { size: 'Limited', price: 150 },
+      ],
+    },
+  ];
+  const found = findInventorySyncSource('BLACK-TEE', catalog, current, 0);
+  assert.ok(found);
+  assert.equal(found.product.id, 'p-source');
+  assert.equal(found.matchedBy, 'product');
+  // Representative variant prefers the size being edited.
+  assert.equal(found.category.size, 'Limited');
+});
+
+test('shared inventory: findInventorySyncSource returns null for a brand-new slug', () => {
+  assert.equal(findInventorySyncSource('brand-new', [{ id: 'p', slug: 'x', priceCategories: [{ size: 'S' }] }], null, null), null);
+});
+
+test('shared inventory: isSyncedSourceReleased also accepts a product-slug source', () => {
+  const synced = {
+    id: 'p-child',
+    isUpcoming: true,
+    priceCategories: [{ size: 'Standard', price: 95, inventorySyncSlug: 'black-tee' }],
+  };
+  const liveSource = {
+    id: 'p-source',
+    slug: 'black-tee',
+    isActive: true,
+    isArchived: false,
+    isUpcoming: false,
+    priceCategories: [{ size: 'Standard', price: 95 }],
+  };
+  assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced, liveSource]), true);
 });

@@ -129,6 +129,116 @@ export function sharedInventoryField(slug: string): string {
 }
 
 /**
+ * True when a variant (a `priceCategories[]` entry) owns a shared-inventory
+ * sync slug. Compares the NORMALIZED tokens (case-insensitive + trimmed)
+ * against both `inventorySyncSlug` and its canonical `inventoryPoolId`.
+ */
+export function categoryMatchesInventorySyncSlug(category: any, slug: unknown): boolean {
+  const key = normalizeInventorySyncSlug(slug);
+  if (!key) return false;
+  return (
+    normalizeInventorySyncSlug(category?.inventorySyncSlug) === key ||
+    normalizeInventorySyncSlug(category?.inventoryPoolId) === key
+  );
+}
+
+/**
+ * True when a product's OWN slug (or id) equals a shared-inventory slug. This
+ * lets an operator link a size to a whole product by typing the product slug —
+ * the product itself acts as the pool's canonical source even when none of its
+ * variants carry an explicit `inventorySyncSlug`.
+ */
+export function productMatchesInventorySyncSlug(product: any, slug: unknown): boolean {
+  const key = normalizeInventorySyncSlug(slug);
+  if (!key) return false;
+  return (
+    normalizeInventorySyncSlug(product?.slug) === key ||
+    normalizeInventorySyncSlug(product?.id) === key
+  );
+}
+
+/** The resolved shared-inventory source for a sync slug. */
+export interface InventorySyncSource {
+  /** The source variant (a `priceCategories[]` entry) to inherit fields from. */
+  category: any;
+  /** The parent product that owns the source variant / slug. */
+  product: any;
+  /** How the source was matched — a variant's sync slug or a product's slug. */
+  matchedBy: 'variant' | 'product';
+}
+
+/**
+ * Find the shared-inventory source for a sync slug across an ENTIRE catalog.
+ *
+ * Searches case-insensitively and trimmed across BOTH variants and products:
+ *   1. the active editor's own variants (unsaved edits), then its product slug;
+ *   2. every product in `catalog` — each product's variants, then its own slug.
+ *
+ * A variant "owns" the slug via `inventorySyncSlug`/`inventoryPoolId`; a
+ * product owns it via its `slug`/`id`. When a product is matched by its own
+ * slug, the representative source variant is the one whose SIZE matches the
+ * size being edited (falling back to the slug-carrying / first variant).
+ * Returns null when no source exists — i.e. the slug starts a NEW pool.
+ */
+export function findInventorySyncSource(
+  slug: unknown,
+  catalog?: any[] | null,
+  current?: any | null,
+  currentIndex?: number | null,
+): InventorySyncSource | null {
+  const key = normalizeInventorySyncSlug(slug);
+  if (!key) return null;
+
+  const editingIndex = typeof currentIndex === 'number' ? currentIndex : -1;
+  const editingSize = String(
+    Array.isArray(current?.priceCategories) ? current.priceCategories[editingIndex]?.size || '' : '',
+  ).trim().toLowerCase();
+
+  const pickCategory = (product: any, excludeIndex?: number): any | null => {
+    const cats = Array.isArray(product?.priceCategories) ? product.priceCategories : [];
+    if (cats.length === 0) return null;
+    const others = typeof excludeIndex === 'number' ? cats.filter((_: any, i: number) => i !== excludeIndex) : cats;
+    if (editingSize) {
+      const bySize = others.find((c: any) => String(c?.size || '').trim().toLowerCase() === editingSize);
+      if (bySize) return bySize;
+    }
+    const withSlug = others.find((c: any) => categoryMatchesInventorySyncSlug(c, key));
+    return withSlug || others[0] || null;
+  };
+
+  // 1) The active editor (unsaved edits) — same-product sharing.
+  if (current && Array.isArray(current.priceCategories)) {
+    const inForm = current.priceCategories.find(
+      (c: any, i: number) => i !== editingIndex && categoryMatchesInventorySyncSlug(c, key),
+    );
+    if (inForm) return { category: inForm, product: current, matchedBy: 'variant' };
+    if (productMatchesInventorySyncSlug(current, key)) {
+      const picked = pickCategory(current, editingIndex);
+      if (picked) return { category: picked, product: current, matchedBy: 'product' };
+    }
+  }
+
+  // 2) The entire catalog — every product and every variant.
+  const ownId = current ? String(current.id ?? '') : '';
+  for (const p of Array.isArray(catalog) ? catalog : []) {
+    if (!p) continue;
+    // The active editor's FRESH state was already searched above; skip its
+    // (possibly stale) catalog copy so the product can't match itself.
+    if (ownId && String(p?.id ?? '') === ownId) continue;
+    const inProduct = (Array.isArray(p.priceCategories) ? p.priceCategories : []).find(
+      (c: any) => categoryMatchesInventorySyncSlug(c, key),
+    );
+    if (inProduct) return { category: inProduct, product: p, matchedBy: 'variant' };
+    if (productMatchesInventorySyncSlug(p, key)) {
+      const picked = pickCategory(p);
+      if (picked) return { category: picked, product: p, matchedBy: 'product' };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Whether a size's shared-inventory SOURCE is "released".
  *
  * A size that syncs to an existing slug (`inventorySyncSlug`) draws from a
@@ -156,8 +266,11 @@ export function isSyncedSourceReleased(
       p.isArchived !== true &&
       p.isUpcoming !== true;
     if (!released) return false;
+    // A released source "owns" the slug either as its OWN product slug, or via
+    // one of its variants' sync slugs (matching the admin editor's lookup).
+    if (normalizeInventorySyncSlug(p?.slug) === slug) return true;
     return Array.isArray(p?.priceCategories)
-      ? p.priceCategories.some((c: any) => normalizeInventorySyncSlug(c?.inventorySyncSlug) === slug)
+      ? p.priceCategories.some((c: any) => categoryMatchesInventorySyncSlug(c, slug))
       : false;
   });
 }

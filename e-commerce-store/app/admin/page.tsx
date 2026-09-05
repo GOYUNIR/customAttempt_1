@@ -22,6 +22,7 @@ import { statusFromLegacy, legacyBooleansFromStatus, normalizeProductStatus } fr
 import { validatePrice } from '@/lib/price-validation';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
+import { findInventorySyncSource } from '@/lib/checkout-mode';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -1411,7 +1412,7 @@ export default function AdminPortal() {
     images: [],
     // NEW: dynamic price categories
     priceCategories: [
-      { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: UNCONFIGURED_STRIPE_PRICE_ID, winnerTiers: '1' }
+      { size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: UNCONFIGURED_STRIPE_PRICE_ID, winnerTiers: '1', position: 0 }
     ]
   });
   const [defaultStripePriceId, setDefaultStripePriceId] = useState(UNCONFIGURED_STRIPE_PRICE_ID);
@@ -2028,18 +2029,19 @@ export default function AdminPortal() {
   const addPriceCategory = () => {
     setProductForm((prev: any) => {
       const slug = String(prev.slug || prev.name || '').trim();
+      const next = [
+        ...(prev.priceCategories || []),
+        {
+          size: '',
+          sku: slug ? slugifyName(slug).toUpperCase() : '',
+          price: UNCONFIGURED_PRICE_SENTINEL,
+          stripeId: defaultStripePriceId,
+          winnerTiers: '1',
+        },
+      ];
       return {
         ...prev,
-        priceCategories: [
-          ...prev.priceCategories,
-          {
-            size: '',
-            sku: slug ? slugifyName(slug).toUpperCase() : '',
-            price: UNCONFIGURED_PRICE_SENTINEL,
-            stripeId: defaultStripePriceId,
-            winnerTiers: '1',
-          },
-        ],
+        priceCategories: next.map((c: any, i: number) => ({ ...c, position: i })),
       };
     });
   };
@@ -2053,7 +2055,9 @@ export default function AdminPortal() {
       const target = index + direction;
       if (target < 0 || target >= cats.length) return prev;
       [cats[index], cats[target]] = [cats[target], cats[index]];
-      return { ...prev, priceCategories: cats };
+      // Re-index `position` sequentially so every variant keeps a distinct,
+      // stable order value that persists correctly on save.
+      return { ...prev, priceCategories: cats.map((c: any, i: number) => ({ ...c, position: i })) };
     });
   };
 
@@ -2256,18 +2260,12 @@ export default function AdminPortal() {
 
   // Resolve the shared-inventory pool SOURCE for a sync slug: the first variant
   // (in the current form, then the rest of the catalog) that already owns the
-  // slug, plus its parent product (for per-size stock). Returns null when no
-  // existing source exists — i.e. this variant is establishing a NEW pool.
-  const findSourceCategoryForSlug = (slug: string, current: any, currentIndex: number) => {
-    const match = (c: any) => c && slugifyName(c?.inventorySyncSlug) === slug;
-    const inForm = (current.priceCategories || []).find((c: any, i: number) => i !== currentIndex && match(c));
-    if (inForm) return { category: inForm, product: current };
-    for (const p of allProducts) {
-      const cat = (p.priceCategories || []).find(match);
-      if (cat) return { category: cat, product: p };
-    }
-    return null;
-  };
+  // slug — OR a product whose OWN slug matches — plus its parent product (for
+  // per-size stock). Returns null when no existing source exists — i.e. this
+  // variant is establishing a NEW pool. Matching is case-insensitive + trimmed
+  // and spans EVERY product/variant in the catalog via `findInventorySyncSource`.
+  const findSourceCategoryForSlug = (slug: string, current: any, currentIndex: number) =>
+    findInventorySyncSource(slug, allProducts, current, currentIndex);
 
   // When a variant is linked to an existing "Inventory Sync Slug", fetch the
   // source variant's data and OVERRIDE the local fields (price, Stripe ID, SKU,
@@ -2579,7 +2577,8 @@ export default function AdminPortal() {
         if (seenSizes.has(sizeKey)) return false;
         seenSizes.add(sizeKey);
         return true;
-      });
+      })
+      .map((c: any, i: number) => ({ ...c, position: i }));
     if (priceCategories.length === 0) {
       focusField('variants', 'pf-sizes');
       setProductMsg('Add at least one variant / option with a price before saving.');
@@ -2727,9 +2726,10 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
-  /** Move a product up/down in the catalog sort order by swapping its sortOrder
-   *  with the adjacent product in the (already sorted) list. No numeric prompt —
-   *  just clean Up/Down arrows. */
+  /** Move a product up/down in the catalog sort order: swap it with the adjacent
+   *  product in the (already sorted) list, then re-index `sortOrder` for EVERY
+   *  product sequentially (0, 1, 2, …) so order values stay perfectly distinct
+   *  and persist correctly. No numeric prompt — just clean Up/Down arrows. */
   const moveProductOrder = async (product: any, direction: -1 | 1) => {
     if (!requireUnlocked()) return;
     const sorted = [...allProducts].sort(
@@ -2739,31 +2739,33 @@ export default function AdminPortal() {
     if (idx < 0) return;
     const target = idx + direction;
     if (target < 0 || target >= sorted.length) return;
-    const neighbor = sorted[target];
-    const curOrder = Number(product.sortOrder) || 0;
-    const neighborOrder = Number(neighbor.sortOrder) || 0;
-    // When two products share the same sortOrder (fresh catalogs), nudge the
-    // neighbor up one so the swap is actually visible.
-    const nextNeighborOrder = neighborOrder === curOrder ? curOrder + 1 : curOrder;
-    const nextCurOrder = neighborOrder;
+    // Swap the two items in place, then re-index sortOrder for ALL items.
+    [sorted[idx], sorted[target]] = [sorted[target], sorted[idx]];
+    const reindexed = sorted.map((p: any, i: number) => ({ ...p, sortOrder: i }));
+    // Optimistic state update so the arrow click reorders instantly.
+    setAllProducts(reindexed);
     setProductActionLoading(true);
     try {
-      await Promise.all([
-        adminFetch('/api/admin/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, action: 'reorder', id: neighbor.id, sortOrder: nextNeighborOrder }),
+      const res = await adminFetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password,
+          action: 'reorderAll',
+          orders: reindexed.map((p: any) => ({ id: p.id, sortOrder: p.sortOrder })),
         }),
-        adminFetch('/api/admin/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, action: 'reorder', id: product.id, sortOrder: nextCurOrder }),
-        }),
-      ]);
-      showToast('UPDATED · Reordered');
-      await fetchProducts();
+      });
+      if (res.ok) {
+        showToast('UPDATED · Reordered');
+        await fetchProducts();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast('Reorder failed: ' + (data.error || 'Unknown error'));
+        await fetchProducts();
+      }
     } catch (err: any) {
       showToast('Error: ' + err.message);
+      await fetchProducts();
     }
     setProductActionLoading(false);
   };
