@@ -2696,16 +2696,17 @@ export default function AdminPortal() {
       .map((c: any, i: number) => {
         const out = { ...c, position: i };
         // ── Slug-sync auto-commit (never lose a saved/typed sync slug) ──
-        // A synced variant is one where the operator checked "Sync with existing
-        // slug?", a committed slug is present, OR a draft is being typed. In all
-        // three cases resolve the final slug from (draft → committed) and KEEP it
-        // — a synced variant must never be wiped to null on save.
-        const syncEnabled = c.syncWithExisting === true;
-        const draft = String(c._syncDraft ?? '').trim();
-        const committed = String(c.inventorySyncSlug ?? '').trim();
-        if (syncEnabled || committed || draft) {
-          out.inventorySyncSlug = (draft || committed).trim();
-        }
+        // The shared-inventory slug can live in THREE places while editing:
+        //   · `inventorySyncSlug` — a committed (saved) slug
+        //   · `_syncDraft`        — a slug being typed but not yet "Link"-ed
+        //   · `syncWithExisting`  — the operator checked "Sync with existing slug?"
+        // Resolve the final slug from the COMMITTED value first, then the draft,
+        // slugify it once, and NEVER emit null while a real slug exists. This
+        // fixes the smoking gun where `slug: null` was logged even though the
+        // variant had a sync slug (the old draft-first two-pass logic could fall
+        // through to `null`).
+        const rawSlug = String(c.inventorySyncSlug || c._syncDraft || '').trim();
+        const effectiveSlug = rawSlug ? slugifyName(rawSlug) : null;
         // Strip transient editor-only fields so they never reach Redis/disk.
         delete out.syncWithExisting;
         delete out._syncDraft;
@@ -2713,22 +2714,21 @@ export default function AdminPortal() {
         // so the server binds and persists it. Every variant now sends BOTH
         // fields as a real slug OR null (never absent), so a reorder/status save
         // can never silently un-link a pool.
-        const poolSlug = slugifyName(String(out.inventorySyncSlug || out.inventoryPoolId || ''));
-        if (poolSlug) {
-          out.inventorySyncSlug = poolSlug;
-          out.inventoryPoolId = poolSlug;
+        if (effectiveSlug) {
+          out.inventorySyncSlug = effectiveSlug;
+          out.inventoryPoolId = effectiveSlug;
           // Synced variants inherit their commerce values from the shared pool.
           // Backfill a VALID price / SKU so the backend price + sanity gates
           // never 400 on a sentinel price. Prefer the pool's canonical source
           // price; fall back to a neutral 0 (the backend exempts synced variants).
           if (!isConfiguredPrice(out.price)) {
-            const source = findInventorySyncSource(poolSlug, allProducts, productForm, i);
+            const source = findInventorySyncSource(effectiveSlug, allProducts, productForm, i);
             const src = source?.category;
             if (src && isConfiguredPrice(src?.price)) out.price = Number(src.price);
             else out.price = 0;
           }
           if (!String(out.sku || '').trim()) {
-            const source = findInventorySyncSource(poolSlug, allProducts, productForm, i);
+            const source = findInventorySyncSource(effectiveSlug, allProducts, productForm, i);
             if (source?.category && String(source.category.sku || '').trim()) {
               out.sku = source.category.sku;
             }
@@ -2739,15 +2739,10 @@ export default function AdminPortal() {
           // and `out.sku || ''` are no-ops on already-valid values.
           out.price = out.price || 0;
           out.sku = out.sku || '';
-        } else if (!syncEnabled) {
-          // No sync intent at all — explicitly un-link (null, never absent).
+        } else {
+          // No slug resolved — explicitly un-link (null, never absent).
           out.inventorySyncSlug = null;
           out.inventoryPoolId = null;
-        } else {
-          // Toggle was on but no slug resolved: drop the fields cleanly rather
-          // than persisting empty strings (the server drops blanks anyway).
-          delete out.inventorySyncSlug;
-          delete out.inventoryPoolId;
         }
         // ── Compile the universal commerce blocks into valid JSON objects ──
         // The unified "Variant Mode" dropdown + its conditional inputs write into
