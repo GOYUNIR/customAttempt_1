@@ -1799,7 +1799,6 @@ export default function AdminPortal() {
     setSettingsLoading(false);
   };
 
-  
   // ===== UPDATED fetchProducts to handle priceCategories =====
   const fetchProducts = async () => {
     setProductsLoading(true);
@@ -2318,27 +2317,58 @@ export default function AdminPortal() {
   // When a variant is linked to an existing "Inventory Sync Slug", fetch the
   // source variant's data and OVERRIDE the local fields (price, Stripe ID, SKU,
   // mode, winners, limits, physical attributes, and stock) so linked SKUs start
-  // identical — then the UI locks those synced inputs.
-  const assignInventorySyncSlug = (index: number, rawSlug: string) => {
+  // identical — then the UI hides those synced inputs entirely. This is the
+  // COMMIT step: it only runs when the operator explicitly clicks "Link" (or
+  // presses Enter), never on every keystroke, so a partially-typed slug can't
+  // prematurely lock or clobber the variant's fields.
+  const commitInventorySyncSlug = (prev: any, index: number, rawSlug: string) => {
     const slug = slugifyName(rawSlug);
+    const cats = [...(prev.priceCategories || [])];
+    // Commit the NORMALIZED slug + its canonical pool id (both are persisted so
+    // the read path can always re-resolve the pool after a reload), and clear
+    // the transient draft + toggle state.
+    const cat = {
+      ...cats[index],
+      inventorySyncSlug: slug,
+      inventoryPoolId: slug,
+      syncWithExisting: true,
+      _syncDraft: '',
+    };
+    cats[index] = cat;
+    if (!slug) return { ...prev, priceCategories: cats };
+    const found = findSourceCategoryForSlug(slug, prev, index);
+    if (!found) return { ...prev, priceCategories: cats };
+    const source = found.category;
+    const sourceProduct = found.product;
+    const merged = { ...cat };
+    for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
+      if (source?.[field] !== undefined) merged[field] = source[field];
+    }
+    const inv = { ...(prev.inventoryPerSize || {}) };
+    const sourceStock = Math.max(0, Number(sourceProduct?.inventoryPerSize?.[source?.size] ?? 0) || 0);
+    if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
+    cats[index] = merged;
+    return { ...prev, priceCategories: cats, inventoryPerSize: inv };
+  };
+
+  // Type into the slug prompt WITHOUT committing: only updates the transient
+  // draft so the input stays freely editable and no source is linked until the
+  // operator clicks "Link" (or presses Enter). Fixes the premature-lock bug.
+  const typeInventorySyncSlug = (index: number, rawSlug: string) => {
     setProductForm((prev: any) => {
       const cats = [...(prev.priceCategories || [])];
-      const cat = { ...cats[index], inventorySyncSlug: rawSlug, syncWithExisting: true };
-      cats[index] = cat;
-      if (!slug) return { ...prev, priceCategories: cats };
-      const found = findSourceCategoryForSlug(slug, prev, index);
-      if (!found) return { ...prev, priceCategories: cats };
-      const source = found.category;
-      const sourceProduct = found.product;
-      const merged = { ...cat };
-      for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
-        if (source?.[field] !== undefined) merged[field] = source[field];
-      }
-      const inv = { ...(prev.inventoryPerSize || {}) };
-      const sourceStock = Math.max(0, Number(sourceProduct?.inventoryPerSize?.[source?.size] ?? 0) || 0);
-      if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
-      cats[index] = merged;
-      return { ...prev, priceCategories: cats, inventoryPerSize: inv };
+      cats[index] = { ...cats[index], _syncDraft: rawSlug };
+      return { ...prev, priceCategories: cats };
+    });
+  };
+
+  // Commit the currently-typed draft (used by the "Link" button + Enter key).
+  const applyInventorySyncSlug = (index: number) => {
+    setProductForm((prev: any) => {
+      const cat = prev.priceCategories?.[index];
+      const raw = String(cat?._syncDraft ?? cat?.inventorySyncSlug ?? '').trim();
+      if (!raw) return prev;
+      return commitInventorySyncSlug(prev, index, raw);
     });
   };
 
@@ -2348,7 +2378,9 @@ export default function AdminPortal() {
       const cats = [...(prev.priceCategories || [])];
       const cat = { ...cats[index] };
       delete cat.inventorySyncSlug;
+      delete cat.inventoryPoolId;
       delete cat.syncWithExisting;
+      delete cat._syncDraft;
       cats[index] = cat;
       return { ...prev, priceCategories: cats };
     });
@@ -2626,7 +2658,24 @@ export default function AdminPortal() {
         seenSizes.add(sizeKey);
         return true;
       })
-      .map((c: any, i: number) => ({ ...c, position: i }));
+      .map((c: any, i: number) => {
+        const out = { ...c, position: i };
+        // Strip transient editor-only fields so they never reach Redis/disk.
+        delete out.syncWithExisting;
+        delete out._syncDraft;
+        // Explicitly carry the shared-inventory link (slug + canonical pool id)
+        // so the server binds and persists it — even if a future editor path
+        // drops one of the two fields, the pair is always sent together.
+        const poolSlug = slugifyName(String(out.inventorySyncSlug || out.inventoryPoolId || ''));
+        if (poolSlug) {
+          out.inventorySyncSlug = poolSlug;
+          out.inventoryPoolId = poolSlug;
+        } else {
+          delete out.inventorySyncSlug;
+          delete out.inventoryPoolId;
+        }
+        return out;
+      });
     if (priceCategories.length === 0) {
       focusField('variants', 'pf-sizes');
       setProductMsg('Add at least one variant / option with a price before saving.');
@@ -5162,7 +5211,11 @@ export default function AdminPortal() {
                     const syncSlug = slugifyName(cat.inventorySyncSlug || '');
                     const syncEnabled = Boolean(cat.syncWithExisting || cat.inventorySyncSlug);
                     const syncSource = syncSlug ? findSourceCategoryForSlug(syncSlug, productForm, idx) : null;
-                    const synced = syncEnabled && Boolean(syncSource);
+                    // A variant is "synced" the moment its sync slug is COMMITTED
+                    // (inventorySyncSlug set) — not merely while the operator is
+                    // typing. This lets the full input grid be hidden and replaced
+                    // with the badge card, and keeps the draft input editable.
+                    const synced = Boolean(cat.inventorySyncSlug);
                     return (
                       <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
                         {/* Row 0 — Inventory Sync Slug. When a variant is linked to an
@@ -5174,7 +5227,9 @@ export default function AdminPortal() {
                               🔗 Synced with <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#bae6fd' }}>{syncSlug}</span>
                             </span>
                             <span style={{ fontSize: 9.5, color: '#8b95a7', lineHeight: 1.4 }}>
-                              Inherits price, stock, SKU, Stripe ID &amp; limits from the shared pool.
+                              {syncSource
+                                ? 'Inherits price, stock, SKU, Stripe ID & limits from the shared pool.'
+                                : 'Starts a new shared pool — other variants that link this slug inherit these values.'}
                             </span>
                             <button type="button" onClick={() => unlinkInventorySyncSlug(idx)} style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, color: '#fbbf24', borderColor: '#f59e0b' }}>Unlink</button>
                           </div>
@@ -5189,20 +5244,42 @@ export default function AdminPortal() {
                               Sync with existing slug?
                             </label>
                             {syncEnabled && (
-                              <input
-                                type="text"
-                                placeholder="Inventory Sync Slug"
-                                title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool."
-                                value={cat.inventorySyncSlug || ''}
-                                onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
-                                style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11 }}
-                              />
+                              <>
+                                <input
+                                  type="text"
+                                  placeholder="Inventory Sync Slug"
+                                  title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool. Click Link (or press Enter) to commit."
+                                  value={cat._syncDraft ?? cat.inventorySyncSlug ?? ''}
+                                  onChange={(e) => typeInventorySyncSlug(idx, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      applyInventorySyncSlug(idx);
+                                    }
+                                  }}
+                                  style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11 }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => applyInventorySyncSlug(idx)}
+                                  style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#7dd3fc', borderColor: '#0ea5e9' }}
+                                >
+                                  Link
+                                </button>
+                              </>
                             )}
-                            {syncEnabled && Boolean(cat.inventorySyncSlug) && (
-                              <span style={{ fontSize: 9, color: '#8b95a7' }}>No existing slug found — this starts a new shared pool.</span>
-                            )}
+                            {syncEnabled && (() => {
+                              const draft = String(cat._syncDraft ?? cat.inventorySyncSlug ?? '');
+                              const draftSlug = slugifyName(draft);
+                              if (!draftSlug) return null;
+                              return findSourceCategoryForSlug(draftSlug, productForm, idx)
+                                ? null
+                                : <span style={{ fontSize: 9, color: '#8b95a7' }}>No existing slug found — this starts a new shared pool.</span>;
+                            })()}
                           </div>
                         )}
+                        {!synced && (
+                        <>
                         {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
@@ -5584,6 +5661,8 @@ export default function AdminPortal() {
                         <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
                           ⚡ This size sells instantly — it never draws and has no countdown or raffle schedule. Its price charges right at checkout (perfect for sampler/instant-buy sizes sitting next to a raffle size).
                         </div>
+                      )}
+                      </>
                       )}
                       </div>
                     );

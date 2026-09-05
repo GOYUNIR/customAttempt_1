@@ -1900,5 +1900,35 @@ is the backing endpoint.
   - **✅ Tests:** `tsc --noEmit` clean, `eslint` 0/0 on touched files, and
     **329/329 tests pass** (added `isSyncedSourceReleased` coverage).
 
+- **2026-09-05 — Fix sync-slug typing/locking + synced-row DOM suppression + save/reload persistence (`sync-slug-ux-persistence`):**
+  - **⌨️ No more premature lock while typing.** The "Inventory Sync Slug" input no
+    longer calls the link/override logic on every keystroke. Typing now only
+    updates a transient `_syncDraft` field (`typeInventorySyncSlug`), and the
+    commit happens only via a dedicated **"Link"** button or the **Enter** key
+    (`applyInventorySyncSlug` → `commitInventorySyncSlug`). A partially-typed
+    slug can never clobber price/SKU/stock/limits or flip a row to the locked
+    "🔗 Synced" state mid-edit. `commitInventorySyncSlug` now commits the
+    NORMALIZED slug and explicitly sets `inventoryPoolId` alongside
+    `inventorySyncSlug`.
+  - **🧱 Synced rows now fully suppress their input grid.** `synced` is
+    `Boolean(cat.inventorySyncSlug)` (committed slug), and the entire variant
+    field grid (Price / Units / SKU / Stripe ID / Limits / Mode / winners /
+    sampler / size-config) is wrapped in `{!synced && (<>…</>)}`, so a synced
+    row renders ONLY the clean "🔗 Synced with [SLUG]" badge card + Unlink —
+    no lingering disabled inputs or "Limits (0 = Unlimited)" labels. The badge's
+    secondary line is context-aware: "Inherits … from the shared pool" when a
+    source exists, else "Starts a new shared pool …".
+  - **💾 Save & reload persistence hardened.** `saveProduct`'s payload mapping
+    now strips transient `syncWithExisting`/`_syncDraft` and explicitly sends
+    `inventorySyncSlug` + `inventoryPoolId` (normalized) per variant. The route
+    already binds/persists via `bindInventoryPoolToCategories` and
+    `normalizePriceCategory` already hydrates both fields back on reload, so the
+    "🔗 Synced" card survives a full page reload.
+  - **🧪 Verified:** `tsc --noEmit` clean, `npm test` **343/343**. (The two
+    pre-existing `app/admin/page.tsx` lint notices — the unused
+    `react-hooks/exhaustive-deps` disable directive at line 104 and the
+    unescaped apostrophe in the Checkout Mode tab — predate this change and were
+    left untouched.)
+
 
 
