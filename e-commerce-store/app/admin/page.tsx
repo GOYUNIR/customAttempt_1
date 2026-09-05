@@ -2669,6 +2669,7 @@ export default function AdminPortal() {
       focusField('catalog', 'pf-name');
       setProductMsg('Add a product name before saving.');
       showToast('Product name is required');
+      window.alert('Save prevented: Add a product name before saving.');
       return;
     }
     // Auto-generate the slug from the name when the operator left it blank.
@@ -2678,6 +2679,7 @@ export default function AdminPortal() {
       focusField('catalog', 'pf-slug');
       setProductMsg('Add a URL slug (or a name to auto-generate one) before saving.');
       showToast('Slug is required');
+      window.alert('Save prevented: Add a URL slug (or a name to auto-generate one) before saving.');
       return;
     }
     // Every sellable size needs a size label. Dedupe the categories so the same
@@ -2731,6 +2733,12 @@ export default function AdminPortal() {
               out.sku = source.category.sku;
             }
           }
+          // GUARANTEE: a synced variant always carries a numeric price + string
+          // SKU so an empty form input (the synced grid is fully unmounted) can
+          // NEVER trip a backend JSON-schema / price validator. `out.price || 0`
+          // and `out.sku || ''` are no-ops on already-valid values.
+          out.price = out.price || 0;
+          out.sku = out.sku || '';
         } else if (!syncEnabled) {
           // No sync intent at all — explicitly un-link (null, never absent).
           out.inventorySyncSlug = null;
@@ -2761,6 +2769,7 @@ export default function AdminPortal() {
       focusField('variants', 'pf-sizes');
       setProductMsg('Add at least one variant / option with a price before saving.');
       showToast('At least one variant + price is required');
+      window.alert('Save prevented: Add at least one variant / option with a price before saving.');
       return;
     }
     // ── Smart-math gate: never save EXPLOITABLE math. The server enforces the
@@ -2773,6 +2782,7 @@ export default function AdminPortal() {
       focusIssue(first);
       setProductMsg(`Fix ${blockers.length > 1 ? `${blockers.length} issues` : 'this issue'} to save — ${first.message}`);
       showToast(`Fix this to save: ${first.message}`);
+      window.alert(`Save prevented: ${first.message}`);
       return;
     }
     setProductMsg('');
@@ -2813,6 +2823,16 @@ export default function AdminPortal() {
       delete payload.stripeId50ml;
       delete payload.stripeId100ml;
 
+      // ── Payload telemetry: log exactly what sync slugs are about to be sent ──
+      console.log(
+        '[CLIENT SAVE PAYLOAD]',
+        JSON.stringify(
+          (payload.priceCategories || []).map((c: any) => ({ size: c.size, slug: c.inventorySyncSlug })),
+          null,
+          2,
+        ),
+      );
+
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2832,10 +2852,20 @@ export default function AdminPortal() {
         setShowProductForm(false);
         resetProductForm();
       } else {
+        // Parse the error body (prefer the structured `error`, then `blocking`,
+        // then the raw text) and surface it as a prominent, unmissable alert so
+        // a rejected save never fails silently.
+        const errorText =
+          (typeof data?.error === 'string' && data.error.trim() && data.error) ||
+          (Array.isArray(data?.blocking) && data.blocking.length ? data.blocking.join(' · ') : '') ||
+          (text || 'Unknown server error');
         setProductMsg('❌ Error: ' + (data.error || `HTTP ${res.status}`));
+        window.alert('API Error (' + res.status + '): ' + errorText);
       }
     } catch (err: any) {
+      // A thrown fetch() is a network / CORS / abort failure — surface it loudly.
       setProductMsg('❌ Error: ' + err.message);
+      window.alert('Network Error: ' + (err?.message || String(err)));
     }
     setProductActionLoading(false);
   };
