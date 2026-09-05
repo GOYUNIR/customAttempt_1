@@ -120,7 +120,11 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
         seen.set(key, i + 1);
       }
 
-      if (price < 0.01 || price >= 9999999) {
+      // A variant linked into a shared-inventory pool (`inventorySyncSlug`) inherits
+      // its price from the pool's canonical source variant, so an empty local price
+      // is NOT "no price" — flagging it would make every synced variant un-saveable.
+      const isSyncedVariant = String(cat?.inventorySyncSlug || '').trim() !== '';
+      if (!isSyncedVariant && (price < 0.01 || price >= 9999999)) {
         issues.push({
           severity: 'error',
           code: 'empty_price',

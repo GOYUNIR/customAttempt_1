@@ -577,7 +577,13 @@ export async function POST(request: Request) {
 
   // ── Bulletproof price gate: no sentinel / placeholder / zero / sub-cent
   //    prices may ever reach the catalog. A 400 lists every offending size.
-  const priceCheck = validatePriceCategories(product.priceCategories);
+  //    Variants linked into a shared-inventory pool (`inventorySyncSlug`) inherit
+  //    their price from the pool's canonical source, so they are exempt here —
+  //    the source variant itself is still validated. This fixes saves that 400'd
+  //    whenever a variant was synced to a slug with an empty local price.
+  const priceCheck = validatePriceCategories(
+    product.priceCategories.filter((c: any) => !String(c?.inventorySyncSlug || '').trim()),
+  );
   if (!priceCheck.ok) {
     return NextResponse.json({
       error: priceCheck.errors[0].error,

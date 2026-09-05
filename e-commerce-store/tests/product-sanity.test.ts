@@ -61,6 +61,28 @@ test('a $0 price is a blocking error', () => {
   assert.ok(issues.some((i) => i.code === 'empty_price' && i.severity === 'error'));
 });
 
+test('a synced variant with an empty local price is NOT a blocking error', () => {
+  const issues = checkProductSanity(
+    {
+      ...BASE_PRODUCT,
+      priceCategories: [{ size: 'Standard', price: 0, inventorySyncSlug: 'shared-pool', winnerTiers: '1' }],
+    },
+    { now: NOW, globalStripeConfigured: true },
+  );
+  assert.equal(issues.some((i) => i.code === 'empty_price' && i.severity === 'error'), false);
+});
+
+test('a synced variant with a sentinel price is NOT a blocking error', () => {
+  const issues = checkProductSanity(
+    {
+      ...BASE_PRODUCT,
+      priceCategories: [{ size: 'Standard', price: 9999999, inventorySyncSlug: 'shared-pool', winnerTiers: '1' }],
+    },
+    { now: NOW, globalStripeConfigured: true },
+  );
+  assert.equal(issues.some((i) => i.code === 'empty_price' && i.severity === 'error'), false);
+});
+
 test('raffle winners that exceed inventory are a blocking error', () => {
   const issues = checkProductSanity(
     { ...BASE_PRODUCT, totalInventory: 5, priceCategories: [{ size: 'Standard', price: 95, stripeId: 'a', winnerTiers: '4,4' }] },

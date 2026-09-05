@@ -19,7 +19,7 @@ import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib
 import { isVideoMedia, pickCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, splitCropEntry, cropEntryFromPair, type MediaCrop, type CropEntry } from '@/lib/media';
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 import { statusFromLegacy, legacyBooleansFromStatus, normalizeProductStatus } from '@/lib/product-status';
-import { validatePrice } from '@/lib/price-validation';
+import { validatePrice, isConfiguredPrice } from '@/lib/price-validation';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
@@ -2670,6 +2670,22 @@ export default function AdminPortal() {
         if (poolSlug) {
           out.inventorySyncSlug = poolSlug;
           out.inventoryPoolId = poolSlug;
+          // Synced variants inherit their commerce values from the shared pool.
+          // Backfill a VALID price / SKU so the backend price + sanity gates
+          // never 400 on a sentinel price. Prefer the pool's canonical source
+          // price; fall back to a neutral 0 (the backend exempts synced variants).
+          if (!isConfiguredPrice(out.price)) {
+            const source = findInventorySyncSource(poolSlug, allProducts, productForm, i);
+            const src = source?.category;
+            if (src && isConfiguredPrice(src?.price)) out.price = Number(src.price);
+            else out.price = 0;
+          }
+          if (!String(out.sku || '').trim()) {
+            const source = findInventorySyncSource(poolSlug, allProducts, productForm, i);
+            if (source?.category && String(source.category.sku || '').trim()) {
+              out.sku = source.category.sku;
+            }
+          }
         } else {
           delete out.inventorySyncSlug;
           delete out.inventoryPoolId;
@@ -2889,6 +2905,16 @@ export default function AdminPortal() {
   const editNote = (idx: number) => {
     setEditingNoteIdx(idx);
     setNoteForm(productForm.notes[idx]);
+  };
+
+  const moveNote = (idx: number, direction: -1 | 1) => {
+    setProductForm((prev: any) => {
+      const notes = [...(prev.notes || [])];
+      const target = idx + direction;
+      if (target < 0 || target >= notes.length) return prev;
+      [notes[idx], notes[target]] = [notes[target], notes[idx]];
+      return { ...prev, notes };
+    });
   };
 
   // For image URL input (still supported). URL media always starts at the
@@ -4784,11 +4810,25 @@ export default function AdminPortal() {
               </div>
             </div>
             
-            {productMsg && (
-              <p style={{ fontSize: 12, color: productMsg.includes('Error') || productMsg.includes('❌') ? '#f87171' : '#34d399', marginBottom: 10 }}>
-                {productMsg}
-              </p>
-            )}
+            {productMsg && (() => {
+              const isError = productMsg.includes('Error') || productMsg.includes('❌');
+              return (
+                <div
+                  role="alert"
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8,
+                    padding: '10px 12px', borderRadius: 10, marginBottom: 10,
+                    fontSize: 12, lineHeight: 1.5,
+                    background: isError ? 'rgba(239,68,68,0.12)' : 'rgba(52,211,153,0.10)',
+                    border: `1px solid ${isError ? 'rgba(239,68,68,0.45)' : 'rgba(52,211,153,0.35)'}`,
+                    color: isError ? '#fecaca' : '#6ee7b7',
+                  }}
+                >
+                  <span>{isError ? '⚠️' : '✓'}</span>
+                  <span style={{ flex: 1 }}>{productMsg}</span>
+                </div>
+              );
+            })()}
 
             {showProductForm && (
               <div style={{ background: '#09090b', padding: 16, borderRadius: 12, marginBottom: 16 }}>
@@ -5657,6 +5697,38 @@ export default function AdminPortal() {
                           )}
                         </div>
                       )}
+                      {/* ⚙️ Variant Rules & Commerce Config — the 10-primitive commerce
+                          selector + flexible JSON blocks, now PER-VARIANT (the single
+                          source of truth for each variant's sellable behaviour). */}
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 9.5, fontWeight: 700, color: '#c084fc', letterSpacing: '0.5px', textTransform: 'uppercase', userSelect: 'none' }}>
+                          ⚙️ Variant Rules &amp; Commerce Config
+                        </summary>
+                        <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#0b0b0d', border: '1px solid #232329', display: 'grid', gap: 8 }}>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#888' }}>Commerce mode (empty = derived from checkout mode)</label>
+                            <select
+                              value={String(cat.commerceMode || '')}
+                              onChange={(e) => updatePriceCategory(idx, 'commerceMode', sanitizeCommerceMode(e.target.value) || '')}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
+                            >
+                              <option value="">— Derived from checkout mode —</option>
+                              {COMMERCE_MODES.map((mode) => (
+                                <option key={mode} value={mode}>{COMMERCE_MODE_META[mode].label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {(['accessRule', 'billingRule', 'scheduleConfig'] as const).map((block) => (
+                            <div key={block}>
+                              <label style={{ fontSize: 10, color: '#888' }}>{block} (JSON)</label>
+                              <CommerceJsonField
+                                value={cat[block]}
+                                onChange={(obj) => updatePriceCategory(idx, block, obj)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </details>
                       {effectiveMode === 'FCFS' && (
                         <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
                           ⚡ This size sells instantly — it never draws and has no countdown or raffle schedule. Its price charges right at checkout (perfect for sampler/instant-buy sizes sitting next to a raffle size).
@@ -5834,43 +5906,6 @@ export default function AdminPortal() {
                       ⚡ Fully FCFS — every size sells instantly at checkout. All raffle-specific controls (draw timers, winner tiers, raffle caps) are hidden and disabled below.
                     </div>
                   )}
-                </SectionCard>
-
-                {/* ============ UNIVERSAL COMMERCE MODE (optional) ============ */}
-                <SectionCard
-                  id="pf-commerce"
-                  collapsible
-                  title="Universal commerce mode"
-                  description="Optional — map this release to one of 10 commerce primitives using flexible accessRule / billingRule / scheduleConfig JSON. Leave empty to keep the default checkout-mode behaviour."
-                >
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 10, color: '#888' }}>Commerce mode (empty = derived from checkout mode)</label>
-                      <select
-                        value={String(productForm.commerceMode || '')}
-                        onChange={(e) => setProductForm((p: any) => ({ ...p, commerceMode: sanitizeCommerceMode(e.target.value) || '' }))}
-                        style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                      >
-                        <option value="">— Derived from checkout mode —</option>
-                        {COMMERCE_MODES.map((mode) => (
-                          <option key={mode} value={mode}>{COMMERCE_MODE_META[mode].label}</option>
-                        ))}
-                      </select>
-                      {(() => {
-                        const m = sanitizeCommerceMode(productForm.commerceMode);
-                        return m ? <p style={{ fontSize: 10, color: '#8b95a7', margin: '4px 0 0' }}>{COMMERCE_MODE_META[m].description}</p> : null;
-                      })()}
-                    </div>
-                    {(['accessRule', 'billingRule', 'scheduleConfig'] as const).map((block) => (
-                      <div key={block}>
-                        <label style={{ fontSize: 10, color: '#888' }}>{block} (JSON)</label>
-                        <CommerceJsonField
-                          value={(productForm as any)[block]}
-                          onChange={(obj) => setProductForm((p: any) => ({ ...p, [block]: obj }))}
-                        />
-                      </div>
-                    ))}
-                  </div>
                 </SectionCard>
 
                 {/* ============ DROP SCHEDULE ============ */}
@@ -6071,6 +6106,10 @@ export default function AdminPortal() {
                   <div style={{ marginBottom: 8 }}>
                     {productForm.notes && productForm.notes.map((note: any, idx: number) => (
                       <div key={idx} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', background: '#060606', padding: 6, borderRadius: 6 }}>
+                        <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }}>
+                          <button type="button" onClick={() => moveNote(idx, -1)} disabled={idx === 0} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▲</button>
+                          <button type="button" onClick={() => moveNote(idx, 1)} disabled={idx === (productForm.notes?.length || 0) - 1} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▼</button>
+                        </span>
                         <span style={{ fontSize: 10, color: '#888', minWidth: 60 }}>{note.label}</span>
                         <span style={{ fontSize: 11, color: '#ccc', flex: 1 }}>{note.name}</span>
                         <span style={{ fontSize: 10, color: '#666', flex: 1 }}>{note.text}</span>
