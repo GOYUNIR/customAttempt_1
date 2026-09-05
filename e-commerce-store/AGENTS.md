@@ -1869,5 +1869,36 @@ is the backing endpoint.
   - **✅ Tests:** `tsc --noEmit` clean and **297/297 tests pass** (added coverage for
     per-viewport crop helpers, `resolveSizeLimits`, and `sampleRefName` round-trip).
 
+- **2026-09-04 — Optional go-live, arrow reordering, purge limits box, smart inventory slug sync:**
+  - **🟢 Optional Go-Live.** `lib/product-sanity.ts` no longer emits the
+    `upcoming_no_golive` error (a scheduled release may be saved without a date;
+    it simply stays queued until one is set and auto-activates when the clock
+    reaches it), and `/api/admin/products` `setStatus` no longer 400s on Upcoming
+    without a date. The admin Drop Schedule label reads
+    **"Go live at (optional - auto-activates when set)"**, and the red focus ring /
+    warning / `highlightGoLiveAt` state for a missing date were removed. The
+    `upcoming_golive_past` warning (a PAST date is ready to publish) is kept.
+  - **↕️ Arrow reordering.** The product catalog list no longer uses a numeric
+    `prompt()` "Reorder" button — each row now has clean **↑ Up / ↓ Down** buttons
+    (`moveProductOrder` swaps `sortOrder` with the adjacent product in the sorted
+    list and persists both via the existing `reorder` action). Variant positions
+    already reorder with ▲/▼ arrow buttons.
+  - **🧽 Purged the "Product-wide limits" panel** from the bottom of Tab 2
+    (Variants & Shared Inventory). Per-item limits on each variant row remain the
+    only limit surface.
+  - **🔗 Smart Inventory Sync Slug.** The variant card's FIRST prompt is now a
+    **"Sync with existing slug?"** toggle + **Inventory Sync Slug** input. Filling
+    a slug that another variant already owns fetches the source and OVERRIDES the
+    local fields (price, Stripe ID, SKU, mode, winners, per-item limits, physical
+    attributes, and per-size stock), then greys out / locks those inputs with a
+    **"Synced with [SLUG]"** badge and an **Unlink** button. A slug with no
+    existing match starts a new shared pool (editable). New
+    `isSyncedSourceReleased()` helper in `lib/checkout-mode.ts` lets `/api/checkout`
+    sell a synced FCFS variant directly when its source slug is released (a live,
+    non-upcoming/archived product owns the same slug) even if the variant's own
+    parent container is still DRAFT/UPCOMING.
+  - **✅ Tests:** `tsc --noEmit` clean, `eslint` 0/0 on touched files, and
+    **329/329 tests pass** (added `isSyncedSourceReleased` coverage).
+
 
 

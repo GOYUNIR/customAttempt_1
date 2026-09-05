@@ -127,3 +127,37 @@ export function sharedInventoryField(slug: string): string {
   const safe = normalizeInventorySyncSlug(slug);
   return safe ? `shared:${safe}` : '';
 }
+
+/**
+ * Whether a size's shared-inventory SOURCE is "released".
+ *
+ * A size that syncs to an existing slug (`inventorySyncSlug`) draws from a
+ * shared stock pool whose canonical source lives in ANOTHER product. When that
+ * source product is itself live (active, not upcoming/archived) the synced size
+ * can be sold directly — even when its own parent container is still DRAFT or
+ * UPCOMING (unreleased). This lets checkout relax the parent-lifecycle gate for
+ * synced variants without changing anything for standalone sizes.
+ */
+export function isSyncedSourceReleased(
+  product: any,
+  size?: string | null,
+  catalog?: any[] | null,
+): boolean {
+  const slug = resolveInventorySyncSlug(product, size);
+  if (!slug) return false;
+  const ownId = String(product?.id ?? '');
+  return (Array.isArray(catalog) ? catalog : []).some((p: any) => {
+    if (!p) return false;
+    // Skip the product itself — the "source" must be a DIFFERENT container.
+    if (ownId && String(p?.id ?? '') === ownId) return false;
+    // A source container is "released" when it is live and not scheduled/retired.
+    const released =
+      p.isActive !== false &&
+      p.isArchived !== true &&
+      p.isUpcoming !== true;
+    if (!released) return false;
+    return Array.isArray(p?.priceCategories)
+      ? p.priceCategories.some((c: any) => normalizeInventorySyncSlug(c?.inventorySyncSlug) === slug)
+      : false;
+  });
+}

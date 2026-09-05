@@ -294,25 +294,17 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
     });
   }
 
-  // ── Upcoming lifecycle: a scheduled release must know when to open ────────
-  if (product?.isUpcoming) {
-    if (!Number.isFinite(goLiveMs)) {
-      issues.push({
-        severity: 'error',
-        code: 'upcoming_no_golive',
-        fieldId: 'pf-goliveat',
-        message: 'An Upcoming release needs a “Go live at” time.',
-        detail: 'Upcoming schedules the release to publish automatically. Set “Go live at” so it knows when to open.',
-      });
-    } else if (goLiveMs < now) {
-      issues.push({
-        severity: 'warning',
-        code: 'upcoming_golive_past',
-        fieldId: 'pf-goliveat',
-        message: '“Go live at” is in the past — this release is ready to publish now.',
-        detail: 'Move “Go live at” to the future, or switch the status to Active to publish immediately.',
-      });
-    }
+  // ── Upcoming lifecycle: “Go live at” is OPTIONAL (it auto-activates when set).
+  //    A missing date is perfectly valid — the release just stays queued until
+  //    an operator sets one. A PAST date simply means it's ready to publish now.
+  if (product?.isUpcoming && Number.isFinite(goLiveMs) && goLiveMs < now) {
+    issues.push({
+      severity: 'warning',
+      code: 'upcoming_golive_past',
+      fieldId: 'pf-goliveat',
+      message: '“Go live at” is in the past — this release is ready to publish now.',
+      detail: 'Move “Go live at” to the future, or switch the status to Active to publish immediately.',
+    });
   }
 
   const hasRecurring = Boolean(product?.customDropSchedule) || Object.values(product?.sizeConfigs || {}).some((cfg: any) => Boolean(cfg?.customDropSchedule));

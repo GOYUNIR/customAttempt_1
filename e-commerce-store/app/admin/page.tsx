@@ -253,7 +253,7 @@ function tabForSanityCode(code: string): string {
     ['no_sizes', 'duplicate_size', 'empty_price', 'no_stripe', 'inventory_stale_keys', 'inventory_mismatch', 'max_per_email_over_inventory', 'no_inventory'].includes(code)
   ) return 'variants';
   if (['sampler_no_markers', 'sampler_arbitrage', 'sampler_free_full', 'sampler_min_order_low', 'sampler_stale_target'].includes(code)) return 'variants';
-  if (['winners_on_fcfs', 'raffle_oversell', 'go_live_after_end', 'released_in_past', 'upcoming_no_golive', 'upcoming_golive_past'].includes(code)) return 'drop';
+  if (['winners_on_fcfs', 'raffle_oversell', 'go_live_after_end', 'released_in_past', 'upcoming_golive_past'].includes(code)) return 'drop';
   return '';
 }
 
@@ -268,7 +268,6 @@ function fieldIdForSanityCode(code: string): string {
     case 'duplicate_size': return 'pf-size-0';
     case 'empty_price': return 'pf-price-0';
     case 'raffle_oversell': return 'pf-winnerstiers-0';
-    case 'upcoming_no_golive':
     case 'upcoming_golive_past':
     case 'go_live_after_end': return 'pf-goliveat';
     case 'released_in_past': return 'pf-releaseends';
@@ -1430,9 +1429,6 @@ export default function AdminPortal() {
     confirmLabel: string;
     onConfirm: () => void;
   }>(null);
-  // When true, the "Go live at" picker in Tab 3 gets a red focus ring
-  // (ring-2 ring-red-500) because an Upcoming status was requested without a date.
-  const [highlightGoLiveAt, setHighlightGoLiveAt] = useState(false);
   // True while files are being uploaded/compressed in the product gallery. The
   // Save Product button is disabled during this window so a buyer can never
   // save the product with a half-finished image list.
@@ -2258,43 +2254,70 @@ export default function AdminPortal() {
     });
   };
 
-  // Resolve the shared-inventory pool + physical attributes a variant should
-  // inherit from an existing sync slug (searches the current form first, then
-  // the rest of the catalog).
+  // Resolve the shared-inventory pool SOURCE for a sync slug: the first variant
+  // (in the current form, then the rest of the catalog) that already owns the
+  // slug, plus its parent product (for per-size stock). Returns null when no
+  // existing source exists — i.e. this variant is establishing a NEW pool.
   const findSourceCategoryForSlug = (slug: string, current: any, currentIndex: number) => {
     const match = (c: any) => c && slugifyName(c?.inventorySyncSlug) === slug;
     const inForm = (current.priceCategories || []).find((c: any, i: number) => i !== currentIndex && match(c));
-    if (inForm) return inForm;
+    if (inForm) return { category: inForm, product: current };
     for (const p of allProducts) {
       const cat = (p.priceCategories || []).find(match);
-      if (cat) return cat;
+      if (cat) return { category: cat, product: p };
     }
     return null;
   };
 
-  // When a variant is assigned an "Inventory Sync Slug", auto-prefill its stock
-  // count + physical attributes (weight/dimensions/SKU where unset) from the
-  // variant that already owns that slug, so linked SKUs start in sync.
+  // When a variant is linked to an existing "Inventory Sync Slug", fetch the
+  // source variant's data and OVERRIDE the local fields (price, Stripe ID, SKU,
+  // mode, winners, limits, physical attributes, and stock) so linked SKUs start
+  // identical — then the UI locks those synced inputs.
   const assignInventorySyncSlug = (index: number, rawSlug: string) => {
     const slug = slugifyName(rawSlug);
     setProductForm((prev: any) => {
       const cats = [...(prev.priceCategories || [])];
-      const cat = { ...cats[index], inventorySyncSlug: rawSlug };
+      const cat = { ...cats[index], inventorySyncSlug: rawSlug, syncWithExisting: true };
       cats[index] = cat;
       if (!slug) return { ...prev, priceCategories: cats };
-      const source = findSourceCategoryForSlug(slug, prev, index);
-      if (!source) return { ...prev, priceCategories: cats };
-      const inv = { ...(prev.inventoryPerSize || {}) };
-      const sourceStock = Math.max(0, Number(source?.inventoryPerSize?.[source?.size] ?? 0) || 0);
-      if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
+      const found = findSourceCategoryForSlug(slug, prev, index);
+      if (!found) return { ...prev, priceCategories: cats };
+      const source = found.category;
+      const sourceProduct = found.product;
       const merged = { ...cat };
-      for (const field of ['sku', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
-        if (source?.[field] !== undefined && source?.[field] !== '' && (merged[field] === undefined || merged[field] === '')) {
-          merged[field] = source[field];
-        }
+      for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
+        if (source?.[field] !== undefined) merged[field] = source[field];
       }
+      const inv = { ...(prev.inventoryPerSize || {}) };
+      const sourceStock = Math.max(0, Number(sourceProduct?.inventoryPerSize?.[source?.size] ?? 0) || 0);
+      if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
       cats[index] = merged;
       return { ...prev, priceCategories: cats, inventoryPerSize: inv };
+    });
+  };
+
+  // Unlink a variant from its sync slug, restoring full local editability.
+  const unlinkInventorySyncSlug = (index: number) => {
+    setProductForm((prev: any) => {
+      const cats = [...(prev.priceCategories || [])];
+      const cat = { ...cats[index] };
+      delete cat.inventorySyncSlug;
+      delete cat.syncWithExisting;
+      cats[index] = cat;
+      return { ...prev, priceCategories: cats };
+    });
+  };
+
+  // Toggle "Sync with existing slug?" — ON reveals the slug prompt, OFF unlinks.
+  const setCategorySyncEnabled = (index: number, enabled: boolean) => {
+    if (!enabled) {
+      unlinkInventorySyncSlug(index);
+      return;
+    }
+    setProductForm((prev: any) => {
+      const cats = [...(prev.priceCategories || [])];
+      cats[index] = { ...cats[index], syncWithExisting: true };
+      return { ...prev, priceCategories: cats };
     });
   };
 
@@ -2680,21 +2703,9 @@ export default function AdminPortal() {
     void doDelete();
   };
 
-  /** Set a product's single lifecycle status (DRAFT | ACTIVE | UPCOMING | ARCHIVED).
-   *  Selecting Upcoming without a goLiveAt opens the editor to Tab 3 and rings the
-   *  date picker red instead of persisting a stuck state. */
+  /** Set a product's single lifecycle status (DRAFT | ACTIVE | UPCOMING | ARCHIVED). */
   const setProductStatus = async (product: any, status: string) => {
     if (!requireUnlocked()) return;
-    if (status === 'UPCOMING' && !String(product.goLiveAt || '').trim()) {
-      editProduct(product);
-      setActiveProductTab('drop');
-      setHighlightGoLiveAt(true);
-      showToast('Upcoming needs a “Go live at” date');
-      setProductMsg('⚠ Set a “Go live at” date for Upcoming — the picker is highlighted below.');
-      window.setTimeout(() => focusField('drop', 'pf-goliveat'), 150);
-      return;
-    }
-    setHighlightGoLiveAt(false);
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
@@ -2716,19 +2727,41 @@ export default function AdminPortal() {
     setProductActionLoading(false);
   };
 
-  const reorderProducts = async (productId: string, newOrder: number) => {
+  /** Move a product up/down in the catalog sort order by swapping its sortOrder
+   *  with the adjacent product in the (already sorted) list. No numeric prompt —
+   *  just clean Up/Down arrows. */
+  const moveProductOrder = async (product: any, direction: -1 | 1) => {
     if (!requireUnlocked()) return;
+    const sorted = [...allProducts].sort(
+      (a: any, b: any) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0) || String(a.name).localeCompare(String(b.name)),
+    );
+    const idx = sorted.findIndex((p: any) => String(p.id) === String(product.id));
+    if (idx < 0) return;
+    const target = idx + direction;
+    if (target < 0 || target >= sorted.length) return;
+    const neighbor = sorted[target];
+    const curOrder = Number(product.sortOrder) || 0;
+    const neighborOrder = Number(neighbor.sortOrder) || 0;
+    // When two products share the same sortOrder (fresh catalogs), nudge the
+    // neighbor up one so the swap is actually visible.
+    const nextNeighborOrder = neighborOrder === curOrder ? curOrder + 1 : curOrder;
+    const nextCurOrder = neighborOrder;
     setProductActionLoading(true);
     try {
-      const res = await adminFetch('/api/admin/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'reorder', id: productId, sortOrder: newOrder }),
-      });
-      if (res.ok) {
-        showToast('UPDATED · Reordered');
-        await fetchProducts();
-      }
+      await Promise.all([
+        adminFetch('/api/admin/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, action: 'reorder', id: neighbor.id, sortOrder: nextNeighborOrder }),
+        }),
+        adminFetch('/api/admin/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, action: 'reorder', id: product.id, sortOrder: nextCurOrder }),
+        }),
+      ]);
+      showToast('UPDATED · Reordered');
+      await fetchProducts();
     } catch (err: any) {
       showToast('Error: ' + err.message);
     }
@@ -5062,7 +5095,6 @@ export default function AdminPortal() {
                     <span style={{ width: 80 }}>Price</span>
                     <span style={{ width: 64 }}>Units</span>
                     <span style={{ flex: 1, minWidth: 120 }}>Stripe ID</span>
-                    <span style={{ width: 132 }}>Sync slug</span>
                     <span style={{ width: 150 }}>Mode</span>
                     <span>Actions</span>
                   </div>
@@ -5081,8 +5113,44 @@ export default function AdminPortal() {
                       ? productForm.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey)
                       : undefined;
                     const samplerCreditCents = Number(samplerRec?.creditCents ?? productForm.deliveryIncentiveCreditCents ?? 0) || 0;
+                    const syncSlug = slugifyName(cat.inventorySyncSlug || '');
+                    const syncEnabled = Boolean(cat.syncWithExisting || cat.inventorySyncSlug);
+                    const syncSource = syncSlug ? findSourceCategoryForSlug(syncSlug, productForm, idx) : null;
+                    const synced = syncEnabled && Boolean(syncSource);
                     return (
                       <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                        {/* Row 0 — Inventory Sync Slug (first prompt) */}
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: 8, borderRadius: 8, background: synced ? 'rgba(125,211,252,0.08)' : 'rgba(255,255,255,0.02)', border: synced ? '1px solid rgba(125,211,252,0.4)' : '1px solid #232329' }}>
+                          <label style={{ fontSize: 10, display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            <input
+                              type="checkbox"
+                              checked={syncEnabled}
+                              onChange={(e) => setCategorySyncEnabled(idx, e.target.checked)}
+                            />
+                            Sync with existing slug?
+                          </label>
+                          {syncEnabled && (
+                            <input
+                              type="text"
+                              placeholder="Inventory Sync Slug"
+                              title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool."
+                              value={cat.inventorySyncSlug || ''}
+                              onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
+                              style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11, color: synced ? '#7dd3fc' : undefined }}
+                            />
+                          )}
+                          {synced && (
+                            <>
+                              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(125,211,252,0.16)', border: '1px solid rgba(125,211,252,0.5)', color: '#7dd3fc' }}>
+                                Synced with {syncSlug}
+                              </span>
+                              <button type="button" onClick={() => unlinkInventorySyncSlug(idx)} style={{ ...buttonGhost, padding: '2px 8px', fontSize: 10, color: '#fbbf24', borderColor: '#f59e0b' }}>Unlink</button>
+                            </>
+                          )}
+                          {syncEnabled && !synced && Boolean(cat.inventorySyncSlug) && (
+                            <span style={{ fontSize: 9, color: '#8b95a7' }}>No existing slug found — this starts a new shared pool.</span>
+                          )}
+                        </div>
                         {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
@@ -5096,7 +5164,8 @@ export default function AdminPortal() {
                         placeholder="Variant / Option / SKU"
                         value={cat.size}
                         onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
-                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
+                        disabled={synced}
+                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
                       />
                       <input
                         type="text"
@@ -5104,7 +5173,8 @@ export default function AdminPortal() {
                         title="Auto-generated from [product-slug]-[variant-name]; edit to override."
                         value={cat.sku || ''}
                         onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
-                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
+                        disabled={synced}
+                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined, opacity: synced ? 0.6 : 1 }}
                       />
                       <input
                         id={`pf-price-${idx}`}
@@ -5112,7 +5182,8 @@ export default function AdminPortal() {
                         placeholder="Price ($)"
                         value={cat.price}
                         onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
-                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}) }}
+                        disabled={synced}
+                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
                       />
                       {(() => {
                         const pv = validatePrice(cat.price);
@@ -5145,22 +5216,16 @@ export default function AdminPortal() {
                             return { ...p, inventoryPerSize: inv };
                           });
                         }}
-                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11 }}
+                        disabled={synced}
+                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11, opacity: synced ? 0.6 : 1 }}
                       />
                       <input
                         type="text"
                         placeholder="Stripe Price ID"
                         value={cat.stripeId}
                         onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
-                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Inventory sync slug"
-                        title="Optional shared-stock key. Assign a slug that another variant already uses to auto-inherit its stock pool + physical attributes. Give two or more options the SAME slug to draw from one shared inventory pool."
-                        value={cat.inventorySyncSlug || ''}
-                        onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
-                        style={{ ...inputStyle, width: 132, padding: 6, fontSize: 10, color: cat.inventorySyncSlug ? '#7dd3fc' : undefined }}
+                        disabled={synced}
+                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11, opacity: synced ? 0.6 : 1 }}
                       />
                       </div>
                       {/* Row 1b — per-item limits. Each option/SKU is its own item, so
@@ -5177,7 +5242,8 @@ export default function AdminPortal() {
                             title="Max per email for THIS option (0 or blank = unlimited, blank = product default)."
                             value={cat.maxPerEmail ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
+                            disabled={synced}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
                           />
                           {limitIsUnlimited(cat.maxPerEmail) && <UnlimitedBadge label="0 = Unlimited" />}
                         </span>
@@ -5189,7 +5255,8 @@ export default function AdminPortal() {
                             title="Max in cart per email for THIS option (0 or blank = unlimited, blank = product default)."
                             value={cat.maxPerCart ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
+                            disabled={synced}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
                           />
                           {limitIsUnlimited(cat.maxPerCart) && <UnlimitedBadge label="0 = Unlimited" />}
                         </span>
@@ -5202,7 +5269,8 @@ export default function AdminPortal() {
                               title="Max raffle allocation for THIS option (0 or blank = unlimited, blank = product default)."
                               value={cat.maxRaffleAllocationLimit ?? ''}
                               onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                              style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10 }}
+                              disabled={synced}
+                              style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
                             />
                             {limitIsUnlimited(cat.maxRaffleAllocationLimit) && <UnlimitedBadge label="0 = Unlimited" />}
                           </span>
@@ -5219,7 +5287,8 @@ export default function AdminPortal() {
                           title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
                           value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
                           onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
+                          disabled={synced}
+                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
                         />
                       )}
                       <select
@@ -5228,8 +5297,8 @@ export default function AdminPortal() {
                           : "Checkout mode for THIS option. 'Follow product' inherits the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."}
                         value={cat.checkoutMode || ''}
                         onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
-                        disabled={productForm.checkoutMode === 'FCFS'}
-                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
+                        disabled={synced || productForm.checkoutMode === 'FCFS'}
+                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: synced ? 0.6 : (productForm.checkoutMode === 'FCFS' ? 0.75 : 1), color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
                       >
                         <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
                         {productForm.checkoutMode !== 'FCFS' && <option value="RAFFLE">🎟 RAFFLE</option>}
@@ -5471,39 +5540,6 @@ export default function AdminPortal() {
                   <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
                     <span>💡 If STRIPE_PRODUCT_ID is set, new sizes prefill with <code>{defaultStripePriceId}</code>.</span>
                   </div>
-
-                  {/* ====== Product-wide limits — fallback for any option whose own
-                       limit is left blank. Total inventory is DERIVED (read-only). ====== */}
-                  <details style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
-                    <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
-                      Product-wide limits ▾
-                    </summary>
-                    <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 8px', lineHeight: 1.5 }}>
-                      These limits apply to any option whose own limit is left blank. 0 or blank = Unlimited. Total inventory is calculated from the option units above.
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <label style={{ fontSize: 10, color: '#888' }}>Total inventory (calculated)
-                        <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', width: '100%', marginTop: 3, color: '#9ca3af', background: '#09090b', borderStyle: 'dashed', cursor: 'not-allowed' }}>
-                          <strong style={{ color: '#e4e4e7' }}>{computedTotalInventory(productForm)}</strong>
-                          <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>units · sum of active options</span>
-                        </div>
-                      </label>
-                      {hasRaffleSize && (
-                      <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)
-                        <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
-                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxRaffleAllocationLimit) && <UnlimitedBadge label="0 = Unlimited" />}</div>
-                      </label>
-                      )}
-                      <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)
-                        <input type="number" min={0} value={productForm.maxPerEmail ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
-                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxPerEmail) && <UnlimitedBadge label="0 = Unlimited" />}</div>
-                      </label>
-                      <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email
-                        <input type="number" min={0} value={productForm.maxPerCart ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
-                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxPerCart) && <UnlimitedBadge label="0 = Unlimited" />}</div>
-                      </label>
-                    </div>
-                  </details>
                 </SectionCard>
                   </>
                 )}
@@ -5696,27 +5732,15 @@ export default function AdminPortal() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div>
                       <label style={{ fontSize: 10, color: statusFromLegacy(productForm) === 'UPCOMING' ? '#60a5fa' : '#888' }}>
-                        {statusFromLegacy(productForm) === 'UPCOMING' ? 'Go live at (required for Upcoming)' : 'Go live at (upcoming auto-activates)'}
+                        Go live at (optional - auto-activates when set)
                       </label>
                       <input
                         id="pf-goliveat"
                         type="datetime-local"
                         value={productForm.goLiveAt || ''}
-                        onChange={(e) => { setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value })); setHighlightGoLiveAt(false); }}
-                        className={highlightGoLiveAt ? 'ring-2 ring-red-500' : undefined}
-                        style={{
-                          ...inputStyle,
-                          ...(statusFromLegacy(productForm) === 'UPCOMING' && !String(productForm.goLiveAt || '').trim() ? errorFieldStyle : {}),
-                          // Emulates Tailwind `ring-2 ring-red-500` for the
-                          // "Upcoming without a date" focus highlight.
-                          ...(highlightGoLiveAt ? { boxShadow: '0 0 0 2px #ef4444', borderColor: '#ef4444' } : {}),
-                        }}
+                        onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))}
+                        style={inputStyle}
                       />
-                      {highlightGoLiveAt && (
-                        <div style={{ marginTop: 4, fontSize: 9.5, color: '#f87171', fontWeight: 700 }}>
-                          ⚠ Set a “Go live at” date to schedule this as Upcoming.
-                        </div>
-                      )}
                     </div>
                     {hasRaffleSize && (
                       <div>
@@ -6106,7 +6130,8 @@ export default function AdminPortal() {
                           <option value="UPCOMING">Upcoming</option>
                           <option value="ARCHIVED">Archived</option>
                         </select>
-                        <button onClick={() => { const newOrder = prompt('New sort order (lower = first):', String(product.sortOrder || 0)); if (newOrder !== null) reorderProducts(product.id, Number(newOrder)); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Reorder</button>
+                        <button onClick={() => moveProductOrder(product, -1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>↑ Up</button>
+                        <button onClick={() => moveProductOrder(product, 1)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 8px', fontSize: 10 }}>↓ Down</button>
                         <button onClick={() => duplicateProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>⧉ Duplicate</button>
                         <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>

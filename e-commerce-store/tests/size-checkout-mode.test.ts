@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from '../lib/checkout-mode.ts';
+import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField, isSyncedSourceReleased } from '../lib/checkout-mode.ts';
 
 // A mixed-format product: sampler sells instantly (FCFS), full size runs a raffle.
 const MIXED = {
@@ -148,4 +148,36 @@ test('shared inventory: sharedInventoryField uses the shared: prefix', () => {
   assert.equal(sharedInventoryField('black-tee'), 'shared:black-tee');
   assert.equal(sharedInventoryField('Black Tee!'), 'shared:black-tee');
   assert.equal(sharedInventoryField(''), '');
+});
+
+test('shared inventory: isSyncedSourceReleased only when another LIVE product owns the slug', () => {
+  const synced = {
+    id: 'p-child',
+    isUpcoming: true, // parent container is unreleased
+    priceCategories: [{ size: 'Standard', price: 95, inventorySyncSlug: 'black-tee' }],
+  };
+
+  // Source is in the same catalog, live (released) and owns the slug.
+  const liveSource = {
+    id: 'p-source',
+    isActive: true,
+    isArchived: false,
+    isUpcoming: false,
+    priceCategories: [{ size: 'Standard', price: 95, inventorySyncSlug: 'black-tee' }],
+  };
+  assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced, liveSource]), true);
+
+  // Source is archived → not released.
+  const archivedSource = { ...liveSource, isArchived: true };
+  assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced, archivedSource]), false);
+
+  // Source is itself upcoming → not released.
+  const upcomingSource = { ...liveSource, isUpcoming: true };
+  assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced, upcomingSource]), false);
+
+  // No other product owns the slug → not released.
+  assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced]), false);
+
+  // A size without a slug never reports a released source.
+  assert.equal(isSyncedSourceReleased({ id: 'x', priceCategories: [{ size: 'A' }] }, 'A', [liveSource]), false);
 });

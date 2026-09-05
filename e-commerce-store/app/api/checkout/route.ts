@@ -5,6 +5,7 @@ import { StripeDriver } from '@/services/payment/stripe.driver';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
+import { isSyncedSourceReleased } from '@/lib/checkout-mode';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -92,7 +93,11 @@ export async function POST(request: Request) {
     const variant = String(product.name || product.id);
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const checkoutMode = getSizeCheckoutMode(product, String(size || ''));
-    const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && (product.isArchived === true || product.isUpcoming === true));
+    const parentUnreleased = product.isArchived === true || product.isUpcoming === true;
+    // A synced variant whose source slug is already released can be sold directly
+    // even when its own parent container is still unreleased (DRAFT/UPCOMING).
+    const syncedSourceReleased = isSyncedSourceReleased(product, String(size || ''), Object.values(allProducts));
+    const usesWaitlist = requestedMode === 'waitlist' || (checkoutMode === 'FCFS' && parentUnreleased && !syncedSourceReleased);
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
     const refPrefix = await getRefPrefix(redis);
     const orderRef = buildOrderRef(normalizedEmail, variant, String(size), refPrefix);

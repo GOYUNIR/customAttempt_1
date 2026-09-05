@@ -319,12 +319,9 @@ export async function POST(request: Request) {
     const product = allProducts[body.id];
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const status = normalizeProductStatus(body.status, statusFromLegacy(product));
-    // Upcoming without a scheduled goLiveAt can never actually publish — refuse
-    // to persist a stuck state (the admin client opens Tab 3 + highlights the
-    // date picker before this request is ever sent).
-    if (status === 'UPCOMING' && !String(body.goLiveAt || product.goLiveAt || '').trim()) {
-      return NextResponse.json({ error: 'Upcoming requires a goLiveAt date', code: 'upcoming_no_golive' }, { status: 400 });
-    }
+    // “Go live at” is optional: Upcoming may be saved without a date (the
+    // release stays queued until an operator sets one, and auto-activates when
+    // the clock reaches it). No date → no auto-publish, which is allowed.
     const booleans = legacyBooleansFromStatus(status);
     product.status = status;
     product.isActive = booleans.isActive;
