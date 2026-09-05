@@ -315,6 +315,29 @@ export async function POST(request: Request) {
     } catch {}
     return NextResponse.json({ success: true, product });
   }
+  if (action === 'setStatus') {
+    const product = allProducts[body.id];
+    if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const status = normalizeProductStatus(body.status, statusFromLegacy(product));
+    // Upcoming without a scheduled goLiveAt can never actually publish — refuse
+    // to persist a stuck state (the admin client opens Tab 3 + highlights the
+    // date picker before this request is ever sent).
+    if (status === 'UPCOMING' && !String(body.goLiveAt || product.goLiveAt || '').trim()) {
+      return NextResponse.json({ error: 'Upcoming requires a goLiveAt date', code: 'upcoming_no_golive' }, { status: 400 });
+    }
+    const booleans = legacyBooleansFromStatus(status);
+    product.status = status;
+    product.isActive = booleans.isActive;
+    product.isArchived = booleans.isArchived;
+    product.isUpcoming = booleans.isUpcoming;
+    if (status === 'UPCOMING' && body.goLiveAt) product.goLiveAt = String(body.goLiveAt);
+    product.updatedAt = new Date().toISOString();
+    await saveProduct(redis, product);
+    try {
+      await appendAudit(redis, { action: 'PRODUCT_STATUS_CHANGED', detail: `${product.name} → ${status}`, actor: 'admin' });
+    } catch {}
+    return NextResponse.json({ success: true, product });
+  }
 
   // Upsert (create or update)
   const id = body.id || `prod_${Date.now().toString(36)}`;

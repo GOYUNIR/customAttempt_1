@@ -93,8 +93,8 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
       severity: 'error',
       code: 'no_sizes',
       fieldId: 'pf-sizes',
-      message: 'Add at least one size with a price.',
-      detail: 'A product with no Pricing & Sizes rows cannot be sold or entered. Add a size in Pricing & Sizes.',
+      message: 'Add at least one variant / option with a price.',
+      detail: 'A product with no Pricing & Variants rows cannot be sold or entered. Add a variant in Pricing & Variants.',
     });
   } else {
     const seen = new Map<string, number>();
@@ -189,8 +189,8 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
     issues.push({
       severity: 'warning',
       code: 'sampler_no_markers',
-      message: 'Trial credits are enabled but no size is marked as a sampler.',
-      detail: 'Enable “🧪 Sample” on at least one size in Pricing & Sizes, otherwise the credits are never advertised or issued.',
+      message: 'Trial credits are enabled but no variant is marked as a sampler.',
+      detail: 'Enable “🧪 Sample” on at least one variant in Pricing & Variants, otherwise the credits are never advertised or issued.',
     });
   }
 
@@ -243,8 +243,8 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
       issues.push({
         severity: 'warning',
         code: 'sampler_stale_target',
-        message: `Size “${size}” credits toward “${fullSize}”, which isn't a size on this product.`,
-        detail: '“Credits toward” should be one of the sizes in Pricing & Sizes (or left empty for “any next order”).',
+        message: `Option “${size}” credits toward “${fullSize}”, which isn't a variant on this product.`,
+        detail: '“Credits toward” should be one of the variants in Pricing & Variants (or left empty for “any next order”).',
       });
     }
   }
@@ -259,8 +259,8 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
       issues.push({
         severity: 'warning',
         code: 'inventory_stale_keys',
-        message: 'Per-size inventory mentions a size that no longer exists in Pricing & Sizes.',
-        detail: 'Renaming or deleting a size should re-key its stock automatically — if you see this, re-save the size so the stale record is dropped.',
+        message: 'Per-variant inventory mentions an option that no longer exists in Pricing & Variants.',
+        detail: 'Renaming or deleting a variant should re-key its stock automatically — if you see this, re-save the variant so the stale record is dropped.',
       });
     } else if (totalInventory > 0 && perSizeTotal !== totalInventory) {
       issues.push({

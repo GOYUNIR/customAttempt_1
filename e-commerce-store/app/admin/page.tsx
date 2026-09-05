@@ -1,13 +1,19 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { THEME_PRESETS } from '@/lib/theme-presets';
 import { FONT_CATALOG } from '@/lib/font-catalog';
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import LinkPreviewGallery from '@/components/LinkPreviewGallery';
-import ProductLivePreview from '@/components/ProductLivePreview';
+// Heavy live-preview panel is loaded on demand (client-only) so it never bloats
+// the initial bundle or the Cloudflare Worker CPU wall-time on first paint.
+const ProductLivePreview = dynamic(() => import('@/components/ProductLivePreview'), {
+  ssr: false,
+  loading: () => <div style={{ padding: 24, fontSize: 11, color: '#888' }}>Loading preview…</div>,
+});
 import { toHexColor } from '@/lib/share-card-config';
 import { getNextDrawTimestampForSchedule, visibleProductCategories } from '@/lib/storefront-config';
 import { isVideoMedia, pickCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, splitCropEntry, cropEntryFromPair, type MediaCrop, type CropEntry } from '@/lib/media';
@@ -435,6 +441,14 @@ function computedTotalInventory(p: any): number {
   }, 0);
 }
 
+/** Active inventory held by a product (sum of per-variant units, falling back to
+ *  `totalInventory`). Used by the destructive-delete confirmation gate. */
+function productTotalUnits(p: any): number {
+  const sum = computedTotalInventory(p);
+  if (sum > 0) return sum;
+  return Math.max(0, Number(p?.totalInventory) || 0);
+}
+
 /** Effective inherited copy for the storefront-copy override panel: the global
  *  Settings → Storefront copy value, falling back to the built-in sentence. */
 function inheritedCopy(copy: any, key: string): string {
@@ -457,6 +471,43 @@ function slugifyName(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 64);
+}
+
+/** Auto-generated SKU for a variant: `[product-slug]-[variant-name]`. Falls back
+ *  to the product slug alone when the variant has no name yet. */
+function variantSku(productSlug: string, variantName: string): string {
+  const slug = slugifyName(String(productSlug || ''));
+  const part = slugifyName(String(variantName || ''));
+  return [slug, part].filter(Boolean).join('-').toUpperCase().slice(0, 64);
+}
+
+/** Treat 0 or blank as "Unlimited" for the per-item cap fields (Max per email,
+ *  Max in cart, Raffle cap). A positive integer means a real, enforced cap. */
+function limitIsUnlimited(value: unknown): boolean {
+  const num = Number(value);
+  return value === undefined || value === null || value === '' || !Number.isFinite(num) || num <= 0;
+}
+
+/** Small inline "0 = Unlimited" helper badge shown under a cap input. */
+function UnlimitedBadge({ label = '0 = Unlimited' }: { label?: string }) {
+  return (
+    <span
+      title="Leave blank or enter 0 for no cap on this item."
+      style={{
+        fontSize: 8.5,
+        fontWeight: 700,
+        letterSpacing: '0.4px',
+        color: '#7dd3fc',
+        background: 'rgba(125,211,252,0.1)',
+        border: '1px solid rgba(125,211,252,0.28)',
+        padding: '1px 6px',
+        borderRadius: 999,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      ∞ {label}
+    </span>
+  );
 }
 
 function Bar({ value, max, color }: { value: number; max: number; color: string }) {
@@ -1371,6 +1422,17 @@ export default function AdminPortal() {
   const [editingNoteIdx, setEditingNoteIdx] = useState<number | null>(null);
   const [noteForm, setNoteForm] = useState({ label: '', name: '', text: '' });
   const [productActionLoading, setProductActionLoading] = useState(false);
+  // Destructive-action confirmation modal — required before deleting a product or
+  // variant that still holds active inventory (> 0 units).
+  const [destructiveConfirm, setDestructiveConfirm] = useState<null | {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  }>(null);
+  // When true, the "Go live at" picker in Tab 3 gets a red focus ring
+  // (ring-2 ring-red-500) because an Upcoming status was requested without a date.
+  const [highlightGoLiveAt, setHighlightGoLiveAt] = useState(false);
   // True while files are being uploaded/compressed in the product gallery. The
   // Save Product button is disabled during this window so a buyer can never
   // save the product with a half-finished image list.
@@ -1703,7 +1765,10 @@ export default function AdminPortal() {
   const fetchProducts = async () => {
     setProductsLoading(true);
     try {
-      const res = await adminFetch('/api/admin/products?includeArchived=true');
+      // Explicit pagination keeps the Cloudflare Worker CPU wall-time under 50ms
+      // (Error 1102 = CPU limit) — the server pages/filters on its side instead
+      // of shipping the whole catalog to the admin browser.
+      const res = await adminFetch('/api/admin/products?includeArchived=true&page=1&pageSize=200');
       const data = await res.json();
       if (data.defaultStripePriceId) setDefaultStripePriceId(String(data.defaultStripePriceId));
       if (data.products) {
@@ -1963,34 +2028,72 @@ export default function AdminPortal() {
     showToast('Duplicate created — tweak it, then Save Product');
   };
 
-  // ===== Handle dynamic price categories =====
+  // ===== Handle dynamic price categories (variants / options / SKUs) =====
   const addPriceCategory = () => {
-    setProductForm((prev: any) => ({
-      ...prev,
-      priceCategories: [
-        ...prev.priceCategories,
-        { size: '', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId, winnerTiers: '1' }
-      ]
-    }));
+    setProductForm((prev: any) => {
+      const slug = String(prev.slug || prev.name || '').trim();
+      return {
+        ...prev,
+        priceCategories: [
+          ...prev.priceCategories,
+          {
+            size: '',
+            sku: slug ? slugifyName(slug).toUpperCase() : '',
+            price: UNCONFIGURED_PRICE_SENTINEL,
+            stripeId: defaultStripePriceId,
+            winnerTiers: '1',
+          },
+        ],
+      };
+    });
+  };
+
+  /** Drag-and-drop reorder of the variant matrix — the array order is the
+   *  storefront order. Per-size records (samplers / sizeConfigs / stock) are
+   *  keyed by NAME, so reordering never orphans them. */
+  const movePriceCategory = (index: number, direction: -1 | 1) => {
+    setProductForm((prev: any) => {
+      const cats = [...(prev.priceCategories || [])];
+      const target = index + direction;
+      if (target < 0 || target >= cats.length) return prev;
+      [cats[index], cats[target]] = [cats[target], cats[index]];
+      return { ...prev, priceCategories: cats };
+    });
   };
 
   const removePriceCategory = (index: number) => {
-    setProductForm((prev: any) => {
-      const removedSize = String(prev.priceCategories?.[index]?.size || '').trim();
-      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
-      const removedKey = removedSize.toLowerCase();
-      const nextSamplers = removedKey
-        ? samplers.filter((s: any) => String(s?.size || '').trim().toLowerCase() !== removedKey)
-        : samplers;
-      const sizeConfigs = { ...(prev.sizeConfigs || {}) };
-      if (removedKey && sizeConfigs[removedKey]) delete sizeConfigs[removedKey];
-      return {
-        ...prev,
-        priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index),
-        samplerSizes: nextSamplers,
-        sizeConfigs,
-      };
-    });
+    const cat = productForm.priceCategories?.[index];
+    const size = String(cat?.size || '').trim();
+    const units = size ? Math.max(0, Number(productForm.inventoryPerSize?.[size] || 0) || 0) : 0;
+    const doRemove = () => {
+      setProductForm((prev: any) => {
+        const removedSize = String(prev.priceCategories?.[index]?.size || '').trim();
+        const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+        const removedKey = removedSize.toLowerCase();
+        const nextSamplers = removedKey
+          ? samplers.filter((s: any) => String(s?.size || '').trim().toLowerCase() !== removedKey)
+          : samplers;
+        const sizeConfigs = { ...(prev.sizeConfigs || {}) };
+        if (removedKey && sizeConfigs[removedKey]) delete sizeConfigs[removedKey];
+        return {
+          ...prev,
+          priceCategories: prev.priceCategories.filter((_: any, i: number) => i !== index),
+          samplerSizes: nextSamplers,
+          sizeConfigs,
+        };
+      });
+    };
+    // A variant with live stock demands an explicit modal before it's removed.
+    if (units > 0) {
+      setDestructiveConfirm({
+        title: 'Delete variant with active inventory',
+        message: `“${size}” still holds ${units} unit${units === 1 ? '' : 's'} in stock. Deleting it removes this stock.`,
+        confirmLabel: 'Delete variant',
+        onConfirm: doRemove,
+      });
+      return;
+    }
+    doRemove();
   };
 
   const updatePriceCategory = (index: number, field: string, value: any) => {
@@ -2014,6 +2117,15 @@ export default function AdminPortal() {
         let sizeConfigs: any = null;
         let samplerSizes: any = null;
         let inventoryPerSize: any = null;
+        // Auto-generate the SKU from [product-slug]-[variant-name] when a variant
+        // is (re)named — but never clobber a manually-entered SKU. We only fill
+        // it in when the SKU is blank or still equals the previously auto value.
+        const productSlugForSku = String(prev.slug || prev.name || '').trim();
+        const prevAutoSku = variantSku(productSlugForSku, previousSize);
+        const currentSku = String(updated[index]?.sku || '').trim();
+        if (!currentSku || currentSku.toUpperCase() === prevAutoSku.toUpperCase()) {
+          updated[index].sku = variantSku(productSlugForSku, nextSize);
+        }
         // Keep EVERY per-size record attached when a size is renamed: the sampler
         // marker + its "credits toward" pointer, any per-size raffle config, and
         // the per-size stock. Renaming "Standard" → "Full Bottle" must never orphan
@@ -2107,6 +2219,82 @@ export default function AdminPortal() {
           },
         ],
       };
+    });
+  };
+
+  // Update ONE field on a per-sampler (trial SKU) record — credit value, full-size
+  // target, expiry, code prefix, eligible slugs/sizes and the customer-facing
+  // "trial story" line. Missing records are created on the fly (auto-marking the
+  // variant as a sampler + enabling delivery incentives).
+  const updateSampler = (size: string, patch: any) => {
+    const key = String(size || '').trim().toLowerCase();
+    if (!key) return;
+    setProductForm((prev: any) => {
+      const samplers = Array.isArray(prev.samplerSizes) ? prev.samplerSizes : [];
+      const idx = samplers.findIndex((s: any) => String(s?.size || '').trim().toLowerCase() === key);
+      if (idx === -1) {
+        const cat = (prev.priceCategories || []).find((c: any) => String(c?.size || '').trim().toLowerCase() === key);
+        if (!cat) return prev;
+        const rec = {
+          size: cat.size,
+          label: '',
+          fullSize: '',
+          creditCents: null,
+          minOrderSubtotalCents: null,
+          neverExpires: null,
+          expiresDays: null,
+          codePrefix: '',
+          eligibleProductSlugs: null,
+          eligibleSizes: null,
+          note: '',
+          sampleRefId: null,
+          ...patch,
+        };
+        return { ...prev, samplerSizes: [...samplers, rec], deliveryIncentiveEnabled: true };
+      }
+      const next = [...samplers];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, samplerSizes: next, deliveryIncentiveEnabled: true };
+    });
+  };
+
+  // Resolve the shared-inventory pool + physical attributes a variant should
+  // inherit from an existing sync slug (searches the current form first, then
+  // the rest of the catalog).
+  const findSourceCategoryForSlug = (slug: string, current: any, currentIndex: number) => {
+    const match = (c: any) => c && slugifyName(c?.inventorySyncSlug) === slug;
+    const inForm = (current.priceCategories || []).find((c: any, i: number) => i !== currentIndex && match(c));
+    if (inForm) return inForm;
+    for (const p of allProducts) {
+      const cat = (p.priceCategories || []).find(match);
+      if (cat) return cat;
+    }
+    return null;
+  };
+
+  // When a variant is assigned an "Inventory Sync Slug", auto-prefill its stock
+  // count + physical attributes (weight/dimensions/SKU where unset) from the
+  // variant that already owns that slug, so linked SKUs start in sync.
+  const assignInventorySyncSlug = (index: number, rawSlug: string) => {
+    const slug = slugifyName(rawSlug);
+    setProductForm((prev: any) => {
+      const cats = [...(prev.priceCategories || [])];
+      const cat = { ...cats[index], inventorySyncSlug: rawSlug };
+      cats[index] = cat;
+      if (!slug) return { ...prev, priceCategories: cats };
+      const source = findSourceCategoryForSlug(slug, prev, index);
+      if (!source) return { ...prev, priceCategories: cats };
+      const inv = { ...(prev.inventoryPerSize || {}) };
+      const sourceStock = Math.max(0, Number(source?.inventoryPerSize?.[source?.size] ?? 0) || 0);
+      if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
+      const merged = { ...cat };
+      for (const field of ['sku', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
+        if (source?.[field] !== undefined && source?.[field] !== '' && (merged[field] === undefined || merged[field] === '')) {
+          merged[field] = source[field];
+        }
+      }
+      cats[index] = merged;
+      return { ...prev, priceCategories: cats, inventoryPerSize: inv };
     });
   };
 
@@ -2371,8 +2559,8 @@ export default function AdminPortal() {
       });
     if (priceCategories.length === 0) {
       focusField('variants', 'pf-sizes');
-      setProductMsg('Add at least one size with a price before saving.');
-      showToast('At least one size + price is required');
+      setProductMsg('Add at least one variant / option with a price before saving.');
+      showToast('At least one variant + price is required');
       return;
     }
     // ── Smart-math gate: never save EXPLOITABLE math. The server enforces the
@@ -2453,85 +2641,74 @@ export default function AdminPortal() {
   };
 
   // ===== Delete, archive, active toggles (unchanged logic, but now archiving/upcoming does NOT hide) =====
-  const deleteProduct = async (id: string) => {
+  const deleteProduct = (id: string) => {
     if (!requireUnlocked()) return;
-    if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
-    setProductActionLoading(true);
-    try {
-      const res = await adminFetch('/api/admin/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'delete', id }),
-      });
-      if (res.ok) {
-        showToast('DELETED · Product');
-        await fetchProducts();
-      } else {
-        const data = await res.json();
-        showToast('Delete failed: ' + (data.error || 'Unknown error'));
+    const product = allProducts.find((p: any) => String(p.id) === String(id));
+    const units = productTotalUnits(product);
+    const doDelete = async () => {
+      setProductActionLoading(true);
+      try {
+        const res = await adminFetch('/api/admin/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, action: 'delete', id }),
+        });
+        if (res.ok) {
+          showToast('DELETED · Product');
+          await fetchProducts();
+        } else {
+          const data = await res.json();
+          showToast('Delete failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err: any) {
+        showToast('Delete failed: ' + err.message);
       }
-    } catch (err: any) {
-      showToast('Delete failed: ' + err.message);
+      setProductActionLoading(false);
+    };
+    // Products with live inventory demand an explicit modal confirmation — a
+    // plain browser prompt is too easy to fat-finger for a destructive delete.
+    if (units > 0) {
+      setDestructiveConfirm({
+        title: 'Delete product with active inventory',
+        message: `“${product?.name || id}” still holds ${units} unit${units === 1 ? '' : 's'} in stock. Deleting it removes this inventory and every order/entry tied to it. This cannot be undone.`,
+        confirmLabel: 'Delete permanently',
+        onConfirm: doDelete,
+      });
+      return;
     }
-    setProductActionLoading(false);
+    if (!confirm('Are you sure you want to delete this product? This cannot be undone.')) return;
+    void doDelete();
   };
 
-  // Archive/Unarchive: now they do NOT affect isActive – they just move the product to the archive list while remaining visible.
-  const toggleArchive = async (id: string, currentArchived: boolean) => {
+  /** Set a product's single lifecycle status (DRAFT | ACTIVE | UPCOMING | ARCHIVED).
+   *  Selecting Upcoming without a goLiveAt opens the editor to Tab 3 and rings the
+   *  date picker red instead of persisting a stuck state. */
+  const setProductStatus = async (product: any, status: string) => {
     if (!requireUnlocked()) return;
-    const action = currentArchived ? 'unarchive' : 'archive';
+    if (status === 'UPCOMING' && !String(product.goLiveAt || '').trim()) {
+      editProduct(product);
+      setActiveProductTab('drop');
+      setHighlightGoLiveAt(true);
+      showToast('Upcoming needs a “Go live at” date');
+      setProductMsg('⚠ Set a “Go live at” date for Upcoming — the picker is highlighted below.');
+      window.setTimeout(() => focusField('drop', 'pf-goliveat'), 150);
+      return;
+    }
+    setHighlightGoLiveAt(false);
     setProductActionLoading(true);
     try {
       const res = await adminFetch('/api/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action, id }),
+        body: JSON.stringify({ password, action: 'setStatus', id: product.id, status }),
       });
       if (res.ok) {
-        showToast(`UPDATED · ${currentArchived ? 'Unarchived' : 'Archived'}`);
+        showToast(`UPDATED · ${status}`);
         await fetchProducts();
         await fetchCatalogStatus();
-      }
-    } catch (err: any) {
-      showToast('Error: ' + err.message);
-    }
-    setProductActionLoading(false);
-  };
-
-  // Toggle active: simply toggles visibility without affecting archive/upcoming status
-  const toggleActive = async (id: string, currentActive: boolean) => {
-    if (!requireUnlocked()) return;
-    setProductActionLoading(true);
-    try {
-      const res = await adminFetch('/api/admin/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'toggleActive', id, nextActive: !currentActive }),
-      });
-      if (res.ok) {
-        showToast(`UPDATED · ${currentActive ? 'Hidden' : 'Visible'}`);
-        await fetchProducts();
-      }
-    } catch (err: any) {
-      showToast('Error: ' + err.message);
-    }
-    setProductActionLoading(false);
-  };
-
-  // Upcoming toggle: does not hide, just marks/unmarks as upcoming
-  const toggleUpcoming = async (id: string, currentUpcoming: boolean) => {
-    if (!requireUnlocked()) return;
-    const action = currentUpcoming ? 'removeFromUpcoming' : 'addToUpcoming';
-    setProductActionLoading(true);
-    try {
-      const res = await adminFetch('/api/admin/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action, id }),
-      });
-      if (res.ok) {
-        showToast(`UPDATED · ${currentUpcoming ? 'Removed from Upcoming' : 'Added to Upcoming'}`);
-        await fetchProducts();
+      } else {
+        const data = await res.json();
+        showToast('Status change failed: ' + (data.error || 'Unknown error'));
       }
     } catch (err: any) {
       showToast('Error: ' + err.message);
@@ -3583,6 +3760,22 @@ export default function AdminPortal() {
   // taken when the editor opened (editProduct / resetProductForm + Add).
   const productFormDirty = productFormSnapshot !== ''
     && JSON.stringify(productForm) !== productFormSnapshot;
+
+  // ── Unsaved-changes guard ─────────────────────────────────────────────────
+  // Warn the operator before they navigate away / reload / close the tab while
+  // the product editor or any settings tab holds uncommitted state.
+  const anyUnsavedChanges = productFormDirty || settingsDirty;
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!anyUnsavedChanges) return;
+      event.preventDefault();
+      // Modern browsers show a generic prompt; returnValue is the legacy hook.
+      event.returnValue = '';
+      return '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [anyUnsavedChanges]);
 
   // Revert every settings form back to the last SAVED state by re-fetching
   // from Redis (fetchSettings sets both the form states and the baseline).
@@ -4857,10 +5050,22 @@ export default function AdminPortal() {
                 {/* ============ TAB 2 — VARIANTS & SHARED INVENTORY ============ */}
                 <SectionCard
                   id="pf-sizes" collapsible
-                  title="Pricing, Sizes & Inventory"
-                  description="Each row is one sellable item — price, Stripe ID, and its own stock."
-                  action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Size</button>}
+                  title="Pricing, Variants & Inventory"
+                  description="Each row is one sellable option / SKU — name, price, Stripe ID, and its own stock. Reorder with the drag handle to control storefront order."
+                  action={<button onClick={addPriceCategory} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>+ Add Variant</button>}
                 >
+                  {/* High-density variant matrix header — each row below maps to a column. */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 6px', marginBottom: 4, borderBottom: '1px solid #232329', fontSize: 8.5, fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', color: '#5d6570' }}>
+                    <span style={{ width: 34 }}>Reorder</span>
+                    <span style={{ width: 130 }}>Variant</span>
+                    <span style={{ width: 120 }}>SKU</span>
+                    <span style={{ width: 80 }}>Price</span>
+                    <span style={{ width: 64 }}>Units</span>
+                    <span style={{ flex: 1, minWidth: 120 }}>Stripe ID</span>
+                    <span style={{ width: 132 }}>Sync slug</span>
+                    <span style={{ width: 150 }}>Mode</span>
+                    <span>Actions</span>
+                  </div>
                   {productForm.priceCategories.map((cat: any, idx: number) => {
                     const sizeKey = String(cat.size || '').trim().toLowerCase();
                     const sizeCfg = (productForm.sizeConfigs || {})[sizeKey] || {};
@@ -4872,17 +5077,34 @@ export default function AdminPortal() {
                     const isSamplerCat = Array.isArray(productForm.samplerSizes)
                       && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey);
                     const sizeHasOwnConfig = Boolean(sizeCfg.releaseEndsAt) || Boolean(sizeCfg.customDropSchedule);
+                    const samplerRec = Array.isArray(productForm.samplerSizes)
+                      ? productForm.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey)
+                      : undefined;
+                    const samplerCreditCents = Number(samplerRec?.creditCents ?? productForm.deliveryIncentiveCreditCents ?? 0) || 0;
                     return (
                       <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
-                        {/* Row 1 — identity + price */}
+                        {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
+                          <span style={{ fontSize: 12, color: '#5d6570', cursor: 'grab', padding: '0 2px' }}>⠿</span>
+                          <button type="button" onClick={() => movePriceCategory(idx, -1)} disabled={idx === 0} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▲</button>
+                          <button type="button" onClick={() => movePriceCategory(idx, 1)} disabled={idx === productForm.priceCategories.length - 1} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▼</button>
+                        </span>
                       <input
                         id={`pf-size-${idx}`}
                         type="text"
-                        placeholder="Size (e.g. Standard)"
+                        placeholder="Variant / Option / SKU"
                         value={cat.size}
                         onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
-                        style={{ ...inputStyle, width: 100, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
+                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="SKU (auto)"
+                        title="Auto-generated from [product-slug]-[variant-name]; edit to override."
+                        value={cat.sku || ''}
+                        onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
+                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
                       />
                       <input
                         id={`pf-price-${idx}`}
@@ -4934,46 +5156,56 @@ export default function AdminPortal() {
                       />
                       <input
                         type="text"
-                        placeholder="Sync slug (optional)"
-                        title="Optional shared-stock key. Give two or more items the SAME slug to draw from one shared inventory pool — e.g. the same physical SKU listed twice. Leave blank for this item to keep its own independent stock."
+                        placeholder="Inventory sync slug"
+                        title="Optional shared-stock key. Assign a slug that another variant already uses to auto-inherit its stock pool + physical attributes. Give two or more options the SAME slug to draw from one shared inventory pool."
                         value={cat.inventorySyncSlug || ''}
-                        onChange={(e) => updatePriceCategory(idx, 'inventorySyncSlug', e.target.value)}
+                        onChange={(e) => assignInventorySyncSlug(idx, e.target.value)}
                         style={{ ...inputStyle, width: 132, padding: 6, fontSize: 10, color: cat.inventorySyncSlug ? '#7dd3fc' : undefined }}
                       />
                       </div>
-                      {/* Row 1b — per-item limits. Each size is its own item, so
+                      {/* Row 1b — per-item limits. Each option/SKU is its own item, so
                           its purchase caps + raffle cap live here (blank falls
-                          back to the product defaults in the panel below). */}
+                          back to the product defaults in the panel below). 0 or
+                          blank = Unlimited. */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
                         <span style={{ fontSize: 9, color: '#5d6570', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', minWidth: 96 }}>Limits</span>
-                        <input
-                          type="number"
-                          min={1}
-                          placeholder="Max / email"
-                          title="Max per email for THIS size (blank = product default)."
-                          value={cat.maxPerEmail ?? ''}
-                          onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(1, Number(e.target.value) || 1))}
-                          style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
-                        />
-                        <input
-                          type="number"
-                          min={1}
-                          placeholder="Max / cart"
-                          title="Max in cart per email for THIS size (blank = product default)."
-                          value={cat.maxPerCart ?? ''}
-                          onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(1, Number(e.target.value) || 1))}
-                          style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
-                        />
-                        {effectiveMode === 'RAFFLE' && (
+                        <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
                           <input
                             type="number"
                             min={0}
-                            placeholder="Raffle cap (0 = unlimited)"
-                            title="Max raffle allocation for THIS size (0 = unlimited, blank = product default)."
-                            value={cat.maxRaffleAllocationLimit ?? ''}
-                            onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                            style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10 }}
+                            placeholder="Max / email"
+                            title="Max per email for THIS option (0 or blank = unlimited, blank = product default)."
+                            value={cat.maxPerEmail ?? ''}
+                            onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
                           />
+                          {limitIsUnlimited(cat.maxPerEmail) && <UnlimitedBadge label="0 = Unlimited" />}
+                        </span>
+                        <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="Max / cart"
+                            title="Max in cart per email for THIS option (0 or blank = unlimited, blank = product default)."
+                            value={cat.maxPerCart ?? ''}
+                            onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
+                          />
+                          {limitIsUnlimited(cat.maxPerCart) && <UnlimitedBadge label="0 = Unlimited" />}
+                        </span>
+                        {effectiveMode === 'RAFFLE' && (
+                          <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder="Raffle cap (0 = unlimited)"
+                              title="Max raffle allocation for THIS option (0 or blank = unlimited, blank = product default)."
+                              value={cat.maxRaffleAllocationLimit ?? ''}
+                              onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
+                              style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10 }}
+                            />
+                            {limitIsUnlimited(cat.maxRaffleAllocationLimit) && <UnlimitedBadge label="0 = Unlimited" />}
+                          </span>
                         )}
                       </div>
                       {/* Row 2 — draw controls. Only raffle sizes are ever drawn,
@@ -4991,13 +5223,16 @@ export default function AdminPortal() {
                         />
                       )}
                       <select
-                        title="Checkout mode for THIS size. 'Follow product' inherits the product's Checkout Mode — the label shows exactly what it resolves to, so there is no ambiguous 'Auto'. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."
+                        title={productForm.checkoutMode === 'FCFS'
+                          ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Raffle overrides are unavailable."
+                          : "Checkout mode for THIS option. 'Follow product' inherits the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."}
                         value={cat.checkoutMode || ''}
                         onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
-                        style={{ ...inputStyle, width: 132, padding: 6, fontSize: 10, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : String(cat.checkoutMode || '').toUpperCase() === 'FCFS' ? '#60a5fa' : '#8b95a7' }}
+                        disabled={productForm.checkoutMode === 'FCFS'}
+                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
                       >
                         <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
-                        <option value="RAFFLE">🎟 RAFFLE</option>
+                        {productForm.checkoutMode !== 'FCFS' && <option value="RAFFLE">🎟 RAFFLE</option>}
                         <option value="FCFS">⚡ FCFS</option>
                       </select>
                           <button
@@ -5043,6 +5278,37 @@ export default function AdminPortal() {
                           </>
                         )}
                       </div>
+                      {/* Per-sampler (trial SKU) customization — credit value, the
+                          full-size it credits toward, and its customer-facing story. */}
+                      {isSamplerCat && (
+                        <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.28)' }}>
+                          <div style={{ fontSize: 9.5, fontWeight: 700, color: '#4ade80', letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 6 }}>
+                            🧪 Trial / Sampler SKU — customize credit & story
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                            <label style={{ fontSize: 10, color: '#888' }}>Badge label
+                              <input type="text" placeholder="Trial / Sample" value={samplerRec?.label || ''} onChange={(e) => updateSampler(cat.size, { label: e.target.value })} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                            </label>
+                            <label style={{ fontSize: 10, color: '#888' }}>Credit after delivery ($)
+                              <input type="number" min={0} step="0.01" placeholder="0.00" value={samplerCreditCents ? (samplerCreditCents / 100).toFixed(2) : ''} onChange={(e) => updateSampler(cat.size, { creditCents: Math.max(0, Math.round(Number(e.target.value || 0) * 100)) })} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                            </label>
+                            <label style={{ fontSize: 10, color: '#888' }}>Credits toward (delivery trigger)
+                              <select value={samplerRec?.fullSize || ''} onChange={(e) => updateSampler(cat.size, { fullSize: e.target.value })} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}>
+                                <option value="">Any next order</option>
+                                {productForm.priceCategories.filter((c: any) => String(c?.size || '').trim().toLowerCase() !== sizeKey).map((c: any) => (
+                                  <option key={c.size} value={c.size}>{c.size}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label style={{ fontSize: 10, color: '#888' }}>Expires in days
+                              <input type="number" min={1} placeholder="inherit" value={samplerRec?.expiresDays ?? ''} onChange={(e) => updateSampler(cat.size, { expiresDays: e.target.value === '' ? null : Math.max(1, Number(e.target.value) || 1) })} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                            </label>
+                          </div>
+                          <label style={{ fontSize: 10, color: '#888', display: 'block', marginTop: 6 }}>Trial story line (customer-facing)
+                            <textarea rows={2} placeholder="e.g. Three minis so you can live with the scent for a week before committing to the full bottle." value={samplerRec?.note || ''} onChange={(e) => updateSampler(cat.size, { note: e.target.value })} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3, fontFamily: 'inherit', resize: 'vertical' }} />
+                          </label>
+                        </div>
+                      )}
                       {/* Row 3 — per-size raffle settings: when this size runs a raffle,
                           it can draw on its OWN countdown end + its OWN recurring
                           schedule ("customize each raffle differently"). Blank =
@@ -5206,32 +5472,35 @@ export default function AdminPortal() {
                     <span>💡 If STRIPE_PRODUCT_ID is set, new sizes prefill with <code>{defaultStripePriceId}</code>.</span>
                   </div>
 
-                  {/* ====== Product-wide limits — fallback for any size whose own
+                  {/* ====== Product-wide limits — fallback for any option whose own
                        limit is left blank. Total inventory is DERIVED (read-only). ====== */}
                   <details style={{ marginTop: 10, padding: 10, borderRadius: 10, background: '#0b0b0d', border: '1px solid #1f2937' }}>
                     <summary style={{ fontSize: 10, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none' }}>
                       Product-wide limits ▾
                     </summary>
                     <p style={{ fontSize: 10, color: '#8b95a7', margin: '6px 0 8px', lineHeight: 1.5 }}>
-                      These limits apply to any size whose own limit is left blank. Total inventory is calculated from the size units above.
+                      These limits apply to any option whose own limit is left blank. 0 or blank = Unlimited. Total inventory is calculated from the option units above.
                     </p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <label style={{ fontSize: 10, color: '#888' }}>Total inventory (calculated)
                         <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', width: '100%', marginTop: 3, color: '#9ca3af', background: '#09090b', borderStyle: 'dashed', cursor: 'not-allowed' }}>
                           <strong style={{ color: '#e4e4e7' }}>{computedTotalInventory(productForm)}</strong>
-                          <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>units · sum of active sizes</span>
+                          <span style={{ fontSize: 9, color: '#6b7280', marginLeft: 6 }}>units · sum of active options</span>
                         </div>
                       </label>
                       {hasRaffleSize && (
                       <label style={{ fontSize: 10, color: '#888' }}>Max raffle allocation (0 = unlimited)
                         <input type="number" min={0} value={productForm.maxRaffleAllocationLimit ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxRaffleAllocationLimit: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxRaffleAllocationLimit) && <UnlimitedBadge label="0 = Unlimited" />}</div>
                       </label>
                       )}
                       <label style={{ fontSize: 10, color: '#888' }}>Max per email (entry or purchase count)
-                        <input type="number" min={1} value={productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                        <input type="number" min={0} value={productForm.maxPerEmail ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerEmail: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxPerEmail) && <UnlimitedBadge label="0 = Unlimited" />}</div>
                       </label>
                       <label style={{ fontSize: 10, color: '#888' }}>Max in cart per email
-                        <input type="number" min={1} value={productForm.maxPerCart ?? productForm.maxPerEmail ?? 1} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Number(e.target.value) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                        <input type="number" min={0} value={productForm.maxPerCart ?? 0} onChange={(e) => setProductForm((p: any) => ({ ...p, maxPerCart: Math.max(0, Number(e.target.value) || 0) }))} style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }} />
+                        <div style={{ marginTop: 2 }}>{limitIsUnlimited(productForm.maxPerCart) && <UnlimitedBadge label="0 = Unlimited" />}</div>
                       </label>
                     </div>
                   </details>
@@ -5433,9 +5702,21 @@ export default function AdminPortal() {
                         id="pf-goliveat"
                         type="datetime-local"
                         value={productForm.goLiveAt || ''}
-                        onChange={(e) => setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value }))}
-                        style={{ ...inputStyle, ...(statusFromLegacy(productForm) === 'UPCOMING' && !String(productForm.goLiveAt || '').trim() ? errorFieldStyle : {}) }}
+                        onChange={(e) => { setProductForm((p: any) => ({ ...p, goLiveAt: e.target.value })); setHighlightGoLiveAt(false); }}
+                        className={highlightGoLiveAt ? 'ring-2 ring-red-500' : undefined}
+                        style={{
+                          ...inputStyle,
+                          ...(statusFromLegacy(productForm) === 'UPCOMING' && !String(productForm.goLiveAt || '').trim() ? errorFieldStyle : {}),
+                          // Emulates Tailwind `ring-2 ring-red-500` for the
+                          // "Upcoming without a date" focus highlight.
+                          ...(highlightGoLiveAt ? { boxShadow: '0 0 0 2px #ef4444', borderColor: '#ef4444' } : {}),
+                        }}
                       />
+                      {highlightGoLiveAt && (
+                        <div style={{ marginTop: 4, fontSize: 9.5, color: '#f87171', fontWeight: 700 }}>
+                          ⚠ Set a “Go live at” date to schedule this as Upcoming.
+                        </div>
+                      )}
                     </div>
                     {hasRaffleSize && (
                       <div>
@@ -5701,6 +5982,32 @@ export default function AdminPortal() {
                     </div>
                   </div>
                 )}
+
+                {/* Destructive-action confirmation modal — required before deleting
+                    a product/variant that still holds active inventory (> 0 units). */}
+                {destructiveConfirm && (
+                  <div
+                    onClick={() => setDestructiveConfirm(null)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                  >
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ background: '#16161a', border: '1px solid rgba(248,113,113,0.5)', borderRadius: 14, maxWidth: 420, width: '100%', padding: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#f87171', marginBottom: 8 }}>⚠ {destructiveConfirm.title}</div>
+                      <div style={{ fontSize: 11.5, color: '#a1a1aa', lineHeight: 1.6, marginBottom: 16 }}>{destructiveConfirm.message}</div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button onClick={() => setDestructiveConfirm(null)} style={{ ...buttonGhost, padding: '7px 12px', fontSize: 11 }}>Cancel</button>
+                        <button
+                          onClick={() => { const fn = destructiveConfirm.onConfirm; setDestructiveConfirm(null); fn(); }}
+                          style={{ padding: '7px 12px', fontSize: 11, fontWeight: 700, borderRadius: 8, border: '1px solid #f87171', background: 'rgba(248,113,113,0.16)', color: '#fca5a5', cursor: 'pointer' }}
+                        >
+                          {destructiveConfirm.confirmLabel}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -5757,7 +6064,7 @@ export default function AdminPortal() {
                         </div>
                         {product.priceCategories && (
                           <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>
-                            Sizes: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
+                            Variants: {product.priceCategories.map((c: any) => `${c.size} ($${c.price})`).join(' · ')}
                           </div>
                         )}
                         {visibleProductCategories(product.categories, catalogSettings.categories).length > 0 && (
@@ -5785,18 +6092,21 @@ export default function AdminPortal() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button onClick={() => editProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
+                        <select
+                          title="Lifecycle status — one value, mutually exclusive."
+                          value={statusFromLegacy(product)}
+                          onChange={(e) => setProductStatus(product, e.target.value)}
+                          disabled={productActionLoading}
+                          style={{ ...inputStyle, padding: '4px 8px', fontSize: 10, width: 118, color: statusFromLegacy(product) === 'ARCHIVED' ? '#fbbf24' : statusFromLegacy(product) === 'UPCOMING' ? '#60a5fa' : statusFromLegacy(product) === 'ACTIVE' ? '#34d399' : '#a1a1aa' }}
+                        >
+                          <option value="DRAFT">Draft</option>
+                          <option value="ACTIVE">Active</option>
+                          <option value="UPCOMING">Upcoming</option>
+                          <option value="ARCHIVED">Archived</option>
+                        </select>
                         <button onClick={() => { const newOrder = prompt('New sort order (lower = first):', String(product.sortOrder || 0)); if (newOrder !== null) reorderProducts(product.id, Number(newOrder)); }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Reorder</button>
-                        <button onClick={() => toggleActive(product.id, isPublished)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isPublished ? '#f87171' : '#34d399', color: isPublished ? '#f87171' : '#34d399' }}>
-                          {isPublished ? 'Unpublish' : 'Publish'}
-                        </button>
-                        <button onClick={() => toggleArchive(product.id, isArchived)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isArchived ? '#34d399' : '#f59e0b', color: isArchived ? '#34d399' : '#f59e0b' }}>
-                          {isArchived ? 'Unarchive' : 'Archive'}
-                        </button>
-                        <button onClick={() => toggleUpcoming(product.id, isUpcoming)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, borderColor: isUpcoming ? '#34d399' : '#3b82f6', color: isUpcoming ? '#34d399' : '#3b82f6' }}>
-                          {isUpcoming ? 'Remove Upcoming' : 'Upcoming'}
-                        </button>
                         <button onClick={() => duplicateProduct(product)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>⧉ Duplicate</button>
                         <button onClick={() => deleteProduct(product.id)} disabled={productActionLoading} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                       </div>
