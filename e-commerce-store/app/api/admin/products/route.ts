@@ -393,6 +393,9 @@ export async function POST(request: Request) {
       return cats.map((c: any) => {
         const mode = String(c?.checkoutMode || '').toUpperCase();
         const out = { ...(c || {}) };
+        // inventorySyncSlug / inventoryPoolId pass through the spread UNCHANGED so
+        // the shared-inventory link reaches bindInventoryPoolToCategories below.
+        // Never whitelist them away here — that would silently un-link pools.
         if (mode !== 'RAFFLE' && mode !== 'FCFS') delete out.checkoutMode;
         else out.checkoutMode = mode;
         // Preserve an optional per-variant universal commerce mode + JSON blocks

@@ -2660,12 +2660,20 @@ export default function AdminPortal() {
       })
       .map((c: any, i: number) => {
         const out = { ...c, position: i };
+        // Auto-commit: if the operator checked "Sync with existing slug?" or typed
+        // a draft slug but never pressed Link, promote the draft to the committed
+        // slug so the shared-inventory link is never silently dropped on save.
+        const draft = String(c._syncDraft ?? '').trim();
+        if (c.syncWithExisting || draft) {
+          out.inventorySyncSlug = slugifyName(draft || String(c.inventorySyncSlug || c.inventoryPoolId || ''));
+        }
         // Strip transient editor-only fields so they never reach Redis/disk.
         delete out.syncWithExisting;
         delete out._syncDraft;
         // Explicitly carry the shared-inventory link (slug + canonical pool id)
-        // so the server binds and persists it — even if a future editor path
-        // drops one of the two fields, the pair is always sent together.
+        // so the server binds and persists it. Every variant now sends BOTH
+        // fields as a real slug OR null (never absent), so a reorder/status save
+        // can never silently un-link a pool.
         const poolSlug = slugifyName(String(out.inventorySyncSlug || out.inventoryPoolId || ''));
         if (poolSlug) {
           out.inventorySyncSlug = poolSlug;
@@ -2687,8 +2695,8 @@ export default function AdminPortal() {
             }
           }
         } else {
-          delete out.inventorySyncSlug;
-          delete out.inventoryPoolId;
+          out.inventorySyncSlug = null;
+          out.inventoryPoolId = null;
         }
         return out;
       });
@@ -5251,11 +5259,21 @@ export default function AdminPortal() {
                     const syncSlug = slugifyName(cat.inventorySyncSlug || '');
                     const syncEnabled = Boolean(cat.syncWithExisting || cat.inventorySyncSlug);
                     const syncSource = syncSlug ? findSourceCategoryForSlug(syncSlug, productForm, idx) : null;
-                    // A variant is "synced" the moment its sync slug is COMMITTED
-                    // (inventorySyncSlug set) — not merely while the operator is
-                    // typing. This lets the full input grid be hidden and replaced
-                    // with the badge card, and keeps the draft input editable.
+                    // A variant is "synced" (linked) the moment its sync slug is
+                    // COMMITTED (inventorySyncSlug set) — not merely while the operator
+                    // is typing. This picks between the badge card and the prompt.
                     const synced = Boolean(cat.inventorySyncSlug);
+                    // DOM suppression gate: the FULL input grid (variant name, SKU,
+                    // price, units, Stripe ID, limits, checkout mode, winners) is
+                    // COMPLETELY UNMOUNTED — not merely disabled — the moment sync is
+                    // engaged: the box is checked, a slug is committed, OR a draft is
+                    // being typed. Only the slug prompt (unlinked) or the "🔗 Synced"
+                    // badge card (linked) renders in its place.
+                    const isSyncEnabled = Boolean(
+                      cat.syncWithExisting ||
+                      cat.inventorySyncSlug ||
+                      String(cat._syncDraft ?? '').trim(),
+                    );
                     return (
                       <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
                         {/* Row 0 — Inventory Sync Slug. When a variant is linked to an
@@ -5318,7 +5336,7 @@ export default function AdminPortal() {
                             })()}
                           </div>
                         )}
-                        {!synced && (
+                        {!isSyncEnabled && (
                         <>
                         {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -5333,8 +5351,7 @@ export default function AdminPortal() {
                         placeholder="Variant / Option / SKU"
                         value={cat.size}
                         onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
-                        disabled={synced}
-                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
+                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
                       />
                       <input
                         type="text"
@@ -5342,8 +5359,7 @@ export default function AdminPortal() {
                         title="Auto-generated from [product-slug]-[variant-name]; edit to override."
                         value={cat.sku || ''}
                         onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
-                        disabled={synced}
-                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined, opacity: synced ? 0.6 : 1 }}
+                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
                       />
                       <input
                         id={`pf-price-${idx}`}
@@ -5351,8 +5367,7 @@ export default function AdminPortal() {
                         placeholder="Price ($)"
                         value={cat.price}
                         onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
-                        disabled={synced}
-                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
+                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}) }}
                       />
                       {(() => {
                         const pv = validatePrice(cat.price);
@@ -5385,16 +5400,14 @@ export default function AdminPortal() {
                             return { ...p, inventoryPerSize: inv };
                           });
                         }}
-                        disabled={synced}
-                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11, opacity: synced ? 0.6 : 1 }}
+                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11 }}
                       />
                       <input
                         type="text"
                         placeholder="Stripe Price ID"
                         value={cat.stripeId}
                         onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
-                        disabled={synced}
-                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11, opacity: synced ? 0.6 : 1 }}
+                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
                       />
                       </div>
                       {/* Row 1b — per-item limits. Each option/SKU is its own item, so
@@ -5410,8 +5423,7 @@ export default function AdminPortal() {
                             title="Max per email for THIS option (0 or blank = unlimited)."
                             value={cat.maxPerEmail ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerEmail', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                            disabled={synced}
-                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
                           />
                           {limitIsUnlimited(cat.maxPerEmail) && <UnlimitedBadge label="0 = Unlimited" />}
                         </span>
@@ -5423,8 +5435,7 @@ export default function AdminPortal() {
                             title="Max in cart per email for THIS option (0 or blank = unlimited)."
                             value={cat.maxPerCart ?? ''}
                             onChange={(e) => updatePriceCategory(idx, 'maxPerCart', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                            disabled={synced}
-                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
+                            style={{ ...inputStyle, width: 84, padding: 5, fontSize: 10 }}
                           />
                           {limitIsUnlimited(cat.maxPerCart) && <UnlimitedBadge label="0 = Unlimited" />}
                         </span>
@@ -5437,8 +5448,7 @@ export default function AdminPortal() {
                               title="Max raffle allocation for THIS option (0 or blank = unlimited)."
                               value={cat.maxRaffleAllocationLimit ?? ''}
                               onChange={(e) => updatePriceCategory(idx, 'maxRaffleAllocationLimit', e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0))}
-                              disabled={synced}
-                              style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10, opacity: synced ? 0.6 : 1 }}
+                              style={{ ...inputStyle, width: 132, padding: 5, fontSize: 10 }}
                             />
                             {limitIsUnlimited(cat.maxRaffleAllocationLimit) && <UnlimitedBadge label="0 = Unlimited" />}
                           </span>
@@ -5455,8 +5465,7 @@ export default function AdminPortal() {
                           title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
                           value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
                           onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                          disabled={synced}
-                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}), opacity: synced ? 0.6 : 1 }}
+                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
                         />
                       )}
                       <select
@@ -5465,8 +5474,8 @@ export default function AdminPortal() {
                           : "Checkout mode for THIS option. 'Follow product' inherits the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."}
                         value={cat.checkoutMode || ''}
                         onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
-                        disabled={synced || productForm.checkoutMode === 'FCFS'}
-                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: synced ? 0.6 : (productForm.checkoutMode === 'FCFS' ? 0.75 : 1), color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
+                        disabled={productForm.checkoutMode === 'FCFS'}
+                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
                       >
                         <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
                         {productForm.checkoutMode !== 'FCFS' && <option value="RAFFLE">🎟 RAFFLE</option>}
