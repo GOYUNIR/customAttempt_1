@@ -23,7 +23,7 @@ import { validatePrice, isConfiguredPrice } from '@/lib/price-validation';
 import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
-import { COMMERCE_MODES, COMMERCE_MODE_META, sanitizeCommerceMode } from '@/lib/commerce-modes';
+import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -81,46 +81,6 @@ function typeLabel(type: string | undefined) {
     ADMIN_NOTE: 'Admin Note',
   };
   return map[type || ''] || type || 'Unknown';
-}
-
-/** A small controlled JSON-object editor for the universal commerce-mode config
- *  blocks (`accessRule` / `billingRule` / `scheduleConfig`). Stores text locally
- *  while typing, then commits a parsed object on blur. */
-function CommerceJsonField({ value, onChange }: { value: unknown; onChange: (obj: Record<string, unknown>) => void }) {
-  const serialize = (v: unknown): string => {
-    const obj = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-    try { return JSON.stringify(obj, null, 2); } catch { return '{}'; }
-  };
-  const [text, setText] = useState<string>(serialize(value));
-  const lastExternal = useRef<unknown>(value);
-
-  useEffect(() => {
-    // Resync only when the external value identity changed (e.g. switching
-    // products), never on a keystroke.
-    if (lastExternal.current !== value) {
-      lastExternal.current = value;
-      setText(serialize(value));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  return (
-    <textarea
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={() => {
-        try {
-          const parsed = JSON.parse(text || '{}');
-          onChange(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {});
-        } catch {
-          /* keep the last committed value; leave the text for correction */
-        }
-      }}
-      rows={4}
-      spellCheck={false}
-      style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #232329', background: '#0b0b0d', color: '#e4e4e7', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 10, lineHeight: 1.5 }}
-    />
-  );
 }
 
 // Streamer-mode masks are FIXED-LENGTH bullet strings (never derived from the
@@ -449,10 +409,58 @@ function normalizeWinnerTiersCsv(value: string): string {
 /** Effective sale mode for ONE size: its own override wins, otherwise the
  *  product-level checkout mode decides (RAFFLE is the default). */
 function effectiveSizeCheckoutMode(product: any, cat: any): 'RAFFLE' | 'FCFS' {
+  // A universal commerce mode (when set) is the single source of truth for the
+  // sellable behaviour: ALLOCATION_DRAW → RAFFLE; every other mode (instant
+  // buy / preorder / time slot / gated / group buy / dutch auction / rfq) is a
+  // non-raffle sale that charges at checkout → FCFS.
+  const commerce = sanitizeCommerceMode(cat?.commerceMode);
+  if (commerce === 'ALLOCATION_DRAW') return 'RAFFLE';
+  if (commerce) return 'FCFS';
   const mode = String(cat?.checkoutMode || '').trim().toUpperCase();
   if (mode === 'FCFS') return 'FCFS';
   if (mode === 'RAFFLE') return 'RAFFLE';
   return product?.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE';
+}
+
+/** The unified "Variant Mode" dropdown options — the 8 retail commerce modes
+ *  that a variant can be sold as (Instant Buy / Raffle / Preorder / Time Slot /
+ *  Gated Access / Group Buy / Dutch Auction / RFQ). Each maps onto the universal
+ *  `commerceMode` primitive plus its `accessRule` / `billingRule` /
+ *  `scheduleConfig` blocks. */
+const VARIANT_MODE_OPTIONS: { mode: CommerceMode; label: string; emoji: string }[] = [
+  { mode: 'INSTANT_BUY', label: 'Instant Buy (FCFS)', emoji: '⚡' },
+  { mode: 'ALLOCATION_DRAW', label: 'Raffle / Allocation Draw', emoji: '🎟' },
+  { mode: 'PREORDER', label: 'Preorder', emoji: '📦' },
+  { mode: 'TIME_SLOT', label: 'Time Slot', emoji: '⏰' },
+  { mode: 'GATED_ACCESS', label: 'Gated Access', emoji: '🔒' },
+  { mode: 'GROUP_BUY', label: 'Group Buy', emoji: '👥' },
+  { mode: 'DUTCH_AUCTION', label: 'Dutch Auction', emoji: '📉' },
+  { mode: 'RFQ_QUOTE', label: 'RFQ / Quote', emoji: '💬' },
+];
+
+/** Resolve the dropdown's selected value for a variant, deriving from the legacy
+ *  `checkoutMode` when the newer `commerceMode` is unset (so legacy RAFFLE/FCFS
+ *  variants still show their real mode instead of "Follow product"). */
+function variantModeValue(cat: any): CommerceMode | '' {
+  const commerce = sanitizeCommerceMode(cat?.commerceMode);
+  if (commerce) return commerce;
+  const checkout = String(cat?.checkoutMode || '').trim().toUpperCase();
+  if (checkout === 'FCFS') return 'INSTANT_BUY';
+  if (checkout === 'RAFFLE') return 'ALLOCATION_DRAW';
+  return '';
+}
+
+/** Hydrate the transient slug-sync editor state for a loaded category so the UI
+ *  immediately recognizes a committed `inventorySyncSlug` as "synced" on FIRST
+ *  render (`isSyncEnabled` = true) and suppresses the standard input grid. This
+ *  is the root-cause fix for a saved sync slug appearing to be lost on reload. */
+function hydrateCategorySyncState(c: any): any {
+  const committedSlug = String(c?.inventorySyncSlug || c?.inventoryPoolId || '').trim();
+  return {
+    ...(c || {}),
+    syncWithExisting: committedSlug !== '',
+    _syncDraft: committedSlug,
+  };
 }
 
 /** FCFS sizes are never drawn, so a "Winners / draw" value on them is
@@ -1974,7 +1982,11 @@ export default function AdminPortal() {
         const mode = String(c?.checkoutMode || '').trim().toUpperCase();
         if (mode === 'RAFFLE' || mode === 'FCFS') normalized.checkoutMode = mode;
         else delete normalized.checkoutMode;
-        return normalized;
+        // ── Slug-sync hydration (root cause of saved-slug loss on load) ──
+        // Explicitly set the transient editor flags from the committed slug so
+        // `isSyncEnabled` resolves true on FIRST render and the standard input
+        // grid is suppressed — not merely the "🔗 Synced" badge card.
+        return hydrateCategorySyncState(normalized);
       });
     const form = {
       ...product,
@@ -2141,6 +2153,27 @@ export default function AdminPortal() {
       return;
     }
     doRemove();
+  };
+
+  // Set a variant's unified commerce mode. This is the single control behind the
+  // "Variant Mode" dropdown — it stores the universal `commerceMode` AND derives
+  // the legacy `checkoutMode` (RAFFLE for allocation draws, FCFS for every other
+  // non-raffle mode) so the draw engine, storefront and admin summary all agree.
+  const setVariantCommerceMode = (index: number, mode: CommerceMode | '') => {
+    setProductForm((prev: any) => {
+      const cats = [...prev.priceCategories];
+      const cat = { ...cats[index] };
+      cat.commerceMode = mode || '';
+      if (mode === 'ALLOCATION_DRAW') cat.checkoutMode = 'RAFFLE';
+      else if (mode === 'INSTANT_BUY') cat.checkoutMode = 'FCFS';
+      else if (mode) cat.checkoutMode = 'FCFS'; // non-raffle modes never draw
+      else delete cat.checkoutMode; // empty → follow the product-level mode
+      // FCFS (and non-raffle) sizes are never drawn — strip winners so the
+      // invalid "winners on a non-raffle size" state can never be created.
+      if (effectiveSizeCheckoutMode(prev, cat) === 'FCFS') delete cat.winnerTiers;
+      cats[index] = cat;
+      return { ...prev, priceCategories: cats };
+    });
   };
 
   const updatePriceCategory = (index: number, field: string, value: any) => {
@@ -2660,12 +2693,16 @@ export default function AdminPortal() {
       })
       .map((c: any, i: number) => {
         const out = { ...c, position: i };
-        // Auto-commit: if the operator checked "Sync with existing slug?" or typed
-        // a draft slug but never pressed Link, promote the draft to the committed
-        // slug so the shared-inventory link is never silently dropped on save.
+        // ── Slug-sync auto-commit (never lose a saved/typed sync slug) ──
+        // A synced variant is one where the operator checked "Sync with existing
+        // slug?", a committed slug is present, OR a draft is being typed. In all
+        // three cases resolve the final slug from (draft → committed) and KEEP it
+        // — a synced variant must never be wiped to null on save.
+        const syncEnabled = c.syncWithExisting === true;
         const draft = String(c._syncDraft ?? '').trim();
-        if (c.syncWithExisting || draft) {
-          out.inventorySyncSlug = slugifyName(draft || String(c.inventorySyncSlug || c.inventoryPoolId || ''));
+        const committed = String(c.inventorySyncSlug ?? '').trim();
+        if (syncEnabled || committed || draft) {
+          out.inventorySyncSlug = (draft || committed).trim();
         }
         // Strip transient editor-only fields so they never reach Redis/disk.
         delete out.syncWithExisting;
@@ -2694,9 +2731,29 @@ export default function AdminPortal() {
               out.sku = source.category.sku;
             }
           }
-        } else {
+        } else if (!syncEnabled) {
+          // No sync intent at all — explicitly un-link (null, never absent).
           out.inventorySyncSlug = null;
           out.inventoryPoolId = null;
+        } else {
+          // Toggle was on but no slug resolved: drop the fields cleanly rather
+          // than persisting empty strings (the server drops blanks anyway).
+          delete out.inventorySyncSlug;
+          delete out.inventoryPoolId;
+        }
+        // ── Compile the universal commerce blocks into valid JSON objects ──
+        // The unified "Variant Mode" dropdown + its conditional inputs write into
+        // `commerceMode` / `accessRule` / `billingRule` / `scheduleConfig`. Normalize
+        // them here so the payload always carries clean objects (never strings,
+        // arrays or null), and drop empty blocks so the payload stays lean.
+        const commerceMode = sanitizeCommerceMode(out.commerceMode);
+        if (commerceMode) out.commerceMode = commerceMode;
+        else delete out.commerceMode;
+        for (const block of ['accessRule', 'billingRule', 'scheduleConfig'] as const) {
+          const v = out[block];
+          const obj = v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+          if (Object.keys(obj).length > 0) out[block] = obj;
+          else delete out[block];
         }
         return out;
       });
@@ -5244,11 +5301,8 @@ export default function AdminPortal() {
                   {productForm.priceCategories.map((cat: any, idx: number) => {
                     const sizeKey = String(cat.size || '').trim().toLowerCase();
                     const sizeCfg = (productForm.sizeConfigs || {})[sizeKey] || {};
-                    const effectiveMode = String(cat.checkoutMode || '').toUpperCase() === 'FCFS'
-                      ? 'FCFS'
-                      : String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE'
-                        ? 'RAFFLE'
-                        : (productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE');
+                    const effectiveMode = effectiveSizeCheckoutMode(productForm, cat);
+                    const variantCommerceMode = sanitizeCommerceMode(cat.commerceMode);
                     const isSamplerCat = Array.isArray(productForm.samplerSizes)
                       && productForm.samplerSizes.some((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey);
                     const sizeHasOwnConfig = Boolean(sizeCfg.releaseEndsAt) || Boolean(sizeCfg.customDropSchedule);
@@ -5454,32 +5508,23 @@ export default function AdminPortal() {
                           </span>
                         )}
                       </div>
-                      {/* Row 2 — draw controls. Only raffle sizes are ever drawn,
-                          so an FCFS (instant-buy) row unmounts the winners field. */}
+                      {/* Row 2 — mode selector + sampler toggle + actions. The raffle
+                          "Draw date / time" and "Winner count" inputs are rendered
+                          conditionally below this row (see the commerce-input block). */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
-                      {effectiveMode === 'RAFFLE' && (
-                        <input
-                          id={`pf-winnerstiers-${idx}`}
-                          type="text"
-                          placeholder="Winners / draw (e.g. 3,2,2)"
-                          title="How many winners this raffle picks per draw. A CSV like 3,2,2 means 3 winners on draw 1, 2 on draw 2, and so on. Applies to THIS size only."
-                          value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
-                          onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
-                          style={{ ...inputStyle, width: 140, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
-                        />
-                      )}
                       <select
                         title={productForm.checkoutMode === 'FCFS'
-                          ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Raffle overrides are unavailable."
-                          : "Checkout mode for THIS option. 'Follow product' inherits the product's Checkout Mode. A product can mix formats — e.g. a sampler sells instantly (FCFS) while the full size runs a raffle."}
-                        value={cat.checkoutMode || ''}
-                        onChange={(e) => updatePriceCategory(idx, 'checkoutMode', e.target.value || '')}
+                          ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Other modes are unavailable."
+                          : "How this variant is sold. ⚡ Instant Buy charges at checkout; 🎟 Raffle enters an allocation draw; the other modes map onto the universal commerce primitives (accessRule / billingRule / scheduleConfig). 'Follow product' inherits the product's Checkout Mode."}
+                        value={variantModeValue(cat)}
+                        onChange={(e) => setVariantCommerceMode(idx, sanitizeCommerceMode(e.target.value) || '')}
                         disabled={productForm.checkoutMode === 'FCFS'}
-                        style={{ ...inputStyle, width: 150, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: String(cat.checkoutMode || '').toUpperCase() === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
+                        style={{ ...inputStyle, width: 190, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
                       >
                         <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
-                        {productForm.checkoutMode !== 'FCFS' && <option value="RAFFLE">🎟 RAFFLE</option>}
-                        <option value="FCFS">⚡ FCFS</option>
+                        {VARIANT_MODE_OPTIONS.map((opt) => (
+                          <option key={opt.mode} value={opt.mode}>{opt.emoji} {opt.label}</option>
+                        ))}
                       </select>
                           <button
                             onClick={() => toggleSampler(idx)}
@@ -5503,6 +5548,69 @@ export default function AdminPortal() {
                           </span>
                           <button onClick={() => removePriceCategory(idx)} style={{ ...buttonGhost, padding: '2px 6px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>✕</button>
                       </div>
+                      {/* Conditional commerce inputs — rendered ONLY for the mode the
+                          dropdown selects. Each writes straight into the variant's
+                          accessRule / billingRule / scheduleConfig blocks, which
+                          saveProduct compiles into valid JSON before saving. Instant
+                          Buy (FCFS) intentionally shows no extra inputs. */}
+                      {variantCommerceMode === 'ALLOCATION_DRAW' && (
+                        <div style={{ marginTop: 6, padding: 8, borderRadius: 8, background: '#08080a', border: '1px dashed #2a2a31', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <label style={{ fontSize: 10, color: '#888' }}>Draw date / time
+                            <input
+                              type="datetime-local"
+                              value={String(cat.scheduleConfig?.drawAt || '')}
+                              onChange={(e) => updatePriceCategory(idx, 'scheduleConfig', { ...(cat.scheduleConfig || {}), drawAt: e.target.value })}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
+                            />
+                          </label>
+                          <label style={{ fontSize: 10, color: '#888' }}>Winner count
+                            <input
+                              id={`pf-winnerstiers-${idx}`}
+                              type="text"
+                              placeholder="Winners / draw (e.g. 3,2,2)"
+                              value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
+                              onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
+                            />
+                          </label>
+                        </div>
+                      )}
+                      {variantCommerceMode === 'PREORDER' && (
+                        <div style={{ marginTop: 6, padding: 8, borderRadius: 8, background: '#08080a', border: '1px dashed #2a2a31', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <label style={{ fontSize: 10, color: '#888' }}>Estimated ship date
+                            <input
+                              type="date"
+                              value={String(cat.scheduleConfig?.estimatedShipDate || '')}
+                              onChange={(e) => updatePriceCategory(idx, 'scheduleConfig', { ...(cat.scheduleConfig || {}), estimatedShipDate: e.target.value })}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
+                            />
+                          </label>
+                          <label style={{ fontSize: 10, color: '#888' }}>Deposit %
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              placeholder="0"
+                              value={cat.billingRule?.depositPercent ?? ''}
+                              onChange={(e) => updatePriceCategory(idx, 'billingRule', { ...(cat.billingRule || {}), depositPercent: e.target.value === '' ? undefined : Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
+                            />
+                          </label>
+                        </div>
+                      )}
+                      {variantCommerceMode === 'GATED_ACCESS' && (
+                        <div style={{ marginTop: 6, padding: 8, borderRadius: 8, background: '#08080a', border: '1px dashed #2a2a31' }}>
+                          <label style={{ fontSize: 10, color: '#888', display: 'block' }}>Access key / tag
+                            <input
+                              type="text"
+                              placeholder="e.g. EARLY-ACCESS-2026"
+                              value={String(cat.accessRule?.accessCode || '')}
+                              onChange={(e) => updatePriceCategory(idx, 'accessRule', { ...(cat.accessRule || {}), accessCode: e.target.value, ...(e.target.value ? { gatedBy: 'password' } : {}) })}
+                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
+                            />
+                          </label>
+                        </div>
+                      )}
                       {/* Per-size summary — what THIS size actually does, so a mixed
                           product (one raffle + one instant-buy) reads clearly. */}
                       <div style={{ marginTop: 5, fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
@@ -5706,38 +5814,6 @@ export default function AdminPortal() {
                           )}
                         </div>
                       )}
-                      {/* ⚙️ Variant Rules & Commerce Config — the 10-primitive commerce
-                          selector + flexible JSON blocks, now PER-VARIANT (the single
-                          source of truth for each variant's sellable behaviour). */}
-                      <details style={{ marginTop: 8 }}>
-                        <summary style={{ cursor: 'pointer', fontSize: 9.5, fontWeight: 700, color: '#c084fc', letterSpacing: '0.5px', textTransform: 'uppercase', userSelect: 'none' }}>
-                          ⚙️ Variant Rules &amp; Commerce Config
-                        </summary>
-                        <div style={{ marginTop: 8, padding: 8, borderRadius: 8, background: '#0b0b0d', border: '1px solid #232329', display: 'grid', gap: 8 }}>
-                          <div>
-                            <label style={{ fontSize: 10, color: '#888' }}>Commerce mode (empty = derived from checkout mode)</label>
-                            <select
-                              value={String(cat.commerceMode || '')}
-                              onChange={(e) => updatePriceCategory(idx, 'commerceMode', sanitizeCommerceMode(e.target.value) || '')}
-                              style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 4 }}
-                            >
-                              <option value="">— Derived from checkout mode —</option>
-                              {COMMERCE_MODES.map((mode) => (
-                                <option key={mode} value={mode}>{COMMERCE_MODE_META[mode].label}</option>
-                              ))}
-                            </select>
-                          </div>
-                          {(['accessRule', 'billingRule', 'scheduleConfig'] as const).map((block) => (
-                            <div key={block}>
-                              <label style={{ fontSize: 10, color: '#888' }}>{block} (JSON)</label>
-                              <CommerceJsonField
-                                value={cat[block]}
-                                onChange={(obj) => updatePriceCategory(idx, block, obj)}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </details>
                       {effectiveMode === 'FCFS' && (
                         <div style={{ marginTop: 8, padding: '7px 9px', borderRadius: 8, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.22)', fontSize: 10, color: '#93c5fd', lineHeight: 1.5 }}>
                           ⚡ This size sells instantly — it never draws and has no countdown or raffle schedule. Its price charges right at checkout (perfect for sampler/instant-buy sizes sitting next to a raffle size).
@@ -5889,7 +5965,7 @@ export default function AdminPortal() {
                   description="Derived automatically from each variant's mode in Variants & Shared Inventory."
                 >
                   <div style={{ padding: '8px 10px', borderRadius: 8, background: '#0b0b0d', border: '1px solid #1f2937', fontSize: 10, color: '#8b95a7', lineHeight: 1.5 }}>
-                    Each variant's mode is set in <strong style={{ color: '#cbd5e1' }}>Variants &amp; Shared Inventory</strong>. This summary is read-only and updates automatically.
+                    Each variant&apos;s mode is set in <strong style={{ color: '#cbd5e1' }}>Variants &amp; Shared Inventory</strong>. This summary is read-only and updates automatically.
                   </div>
                   {(() => {
                     const modes = sizeCheckoutModes(productForm);
