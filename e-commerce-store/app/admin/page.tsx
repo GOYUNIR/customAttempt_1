@@ -482,42 +482,47 @@ function categorySyncSlug(cat: any): string {
  *  shared-inventory sync slug straight out of the LIVE DOM so a slug the
  *  operator TYPED into the prompt OR SEES in a "🔗 Synced with [slug]" badge
  *  can never be silently dropped at save time. Returns a Map keyed by variant
- *  row index. Three sources, in priority order:
- *    1. badge cards (`[data-sync-badge-slug]`)        — committed slugs,
- *    2. the "Inventory Sync Slug" inputs (`#pf-sync-slug-<idx>`) — typed drafts,
- *    3. a text scan of any element containing "Synced with <slug>".
+ *  row index. Resolution is STRICTLY SCOPED to each variant's own row
+ *  (`[data-variant-row]`) so a slug can never be mis-assigned to a DIFFERENT
+ *  variant. Within a row, three sources in priority order:
+ *    1. the "🔗 Synced" badge card (`[data-sync-badge-slug]`) — committed,
+ *    2. the "Inventory Sync Slug" input (`input[id^="pf-sync-slug-"]`) — draft,
+ *    3. "Synced with <slug>" text scoped INSIDE that row only.
  *  The indices are the ORIGINAL `priceCategories` row indices, so they align
  *  exactly with the pre-filter reconciliation sweep in `saveProduct`. */
 function scrapeSyncSlugsFromDom(): Map<number, string> {
   const map = new Map<number, string>();
   if (typeof document === 'undefined') return map;
 
-  // (1) Committed slugs live on the badge card's data attributes.
-  document.querySelectorAll<HTMLElement>('[data-sync-badge-slug]').forEach((el) => {
-    const idx = Number(el.getAttribute('data-sync-badge-idx'));
-    const slug = slugifyName(String(el.getAttribute('data-sync-badge-slug') || '').trim());
-    if (Number.isFinite(idx) && idx >= 0 && slug) map.set(idx, slug);
-  });
+  // Iterate each variant editor row by its stable index attribute, and resolve
+  // the slug for THAT row only — never a page-wide scan.
+  document.querySelectorAll<HTMLElement>('[data-variant-row]').forEach((row) => {
+    const idx = Number(row.getAttribute('data-variant-row'));
+    if (!Number.isFinite(idx) || idx < 0) return;
 
-  // (2) Typed-but-not-yet-committed drafts live in the dedicated input.
-  document.querySelectorAll<HTMLInputElement>('input[id^="pf-sync-slug-"]').forEach((el) => {
-    const m = el.id.match(/^pf-sync-slug-(\d+)$/);
-    const idx = m ? Number(m[1]) : NaN;
-    const slug = slugifyName(String(el.value || '').trim());
-    if (Number.isFinite(idx) && idx >= 0 && slug) map.set(idx, slug);
-  });
+    // (1) Committed slug lives on the badge card's data attributes (scoped to row).
+    const badge = row.querySelector<HTMLElement>('[data-sync-badge-slug]');
+    if (badge) {
+      const slug = slugifyName(String(badge.getAttribute('data-sync-badge-slug') || '').trim());
+      if (slug) { map.set(idx, slug); return; }
+    }
 
-  // (3) Last resort: parse "Synced with <slug>" out of visible badge text and
-  //     resolve its row index from the nearest `[data-sync-badge-idx]` ancestor.
-  document.querySelectorAll<HTMLElement>('span').forEach((el) => {
-    const text = (el.textContent || '').trim();
-    const m = text.match(/Synced with\s+([A-Za-z0-9_-]+)/);
-    if (!m) return;
-    const slug = slugifyName(m[1]);
-    if (!slug) return;
-    const badge = el.closest('[data-sync-badge-idx]');
-    const idx = badge ? Number(badge.getAttribute('data-sync-badge-idx')) : NaN;
-    if (Number.isFinite(idx) && idx >= 0 && !map.has(idx)) map.set(idx, slug);
+    // (2) Typed-but-not-yet-committed draft lives in the dedicated input.
+    const input = row.querySelector<HTMLInputElement>('input[id^="pf-sync-slug-"]');
+    if (input) {
+      const slug = slugifyName(String(input.value || '').trim());
+      if (slug) { map.set(idx, slug); return; }
+    }
+
+    // (3) Last resort: "Synced with <slug>" text scoped WITHIN this row only.
+    const spans = row.querySelectorAll<HTMLElement>('span');
+    for (const el of Array.from(spans)) {
+      const m = (el.textContent || '').trim().match(/Synced with\s+([A-Za-z0-9_-]+)/);
+      if (m) {
+        const slug = slugifyName(m[1]);
+        if (slug) { map.set(idx, slug); return; }
+      }
+    }
   });
 
   return map;
@@ -2766,19 +2771,27 @@ export default function AdminPortal() {
       // during reconciliation — only the sync fields may change, and only for a
       // variant that is genuinely pool-linked.
       const cat = { ...c };
-      const domSlug = String(domSyncSlugs.get(i) || '').trim();
-      const existingSlug = String(
+      // ── STRICT per-variant slug resolution priority ──
+      // (1) Active STATE values are the highest authority:
+      //     `inventorySyncSlug` → `_syncDraft` → `inventoryPoolId`.
+      const stateSlug = String(
         cat.inventorySyncSlug || cat._syncDraft || cat.inventoryPoolId || '',
       ).trim();
+      // (2/3) DOM input / badge / "Synced with <slug>" text scoped WITHIN the
+      //       i-th variant row only (via `scrapeSyncSlugsFromDom`).
+      const domSlug = String(domSyncSlugs.get(i) || '').trim();
       const isSyncFlagged = cat.syncWithExisting === true;
       // A variant is reconciled ONLY when it is (a) explicitly sync-flagged,
       // (b) already carrying an active sync slug/input, or (c) showing a
       // DOM-scraped slug at its OWN row index. Everything else is independent
       // and is returned untouched — no slug is ever forced onto it.
-      const shouldSync = isSyncFlagged || Boolean(existingSlug) || Boolean(domSlug);
+      const shouldSync = isSyncFlagged || Boolean(stateSlug) || Boolean(domSlug);
       if (!shouldSync) return cat;
 
-      const slug = slugifyName(domSlug || existingSlug);
+      // State wins over DOM; the DOM value is only a fallback when no slug is
+      // present in React state. This keeps a committed/typed slug authoritative
+      // and prevents a stale DOM badge from clobbering a freshly edited value.
+      const slug = slugifyName(stateSlug || domSlug);
       if (slug) {
         // Apply the resolved slug to every sync field so state, DOM and payload
         // agree on ONE value — but never touch the variant's commerce fields.
@@ -2870,6 +2883,15 @@ export default function AdminPortal() {
         }
         return out;
       });
+
+    // ── Multi-variant payload state telemetry ──
+    // Log the FINAL variant count and the fully-reconciled categories so an
+    // operator (or support agent) can verify in F12 that EVERY variant survived
+    // reconciliation — no variant was truncated, dropped, or had its slug
+    // mis-assigned.
+    console.log('[MULTI-VARIANT PAYLOAD COUNT]', priceCategories.length);
+    console.log('[MULTI-VARIANT RECONCILED]', JSON.stringify(priceCategories, null, 2));
+
     if (priceCategories.length === 0) {
       focusField('variants', 'pf-sizes');
       setProductMsg('Add at least one variant / option with a price before saving.');
@@ -5466,7 +5488,7 @@ export default function AdminPortal() {
                       String(cat._syncDraft ?? '').trim(),
                     );
                     return (
-                      <div key={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                      <div key={idx} data-variant-row={idx} style={{ background: '#0b0b0d', border: '1px solid #232329', borderRadius: 10, padding: 10, marginBottom: 8 }}>
                         {/* Row 0 — Inventory Sync Slug. When a variant is linked to an
                             existing shared pool the checkbox + input are fully hidden and
                             replaced by a clean "Synced with [slug]" card + Unlink. */}
