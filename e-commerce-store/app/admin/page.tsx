@@ -468,6 +468,16 @@ function hydrateCategorySyncState(c: any): any {
   };
 }
 
+/** Resolve the canonical shared-inventory slug for ONE variant, checking the
+ *  operator-facing `inventorySyncSlug` first and its stable `inventoryPoolId`
+ *  alias second. This is the SINGLE source of truth used by BOTH the "🔗 Synced
+ *  with [slug]" badge and the save-time payload builder, so a variant whose pool
+ *  id is the ONLY populated field can never render a badge that the payload
+ *  builder then un-links (the exact disconnect this fixes). */
+function categorySyncSlug(cat: any): string {
+  return slugifyName(String(cat?.inventorySyncSlug || cat?.inventoryPoolId || '').trim());
+}
+
 /** FCFS sizes are never drawn, so a "Winners / draw" value on them is
  *  meaningless. Strip it so that invalid state can never even exist — the
  *  "winners on FCFS" sanity warning becomes impossible, not just flagged. */
@@ -2716,7 +2726,7 @@ export default function AdminPortal() {
         // fixes the smoking gun where `slug: null` was logged even though the
         // variant had a sync slug (the old draft-first two-pass logic could fall
         // through to `null`).
-        const rawSlug = String(c.inventorySyncSlug || c._syncDraft || '').trim();
+        const rawSlug = String(c.inventorySyncSlug || c._syncDraft || c.inventoryPoolId || '').trim();
         const effectiveSlug = rawSlug ? slugifyName(rawSlug) : null;
         // Strip transient editor-only fields so they never reach Redis/disk.
         delete out.syncWithExisting;
@@ -5346,13 +5356,14 @@ export default function AdminPortal() {
                       ? productForm.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === sizeKey)
                       : undefined;
                     const samplerCreditCents = Number(samplerRec?.creditCents ?? productForm.deliveryIncentiveCreditCents ?? 0) || 0;
-                    const syncSlug = slugifyName(cat.inventorySyncSlug || '');
-                    const syncEnabled = Boolean(cat.syncWithExisting || cat.inventorySyncSlug);
+                    const syncSlug = categorySyncSlug(cat);
+                    const syncEnabled = Boolean(cat.syncWithExisting || cat.inventorySyncSlug || cat.inventoryPoolId);
                     const syncSource = syncSlug ? findSourceCategoryForSlug(syncSlug, productForm, idx) : null;
                     // A variant is "synced" (linked) the moment its sync slug is
-                    // COMMITTED (inventorySyncSlug set) — not merely while the operator
-                    // is typing. This picks between the badge card and the prompt.
-                    const synced = Boolean(cat.inventorySyncSlug);
+                    // COMMITTED (inventorySyncSlug OR its canonical inventoryPoolId
+                    // set) — not merely while the operator is typing. This picks
+                    // between the badge card and the prompt.
+                    const synced = Boolean(cat.inventorySyncSlug || cat.inventoryPoolId);
                     // DOM suppression gate: the FULL input grid (variant name, SKU,
                     // price, units, Stripe ID, limits, checkout mode, winners) is
                     // COMPLETELY UNMOUNTED — not merely disabled — the moment sync is
@@ -5362,6 +5373,7 @@ export default function AdminPortal() {
                     const isSyncEnabled = Boolean(
                       cat.syncWithExisting ||
                       cat.inventorySyncSlug ||
+                      cat.inventoryPoolId ||
                       String(cat._syncDraft ?? '').trim(),
                     );
                     return (
