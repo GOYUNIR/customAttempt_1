@@ -458,6 +458,11 @@ function hydrateCategorySyncState(c: any): any {
   const committedSlug = String(c?.inventorySyncSlug || c?.inventoryPoolId || '').trim();
   return {
     ...(c || {}),
+    // Guarantee the operator-facing slug field is itself populated from the
+    // committed value so the "🔗 Synced with [slug]" card, the variant-mode
+    // dropdown and the checkbox ALL read the SAME canonical slug — never a
+    // blank card while `syncWithExisting`/`_syncDraft` are truthy.
+    inventorySyncSlug: committedSlug,
     syncWithExisting: committedSlug !== '',
     _syncDraft: committedSlug,
   };
@@ -2410,10 +2415,15 @@ export default function AdminPortal() {
     setProductForm((prev: any) => {
       const cats = [...(prev.priceCategories || [])];
       const cat = { ...cats[index] };
-      delete cat.inventorySyncSlug;
-      delete cat.inventoryPoolId;
-      delete cat.syncWithExisting;
-      delete cat._syncDraft;
+      // Explicitly reset EVERY sync flag so the badge card, the "Sync with
+      // existing slug?" checkbox, the prompt and the save-time payload builder
+      // all agree this variant is UNLINKED. Using `delete` left the transient
+      // `syncWithExisting`/`_syncDraft` keys (or a stale pool id) intact in some
+      // paths, which disconnected the card from the dropdown/checkbox state.
+      cat.inventorySyncSlug = null;
+      cat.inventoryPoolId = null;
+      cat.syncWithExisting = false;
+      cat._syncDraft = '';
       cats[index] = cat;
       return { ...prev, priceCategories: cats };
     });

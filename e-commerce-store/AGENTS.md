@@ -643,6 +643,10 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+- **2026-09-05 — Fix disconnected sync state in the variant UI dropdown + "🔗 Synced" card (`sync-state-dropdown-card-disconnect`):**
+  - **🔗 Unlink now explicitly resets state (never `delete`).** `unlinkInventorySyncSlug` sets `inventorySyncSlug = null`, `inventoryPoolId = null`, `syncWithExisting = false`, and `_syncDraft = ''` — instead of `delete`-ing the keys — so the badge card, the "Sync with existing slug?" checkbox, the prompt and the save-time payload builder all agree a variant is UNLINKED in every path.
+  - **🧱 Hydration now populates the operator-facing slug field itself.** `hydrateCategorySyncState` explicitly sets `inventorySyncSlug: committedSlug` (in addition to `_syncDraft` + `syncWithExisting`), so the "🔗 Synced with [slug]" card, the variant-mode dropdown and the checkbox read the SAME canonical slug — never a blank card while the transient flags are truthy.
+  - **🧪 Verified:** `npx tsc --noEmit` clean, `eslint app/admin/page.tsx` 0 errors, `npm test` **345/345**. No new Redis keys (the link fields remain `inventorySyncSlug`/`inventoryPoolId`).
 - **2026-09-05 — Sync-slug state disconnect fix: input binding + commit consistency + save-time dump (`sync-slug-binding-disconnect-fix`):**
   - **🔗 Input binding hardened.** The "Inventory Sync Slug" input `value` now uses `cat._syncDraft || cat.inventorySyncSlug || ''` (was `??`), so an empty-string `_syncDraft` can never mask a committed `inventorySyncSlug` — the binding now agrees with the `||`-based resolution used in `saveProduct`'s payload builder.
   - **🧱 Commit state consistency.** `commitInventorySyncSlug` now sets `_syncDraft: slug` (was `''`) so the in-memory committed state matches `hydrateCategorySyncState` (which sets `_syncDraft: committedSlug` on reload) — no more shape mismatch between the just-committed and the reloaded category object.
