@@ -46,6 +46,9 @@ export interface LiveThemeValue {
     accentA?: string;
     accentB?: string;
     accentC?: string;
+    containerTarget?: 'background' | 'banner';
+    canvasHeight?: 'slim' | 'medium' | 'expanded';
+    blendMode?: 'normal' | 'overlay' | 'screen';
   };
 }
 

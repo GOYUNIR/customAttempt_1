@@ -7,10 +7,16 @@ import {
   PARTICLE_COUNT_OPTIONS,
   EXPLOSION_RADIUS_MIN,
   EXPLOSION_RADIUS_MAX,
+  CONTAINER_TARGET_OPTIONS,
+  CANVAS_HEIGHT_OPTIONS,
+  BLEND_MODE_OPTIONS,
   type AiHeroSettings,
   type AnimationLoopMode,
+  type HeroContainerTarget,
+  type HeroCanvasHeight,
+  type HeroBlendMode,
 } from '@/lib/shaders/presets';
-import { parsePromptToParams, enhancePrompt, MAGIC_PROMPT_PILLS } from '@/lib/shaders/promptParser';
+import { parsePromptToParams, enhancePrompt, paramsToPreset, MAGIC_PROMPT_PILLS } from '@/lib/shaders/promptParser';
 import { extractAccentPalette, paletteToCss, type AccentPalette } from '@/lib/shaders/palette';
 
 /**
@@ -97,6 +103,22 @@ export default function HeroShaderSettings({
 
   const patch = (next: Partial<AiHeroSettings>) => onChange({ ...value, ...next });
 
+  // "Execute Prompt & Generate Preview" — compiles the prompt text into
+  // bounded render uniforms via the dynamic prompt parser, then patches the
+  // live canvas state so the preview updates BEFORE any settings save. Zero
+  // hardcoded product/brand mapping: the parser maps natural language onto the
+  // canonical preset + uniform bounds.
+  const executePrompt = () => {
+    const params = parsePromptToParams(value.prompt);
+    onChange({
+      ...value,
+      preset: paramsToPreset(params),
+      assemblyProgress: params.assemblyProgress,
+      explosionRadius: Math.round(params.dispersion * EXPLOSION_RADIUS_MAX),
+      animationLoop: params.spin ? 'pulse' : value.animationLoop,
+    });
+  };
+
   const previewColors = value.paletteAutoSync
     ? { themeColors }
     : {
@@ -119,7 +141,7 @@ export default function HeroShaderSettings({
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
       <div className="lg:col-span-7">
         <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Mode &amp; Presets</div>
+          <div style={sectionTitleStyle}>Engine Mode &amp; Presets</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {HERO_SHADER_PRESETS.map((preset) => {
               const isActive = value.preset === preset.id;
@@ -148,7 +170,7 @@ export default function HeroShaderSettings({
         </div>
 
         <div style={cardStyle}>
-          <div style={sectionTitleStyle}>AI Prompt &amp; Smart Parameters</div>
+          <div style={sectionTitleStyle}>Smart AI Prompt Compiler</div>
           <textarea
             rows={2}
             placeholder="Describe the hero motion (e.g. exploded bottle view, liquid glass, cosmic dust)"
@@ -180,15 +202,35 @@ export default function HeroShaderSettings({
               ⚡ AI Auto-Enhance Prompt
             </span>
           </div>
+          <button
+            type="button"
+            onClick={executePrompt}
+            style={{
+              width: '100%',
+              marginTop: 12,
+              padding: '12px 16px',
+              borderRadius: 12,
+              border: '1px solid rgba(124,92,255,0.55)',
+              background: 'linear-gradient(135deg, rgba(124,92,255,0.28), rgba(124,92,255,0.12))',
+              color: '#e6dfff',
+              fontWeight: 700,
+              fontSize: 13,
+              letterSpacing: '0.3px',
+              cursor: 'pointer',
+            }}
+          >
+            🎬 Execute Prompt &amp; Generate Preview
+          </button>
           <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94', lineHeight: 1.7 }}>
             Derived: mode <b style={{ color: '#c9b8ff' }}>{derived.mode}</b>
             {derived.productSilhouette ? <> · silhouette <b style={{ color: '#c9b8ff' }}>{derived.productSilhouette}</b></> : null}
             {' · '}viscosity {(derived.viscosity * 100).toFixed(0)}% · turbulence {(derived.turbulence * 100).toFixed(0)}%
+            {derived.spin ? <> · <b style={{ color: '#c9b8ff' }}>continuous spin</b></> : null}
           </div>
         </div>
 
         <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Motion &amp; Explosion Controls</div>
+          <div style={sectionTitleStyle}>Motion &amp; Primitive Parameters</div>
 
           <label style={labelStyle}>Explosion radius — {value.explosionRadius}mm</label>
           <input
@@ -271,6 +313,57 @@ export default function HeroShaderSettings({
         </div>
 
         <div style={cardStyle}>
+          <div style={sectionTitleStyle}>Placement &amp; Canvas Layout</div>
+
+          <label style={labelStyle}>Container target</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {CONTAINER_TARGET_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ containerTarget: opt.value as HeroContainerTarget })}
+                style={{ ...chipBase, borderColor: value.containerTarget === opt.value ? '#7c5cff' : 'rgba(255,255,255,0.12)', color: value.containerTarget === opt.value ? '#c9b8ff' : '#c8c8d0' }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={{ ...labelStyle, marginTop: 14 }}>Canvas height / aspect ratio</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {CANVAS_HEIGHT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ canvasHeight: opt.value as HeroCanvasHeight })}
+                style={{ ...chipBase, borderColor: value.canvasHeight === opt.value ? '#7c5cff' : 'rgba(255,255,255,0.12)', color: value.canvasHeight === opt.value ? '#c9b8ff' : '#c8c8d0' }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={{ ...labelStyle, marginTop: 14 }}>Blend mode</label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {BLEND_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ blendMode: opt.value as HeroBlendMode })}
+                style={{ ...chipBase, borderColor: value.blendMode === opt.value ? '#7c5cff' : 'rgba(255,255,255,0.12)', color: value.blendMode === opt.value ? '#c9b8ff' : '#c8c8d0' }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94', lineHeight: 1.6 }}>
+            Container target decides whether the canvas paints behind the whole hero card or as an inline banner
+            beneath the copy. Blend mode controls how the shader composites against the card surface.
+          </div>
+        </div>
+
+        <div style={cardStyle}>
           <div style={sectionTitleStyle}>Theme &amp; Palette</div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', color: '#ddd' }}>
             <input type="checkbox" checked={value.paletteAutoSync} onChange={(e) => patch({ paletteAutoSync: e.target.checked })} />
@@ -332,6 +425,7 @@ export default function HeroShaderSettings({
                 depthBlur={value.depthBlur}
                 animationLoop={value.animationLoop}
                 assemblyProgress={value.assemblyProgress}
+                blendMode={value.blendMode}
                 interactive
                 onStatus={setStatus}
                 {...previewColors}

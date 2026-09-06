@@ -148,6 +148,8 @@ export default function HeroShaderCanvas({
   interactive = false,
   onStatus,
   style,
+  placement = 'background',
+  blendMode = 'normal',
 }: {
   enabled?: boolean;
   preset?: string;
@@ -164,6 +166,10 @@ export default function HeroShaderCanvas({
   interactive?: boolean;
   onStatus?: (status: HeroShaderStatus) => void;
   style?: React.CSSProperties;
+  /** `background` = fill the parent card behind its text; `banner` = inline block. */
+  placement?: 'background' | 'banner';
+  /** CSS mix-blend-mode applied to the canvas against the card surface. */
+  blendMode?: 'normal' | 'overlay' | 'screen';
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HeroShaderStatus>({ backend: 'css', fps: 0 });
@@ -445,9 +451,15 @@ export default function HeroShaderCanvas({
   if (!enabled) return null;
 
   const gradient = `linear-gradient(135deg, ${colorA || '#bf5af2'}, ${colorB || '#0071e3'}, ${colorC || '#ff375f'}, ${colorA || '#bf5af2'})`;
+  const positionStyle: React.CSSProperties =
+    placement === 'banner'
+      ? { position: 'relative', inset: 'auto', width: '100%', height: '100%' }
+      : { position: 'absolute', inset: 0 };
+  const mixStyle: React.CSSProperties =
+    blendMode && blendMode !== 'normal' ? { mixBlendMode: blendMode } : {};
 
   return (
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', ...style }} aria-hidden="true">
+    <div style={{ ...positionStyle, overflow: 'hidden', pointerEvents: 'none', ...mixStyle, ...style }} aria-hidden="true">
       <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
       <div
         style={{

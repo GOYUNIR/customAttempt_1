@@ -21,15 +21,21 @@ export interface ShaderParams {
   warpFrequency: number;
   /** Turbulence strength. */
   turbulence: number;
+  /** Continuous 3D rotation (spinning geometry) requested by the prompt. */
+  spin: boolean;
   /** Bound product silhouette key, or null. */
   productSilhouette: string | null;
 }
 
 const EXPLODED_RE = /\b(exploded|explode|construction|rebuild|re-?build|assemble|assembly|disassembly|disassemble)\b/i;
-const PRODUCT_RE = /\b(roccstar|perfume|bottle|bottles|atomizer|atomiser|nozzle|spray|fragrance|flacon|vessel|cap)\b/i;
-const FLUID_RE = /\b(fluid|liquid|smoke|organic|viscous|flow|molten|warp|swirl)\b/i;
+// Generic container/shape descriptors only — a natural-language prompt maps onto
+// a silhouette KEY, never a specific product. No brand/product-name tokens live
+// here (zero hardcoded product assumptions).
+const PRODUCT_RE = /\b(perfume|bottle|bottles|atomizer|atomiser|nozzle|spray|fragrance|flacon|vessel|cap|container)\b/i;
+const FLUID_RE = /\b(fluid|liquid|smoke|organic|viscous|flow|molten|warp|swirl|drift)\b/i;
 const GLASS_RE = /\b(glass|refract|refraction|raymarch|raymarched|prism|crystal|gem|caustic)\b/i;
 const PARTICLE_RE = /\b(particle|particles|dust|cosmic|mesh|grid|wireframe|points|stars|embers)\b/i;
+const SPIN_RE = /\b(spin|spinning|rotate|rotation|rotating|geometry|shape|logo)\b/i;
 
 const normalize = (s: string) => String(s || '').toLowerCase().trim();
 
@@ -46,6 +52,7 @@ export function parsePromptToParams(prompt: string, base: Partial<ShaderParams> 
     viscosity: clamp01(base.viscosity ?? 0.45),
     warpFrequency: clamp01(base.warpFrequency ?? 0.4),
     turbulence: clamp01(base.turbulence ?? 0.45),
+    spin: base.spin ?? false,
     productSilhouette: base.productSilhouette ?? null,
   };
 
@@ -56,6 +63,15 @@ export function parsePromptToParams(prompt: string, base: Partial<ShaderParams> 
     params.dispersion = clamp01(params.dispersion * 1.5 + 0.35);
   }
   if (PARTICLE_RE.test(text)) params.mode = 'particle';
+  if (SPIN_RE.test(text)) {
+    // Spinning geometry / rotating shapes → continuous 3D rotation. When no
+    // stronger primitive is requested, the particle engine renders a rotating
+    // point-cloud mesh.
+    params.spin = true;
+    if (!EXPLODED_RE.test(text) && !PARTICLE_RE.test(text) && !GLASS_RE.test(text)) {
+      params.mode = 'particle';
+    }
+  }
   if (GLASS_RE.test(text)) params.mode = 'glass';
 
   if (FLUID_RE.test(text)) {
@@ -68,7 +84,7 @@ export function parsePromptToParams(prompt: string, base: Partial<ShaderParams> 
   if (productMatch) {
     const word = productMatch[0].toLowerCase();
     if (word === 'atomiser') params.productSilhouette = 'atomizer';
-    else if (word === 'flacon' || word === 'fragrance' || word === 'roccstar') params.productSilhouette = 'bottle';
+    else if (word === 'flacon' || word === 'fragrance' || word === 'perfume') params.productSilhouette = 'bottle';
     else params.productSilhouette = word;
   }
 
@@ -82,10 +98,29 @@ export interface MagicPromptPill {
 
 export const MAGIC_PROMPT_PILLS: ReadonlyArray<MagicPromptPill> = [
   { label: 'Exploded Bottle View', prompt: 'Exploded bottle view — construction, rebuild, assemble' },
-  { label: 'Particle Assemble', prompt: 'Particle assemble — cosmic dust, points' },
+  { label: 'Spinning Geometry', prompt: 'Spinning geometry — rotating 3D shapes, mesh, continuous rotation' },
+  { label: 'Particle Rebuild', prompt: 'Particle rebuild — cosmic dust, points, assemble' },
   { label: 'Liquid Glass', prompt: 'Liquid glass — refractive raymarched crystal' },
-  { label: 'Cosmic Dust', prompt: 'Cosmic dust — particles, embers, mesh' },
+  { label: 'Slow Motion Drift', prompt: 'Slow motion drift — fluid organic smoke, gentle viscous warp' },
 ];
+
+/**
+ * Map a parsed prompt onto the canonical hero preset id the engine renders, so
+ * the admin "Execute Prompt & Generate Preview" action can update the live
+ * canvas from natural language without any hardcoded product/brand mapping.
+ */
+export function paramsToPreset(params: ShaderParams): string {
+  switch (params.mode) {
+    case 'exploded':
+      return 'exploded_rebuild';
+    case 'glass':
+      return 'ambient_glass';
+    case 'particle':
+      return 'cyber_mesh';
+    default:
+      return 'dark_organic';
+  }
+}
 
 /** Deterministic "AI Auto-Enhance" — enriches a prompt without an external call. */
 export function enhancePrompt(prompt: string): string {

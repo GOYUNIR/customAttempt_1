@@ -89,6 +89,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     animationLoop: 'pulse',
     assemblyProgress: 1,
     paletteAutoSync: true,
+    containerTarget: 'background',
+    canvasHeight: 'medium',
+    blendMode: 'normal',
   },
 
   socialProof: {

@@ -78,6 +78,15 @@ export function isExplodedPreset(id: string | undefined | null): boolean {
 
 export type AnimationLoopMode = 'pulse' | 'scroll' | 'mouse' | 'scrub';
 
+/** Where the hero canvas paints relative to the hero card content. */
+export type HeroContainerTarget = 'background' | 'banner';
+
+/** Preset canvas heights for the inline banner placement (and the aspect hint). */
+export type HeroCanvasHeight = 'slim' | 'medium' | 'expanded';
+
+/** CSS blend mode the canvas composes against the hero card surface. */
+export type HeroBlendMode = 'normal' | 'overlay' | 'screen';
+
 export interface AiHeroSettings {
   enabled: boolean;
   preset: string;
@@ -98,12 +107,35 @@ export interface AiHeroSettings {
   accentA?: string;
   accentB?: string;
   accentC?: string;
+  /** Canvas layout: full-card background vs inline sub-text banner. */
+  containerTarget: HeroContainerTarget;
+  /** Canvas height / aspect ratio when placed as an inline banner. */
+  canvasHeight: HeroCanvasHeight;
+  /** How the canvas blends with the hero card surface. */
+  blendMode: HeroBlendMode;
 }
 
 export const PARTICLE_COUNT_OPTIONS = [10_000, 50_000, 100_000] as const;
 
 export const EXPLOSION_RADIUS_MIN = 0;
 export const EXPLOSION_RADIUS_MAX = 150;
+
+export const CONTAINER_TARGET_OPTIONS: ReadonlyArray<{ value: HeroContainerTarget; label: string }> = [
+  { value: 'background', label: 'Full Card Background' },
+  { value: 'banner', label: 'Inline Sub-Text Banner' },
+];
+
+export const CANVAS_HEIGHT_OPTIONS: ReadonlyArray<{ value: HeroCanvasHeight; label: string; px: number }> = [
+  { value: 'slim', label: 'Slim (120px)', px: 120 },
+  { value: 'medium', label: 'Medium (240px)', px: 240 },
+  { value: 'expanded', label: 'Expanded Full Card', px: 0 },
+];
+
+export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: string }> = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'overlay', label: 'Overlay' },
+  { value: 'screen', label: 'Screen' },
+];
 
 export function defaultAiHeroSettings(): AiHeroSettings {
   return {
@@ -120,5 +152,10 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     accentA: '',
     accentB: '',
     accentC: '',
+    containerTarget: 'background',
+    canvasHeight: 'medium',
+    blendMode: 'normal',
   };
 }
+
+

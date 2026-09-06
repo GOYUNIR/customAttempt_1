@@ -194,6 +194,9 @@ export interface StorefrontConfig {
     accentA?: string;
     accentB?: string;
     accentC?: string;
+    containerTarget?: 'background' | 'banner';
+    canvasHeight?: 'slim' | 'medium' | 'expanded';
+    blendMode?: 'normal' | 'overlay' | 'screen';
   };
   socialProof: {
     label: string;
@@ -681,6 +684,9 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       animationLoop: 'pulse',
       assemblyProgress: 1,
       paletteAutoSync: true,
+      containerTarget: 'background',
+      canvasHeight: 'medium',
+      blendMode: 'normal',
       ...(input.aiHero ?? {}),
     },
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },

@@ -414,7 +414,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
     const open = () => setCartOpen(true);
     const onScroll = () => {
       const nextScroll = window.scrollY || 0;
-      if (nextScroll > 120) setShowScrollCue(false);
+      if (nextScroll > 50) setShowScrollCue(false);
       else if (nextScroll < 40) setShowScrollCue(true);
     };
     let lastInteraction = Date.now();

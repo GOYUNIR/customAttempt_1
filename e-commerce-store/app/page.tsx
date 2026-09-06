@@ -272,26 +272,43 @@ export default function HomePage() {
   // Apple "less is more" rhythm: the admin contentSpacing setting scales the
   // page padding and section gaps so a buyer can dial the whitespace up/down.
   const spacing = contentSpacingScale(configPalette);
+  // AI hero canvas layout (admin → Settings → AI Hero → Placement & Canvas
+  // Layout): full-card background vs an inline sub-text banner, with a preset
+  // height and a CSS blend mode. Every value derives from the admin settings —
+  // zero hardcoded product/layout assumptions.
+  const aiHeroContainerTarget = aiHero?.containerTarget === 'banner' ? 'banner' : 'background';
+  const aiHeroBlendMode = aiHero?.blendMode || 'normal';
+  const aiHeroBannerHeight =
+    aiHero?.canvasHeight === 'slim' ? 120 : aiHero?.canvasHeight === 'expanded' ? 300 : 240;
+  const heroCanvasProps = {
+    enabled: aiHero?.enabled !== false,
+    preset: String(aiHero?.preset || 'dark_organic'),
+    opacity: Number(aiHero?.opacity) || 0.55,
+    colorA: configPalette.accentPurple || '#bf5af2',
+    colorB: configPalette.accentBlue || '#0071e3',
+    colorC: configPalette.accentPurple || '#ff375f',
+    explosionRadius: Number(aiHero?.explosionRadius) || 60,
+    particleCount: Number(aiHero?.particleCount) || 50_000,
+    depthBlur: Number(aiHero?.depthBlur) || 30,
+    animationLoop: aiHero?.animationLoop || 'pulse',
+    assemblyProgress: Number(aiHero?.assemblyProgress) || 1,
+    blendMode: aiHeroBlendMode,
+  };
 
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-          <HeroShaderCanvas
-            enabled={aiHero.enabled !== false}
-            preset={aiHero.preset}
-            opacity={aiHero.opacity}
-            colorA={configPalette.accentPurple || '#bf5af2'}
-            colorB={configPalette.accentBlue || '#0071e3'}
-            colorC={configPalette.accentPurple || '#ff375f'}
-            explosionRadius={Number(aiHero.explosionRadius) || 60}
-            particleCount={Number(aiHero.particleCount) || 50_000}
-            depthBlur={Number(aiHero.depthBlur) || 30}
-            animationLoop={aiHero.animationLoop || 'pulse'}
-            assemblyProgress={Number(aiHero.assemblyProgress) || 1}
-          />
+          {aiHeroContainerTarget === 'background' && (
+            <HeroShaderCanvas {...heroCanvasProps} placement="background" />
+          )}
           <div style={{ position: 'relative', zIndex: 1 }}>
+          {aiHeroContainerTarget === 'banner' && (
+            <div style={{ position: 'relative', height: aiHeroBannerHeight, marginBottom: 18, borderRadius: themeRadius(configPalette, 18), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}` }}>
+              <HeroShaderCanvas {...heroCanvasProps} placement="banner" />
+            </div>
+          )}
           {heroCoverImage && (
             <div
               className="goyunir-ai"
@@ -347,7 +364,7 @@ export default function HomePage() {
               </Link>
             )}
             {heroContent.showStory !== false && (
-              <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, textDecoration: 'none', fontWeight: 600, fontSize: 13 }}>
+              <Link href="/story" prefetch={false} style={{ padding: '10px 2px', background: 'transparent', color: configPalette.cardTextMuted, textDecoration: 'none', fontWeight: 500, fontSize: 12, letterSpacing: '0.2px' }}>
                 {heroContent.storyBody || 'take control.'}
               </Link>
             )}

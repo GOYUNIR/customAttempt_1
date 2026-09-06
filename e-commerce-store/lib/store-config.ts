@@ -125,6 +125,9 @@ export interface StoreConfig {
     accentA?: string;
     accentB?: string;
     accentC?: string;
+    containerTarget?: 'background' | 'banner';
+    canvasHeight?: 'slim' | 'medium' | 'expanded';
+    blendMode?: 'normal' | 'overlay' | 'screen';
   };
   socialProof: {
     label: string;
@@ -278,6 +281,9 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     animationLoop: 'pulse',
     assemblyProgress: 1,
     paletteAutoSync: true,
+    containerTarget: 'background',
+    canvasHeight: 'medium',
+    blendMode: 'normal',
   },
   socialProof: {
     label: 'Limited drop access',

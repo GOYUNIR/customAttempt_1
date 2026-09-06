@@ -54,11 +54,13 @@ test('parsePromptToParams detects the exploded/assembly mode', () => {
 test('parsePromptToParams detects liquid glass + product silhouette', () => {
   const p = parsePromptToParams('liquid glass — refractive raymarched perfume bottle');
   assert.equal(p.mode, 'glass');
-  assert.equal(p.productSilhouette, 'perfume');
+  // Perfume is a generic container descriptor → bound to the `bottle` silhouette
+  // key (never a brand/product name).
+  assert.equal(p.productSilhouette, 'bottle');
 });
 
-test('parsePromptToParams binds the roccstar brand to a bottle silhouette', () => {
-  const p = parsePromptToParams('roccstar hero — cosmic dust, particles');
+test('parsePromptToParams binds a generic container descriptor to a silhouette key', () => {
+  const p = parsePromptToParams('cosmic dust, particles, bottle');
   assert.equal(p.productSilhouette, 'bottle');
   assert.equal(p.mode, 'particle');
 });
