@@ -2399,13 +2399,16 @@ export default function AdminPortal() {
     return { ...prev, priceCategories: cats, inventoryPerSize: inv };
   };
 
-  // Type into the slug prompt WITHOUT committing: only updates the transient
-  // draft so the input stays freely editable and no source is linked until the
-  // operator clicks "Link" (or presses Enter). Fixes the premature-lock bug.
+  // Type into the slug prompt WITHOUT committing: every keystroke synchronously
+  // mutates the master state so the category can never drift back to an
+  // "unlinked" shape mid-edit. We persist the draft AND mark the sync intent
+  // (`syncWithExisting: true`) on EVERY change. `inventorySyncSlug` stays
+  // committed-only — setting it here would flip `synced` and unmount the input
+  // the moment the first character is typed (the premature-lock bug).
   const typeInventorySyncSlug = (index: number, rawSlug: string) => {
     setProductForm((prev: any) => {
       const cats = [...(prev.priceCategories || [])];
-      cats[index] = { ...cats[index], _syncDraft: rawSlug };
+      cats[index] = { ...cats[index], _syncDraft: rawSlug, syncWithExisting: true };
       return { ...prev, priceCategories: cats };
     });
   };
@@ -2702,10 +2705,33 @@ export default function AdminPortal() {
       window.alert('Save prevented: Add a URL slug (or a name to auto-generate one) before saving.');
       return;
     }
+    // ── Final sync-state reconciliation (DOM + draft fallback) ──
+    // Before serializing the payload, sweep every variant and reconcile its
+    // shared-inventory slug from the LIVE DOM input (the ground truth the
+    // operator actually typed) plus the transient draft/pool fields. If
+    // `inventorySyncSlug` is empty but a slug exists in the DOM input,
+    // `_syncDraft`, or `inventoryPoolId`, promote it so a typed-but-never-
+    // committed slug is never silently dropped on save.
+    const reconciledCategories = (productForm.priceCategories || []).map((c: any, i: number) => {
+      const cat = { ...c };
+      const domEl = typeof document !== 'undefined'
+        ? (document.getElementById(`pf-sync-slug-${i}`) as HTMLInputElement | null)
+        : null;
+      const domValue = String(domEl?.value ?? '').trim();
+      const fallback = String(domValue || cat._syncDraft || cat.inventoryPoolId || '').trim();
+      if (!String(cat.inventorySyncSlug || '').trim() && fallback) {
+        const slug = slugifyName(fallback);
+        cat.inventorySyncSlug = slug;
+        cat._syncDraft = slug;
+        cat.syncWithExisting = true;
+      }
+      return cat;
+    });
+
     // Every sellable size needs a size label. Dedupe the categories so the same
     // size can never be saved twice (it would shadow itself at checkout).
     const seenSizes = new Set<string>();
-    const priceCategories = (productForm.priceCategories || [])
+    const priceCategories = reconciledCategories
       .filter((c: any) => String(c?.size || '').trim())
       .filter((c: any) => {
         const sizeKey = String(c.size).trim().toLowerCase();
@@ -5406,6 +5432,7 @@ export default function AdminPortal() {
                             {syncEnabled && (
                               <>
                                 <input
+                                  id={`pf-sync-slug-${idx}`}
                                   type="text"
                                   placeholder="Inventory Sync Slug"
                                   title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool. Click Link (or press Enter) to commit."
