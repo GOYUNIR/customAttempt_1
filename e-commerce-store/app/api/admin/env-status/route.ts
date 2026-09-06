@@ -39,68 +39,98 @@ type EnvStatusItem = {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!(await adminAuthorized(request, password))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+
+  // The pure env registry (process.env only) can never throw, so it is the safe
+  // fallback payload whenever Supabase/Redis is unreachable — the SetUp tab still
+  // renders a full, useful list instead of cascading 503s.
+  const buildPayload = () => {
+    const discovery = discoverEnvironment();
+    const toItem = (c: any): EnvStatusItem => ({
+      key: c.id,
+      label: c.name,
+      name: c.name,
+      purpose: c.purpose,
+      variable: c.variable,
+      aliases: c.aliases,
+      kind: c.kind,
+      required: c.required,
+      set: c.present,
+      buildTime: c.buildTime,
+      sensitive: c.secret,
+      example: c.example,
+      where: c.where,
+      commands: c.commands,
+      hint: c.purpose,
+    });
+    const items: EnvStatusItem[] = discovery.all.map(toItem);
+    // The necessary CLOUDFLARE environment variables — a dedicated list so the
+    // SetUp tab can show exactly which values must live in the Cloudflare
+    // dashboard / `wrangler secret put` (not the Setup Wizard).
+    const cloudflare: EnvStatusItem[] = discovery.all
+      .filter((c: any) => c.cloudflareEnvVar === true)
+      .map(toItem);
+    return {
+      items,
+      cloudflare,
+      groups: discovery.groups.map((g: any) => ({
+        title: g.title,
+        subtitle: g.subtitle,
+        kind: g.kind,
+        checks: g.checks.map((c: any) => c.id),
+      })),
+    };
+  };
+
+  try {
+    if (!(await adminAuthorized(request, password))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    const provider = detectStorageProvider();
+    const supabase = supabaseEnvSummary();
+    const configured = (await isPlatformConfigured()) === true;
+    const platformSettings = await getPlatformSettings();
+    const platformProviders = toPublicSummary(platformSettings);
+    const { items, cloudflare, groups } = buildPayload();
+
+    return NextResponse.json({
+      ok: true,
+      items,
+      cloudflare,
+      groups,
+      storageProvider: provider,
+      supabase,
+      platformConfigured: configured,
+      platformProviders,
+      cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
+      environment: process.env.NODE_ENV || 'development',
+      summary: {
+        configured: items.filter((i) => i.set).length,
+        total: items.length,
+        requiredMissing: items.filter((i) => i.required && !i.set).map((i) => i.key),
+      },
+    });
+  } catch (err: any) {
+    // Fail-soft: return the env registry (never secrets) so the SetUp tab stays
+    // usable even when Supabase/Redis is down or the device check throws.
+    const { items, cloudflare, groups } = buildPayload();
+    return NextResponse.json({
+      ok: false,
+      error: err?.message || 'env-status unavailable',
+      items,
+      cloudflare,
+      groups,
+      storageProvider: detectStorageProvider(),
+      supabase: supabaseEnvSummary(),
+      platformConfigured: false,
+      platformProviders: toPublicSummary(null),
+      cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
+      environment: process.env.NODE_ENV || 'development',
+      summary: {
+        configured: items.filter((i) => i.set).length,
+        total: items.length,
+        requiredMissing: items.filter((i) => i.required && !i.set).map((i) => i.key),
+      },
+    });
   }
-
-  const provider = detectStorageProvider();
-  const supabase = supabaseEnvSummary();
-  const configured = (await isPlatformConfigured()) === true;
-  const platformSettings = await getPlatformSettings();
-  const platformProviders = toPublicSummary(platformSettings);
-
-  // Single source of truth — the full env registry (every variable, with a
-  // realistic EXAMPLE value + where to set it on Cloudflare), so the SetUp tab
-  // can never drift from middleware.ts / the Setup Wizard.
-  const discovery = discoverEnvironment();
-
-  const toItem = (c: (typeof discovery.all)[number]): EnvStatusItem => ({
-    key: c.id,
-    label: c.name,
-    name: c.name,
-    purpose: c.purpose,
-    variable: c.variable,
-    aliases: c.aliases,
-    kind: c.kind,
-    required: c.required,
-    set: c.present,
-    buildTime: c.buildTime,
-    sensitive: c.secret,
-    example: c.example,
-    where: c.where,
-    commands: c.commands,
-    hint: c.purpose,
-  });
-
-  const items: EnvStatusItem[] = discovery.all.map(toItem);
-
-  // The necessary CLOUDFLARE environment variables — a dedicated list so the
-  // SetUp tab can show exactly which values must live in the Cloudflare
-  // dashboard / `wrangler secret put` (not the Setup Wizard).
-  const cloudflare: EnvStatusItem[] = discovery.all
-    .filter((c) => c.cloudflareEnvVar === true)
-    .map(toItem);
-
-  return NextResponse.json({
-    ok: true,
-    items,
-    cloudflare,
-    groups: discovery.groups.map((g) => ({
-      title: g.title,
-      subtitle: g.subtitle,
-      kind: g.kind,
-      checks: g.checks.map((c) => c.id),
-    })),
-    storageProvider: provider,
-    supabase,
-    platformConfigured: configured,
-    platformProviders,
-    cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
-    environment: process.env.NODE_ENV || 'development',
-    summary: {
-      configured: items.filter((i) => i.set).length,
-      total: items.length,
-      requiredMissing: items.filter((i) => i.required && !i.set).map((i) => i.key),
-    },
-  });
 }

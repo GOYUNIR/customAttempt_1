@@ -71,7 +71,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!(await adminAuthorized(request, password))) {
+  let authorized = false;
+  try {
+    authorized = await adminAuthorized(request, password);
+  } catch {
+    authorized = false;
+  }
+  if (!authorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

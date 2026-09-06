@@ -39,8 +39,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Resolve the AI driver up front so a REAL API key (DeepSeek/OpenAI/… in
+  // settings or env, or a Workers AI binding) can bypass Demo Mode. Wrapped so a
+  // transient Supabase read can never 503 the whole route.
+  let driver: Awaited<ReturnType<typeof AiFactory.getDriver>> = null;
+  try {
+    driver = await AiFactory.getDriver();
+  } catch {
+    driver = null;
+  }
+  const aiConfigured = Boolean(driver?.configured);
+
+  // Demo Mode only blocks AI generation when NO AI provider is configured — an
+  // operator who wired a paid key has effectively unlocked the model and must
+  // not be locked out of the prompt compiler.
   const license = await getLicenseStatus();
-  if (!isWriteAllowed(license.status)) {
+  if (!isWriteAllowed(license.status) && !aiConfigured) {
     return NextResponse.json(
       { error: 'Demo Mode: AI generation is disabled until a license is active.', license: license.status },
       { status: 403 },
@@ -65,7 +79,8 @@ export async function POST(request: Request) {
   let source: 'ai' | 'fallback' = 'fallback';
   let provider: string | null = null;
 
-  const driver = await AiFactory.getDriver();
+  // Reuse the driver resolved above (a second read would double the Supabase
+  // round-trips and re-risk a transient failure).
   if (driver?.configured) {
     const completion = await driver.complete(buildShaderPrompt({ prompt, product }));
     if (completion.ok) {

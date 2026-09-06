@@ -67,7 +67,13 @@ function isCssColor(value: unknown): boolean {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
-  if (!(await adminAuthorized(request, password))) {
+  let authorized = false;
+  try {
+    authorized = await adminAuthorized(request, password);
+  } catch {
+    authorized = false;
+  }
+  if (!authorized) {
     return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
   }
 
@@ -83,9 +89,16 @@ export async function GET(request: Request) {
   // actually the active one (see also lib/env-discovery.ts).
   // ------------------------------------------------------------------
   const supabaseSummary = supabaseEnvSummary();
-  const configured = (await isPlatformConfigured()) === true;
-  const platformSettings = await getPlatformSettings();
-  const providers = toPublicSummary(platformSettings);
+  let configured = false;
+  let platformSettings: any = null;
+  let providers = toPublicSummary(null);
+  try {
+    configured = (await isPlatformConfigured()) === true;
+    platformSettings = await getPlatformSettings();
+    providers = toPublicSummary(platformSettings);
+  } catch {
+    providers = toPublicSummary(null);
+  }
   const storageProvider = detectStorageProvider();
 
   push(
@@ -199,9 +212,19 @@ export async function GET(request: Request) {
     // ------------------------------------------------------------------
     // store:config integrity
     // ------------------------------------------------------------------
-    const configRaw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(configRaw);
-    push('store:config parseable', Boolean(config), config ? 'ok' : 'missing or invalid JSON');
+    let config: any = null;
+    let configReadError: string | null = null;
+    try {
+      const configRaw = await redis.get(STORE_CONFIG_KEY);
+      config = safeParseRedisItem<any>(configRaw);
+    } catch (e: any) {
+      configReadError = e?.message || 'redis read failed';
+    }
+    push(
+      'store:config parseable',
+      Boolean(config) && !configReadError,
+      configReadError || (config ? 'ok' : 'missing or invalid JSON'),
+    );
 
     let availableSizes: string[] = [];
     if (config) {
@@ -280,9 +303,23 @@ export async function GET(request: Request) {
     // ------------------------------------------------------------------
     // Product catalog
     // ------------------------------------------------------------------
-    const allProducts = await loadProducts(redis);
-    const productList = Object.values(allProducts);
-    push('Products in Redis', productList.length > 0, productList.length > 0 ? `${productList.length} product(s)` : '0 — click Seed Defaults or Add Product in /admin');
+    let productList: any[] = [];
+    let productsReadError: string | null = null;
+    try {
+      const allProducts = await loadProducts(redis);
+      productList = Object.values(allProducts);
+    } catch (e: any) {
+      productsReadError = e?.message || 'redis read failed';
+    }
+    push(
+      'Products in Redis',
+      productList.length > 0,
+      productsReadError
+        ? `read failed: ${productsReadError}`
+        : productList.length > 0
+          ? `${productList.length} product(s)`
+          : '0 — click Seed Defaults or Add Product in /admin',
+    );
 
     // Slug uniqueness
     const slugMap = new Map<string, string>();

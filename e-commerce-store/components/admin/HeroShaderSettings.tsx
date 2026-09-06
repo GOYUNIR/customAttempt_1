@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import HeroShaderCanvas, { type HeroShaderStatus } from '@/components/HeroShaderCanvas';
 import {
   HERO_SHADER_PRESETS,
@@ -26,6 +26,7 @@ import {
 } from '@/lib/shaders/promptParser';
 import { extractAccentPalette, paletteToCss, type AccentPalette } from '@/lib/shaders/palette';
 import { buildProductTarget, silhouetteLabel } from '@/lib/shaders/productTarget';
+import { toHexColor } from '@/lib/share-card-config';
 
 /**
  * Luxury 2-column control suite for the AI Hero Banner & Shader.
@@ -92,6 +93,67 @@ const LOOP_OPTIONS: ReadonlyArray<{ value: AnimationLoopMode; label: string }> =
   { value: 'mouse', label: 'Mouse Interactive Distance' },
   { value: 'scrub', label: 'Manual Scrub (preview)' },
 ];
+
+const selectStyle: CSSProperties = {
+  width: '100%',
+  background: 'rgba(0,0,0,0.25)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 10,
+  color: '#eee',
+  fontSize: 12,
+  padding: '8px 10px',
+};
+
+/** Collapsible accordion module — keeps secondary controls out of the primary
+ *  hero row until the operator expands them. */
+function Section({
+  title,
+  hint,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '14px 16px',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.4, textTransform: 'uppercase', color: '#a0a0aa' }}>{title}</span>
+        <span
+          style={{
+            color: '#8a8a94',
+            fontSize: 11,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 160ms ease',
+            display: 'inline-block',
+          }}
+        >
+          ▾
+        </span>
+      </button>
+      {!open && hint ? <div style={{ padding: '0 16px 12px', fontSize: 10, color: '#8a8a94' }}>{hint}</div> : null}
+      {open ? <div style={{ padding: '0 16px 16px' }}>{children}</div> : null}
+    </div>
+  );
+}
 
 export default function HeroShaderSettings({
   value,
@@ -224,8 +286,7 @@ export default function HeroShaderSettings({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
       <div className="lg:col-span-7">
-        <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Engine Mode &amp; Presets</div>
+        <Section title="Engine Presets" hint="Pick the renderer — GLSL fragment shader or 3D particle assembly." defaultOpen>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {HERO_SHADER_PRESETS.map((preset) => {
               const isActive = value.preset === preset.id;
@@ -251,23 +312,15 @@ export default function HeroShaderSettings({
               );
             })}
           </div>
-        </div>
+        </Section>
 
         <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Product Target</div>
-          <label style={labelStyle}>Target catalog item — drives the 3D silhouette + AI payload</label>
+          <div style={sectionTitleStyle}>Smart AI Prompt Compiler</div>
+          <label style={labelStyle}>Product target</label>
           <select
             value={value.targetProductId || ''}
             onChange={(e) => onProductSelect(e.target.value)}
-            style={{
-              width: '100%',
-              background: 'rgba(0,0,0,0.25)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 10,
-              color: '#eee',
-              fontSize: 12,
-              padding: '8px 10px',
-            }}
+            style={selectStyle}
           >
             <option value="" style={{ background: '#141419' }}>None — generic container</option>
             {catalog.map((p) => (
@@ -276,41 +329,30 @@ export default function HeroShaderSettings({
               </option>
             ))}
           </select>
-          <div style={{ marginTop: 8, fontSize: 10, color: '#8a8a94', lineHeight: 1.6 }}>
+          <div style={{ marginTop: 6, fontSize: 10, color: '#8a8a94' }}>
             {selectedTarget ? (
               <>
                 Silhouette: <b style={{ color: '#c9b8ff' }}>{silhouetteLabel(selectedTarget.silhouette)}</b>
                 {selectedTarget.category ? <> · {selectedTarget.category}</> : null}
               </>
             ) : (
-              'No product selected — the exploded mesh renders a neutral container.'
+              'No product — neutral container.'
             )}
           </div>
-          <label style={{ ...labelStyle, marginTop: 10 }}>Manual silhouette override</label>
+          <label style={{ ...labelStyle, marginTop: 10 }}>Silhouette override</label>
           <select
             value={value.productSilhouette || ''}
             onChange={(e) => patch({ productSilhouette: e.target.value })}
-            style={{
-              width: '100%',
-              background: 'rgba(0,0,0,0.25)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 10,
-              color: '#eee',
-              fontSize: 12,
-              padding: '8px 10px',
-            }}
+            style={selectStyle}
           >
-            <option value="">Auto — derive from selected product</option>
+            <option value="">Auto — derive from product</option>
             {SILHOUETTE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value} style={{ background: '#141419' }}>
                 {o.label}
               </option>
             ))}
           </select>
-        </div>
-
-        <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Smart AI Prompt Compiler</div>
+          <label style={{ ...labelStyle, marginTop: 14 }}>Prompt</label>
           <textarea
             rows={2}
             placeholder="Describe the hero motion (e.g. exploded bottle view, liquid glass, cosmic dust)"
@@ -396,8 +438,7 @@ export default function HeroShaderSettings({
           </div>
         </div>
 
-        <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Motion &amp; Primitive Parameters</div>
+        <Section title="Motion & Primitive Parameters" hint="Sliders, particle density, opacity and the animation loop.">
 
           <label style={labelStyle}>Explosion radius — {value.explosionRadius}mm</label>
           <input
@@ -477,10 +518,9 @@ export default function HeroShaderSettings({
               </option>
             ))}
           </select>
-        </div>
+        </Section>
 
-        <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Placement &amp; Canvas Layout</div>
+        <Section title="Placement & Canvas Layout" hint="Where the canvas sits and how it blends with the card.">
 
           <label style={labelStyle}>Container target</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -524,14 +564,12 @@ export default function HeroShaderSettings({
             ))}
           </div>
 
-          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94', lineHeight: 1.6 }}>
-            Container target decides whether the canvas paints behind the whole hero card or as an inline banner
-            beneath the copy. Blend mode controls how the shader composites against the card surface.
+          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94' }}>
+            Canvas behind the whole hero card, or an inline banner beneath the copy.
           </div>
-        </div>
+        </Section>
 
-        <div style={cardStyle}>
-          <div style={sectionTitleStyle}>Theme &amp; Palette</div>
+        <Section title="Theme & Palette" hint="Sync accents from the storefront theme or override per hero.">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', color: '#ddd' }}>
             <input type="checkbox" checked={value.paletteAutoSync} onChange={(e) => patch({ paletteAutoSync: e.target.checked })} />
             Sync accent vectors from the storefront theme
@@ -542,7 +580,7 @@ export default function HeroShaderSettings({
                 <div style={{ width: 40, height: 40, borderRadius: 10, background: col, border: '1px solid rgba(255,255,255,0.15)' }} />
                 <input
                   type="color"
-                  value={col}
+                  value={toHexColor(col)}
                   disabled={value.paletteAutoSync}
                   onChange={(e) => {
                     const key = (['accentA', 'accentB', 'accentC'] as const)[i];
@@ -558,7 +596,7 @@ export default function HeroShaderSettings({
               ? 'Extracted live from the active theme accent colors.'
               : 'Custom accent vectors — override the theme palette per hero.'}
           </div>
-        </div>
+        </Section>
       </div>
 
       <div className="lg:col-span-5">
@@ -651,9 +689,8 @@ export default function HeroShaderSettings({
             style={rangeStyle}
           />
 
-          <div style={{ marginTop: 12, fontSize: 10, color: '#8a8a94', lineHeight: 1.6 }}>
-            0% = fully exploded along surface normals · 100% = assembled hero product. The scrubber drives the
-            interactive timeline when the loop is set to <b style={{ color: '#c9b8ff' }}>Manual Scrub</b>.
+          <div style={{ marginTop: 12, fontSize: 10, color: '#8a8a94' }}>
+            0% exploded → 100% assembled · drives the timeline on <b style={{ color: '#c9b8ff' }}>Manual Scrub</b>.
           </div>
         </div>
       </div>
