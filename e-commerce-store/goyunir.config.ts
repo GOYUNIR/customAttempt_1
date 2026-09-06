@@ -92,6 +92,9 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     containerTarget: 'background',
     canvasHeight: 'medium',
     blendMode: 'normal',
+    targetProductId: '',
+    targetProductName: '',
+    productSilhouette: '',
   },
 
   socialProof: {

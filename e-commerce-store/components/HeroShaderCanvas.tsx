@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
-import { buildBottleGeometry } from '@/lib/shaders/bottleGeometry';
+import { buildProductGeometry } from '@/lib/shaders/bottleGeometry';
 import { FRAGMENT_VS, FRAGMENT_FS, PARTICLE_VS, PARTICLE_FS } from '@/lib/shaders/glsl';
 
 /**
@@ -150,6 +150,8 @@ export default function HeroShaderCanvas({
   style,
   placement = 'background',
   blendMode = 'normal',
+  productSilhouette,
+  paused = false,
 }: {
   enabled?: boolean;
   preset?: string;
@@ -170,9 +172,19 @@ export default function HeroShaderCanvas({
   placement?: 'background' | 'banner';
   /** CSS mix-blend-mode applied to the canvas against the card surface. */
   blendMode?: 'normal' | 'overlay' | 'screen';
+  /** Generic silhouette key the exploded mesh derives from the target product. */
+  productSilhouette?: string;
+  /** Freeze the animation timeline + particles (pause/resume control). */
+  paused?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HeroShaderStatus>({ backend: 'css', fps: 0 });
+  // Latest-value ref so toggling `paused` never tears down the GL context. The
+  // ref is synced in an effect (never during render) and read by the RAF loop.
+  const pausedRef = useRef<boolean>(paused);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -247,7 +259,7 @@ export default function HeroShaderCanvas({
         () => gl!.deleteShader(fs),
       );
 
-      const geom = buildBottleGeometry(particleCount);
+      const geom = buildProductGeometry(productSilhouette, particleCount);
       pointCount = geom.pointCount;
       const buffer = gl.createBuffer();
       if (!buffer) {
@@ -384,11 +396,17 @@ export default function HeroShaderCanvas({
     let running = true;
     let frames = 0;
     let fpsStart = performance.now();
-    const start = performance.now();
+    // Accumulated animation time — frozen while paused so resume is seamless
+    // (the timeline + particles hold their last frame instead of jumping).
+    let animTime = 0;
+    let lastNow = performance.now();
 
     const render = (now: number) => {
       if (!running) return;
-      draw(now, (now - start) / 1000, mouse);
+      const dt = pausedRef.current ? 0 : Math.min(0.1, (now - lastNow) / 1000);
+      lastNow = now;
+      if (!pausedRef.current) animTime += dt;
+      draw(now, animTime, mouse);
 
       frames++;
       const elapsed = now - fpsStart;
@@ -446,7 +464,7 @@ export default function HeroShaderCanvas({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors]);
+  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productSilhouette]);
 
   if (!enabled) return null;
 

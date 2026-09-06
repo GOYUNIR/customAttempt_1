@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import HeroShaderCanvas, { type HeroShaderStatus } from '@/components/HeroShaderCanvas';
 import {
   HERO_SHADER_PRESETS,
@@ -10,14 +10,22 @@ import {
   CONTAINER_TARGET_OPTIONS,
   CANVAS_HEIGHT_OPTIONS,
   BLEND_MODE_OPTIONS,
+  SILHOUETTE_OPTIONS,
   type AiHeroSettings,
   type AnimationLoopMode,
   type HeroContainerTarget,
   type HeroCanvasHeight,
   type HeroBlendMode,
 } from '@/lib/shaders/presets';
-import { parsePromptToParams, enhancePrompt, paramsToPreset, MAGIC_PROMPT_PILLS } from '@/lib/shaders/promptParser';
+import {
+  enhancePrompt,
+  paramsToPreset,
+  compileShaderParams,
+  MAGIC_PROMPT_PILLS,
+  type ShaderParams,
+} from '@/lib/shaders/promptParser';
 import { extractAccentPalette, paletteToCss, type AccentPalette } from '@/lib/shaders/palette';
+import { buildProductTarget, silhouetteLabel } from '@/lib/shaders/productTarget';
 
 /**
  * Luxury 2-column control suite for the AI Hero Banner & Shader.
@@ -89,33 +97,109 @@ export default function HeroShaderSettings({
   value,
   onChange,
   themeColors,
+  products,
 }: {
   value: AiHeroSettings;
   onChange: (next: AiHeroSettings) => void;
   themeColors: Record<string, any>;
+  /** Live catalog items (from /api/admin/products) — the dynamic product selector. */
+  products?: any[];
 }) {
   const [status, setStatus] = useState<HeroShaderStatus>({ backend: 'css', fps: 0 });
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
+  const [generating, setGenerating] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const catalog = Array.isArray(products) ? products : [];
+  const selectedProduct =
+    catalog.find(
+      (p) =>
+        String(p?.id || p?.slug) === String(value.targetProductId) ||
+        String(p?.slug || '') === String(value.targetProductId),
+    ) || null;
+  const selectedTarget = buildProductTarget(selectedProduct);
+  // Effective silhouette: explicit admin override → derived from the selected
+  // product → neutral container.
+  const effectiveSilhouette = value.productSilhouette || selectedTarget?.silhouette || 'generic';
 
   const palette = extractAccentPalette(themeColors);
   const [a, b, c] = paletteToCss(palette);
-  const derived = parsePromptToParams(value.prompt);
+  const derived = compileShaderParams(value.prompt, selectedTarget);
 
   const patch = (next: Partial<AiHeroSettings>) => onChange({ ...value, ...next });
 
-  // "Execute Prompt & Generate Preview" — compiles the prompt text into
-  // bounded render uniforms via the dynamic prompt parser, then patches the
-  // live canvas state so the preview updates BEFORE any settings save. Zero
-  // hardcoded product/brand mapping: the parser maps natural language onto the
-  // canonical preset + uniform bounds.
-  const executePrompt = () => {
-    const params = parsePromptToParams(value.prompt);
+  /** Apply compiled (deterministic or AI) params to the live canvas state. */
+  const applyParams = (params: ShaderParams) => {
     onChange({
       ...value,
       preset: paramsToPreset(params),
       assemblyProgress: params.assemblyProgress,
       explosionRadius: Math.round(params.dispersion * EXPLOSION_RADIUS_MAX),
       animationLoop: params.spin ? 'pulse' : value.animationLoop,
+      productSilhouette: params.productSilhouette || value.productSilhouette || '',
+    });
+  };
+
+  // Execute/Generate: compile locally for instant feedback, then (when an AI
+  // provider is configured) refine via the admin AI endpoint. Cancel aborts the
+  // in-flight request and restores the previous safe state; Pause/Resume freezes
+  // and resumes the timeline in both the preview and the active canvas.
+  const executePrompt = async () => {
+    abortRef.current?.abort();
+    const snapshot = value;
+    setGenError(null);
+    setGenerating(true);
+    // Instant deterministic compile first — never blocks on the network, so the
+    // preview updates even if the AI provider is unconfigured or slow.
+    applyParams(compileShaderParams(value.prompt, selectedTarget));
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const res = await fetch('/api/ai/shader-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: value.prompt, product: selectedTarget }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.error) setGenError(String(data.error));
+        return;
+      }
+      const data = await res.json();
+      if (data?.params) applyParams(data.params);
+      if (data?.silhouette) patch({ productSilhouette: String(data.silhouette) });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // Cancel path — restore the snapshot captured at Execute time.
+        onChange(snapshot);
+      } else {
+        setGenError(err?.message || 'AI generation failed; kept the local compile.');
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      setGenerating(false);
+    }
+  };
+
+  const cancelGeneration = () => {
+    abortRef.current?.abort();
+    setGenerating(false);
+    setGenError(null);
+  };
+
+  const togglePause = () => setPaused((p) => !p);
+
+  const onProductSelect = (id: string) => {
+    const prod = catalog.find((p) => String(p?.id || p?.slug) === id) || null;
+    const target = buildProductTarget(prod);
+    patch({
+      targetProductId: target ? target.id : '',
+      targetProductName: target ? target.name : '',
+      productSilhouette: target ? target.silhouette : '',
     });
   };
 
@@ -170,6 +254,62 @@ export default function HeroShaderSettings({
         </div>
 
         <div style={cardStyle}>
+          <div style={sectionTitleStyle}>Product Target</div>
+          <label style={labelStyle}>Target catalog item — drives the 3D silhouette + AI payload</label>
+          <select
+            value={value.targetProductId || ''}
+            onChange={(e) => onProductSelect(e.target.value)}
+            style={{
+              width: '100%',
+              background: 'rgba(0,0,0,0.25)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 10,
+              color: '#eee',
+              fontSize: 12,
+              padding: '8px 10px',
+            }}
+          >
+            <option value="" style={{ background: '#141419' }}>None — generic container</option>
+            {catalog.map((p) => (
+              <option key={String(p?.id || p?.slug)} value={String(p?.id || p?.slug)} style={{ background: '#141419' }}>
+                {String(p?.name || p?.slug || 'Untitled')}
+              </option>
+            ))}
+          </select>
+          <div style={{ marginTop: 8, fontSize: 10, color: '#8a8a94', lineHeight: 1.6 }}>
+            {selectedTarget ? (
+              <>
+                Silhouette: <b style={{ color: '#c9b8ff' }}>{silhouetteLabel(selectedTarget.silhouette)}</b>
+                {selectedTarget.category ? <> · {selectedTarget.category}</> : null}
+              </>
+            ) : (
+              'No product selected — the exploded mesh renders a neutral container.'
+            )}
+          </div>
+          <label style={{ ...labelStyle, marginTop: 10 }}>Manual silhouette override</label>
+          <select
+            value={value.productSilhouette || ''}
+            onChange={(e) => patch({ productSilhouette: e.target.value })}
+            style={{
+              width: '100%',
+              background: 'rgba(0,0,0,0.25)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 10,
+              color: '#eee',
+              fontSize: 12,
+              padding: '8px 10px',
+            }}
+          >
+            <option value="">Auto — derive from selected product</option>
+            {SILHOUETTE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value} style={{ background: '#141419' }}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={cardStyle}>
           <div style={sectionTitleStyle}>Smart AI Prompt Compiler</div>
           <textarea
             rows={2}
@@ -205,6 +345,7 @@ export default function HeroShaderSettings({
           <button
             type="button"
             onClick={executePrompt}
+            disabled={generating}
             style={{
               width: '100%',
               marginTop: 12,
@@ -216,11 +357,37 @@ export default function HeroShaderSettings({
               fontWeight: 700,
               fontSize: 13,
               letterSpacing: '0.3px',
-              cursor: 'pointer',
+              cursor: generating ? 'progress' : 'pointer',
+              opacity: generating ? 0.7 : 1,
             }}
           >
-            🎬 Execute Prompt &amp; Generate Preview
+            {generating ? '⏳ Generating…' : '🎬 Execute Prompt & Generate Preview'}
           </button>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={togglePause}
+              style={{
+                ...chipBase,
+                flex: 1,
+                justifyContent: 'center',
+                borderColor: paused ? '#7c5cff' : 'rgba(255,255,255,0.12)',
+                color: paused ? '#c9b8ff' : '#c8c8d0',
+              }}
+            >
+              {paused ? '▶ Resume Timeline' : '⏸ Pause Timeline'}
+            </button>
+            {generating && (
+              <button
+                type="button"
+                onClick={cancelGeneration}
+                style={{ ...chipBase, flex: 1, justifyContent: 'center', borderColor: 'rgba(255,80,90,0.6)', color: '#ffb3ba' }}
+              >
+                ✕ Cancel
+              </button>
+            )}
+          </div>
+          {genError && <div style={{ marginTop: 8, fontSize: 10, color: '#ffb3ba', lineHeight: 1.5 }}>{genError}</div>}
           <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94', lineHeight: 1.7 }}>
             Derived: mode <b style={{ color: '#c9b8ff' }}>{derived.mode}</b>
             {derived.productSilhouette ? <> · silhouette <b style={{ color: '#c9b8ff' }}>{derived.productSilhouette}</b></> : null}
@@ -426,6 +593,8 @@ export default function HeroShaderSettings({
                 animationLoop={value.animationLoop}
                 assemblyProgress={value.assemblyProgress}
                 blendMode={value.blendMode}
+                productSilhouette={effectiveSilhouette}
+                paused={paused}
                 interactive
                 onStatus={setStatus}
                 {...previewColors}
@@ -433,6 +602,27 @@ export default function HeroShaderSettings({
             ) : (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8a94', fontSize: 12 }}>
                 Shader disabled
+              </div>
+            )}
+            {generating && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'rgba(8,8,12,0.55)',
+                  color: '#c9b8ff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  zIndex: 2,
+                }}
+              >
+                <span>⏳ Compiling shader…</span>
+                <span style={{ fontSize: 10, fontWeight: 500, color: '#8a8a94' }}>Keeping the ambient fallback active</span>
               </div>
             )}
           </div>

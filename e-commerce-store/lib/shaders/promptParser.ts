@@ -7,6 +7,8 @@
 // viscosity, warp frequency, turbulence, product silhouette) so a hallucinated
 // key can never reach the GPU.
 
+import { normalizeSilhouette, SILHOUETTE_KEYS, type ProductTarget } from './productTarget.ts';
+
 export type ParsedMode = 'organic' | 'exploded' | 'particle' | 'glass';
 
 export interface ShaderParams {
@@ -140,4 +142,106 @@ export function enhancePrompt(prompt: string): string {
   if (params.productSilhouette) clauses.push(`${params.productSilhouette} silhouette`);
   clauses.push('elegant, luxury, seamless loop');
   return clauses.join(', ');
+}
+
+/**
+ * Deterministic compile of a prompt + live product target into bounded render
+ * uniforms. The selected product's silhouette is injected only when the prompt
+ * text itself did not already bind one, so the admin "Execute" action always
+ * renders the chosen catalog item's shape without hardcoding any product.
+ */
+export function compileShaderParams(
+  prompt: string,
+  target: ProductTarget | null | undefined,
+): ShaderParams {
+  const params = parsePromptToParams(prompt);
+  if (!params.productSilhouette && target) {
+    params.productSilhouette = normalizeSilhouette(target.silhouette);
+  }
+  return params;
+}
+
+/**
+ * Build the structured prompt sent to the AI provider for the hero shader. The
+ * payload includes the selected product's metadata (name, slug, category,
+ * silhouette) so the model compiles against a REAL catalog item — never a
+ * hardcoded 'bottle' reference.
+ */
+export function buildShaderPrompt(payload: { prompt?: string; product?: ProductTarget | null }): string {
+  const prompt = String(payload.prompt || '').trim();
+  const product = payload.product || null;
+  const lines: string[] = [
+    'You are a shader-artist assistant compiling hero-banner render uniforms.',
+  ];
+  if (product) {
+    lines.push(`Product: ${product.name || 'Untitled'}${product.slug ? ` (slug: ${product.slug})` : ''}`);
+    lines.push(`Category: ${product.category || 'uncategorized'} · Silhouette: ${product.silhouette}`);
+  }
+  lines.push(`Instruction: ${prompt || 'create a premium, seamless-loop hero shader'}`);
+  lines.push('Return ONLY a JSON object (no markdown fences) with these optional keys:');
+  lines.push('  "mode" — one of "organic" | "exploded" | "particle" | "glass"');
+  lines.push('  "assemblyProgress", "dispersion", "viscosity", "warpFrequency", "turbulence" — numbers 0..1');
+  lines.push('  "spin" — boolean (continuous rotation)');
+  lines.push(`  "productSilhouette" — one of ${JSON.stringify([...SILHOUETTE_KEYS])}`);
+  return lines.join('\n');
+}
+
+const MODE_KEYS = new Set(['organic', 'exploded', 'particle', 'glass']);
+
+function clampParam(v: unknown): number | undefined {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * Parse the AI's (possibly markdown-fenced) JSON back into a bounded
+ * `ShaderParams` object. Returns null when the text is unusable so the caller
+ * falls back to the deterministic compiler — a hallucinated key can never
+ * reach the GPU.
+ */
+export function parseShaderParamsResult(text: string): ShaderParams | null {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  let jsonText = raw;
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) jsonText = fence[1].trim();
+  else {
+    const start = jsonText.indexOf('{');
+    const end = jsonText.lastIndexOf('}');
+    if (start >= 0 && end > start) jsonText = jsonText.slice(start, end + 1);
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(jsonText) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+
+  const base = parsePromptToParams('');
+  const mode = typeof parsed.mode === 'string' && MODE_KEYS.has(parsed.mode)
+    ? (parsed.mode as ShaderParams['mode'])
+    : base.mode;
+  const assemblyProgress = clampParam(parsed.assemblyProgress) ?? base.assemblyProgress;
+  const dispersion = clampParam(parsed.dispersion) ?? base.dispersion;
+  const viscosity = clampParam(parsed.viscosity) ?? base.viscosity;
+  const warpFrequency = clampParam(parsed.warpFrequency) ?? base.warpFrequency;
+  const turbulence = clampParam(parsed.turbulence) ?? base.turbulence;
+  const spin = typeof parsed.spin === 'boolean' ? parsed.spin : base.spin;
+  const productSilhouette =
+    typeof parsed.productSilhouette === 'string' && parsed.productSilhouette.trim()
+      ? normalizeSilhouette(parsed.productSilhouette)
+      : base.productSilhouette;
+
+  return {
+    mode,
+    assemblyProgress,
+    dispersion,
+    viscosity,
+    warpFrequency,
+    turbulence,
+    spin,
+    productSilhouette,
+  };
 }

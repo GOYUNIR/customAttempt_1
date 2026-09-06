@@ -197,6 +197,9 @@ export interface StorefrontConfig {
     containerTarget?: 'background' | 'banner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
+    targetProductId?: string;
+    targetProductName?: string;
+    productSilhouette?: string;
   };
   socialProof: {
     label: string;
@@ -687,6 +690,9 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       containerTarget: 'background',
       canvasHeight: 'medium',
       blendMode: 'normal',
+      targetProductId: '',
+      targetProductName: '',
+      productSilhouette: '',
       ...(input.aiHero ?? {}),
     },
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },

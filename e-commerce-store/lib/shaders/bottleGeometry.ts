@@ -1,11 +1,15 @@
-// Procedural perfume-bottle geometry for the 3D exploded-rebuild engine.
+// Procedural product geometry for the 3D exploded-rebuild engine.
 //
 // PURE module (no React / no `@/` imports / no DOM) so `node --test` can load
 // it and the renderer can build the point cloud once on mount. There are NO
 // external model files in the template — this generator IS the "procedural
-// asset fallback" and the primary source: a normalized bottle decomposed into
-// four components (cap, nozzle, vessel, label) as interleaved points + normals
-// so the exploded view can push each point outward along its own normal.
+// asset fallback" and the primary source: a normalized container decomposed
+// into four components (cap, nozzle, vessel, label) as interleaved points +
+// normals so the exploded view can push each point outward along its own
+// normal. The shape is DERIVED from the target product's silhouette key
+// (bottle / jar / box / card / tube) — never a hardcoded brand or product.
+
+import { normalizeSilhouette } from './productTarget.ts';
 
 export interface BottleGeometry {
   /** Interleaved xyz point positions (length = pointCount * 3). */
@@ -128,6 +132,183 @@ export function buildBottleGeometry(pointCount: number, seed = 1337): BottleGeom
   }
 
   return { points, normals, components, pointCount: cursor, bounds };
+}
+
+/** Non-bottle container silhouettes the exploded mesh can take. */
+type ShapedKind = 'jar' | 'box' | 'card' | 'tube';
+
+/** Shared bounds + emitter used by the shaped geometry builders. */
+interface ShapedBuilder {
+  n: number;
+  rng: () => number;
+  points: Float32Array;
+  normals: Float32Array;
+  components: Uint8Array;
+  bounds: BottleGeometry['bounds'];
+  cursor: number;
+}
+
+function makeShapedBuilder(pointCount: number, seed: number): ShapedBuilder {
+  const n = Math.max(100, Math.floor(pointCount) || 5000);
+  const rng = mulberry32(seed);
+  const points = new Float32Array(n * 3);
+  const normals = new Float32Array(n * 3);
+  const components = new Uint8Array(n);
+  const bounds = {
+    min: [1e9, 1e9, 1e9] as [number, number, number],
+    max: [-1e9, -1e9, -1e9] as [number, number, number],
+  };
+  return { n, rng, points, normals, components, bounds, cursor: 0 };
+}
+
+function emitShaped(
+  b: ShapedBuilder,
+  x: number, y: number, z: number,
+  nx: number, ny: number, nz: number,
+  component: number,
+): void {
+  const i = b.cursor * 3;
+  b.points[i] = x;
+  b.points[i + 1] = y;
+  b.points[i + 2] = z;
+  b.normals[i] = nx;
+  b.normals[i + 1] = ny;
+  b.normals[i + 2] = nz;
+  b.components[b.cursor] = component;
+  b.bounds.min[0] = Math.min(b.bounds.min[0], x);
+  b.bounds.min[1] = Math.min(b.bounds.min[1], y);
+  b.bounds.min[2] = Math.min(b.bounds.min[2], z);
+  b.bounds.max[0] = Math.max(b.bounds.max[0], x);
+  b.bounds.max[1] = Math.max(b.bounds.max[1], y);
+  b.bounds.max[2] = Math.max(b.bounds.max[2], z);
+  b.cursor++;
+}
+
+function finalizeShaped(b: ShapedBuilder): BottleGeometry {
+  return {
+    points: b.points,
+    normals: b.normals,
+    components: b.components,
+    pointCount: b.cursor,
+    bounds: b.bounds,
+  };
+}
+
+/** Build a non-bottle container point cloud (jar / box / card / tube). */
+function buildShapedGeometry(kind: ShapedKind, pointCount: number, seed: number): BottleGeometry {
+  const b = makeShapedBuilder(pointCount, seed);
+  const jitter = () => (b.rng() - 0.5) * 0.02;
+  const capN = Math.max(1, Math.floor(b.n * 0.22));
+  const nozzleN = Math.max(1, Math.floor(b.n * 0.1));
+  const vesselN = Math.max(1, Math.floor(b.n * 0.52));
+  const labelN = Math.max(1, Math.floor(b.n * 0.16));
+
+  // Shape dims (local, normalized space).
+  const dims = (() => {
+    switch (kind) {
+      case 'jar':
+        return { capBottom: 0.5, capTop: 0.72, capRadius: 0.34, vesselBottom: -0.55, vesselTop: 0.5, vesselR: 0.5, labelZ: 0.5 };
+      case 'box':
+        return { capBottom: 0.55, capTop: 0.75, capRadius: 0.3, vesselBottom: -0.6, vesselTop: 0.55, vesselR: 0.42, labelZ: 0.43 };
+      case 'card':
+        return { capBottom: 0.28, capTop: 0.36, capRadius: 0.1, vesselBottom: -0.34, vesselTop: 0.28, vesselR: 0.5, labelZ: 0.08 };
+      case 'tube':
+        return { capBottom: 0.85, capTop: 1.0, capRadius: 0.17, vesselBottom: -0.9, vesselTop: 0.85, vesselR: 0.16, labelZ: 0.16 };
+    }
+  })();
+
+  // --- CAP (0): a squat cylinder/box on top ---
+  for (let k = 0; k < capN; k++) {
+    const theta = b.rng() * Math.PI * 2;
+    if (kind === 'box' && b.rng() < 0.6) {
+      const x = (b.rng() - 0.5) * dims.capRadius * 1.5;
+      const y = dims.capBottom + (dims.capTop - dims.capBottom) * b.rng();
+      const z = (b.rng() - 0.5) * dims.capRadius * 1.5;
+      const onTop = y > dims.capTop - 0.03;
+      emitShaped(b, x, y + jitter(), z + jitter(), 0, onTop ? 1 : -1, 0, 0);
+    } else {
+      const y = dims.capBottom + (dims.capTop - dims.capBottom) * b.rng();
+      const r = dims.capRadius + jitter();
+      emitShaped(b, Math.cos(theta) * r, y, Math.sin(theta) * r, Math.cos(theta), 0, Math.sin(theta), 0);
+    }
+  }
+
+  // --- NOZZLE (1): a small top nub / stem above the cap ---
+  for (let k = 0; k < nozzleN; k++) {
+    const theta = b.rng() * Math.PI * 2;
+    const y = dims.capTop + 0.06 + 0.14 * b.rng();
+    const r = (kind === 'tube' ? 0.04 : 0.05) + jitter();
+    emitShaped(b, Math.cos(theta) * r, y, Math.sin(theta) * r, Math.cos(theta), 0.5, Math.sin(theta), 1);
+  }
+
+  // --- VESSEL (2): body per silhouette ---
+  for (let k = 0; k < vesselN; k++) {
+    const theta = b.rng() * Math.PI * 2;
+    if (kind === 'box') {
+      const x = (b.rng() - 0.5) * dims.vesselR * 2;
+      const y = dims.vesselBottom + (dims.vesselTop - dims.vesselBottom) * b.rng();
+      const z = (b.rng() - 0.5) * dims.vesselR * 2;
+      const ax = Math.abs(x) / dims.vesselR;
+      const ay = Math.abs(y) / Math.max(0.6, (dims.vesselTop - dims.vesselBottom) / 2);
+      const az = Math.abs(z) / dims.vesselR;
+      if (ax >= ay && ax >= az) emitShaped(b, x, y + jitter(), z + jitter(), Math.sign(x), 0, 0, 2);
+      else if (az >= ay) emitShaped(b, x + jitter(), y + jitter(), z, 0, 0, Math.sign(z), 2);
+      else emitShaped(b, x + jitter(), y, z + jitter(), 0, Math.sign(y), 0, 2);
+    } else if (kind === 'card') {
+      const x = (b.rng() - 0.5) * dims.vesselR * 2;
+      const y = dims.vesselBottom + (dims.vesselTop - dims.vesselBottom) * b.rng();
+      const z = (b.rng() - 0.5) * 0.12;
+      emitShaped(b, x, y, z, 0, 0, Math.sign(z) || 1, 2);
+    } else {
+      // jar / tube: cylinder with a subtle taper.
+      const t = b.rng();
+      const y = dims.vesselBottom + (dims.vesselTop - dims.vesselBottom) * t;
+      const shoulder = kind === 'jar' && y > 0.4 ? 1 - (y - 0.4) / 0.1 : 1;
+      const r = dims.vesselR * Math.max(0.6, shoulder) * (0.94 + 0.06 * Math.sin(theta * 4));
+      const nx = Math.cos(theta) / 1.15;
+      const ny = (kind === 'jar' && y > 0.4 ? 1 : 0) * 0.4;
+      const nz = Math.sin(theta) / 1.15;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      emitShaped(b, Math.cos(theta) * r + jitter(), y, Math.sin(theta) * r + jitter(), nx / len, ny / len, nz / len, 2);
+    }
+  }
+
+  // --- LABEL (3): flat front plate ---
+  for (let k = 0; k < labelN; k++) {
+    const x = (b.rng() - 0.5) * (kind === 'card' ? 0.9 : 0.5);
+    const y = (dims.vesselBottom + dims.vesselTop) / 2 + (b.rng() - 0.5) * 0.5;
+    const z = dims.labelZ + jitter();
+    emitShaped(b, x, y, z, 0, 0, 1, 3);
+  }
+
+  return finalizeShaped(b);
+}
+
+/**
+ * Build the exploded-mesh point cloud for a target product silhouette. The
+ * shape is DERIVED from the silhouette key — bottle/jar/box/card/tube — with a
+ * neutral container fallback, so the 3D hero never hardcodes a specific
+ * product.
+ */
+export function buildProductGeometry(
+  silhouette: string | undefined | null,
+  pointCount: number,
+  seed = 1337,
+): BottleGeometry {
+  const key = normalizeSilhouette(silhouette);
+  switch (key) {
+    case 'jar':
+      return buildShapedGeometry('jar', pointCount, seed);
+    case 'box':
+      return buildShapedGeometry('box', pointCount, seed);
+    case 'card':
+      return buildShapedGeometry('card', pointCount, seed);
+    case 'tube':
+      return buildShapedGeometry('tube', pointCount, seed);
+    case 'bottle':
+    default:
+      return buildBottleGeometry(pointCount, seed);
+  }
 }
 
 export function bottleBoundsCenter(bounds: BottleGeometry['bounds']): [number, number, number] {

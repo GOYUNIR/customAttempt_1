@@ -128,6 +128,9 @@ export interface StoreConfig {
     containerTarget?: 'background' | 'banner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
+    targetProductId?: string;
+    targetProductName?: string;
+    productSilhouette?: string;
   };
   socialProof: {
     label: string;
@@ -284,6 +287,9 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     containerTarget: 'background',
     canvasHeight: 'medium',
     blendMode: 'normal',
+    targetProductId: '',
+    targetProductName: '',
+    productSilhouette: '',
   },
   socialProof: {
     label: 'Limited drop access',

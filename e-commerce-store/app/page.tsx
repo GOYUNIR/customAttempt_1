@@ -293,6 +293,7 @@ export default function HomePage() {
     animationLoop: aiHero?.animationLoop || 'pulse',
     assemblyProgress: Number(aiHero?.assemblyProgress) || 1,
     blendMode: aiHeroBlendMode,
+    productSilhouette: String(aiHero?.productSilhouette || ''),
   };
 
   return (

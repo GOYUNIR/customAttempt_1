@@ -2128,7 +2128,9 @@ export default function AdminPortal() {
         setBehaviorSettings(next.behavior);
         setCheckoutSettings(next.checkout);
         setLayoutSettings(next.layout);
-        setAiHeroSettings(next.aiHero);
+        // Merge against the defaults so a legacy `store:config.aiHero` (which
+        // predates the product-target fields) still hydrates the new surface.
+        setAiHeroSettings({ ...DEFAULT_AI_HERO_SETTINGS, ...(next.aiHero || {}) });
         setRefPrefix(next.refPrefix);
         setOrbSettings(next.orbs);
         setRequireSignup2FA(s.requireSignup2FA !== false);
@@ -8157,6 +8159,7 @@ export default function AdminPortal() {
                 value={aiHeroSettings}
                 onChange={setAiHeroSettings}
                 themeColors={themeSettings}
+                products={allProducts}
               />
 
               <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>

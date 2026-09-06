@@ -5,6 +5,8 @@
 // source of truth for preset ids, legacy-id mapping and the aiHero settings
 // contract without drifting.
 
+import { SILHOUETTE_KEYS, silhouetteLabel, type SilhouetteKey } from './productTarget.ts';
+
 export type HeroPresetId = 'dark_organic' | 'exploded_rebuild' | 'cyber_mesh' | 'ambient_glass';
 
 /** Which engine renders a preset: the GLSL fragment shader or the 3D particle engine. */
@@ -113,6 +115,12 @@ export interface AiHeroSettings {
   canvasHeight: HeroCanvasHeight;
   /** How the canvas blends with the hero card surface. */
   blendMode: HeroBlendMode;
+  /** Live catalog item the hero shader targets (id/slug from `store:products`). */
+  targetProductId?: string;
+  /** Human name of the target product (echoed for the admin readout only). */
+  targetProductName?: string;
+  /** Generic silhouette key the exploded mesh derives from the target product. */
+  productSilhouette?: string;
 }
 
 export const PARTICLE_COUNT_OPTIONS = [10_000, 50_000, 100_000] as const;
@@ -137,6 +145,10 @@ export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: st
   { value: 'screen', label: 'Screen' },
 ];
 
+/** Generic silhouette keys selectable as an explicit hero target (no product). */
+export const SILHOUETTE_OPTIONS: ReadonlyArray<{ value: SilhouetteKey; label: string }> =
+  SILHOUETTE_KEYS.map((key) => ({ value: key, label: silhouetteLabel(key) }));
+
 export function defaultAiHeroSettings(): AiHeroSettings {
   return {
     enabled: true,
@@ -155,6 +167,9 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     containerTarget: 'background',
     canvasHeight: 'medium',
     blendMode: 'normal',
+    targetProductId: '',
+    targetProductName: '',
+    productSilhouette: '',
   };
 }
 

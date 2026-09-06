@@ -49,6 +49,9 @@ export interface LiveThemeValue {
     containerTarget?: 'background' | 'banner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
+    targetProductId?: string;
+    targetProductName?: string;
+    productSilhouette?: string;
   };
 }
 
