@@ -478,6 +478,51 @@ function categorySyncSlug(cat: any): string {
   return slugifyName(String(cat?.inventorySyncSlug || cat?.inventoryPoolId || '').trim());
 }
 
+/** NUCLEAR pre-save reconciliation source of truth. Scrape every visible
+ *  shared-inventory sync slug straight out of the LIVE DOM so a slug the
+ *  operator TYPED into the prompt OR SEES in a "🔗 Synced with [slug]" badge
+ *  can never be silently dropped at save time. Returns a Map keyed by variant
+ *  row index. Three sources, in priority order:
+ *    1. badge cards (`[data-sync-badge-slug]`)        — committed slugs,
+ *    2. the "Inventory Sync Slug" inputs (`#pf-sync-slug-<idx>`) — typed drafts,
+ *    3. a text scan of any element containing "Synced with <slug>".
+ *  The indices are the ORIGINAL `priceCategories` row indices, so they align
+ *  exactly with the pre-filter reconciliation sweep in `saveProduct`. */
+function scrapeSyncSlugsFromDom(): Map<number, string> {
+  const map = new Map<number, string>();
+  if (typeof document === 'undefined') return map;
+
+  // (1) Committed slugs live on the badge card's data attributes.
+  document.querySelectorAll<HTMLElement>('[data-sync-badge-slug]').forEach((el) => {
+    const idx = Number(el.getAttribute('data-sync-badge-idx'));
+    const slug = slugifyName(String(el.getAttribute('data-sync-badge-slug') || '').trim());
+    if (Number.isFinite(idx) && idx >= 0 && slug) map.set(idx, slug);
+  });
+
+  // (2) Typed-but-not-yet-committed drafts live in the dedicated input.
+  document.querySelectorAll<HTMLInputElement>('input[id^="pf-sync-slug-"]').forEach((el) => {
+    const m = el.id.match(/^pf-sync-slug-(\d+)$/);
+    const idx = m ? Number(m[1]) : NaN;
+    const slug = slugifyName(String(el.value || '').trim());
+    if (Number.isFinite(idx) && idx >= 0 && slug) map.set(idx, slug);
+  });
+
+  // (3) Last resort: parse "Synced with <slug>" out of visible badge text and
+  //     resolve its row index from the nearest `[data-sync-badge-idx]` ancestor.
+  document.querySelectorAll<HTMLElement>('span').forEach((el) => {
+    const text = (el.textContent || '').trim();
+    const m = text.match(/Synced with\s+([A-Za-z0-9_-]+)/);
+    if (!m) return;
+    const slug = slugifyName(m[1]);
+    if (!slug) return;
+    const badge = el.closest('[data-sync-badge-idx]');
+    const idx = badge ? Number(badge.getAttribute('data-sync-badge-idx')) : NaN;
+    if (Number.isFinite(idx) && idx >= 0 && !map.has(idx)) map.set(idx, slug);
+  });
+
+  return map;
+}
+
 /** FCFS sizes are never drawn, so a "Winners / draw" value on them is
  *  meaningless. Strip it so that invalid state can never even exist — the
  *  "winners on FCFS" sanity warning becomes impossible, not just flagged. */
@@ -2705,23 +2750,27 @@ export default function AdminPortal() {
       window.alert('Save prevented: Add a URL slug (or a name to auto-generate one) before saving.');
       return;
     }
-    // ── Final sync-state reconciliation (DOM + draft fallback) ──
-    // Before serializing the payload, sweep every variant and reconcile its
-    // shared-inventory slug from the LIVE DOM input (the ground truth the
-    // operator actually typed) plus the transient draft/pool fields. If
-    // `inventorySyncSlug` is empty but a slug exists in the DOM input,
-    // `_syncDraft`, or `inventoryPoolId`, promote it so a typed-but-never-
-    // committed slug is never silently dropped on save.
+    // ── NUCLEAR pre-save DOM + badge reconciliation ──
+    // Scrape every visible sync slug from the LIVE DOM (both the dedicated
+    // "Inventory Sync Slug" input AND the "🔗 Synced with [slug]" badge) once,
+    // then reconcile each variant against it UNCONDITIONALLY. If a slug exists
+    // in the DOM badge, the input, the transient draft, OR the canonical pool
+    // id, EVERY sync field is overwritten to the SAME slug — so state, DOM and
+    // the payload can never disagree. A typed-but-never-committed slug, and a
+    // slug the operator merely SEES in a badge, can never be dropped on save.
+    const domSyncSlugs = scrapeSyncSlugsFromDom();
+
     const reconciledCategories = (productForm.priceCategories || []).map((c: any, i: number) => {
       const cat = { ...c };
-      const domEl = typeof document !== 'undefined'
-        ? (document.getElementById(`pf-sync-slug-${i}`) as HTMLInputElement | null)
-        : null;
-      const domValue = String(domEl?.value ?? '').trim();
-      const fallback = String(domValue || cat._syncDraft || cat.inventoryPoolId || '').trim();
-      if (!String(cat.inventorySyncSlug || '').trim() && fallback) {
-        const slug = slugifyName(fallback);
+      const domSlug = String(domSyncSlugs.get(i) || '').trim();
+      const fallback = String(cat._syncDraft || cat.inventoryPoolId || '').trim();
+      const foundSlug = domSlug || fallback;
+      if (foundSlug) {
+        const slug = slugifyName(foundSlug);
+        // Unconditional reconciliation: overwrite every sync field so the
+        // committed slug, draft, pool id and toggle all agree on ONE value.
         cat.inventorySyncSlug = slug;
+        cat.inventoryPoolId = slug;
         cat._syncDraft = slug;
         cat.syncWithExisting = true;
       }
@@ -2748,10 +2797,11 @@ export default function AdminPortal() {
         //   · `_syncDraft`        — a slug being typed but not yet "Link"-ed
         //   · `syncWithExisting`  — the operator checked "Sync with existing slug?"
         // Resolve the final slug from the COMMITTED value first, then the draft,
-        // slugify it once, and NEVER emit null while a real slug exists. This
-        // fixes the smoking gun where `slug: null` was logged even though the
-        // variant had a sync slug (the old draft-first two-pass logic could fall
-        // through to `null`).
+        // then the canonical pool id, slugify it once, and NEVER emit null while
+        // a real slug exists. The pre-save reconciliation sweep above has ALREADY
+        // promoted any DOM/badge-scraped slug into `c.inventorySyncSlug`, so this
+        // chain is the ABSOLUTE last resort — if the operator typed or saw a slug
+        // on screen, `effectiveSlug` is guaranteed non-null here.
         const rawSlug = String(c.inventorySyncSlug || c._syncDraft || c.inventoryPoolId || '').trim();
         const effectiveSlug = rawSlug ? slugifyName(rawSlug) : null;
         // Strip transient editor-only fields so they never reach Redis/disk.
@@ -5408,7 +5458,7 @@ export default function AdminPortal() {
                             existing shared pool the checkbox + input are fully hidden and
                             replaced by a clean "Synced with [slug]" card + Unlink. */}
                         {synced ? (
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: '9px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.4)' }}>
+                          <div data-sync-badge-idx={idx} data-sync-badge-slug={syncSlug} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: '9px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.4)' }}>
                             <span style={{ fontSize: 11, fontWeight: 700, color: '#7dd3fc', letterSpacing: '0.3px' }}>
                               🔗 Synced with <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#bae6fd' }}>{syncSlug}</span>
                             </span>
