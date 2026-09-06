@@ -106,24 +106,37 @@ export function checkProductSanity(product: any, ctx: ProductSanityContext = {})
       const mode = String(cat?.checkoutMode || '').toUpperCase();
       sizeByName.set(key, { price, winnerTiers: cat?.winnerTiers, checkoutMode: mode === 'FCFS' ? 'FCFS' : mode === 'RAFFLE' ? 'RAFFLE' : '' });
 
-      if (!size) continue;
-      const first = seen.get(key);
-      if (first !== undefined) {
-        issues.push({
-          severity: 'error',
-          code: 'duplicate_size',
-          fieldId: `pf-size-${i}`,
-          message: `Duplicate size “${size}” (same as size #${first + 1}).`,
-          detail: 'Two sizes with the same label will share one pool and confuse the storefront. Rename one of them.',
-        });
-      } else {
-        seen.set(key, i + 1);
-      }
+      // A variant linked into a shared-inventory pool (`inventorySyncSlug` /
+      // `inventoryPoolId`) inherits its identity from the pool's canonical source
+      // variant: an empty local price is NOT "no price", and a shared size label
+      // is NOT an accidental duplicate. Two such variants may legitimately carry
+      // the SAME size label (e.g. the same SKU offered as a raffle allocation AND
+      // an instant buy drawing from one stock pool) — `saveProduct` preserves them
+      // 1:1, so this gate must never flag that as a duplicate.
+      const isSyncedVariant = Boolean(
+        String(cat?.inventorySyncSlug || '').trim() ||
+        String(cat?.inventoryPoolId || '').trim(),
+      );
 
-      // A variant linked into a shared-inventory pool (`inventorySyncSlug`) inherits
-      // its price from the pool's canonical source variant, so an empty local price
-      // is NOT "no price" — flagging it would make every synced variant un-saveable.
-      const isSyncedVariant = String(cat?.inventorySyncSlug || '').trim() !== '';
+      if (!size) continue;
+
+      // Duplicate-size guard — independent variants may still not share a size
+      // label (it would shadow itself at checkout), but synced variants are
+      // skipped so shared-pool variants are never false-flagged.
+      if (!isSyncedVariant) {
+        const first = seen.get(key);
+        if (first !== undefined) {
+          issues.push({
+            severity: 'error',
+            code: 'duplicate_size',
+            fieldId: `pf-size-${i}`,
+            message: `Duplicate size “${size}” (same as size #${first + 1}).`,
+            detail: 'Two sizes with the same label will share one pool and confuse the storefront. Rename one of them.',
+          });
+        } else {
+          seen.set(key, i + 1);
+        }
+      }
       if (!isSyncedVariant && (price < 0.01 || price >= 9999999)) {
         issues.push({
           severity: 'error',

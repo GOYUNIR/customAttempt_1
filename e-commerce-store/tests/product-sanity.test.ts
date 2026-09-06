@@ -53,6 +53,20 @@ test('duplicate sizes are a blocking error', () => {
   assert.ok(issues.some((i) => i.code === 'duplicate_size' && i.severity === 'error'));
 });
 
+test('two variants sharing a sync slug may share a size (no duplicate_size error)', () => {
+  const issues = checkProductSanity(
+    {
+      ...BASE_PRODUCT,
+      priceCategories: [
+        { size: 'Standard', price: 95, stripeId: 'a', winnerTiers: '1', inventorySyncSlug: 'shared-pool' },
+        { size: 'Standard', price: 95, stripeId: 'a', winnerTiers: '1', inventorySyncSlug: 'shared-pool' },
+      ],
+    },
+    { now: NOW, globalStripeConfigured: true },
+  );
+  assert.equal(issues.some((i) => i.code === 'duplicate_size'), false);
+});
+
 test('a $0 price is a blocking error', () => {
   const issues = checkProductSanity(
     { ...BASE_PRODUCT, priceCategories: [{ size: 'Standard', price: 0, stripeId: 'a', winnerTiers: '1' }] },

@@ -3007,17 +3007,19 @@ export default function AdminPortal() {
       return cat;
     });
 
-    // Every sellable size needs a size label. Dedupe the categories so the same
-    // size can never be saved twice (it would shadow itself at checkout).
-    const seenSizes = new Set<string>();
+    // 1:1 VARIANT RETENTION — never collapse, dedupe, or merge variants.
+    // `reconciledCategories` already mirrors `productForm.priceCategories` 1:1
+    // (the DOM-reconciliation sweep above only ever REPLACES the list, never
+    // shrinks it). Two variants may LEGITIMATELY carry the same size label when
+    // they link to the SAME shared-inventory slug/pool (`inventorySyncSlug` /
+    // `inventoryPoolId`) — e.g. the same SKU offered as a raffle allocation AND
+    // an instant buy drawing from one stock pool. The old size-keyed `seenSizes`
+    // dedupe silently DROPPED the second variant (the "[SAVING VARIANT COUNT]"
+    // 2 → 1 truncation), so it is removed. The only filter left is the
+    // empty-size guard: a row with no size label is an incomplete placeholder,
+    // not a sellable variant.
     const priceCategories = reconciledCategories
       .filter((c: any) => String(c?.size || '').trim())
-      .filter((c: any) => {
-        const sizeKey = String(c.size).trim().toLowerCase();
-        if (seenSizes.has(sizeKey)) return false;
-        seenSizes.add(sizeKey);
-        return true;
-      })
       .map((c: any, i: number) => {
         console.log('[DEBUG CAT KEYS]', JSON.stringify(c));
         const out = { ...c, position: i };
