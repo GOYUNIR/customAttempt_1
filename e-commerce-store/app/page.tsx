@@ -365,9 +365,10 @@ export default function HomePage() {
               </Link>
             )}
             {heroContent.showStory !== false && (
-              <Link href="/story" prefetch={false} style={{ padding: '10px 2px', background: 'transparent', color: configPalette.cardTextMuted, textDecoration: 'none', fontWeight: 500, fontSize: 12, letterSpacing: '0.2px' }}>
+              // Subtle side-text copy only — never an interactive button/pill/link.
+              <span style={{ color: configPalette.cardTextMuted, fontWeight: 500, fontSize: 12, letterSpacing: '0.2px' }}>
                 {heroContent.storyBody || 'take control.'}
-              </Link>
+              </span>
             )}
           </div>
           )}
