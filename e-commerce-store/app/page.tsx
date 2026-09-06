@@ -10,7 +10,7 @@ import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, hasMixedCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
-import { isImageMedia, isVideoMedia } from '@/lib/media';
+import { isImageMedia, isVideoMedia, zeroImageStyle } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
 import { fallbackAnimation } from '@/lib/ai-animation';
 
@@ -342,7 +342,9 @@ export default function HomePage() {
               </Link>
             )}
             {heroContent.showStory !== false && (
-              <span style={{ fontSize: 11, color: configPalette.cardTextMuted }}>{heroContent.storyBody || 'Low supply. Fast conversion. Quiet exclusivity.'}</span>
+              <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid ${configPalette.cardBorder}`, background: 'transparent', color: configPalette.cardTextMuted, textDecoration: 'none', fontWeight: 600, fontSize: 13 }}>
+                {heroContent.storyBody || 'take control.'}
+              </Link>
             )}
           </div>
           )}
@@ -378,7 +380,11 @@ export default function HomePage() {
                           </div>
                         );
                       }
-                      return <div style={{ height: 190, background: coverImg ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${coverImg}) center/cover` : '#1a1a1a' }} />;
+                      return coverImg ? (
+                        <div style={{ height: 190, background: `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.4)), url(${coverImg}) center/cover` }} />
+                      ) : (
+                        <div style={{ height: 190, ...zeroImageStyle(configPalette.accentPurple, configPalette.accentBlue) }} />
+                      );
                     })()}
                     <div style={{ padding: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>

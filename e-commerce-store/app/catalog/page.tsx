@@ -9,7 +9,7 @@ import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { surfaceBackground, themeRadius, themeRadiusNumber, cardSheen, cardShadowStyle } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
-import { isVideoMedia } from '@/lib/media';
+import { isVideoMedia, zeroImageStyle } from '@/lib/media';
 
 interface CatalogItem {
   name: string;
@@ -41,6 +41,7 @@ interface ActiveDrop {
   goLiveAt?: string;
   releaseEndsAt?: string;
   categories?: string[];
+  image?: string;
 }
 
 /** Valid /catalog section ids + sanitizer (module-scope so hooks deps stay stable).
@@ -361,7 +362,9 @@ export default function CatalogPage() {
               style={{
                 width: '100%',
                 aspectRatio: '1/1',
-                background: item.image && !isVideoMedia(item.image) ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` : '#1a1a1a',
+                ...(item.image && !isVideoMedia(item.image)
+                  ? { background: `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.34)), url(${item.image}) center/cover` }
+                  : zeroImageStyle(configPalette.accentPurple, configPalette.accentBlue)),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -374,7 +377,6 @@ export default function CatalogPage() {
               {item.image && isVideoMedia(item.image) ? (
                 <video src={item.image} muted loop autoPlay playsInline preload="metadata" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
               ) : null}
-              {!item.image && 'NO IMAGE'}
             </div>
             <div style={{ padding: '10px 12px' }}>
               <div style={{ fontSize: '12px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{item.name}</div>
@@ -535,14 +537,38 @@ export default function CatalogPage() {
                           backgroundImage: cardSheen,
                           border: `1px solid ${configPalette.cardBorder}`,
                           borderRadius: themeRadius(configPalette, 14),
-                          padding: '14px 16px',
+                          padding: '12px',
+                          display: 'flex',
+                          gap: 12,
+                          alignItems: 'center',
                         }}
                       >
-                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
-                        <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px' }}>{drop.tagline}</div>
-                        <div style={{ fontSize: '10px', color: drop.soldOut ? '#eab308' : configPalette.cardTextMuted, marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
-                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
-                          {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                        <div
+                          style={{
+                            width: 64,
+                            height: 64,
+                            flexShrink: 0,
+                            borderRadius: themeRadius(configPalette, 10),
+                            overflow: 'hidden',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            ...(drop.image && !isVideoMedia(drop.image)
+                              ? { background: `url(${drop.image}) center/cover` }
+                              : zeroImageStyle(configPalette.accentPurple, configPalette.accentBlue)),
+                          }}
+                        >
+                          {drop.image && isVideoMedia(drop.image) ? (
+                            <video src={drop.image} muted loop autoPlay playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : null}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: configPalette.cardTextMain }}>{drop.name}</div>
+                          <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{drop.tagline}</div>
+                          <div style={{ fontSize: '10px', color: drop.soldOut ? '#eab308' : configPalette.cardTextMuted, marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
+                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
+                            {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                          </div>
                         </div>
                       </div>
                     </Link>
@@ -630,7 +656,9 @@ export default function CatalogPage() {
                   width: '100%',
                   aspectRatio: '4/3',
                   borderRadius: themeRadius(configPalette, 16),
-                  background: selectedItem.image && !isVideoMedia(selectedItem.image) ? `url(${selectedItem.image}) center/cover` : '#1a1a1a',
+                  ...(selectedItem.image && !isVideoMedia(selectedItem.image)
+                    ? { background: `url(${selectedItem.image}) center/cover` }
+                    : zeroImageStyle(configPalette.accentPurple, configPalette.accentBlue)),
                   marginBottom: '16px',
                   overflow: 'hidden',
                   position: 'relative',

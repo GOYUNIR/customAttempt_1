@@ -33,22 +33,67 @@ function addressValidationError(address: string): string | null {
   return validateShippingAddress(address);
 }
 
+/** Size strings that are clearly placeholder/test data — never shown raw. */
+const PLACEHOLDER_SIZE_RE = /^(yes|true|na|n\/a|none|null|default|option|size|undefined|pending|tbd)$/i;
+
 /**
- * Format a variant's selectable label. When multiple variants share the SAME
- * size string, disambiguate by appending the price and the resolved checkout
- * mode so two otherwise-identical labels can never collide in the UI. No
- * product/variant/price values are hardcoded — everything is derived from the
- * variant's own `size`, `price` and the resolved `mode`.
+ * Humanize a machine string for a badge/label: hyphens + underscores become
+ * spaces, camelCase and digit boundaries get split, and each word is
+ * title-cased ("testsample1" → "Testsample 1", "black-tee" → "Black Tee").
  */
-function variantSizeLabel(cats: any[], cat: any, mode: 'RAFFLE' | 'FCFS'): string {
-  const size = String(cat?.size ?? '').trim();
+function humanizeBadge(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  return s
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
+/** Developer/test placeholder tokens that must never surface as editorial copy. */
+const EDITORIAL_PLACEHOLDER_RE = /(notesnstuff|sanple|awesomeness|note here|sample note|lorem|placeholder|todo|tbd|xxx|test)/i;
+
+/**
+ * Filter a product's `notes` ("Why this drop matters") list down to entries
+ * with REAL editorial content. Drops notes that have no body text, and notes
+ * whose label/name/body is a known developer placeholder — so draft noise can
+ * never leak to the customer-facing page.
+ */
+function sanitizeNotes(notes: unknown): any[] {
+  if (!Array.isArray(notes)) return [];
+  return notes.filter((note) => {
+    if (!note || typeof note !== 'object') return false;
+    const text = String((note as any).text ?? '').trim();
+    if (!text) return false;
+    const haystack = [
+      String((note as any).label ?? ''),
+      String((note as any).name ?? ''),
+      text,
+    ].join(' ');
+    return !EDITORIAL_PLACEHOLDER_RE.test(haystack);
+  });
+}
+
+/**
+ * Format a variant's selectable label. The mode is conveyed by the chip's
+ * separate "raffle"/"buy" badge pill, so the label itself stays minimal
+ * ("Standard ($149)") — no redundant "- RAFFLE" suffix. Placeholder size
+ * strings (blank, "yes", "n/a", …) fall back to a structured "Option N" label
+ * so raw database strings never leak to the storefront. No hardcoded product
+ * data — everything derives from the variant's own `size`/`price`.
+ */
+function variantSizeLabel(cat: any, index: number): string {
+  const raw = String(cat?.size ?? '').trim();
   const price = Number(cat?.price);
   const hasPrice = Number.isFinite(price) && price > 0;
-  const normalized = size.toLowerCase();
-  const isDuplicate = cats.filter((c: any) => String(c?.size ?? '').trim().toLowerCase() === normalized).length > 1;
-  const base = hasPrice ? `${size} ($${price})` : size;
-  if (isDuplicate && size) return `${base} - ${mode}`;
-  return base;
+  const size = raw && !PLACEHOLDER_SIZE_RE.test(raw) ? raw : `Option ${index + 1}`;
+  return hasPrice ? `${size} ($${price})` : size;
 }
 
 /**
@@ -1256,6 +1301,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const sizeModes = sizeCheckoutModes(product);
   const mixedRaffleCount = Object.values(sizeModes).filter((m) => m === 'RAFFLE').length;
   const mixedFcfsCount = Object.values(sizeModes).filter((m) => m === 'FCFS').length;
+  // Condensed mixed-format micro-badge label ({raffle}/{fcfs} tokens resolved
+  // from the admin template, else a built-in concise form).
+  const mixedBadgeLabel = (() => {
+    const template = String(product.mixedFormatRibbon || copySettings.mixedFormatRibbon || '').trim();
+    if (template) {
+      return template.replace(/\{raffle\}/g, String(mixedRaffleCount)).replace(/\{fcfs\}/g, String(mixedFcfsCount));
+    }
+    return `${mixedRaffleCount} raffle · ${mixedFcfsCount} instant-buy`;
+  })();
+  // Editorial notes with placeholder/draft noise filtered out — "Why this drop
+  // matters" renders only when at least one real note survives.
+  const editorialNotes = sanitizeNotes(product.notes);
   // Per-size trial ("sampler") presentation — the copy + math are specific to
   // the size the customer has selected (never one generic line for all sizes).
   // Resolved from the SELECTED VARIANT OBJECT so a slug-synced SAMPLE variant
@@ -1422,7 +1479,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   };
 
   return (
-    <main style={{ minHeight: '100dvh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px calc(${Math.round(104 * contentSpacingScale(configPalette))}px + env(safe-area-inset-bottom))` }}>
+    <main data-goyunir-pdp-cta={!soldOut && primaryCtaLabel ? '' : undefined} style={{ minHeight: '100dvh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px calc(${Math.round(104 * contentSpacingScale(configPalette))}px + env(safe-area-inset-bottom))` }}>
       <div className="goyunir-pdp-grid" style={{ maxWidth: 1120, margin: '0 auto' }}>
         <div className="goyunir-pdp-media" style={{ display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
         <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 16) }}>
@@ -1538,7 +1595,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                   <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: trialColors.chipBg, color: trialColors.chipText, border: `1px solid ${trialColors.chipBorder}` }}>🧪 {selectedSample.label}</span>
                 )}
                 {(selectedCategory?.inventorySyncSlug || selectedCategory?.inventoryPoolId) && (
-                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: 'color-mix(in srgb, #0ea5e9 14%, transparent)', color: cardIsLight ? '#075985' : '#7dd3fc', border: '1px solid color-mix(in srgb, #0ea5e9 40%, transparent)' }} title="This option draws from a shared inventory pool.">🔗 {String(selectedCategory.inventorySyncSlug || selectedCategory.inventoryPoolId)}</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: 'color-mix(in srgb, #0ea5e9 14%, transparent)', color: cardIsLight ? '#075985' : '#7dd3fc', border: '1px solid color-mix(in srgb, #0ea5e9 40%, transparent)' }} title="This option draws from a shared inventory pool.">🔗 {humanizeBadge(selectedCategory.inventorySyncSlug || selectedCategory.inventoryPoolId)}</span>
                 )}
               </div>
             </div>
@@ -1553,44 +1610,26 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               </div>
             )}
             <p style={{ margin: 0, color: configPalette.cardTextMuted, fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{product.desc}</p>
-            {(product.showUrgencyLine !== false || product.showStatusLine !== false) && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, border: `1px solid ${soldOut ? 'rgba(251,191,36,0.28)' : configPalette.cardBorder}` }}>
+            {(product.showUrgencyLine !== false || product.showStatusLine !== false || (pointsEarned > 0 && !soldOut) || (hasMixedModes && product.showMixedRibbon !== false)) && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 8, rowGap: 6, marginTop: 4 }}>
                 {product.showUrgencyLine !== false && (
-                  <div style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain, whiteSpace: 'pre-line' }}>{urgencyLabel}</div>
+                  <span style={{ fontSize: 11, color: soldOut ? '#fde68a' : configPalette.cardTextMain, whiteSpace: 'pre-line', lineHeight: 1.4 }}>{urgencyLabel}</span>
+                )}
+                {pointsEarned > 0 && !soldOut && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '0.2px', padding: '3px 9px', borderRadius: 999, background: `color-mix(in srgb, ${configPalette.accentBlue} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${configPalette.accentBlue} 26%, transparent)`, color: configPalette.accentBlue, whiteSpace: 'nowrap' }}>
+                    ⭐ {pointsEarned.toLocaleString()} pts
+                  </span>
+                )}
+                {hasMixedModes && product.showMixedRibbon !== false && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '0.2px', padding: '3px 9px', borderRadius: 999, background: `color-mix(in srgb, #a855f7 10%, ${configPalette.cardBackground})`, border: cardIsLight ? '1px solid rgba(126,34,206,0.25)' : '1px solid rgba(168,85,247,0.30)', color: cardIsLight ? '#7c3aed' : '#c084fc', whiteSpace: 'nowrap' }}>
+                    🎟 {mixedBadgeLabel}
+                  </span>
                 )}
                 {product.showStatusLine !== false && (
-                  <div style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5, whiteSpace: 'pre-line' }}>{product.isArchived ? 'This release is archived, but future returns can still be pre-registered here so collectors stay ahead of the next opening.' : statusStory}</div>
+                  <span style={{ fontSize: 11, color: configPalette.cardTextMuted, lineHeight: 1.5, whiteSpace: 'pre-line', flexBasis: '100%' }}>
+                    {product.isArchived ? 'This release is archived — future returns can still be pre-registered here.' : statusStory}
+                  </span>
                 )}
-              </div>
-            )}
-            {pointsEarned > 0 && !soldOut && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: configPalette.cardTextMuted, padding: '8px 12px', borderRadius: themeRadius(configPalette, 12), background: `color-mix(in srgb, ${configPalette.accentBlue} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${configPalette.accentBlue} 26%, transparent)` }}>
-                <span style={{ fontSize: 13 }}>⭐</span>
-                <span>Earn <strong style={{ color: configPalette.accentBlue }}>{pointsEarned.toLocaleString()} points</strong> on this size — redeem for store credit at checkout.</span>
-              </div>
-            )}
-            {hasMixedModes && product.showMixedRibbon !== false && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11, lineHeight: 1.5, color: configPalette.cardTextMuted, padding: '10px 12px', borderRadius: themeRadius(configPalette, 14), background: `color-mix(in srgb, #a855f7 7%, ${configPalette.cardBackground})`, border: cardIsLight ? '1px solid rgba(126,34,206,0.25)' : '1px solid rgba(168,85,247,0.30)' }}>
-                <span style={{ fontSize: 13, lineHeight: 1 }}>🎟</span>
-                {(() => {
-                  // Copy resolution is per-product → global (Settings → Storefront
-                  // copy) → built-in sentence. A template may use {raffle}/{fcfs}
-                  // tokens which become the raffle and instant-buy size counts.
-                  const template = String(product.mixedFormatRibbon || copySettings.mixedFormatRibbon || '').trim();
-                  if (template) {
-                    return (
-                      <span style={{ whiteSpace: 'pre-line' }}>
-                        {template.replace(/\{raffle\}/g, String(mixedRaffleCount)).replace(/\{fcfs\}/g, String(mixedFcfsCount))}
-                      </span>
-                    );
-                  }
-                  return (
-                    <span>
-                      This release mixes formats — <strong style={{ color: cardIsLight ? '#92400e' : '#fbbf24' }}>{mixedRaffleCount} raffle size{mixedRaffleCount === 1 ? '' : 's'}</strong> and{' '}
-                      <strong style={{ color: cardIsLight ? '#1e40af' : '#93c5fd' }}>{mixedFcfsCount} instant-buy size{mixedFcfsCount === 1 ? '' : 's'}</strong>. Pick a size above to see its option.
-                    </span>
-                  );
-                })()}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1616,9 +1655,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 const chipMode = getCategoryCheckoutMode(product, cat);
                 const accent = configPalette.checkoutCtaButton || '#635bff';
                 const chipSelected = activeVariantIndex === index;
-                const sizeLabel = variantSizeLabel(product.priceCategories || [], cat, chipMode);
+                const sizeLabel = variantSizeLabel(cat, index);
                 return (
-                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, boxSizing: 'border-box', border: `1px solid ${chipSelected ? accent : (chipIsSample ? trialColors.chipBorder : configPalette.cardBorder)}`, background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: 600, boxShadow: chipSelected ? `inset 0 0 0 1px ${accent}` : 'none', display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, boxSizing: 'border-box', border: `1px solid ${chipSelected ? accent : (chipIsSample ? trialColors.chipBorder : configPalette.cardBorder)}`, background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: 600, boxShadow: chipSelected ? `inset 0 0 0 1px ${accent}` : 'none', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
                     {sizeLabel}
                     <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                       {chipMode === 'FCFS' ? 'buy' : 'raffle'}
@@ -1678,6 +1717,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <form onSubmit={(e) => e.preventDefault()} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             <input
               type="email"
+              className="goyunir-field"
               autoComplete="email"
               placeholder="email@domain.com"
               value={accountEmail || email}
@@ -1699,7 +1739,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 opacity: accountEmail ? 0.8 : 1,
               }}
             />
-            <input type="text" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: 12, borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain }} />
+            <input type="text" className="goyunir-field" autoComplete="shipping street-address" placeholder="Full shipping address (street, city, state, ZIP, country)" value={address} onChange={(e) => setAddress(e.target.value)} style={{ flex: 1, minWidth: 220, padding: '13px 14px', borderRadius: 12, background: `color-mix(in srgb, ${configPalette.cardTextMain} 6%, ${configPalette.cardBackground})`, border: `1px solid ${configPalette.cardBorder}`, color: configPalette.cardTextMain, textOverflow: 'ellipsis' }} />
           </form>
           {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
@@ -1753,13 +1793,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
-              <button onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+              <button className="goyunir-pdp-inline-primary" onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
                 {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation')}
               </button>
             )}
             {canCheckoutDirect && (
               <>
-                <button onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+                <button className="goyunir-pdp-inline-primary" onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
                   {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : `Secure piece · $${price.toFixed(2)}`}
                 </button>
                 {showWaitlistOption && (
@@ -1769,7 +1809,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 )}
               </>
             )}
-            {(canCheckoutDirect || isRaffleProduct) && <button onClick={addToCart} disabled={checkoutDisabled || cartBusy} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled || cartBusy ? 'not-allowed' : 'pointer', opacity: checkoutDisabled || cartBusy ? 0.6 : 1 }}>{cartBusy ? (<><ButtonSpinner light={false} /> Checking…</>) : `Add to ${actionLabel}`}</button>}
+            {(canCheckoutDirect || isRaffleProduct) && <button className="goyunir-pdp-add-bag" onClick={addToCart} disabled={checkoutDisabled || cartBusy} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled || cartBusy ? 'not-allowed' : 'pointer', opacity: checkoutDisabled || cartBusy ? 0.6 : 1 }}>{cartBusy ? (<><ButtonSpinner light={false} /> Checking…</>) : `Add to ${actionLabel}`}</button>}
           </div>
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
@@ -1777,14 +1817,14 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         </div>
 
         <div className="goyunir-pdp-full" style={{ display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
-        {product.showNotesSection !== false && (product.notes || []).length > 0 && (
-        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
-          <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>Why this drop matters</div>
+        {product.showNotesSection !== false && editorialNotes.length > 0 && (
+        <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: '18px 16px', color: configPalette.cardTextMain }}>
+          <div style={{ fontFamily: 'Georgia, Times New Roman, serif', fontSize: 15, letterSpacing: '0.3px', color: configPalette.cardTextMain, marginBottom: 12 }}>Why this drop matters</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(product.notes || []).map((note: any, index: number) => (
-              <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 16), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, padding: 14, border: `1px solid ${configPalette.cardBorder}` }}>
+            {editorialNotes.map((note: any, index: number) => (
+              <div key={`${note.label}-${index}`} style={{ borderRadius: themeRadius(configPalette, 14), background: `color-mix(in srgb, ${configPalette.cardTextMain} 4%, ${configPalette.cardBackground})`, padding: 14, border: `1px solid ${configPalette.cardBorder}` }}>
                 <div style={{ fontSize: 10, color: configPalette.accentPurple, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 4 }}>{note.label}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
+                <div style={{ fontFamily: 'Georgia, Times New Roman, serif', fontSize: 14, fontWeight: 700, marginBottom: 4, color: configPalette.cardTextMain }}>{note.name}</div>
                 <div style={{ fontSize: 12, color: configPalette.cardTextMuted, lineHeight: 1.55, whiteSpace: 'pre-line' }}>{note.text}</div>
               </div>
             ))}

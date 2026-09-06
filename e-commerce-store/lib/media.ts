@@ -172,6 +172,27 @@ export function isImageMedia(src: unknown): boolean {
   return !isVideoMedia(src);
 }
 
+/**
+ * Ambient brand-tinted shimmer style for a media box that has NO image/video
+ * to show (e.g. a product with an empty gallery). Returns a plain object (no
+ * React types) so it can be spread into any inline `style` — a slow animated
+ * gradient driven by the `goyunirZeroImage` keyframe (defined in globals.css)
+ * instead of a pitch-black placeholder. Colors are injected as `color-mix`
+ * accents so they stay readable on light AND dark themes.
+ */
+export function zeroImageStyle(
+  accentA = '#a855f7',
+  accentB = '#0071e3',
+  accentC?: string,
+): { background: string; backgroundSize: string; animation: string } {
+  const c = accentC || accentA;
+  return {
+    background: `linear-gradient(135deg, color-mix(in srgb, ${accentA} 16%, transparent), color-mix(in srgb, ${accentB} 16%, transparent), color-mix(in srgb, ${c} 16%, transparent))`,
+    backgroundSize: '220% 220%',
+    animation: 'goyunirZeroImage 7s ease-in-out infinite',
+  };
+}
+
 /** Human label for a container ratio, e.g. 560×280 → `2:1`, 328×280 → `1.17:1`. */
 export function aspectRatioLabel(width: number, height: number): string {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return '—';

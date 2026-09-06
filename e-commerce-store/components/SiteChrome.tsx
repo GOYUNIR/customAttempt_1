@@ -1213,7 +1213,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       <div style={{ paddingTop: '92px', minHeight: '100vh' }}>{children}</div>
 
-      <div style={{ position: 'fixed', left: '50%', bottom: 18, transform: 'translateX(-50%)', zIndex: 90, opacity: showScrollCue ? 1 : 0, pointerEvents: 'none', transition: 'opacity 220ms ease' }}>
+      <div className="goyunir-scroll-cue" style={{ opacity: showScrollCue ? 1 : 0 }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 0', color: '#f5f5f5', fontSize: 10, letterSpacing: '2px', textTransform: 'uppercase', opacity: 0.9 }}>
           <span style={{ width: 24, height: 1, background: 'rgba(255,255,255,0.35)' }} />
           <span>Keep scrolling</span>
@@ -1223,11 +1223,18 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
 
       <footer style={{ background: chromeBackground(liveTheme.primaryBackground, chromeAlpha, 'rgba(8,8,10,0.96)'), borderTop: '1px solid rgba(255,255,255,0.08)', padding: '38px 20px 58px', textAlign: 'center', color: liveTheme.textMuted || '#71717a', fontSize: 12, position: 'relative', zIndex: 10 }}>
         <div style={{ maxWidth: 520, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap' }}>
-            <Link href="/terms" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Terms</Link>
-            <Link href="/privacy" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Privacy</Link>
-            <Link href="/shipping" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Shipping</Link>
-            <Link href="/account" prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>Manage My Entry</Link>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, flexWrap: 'wrap', rowGap: 6 }}>
+            {([
+              ['/terms', 'Terms'],
+              ['/privacy', 'Privacy'],
+              ['/shipping', 'Shipping'],
+              ['/account', 'Manage My Entry'],
+            ] as const).map(([href, label], index) => (
+              <span key={href} style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                {index > 0 && <span aria-hidden="true" style={{ opacity: 0.4, fontSize: 10 }}>·</span>}
+                <Link href={href} prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>{label}</Link>
+              </span>
+            ))}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
             {(() => {
@@ -1383,7 +1390,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                   {signedIn && signedInEmail ? (
                     <div style={{ fontSize: 10, color: drawerTextMuted, lineHeight: 1.4 }}>Signed in as {signedInEmail} — email can&apos;t be changed here.</div>
                   ) : null}
-                  <input autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Full shipping address (street, city, state, ZIP, country)" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }} />
+                  <input className="goyunir-field" autoComplete="shipping street-address" type="text" value={checkoutAddress} onChange={(e) => setCheckoutAddress(e.target.value)} placeholder="Full shipping address (street, city, state, ZIP, country)" style={{ padding: '11px 13px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, textOverflow: 'ellipsis' }} />
                   {(mapboxHint === 'autofill-on' || mapboxHint === 'autofill-off' || mapboxHint === 'no-token' || mapboxHint === 'token-rejected') && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: mapboxHint === 'autofill-on' ? '#34d399' : mapboxHint === 'autofill-off' ? '#fbbf24' : '#f87171' }}>
                       <span style={{ width: 6, height: 6, borderRadius: 999, background: mapboxHint === 'autofill-on' ? '#22c55e' : mapboxHint === 'autofill-off' ? '#f59e0b' : '#ef4444' }} />

@@ -344,16 +344,68 @@ textarea {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 40;
+  z-index: 50;
   display: flex;
   gap: 8px;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
 }
 @media (min-width: 768px) {
   .goyunir-pdp-cta-bar {
     display: none;
+  }
+}
+
+/* When the mobile sticky CTA bar is active on a product page, the global
+   "Keep scrolling" cue (SiteChrome) is completely suppressed so its text can
+   never bleed behind the fixed primary action. The product page's <main>
+   carries data-goyunir-pdp-cta whenever the bar renders; :has() scopes the
+   suppression to that exact state. */
+.goyunir-scroll-cue {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 30;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+@media (max-width: 767px) {
+  body:has(main[data-goyunir-pdp-cta]) .goyunir-scroll-cue {
+    display: none !important;
+  }
+}
+
+/* ── Mobile action deduplication ───────────────────────────────────────────────
+   On <768px the sticky bottom bar owns the primary action, so the in-panel
+   "Enter allocation" / "Secure piece" buttons are hidden and the secondary
+   "Add to bag" action stretches full-width for a clean stacked layout. */
+@media (max-width: 767px) {
+  .goyunir-pdp-inline-primary {
+    display: none;
+  }
+  .goyunir-pdp-add-bag {
+    flex: 1 1 100%;
+  }
+}
+
+/* ── Form input polish ─────────────────────────────────────────────────────────
+   Long placeholders (e.g. the shipping-address field) ellipsize instead of
+   clipping mid-character, and inputs keep a 16px font on small screens so iOS
+   Safari never auto-zooms. Opt in via className="goyunir-field". */
+.goyunir-field {
+  font-size: 14px;
+}
+.goyunir-field::placeholder {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+@media (max-width: 767px) {
+  .goyunir-field {
+    font-size: 16px;
   }
 }
 
