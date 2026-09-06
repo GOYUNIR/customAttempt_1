@@ -730,6 +730,17 @@ function slugifyName(name: string): string {
     .slice(0, 64);
 }
 
+/** Reverse a slug into a human-friendly size label: `black-tee` → `Black Tee`.
+ *  Used as the fallback SIZE name for a synced variant that has no local size
+ *  string (it inherits its identity from the shared inventory pool slug). */
+function humanizeSlug(slug: string): string {
+  return String(slug || '')
+    .trim()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .trim();
+}
+
 /** Auto-generated SKU for a variant: `[product-slug]-[variant-name]`. Falls back
  *  to the product slug alone when the variant has no name yet. */
 function variantSku(productSlug: string, variantName: string): string {
@@ -3015,11 +3026,17 @@ export default function AdminPortal() {
     // `inventoryPoolId`) — e.g. the same SKU offered as a raffle allocation AND
     // an instant buy drawing from one stock pool. The old size-keyed `seenSizes`
     // dedupe silently DROPPED the second variant (the "[SAVING VARIANT COUNT]"
-    // 2 → 1 truncation), so it is removed. The only filter left is the
-    // empty-size guard: a row with no size label is an incomplete placeholder,
-    // not a sellable variant.
+    // 2 → 1 truncation), so it is removed. The ONLY remaining guard drops a row
+    // that has NO size label AND is NOT pool-linked — a synced variant inherits
+    // its size/name from the shared pool and must NEVER be discarded just
+    // because its local `size` string is empty.
+    const isSyncedCategory = (c: any) =>
+      Boolean(
+        c?.syncWithExisting === true ||
+        String(c?.inventorySyncSlug || c?._syncDraft || c?.inventoryPoolId || '').trim(),
+      );
     const priceCategories = reconciledCategories
-      .filter((c: any) => String(c?.size || '').trim())
+      .filter((c: any) => String(c?.size || '').trim() || isSyncedCategory(c))
       .map((c: any, i: number) => {
         console.log('[DEBUG CAT KEYS]', JSON.stringify(c));
         const out = { ...c, position: i };
@@ -3047,20 +3064,19 @@ export default function AdminPortal() {
           out.inventorySyncSlug = effectiveSlug;
           out.inventoryPoolId = effectiveSlug;
           // Synced variants inherit their commerce values from the shared pool.
+          // Resolve the pool source ONCE so the price, SKU and SIZE fallbacks
+          // all agree on the same canonical source variant.
+          const source = findInventorySyncSource(effectiveSlug, allProducts, productForm, i);
+          const src = source?.category;
           // Backfill a VALID price / SKU so the backend price + sanity gates
           // never 400 on a sentinel price. Prefer the pool's canonical source
           // price; fall back to a neutral 0 (the backend exempts synced variants).
           if (!isConfiguredPrice(out.price)) {
-            const source = findInventorySyncSource(effectiveSlug, allProducts, productForm, i);
-            const src = source?.category;
             if (src && isConfiguredPrice(src?.price)) out.price = Number(src.price);
             else out.price = 0;
           }
           if (!String(out.sku || '').trim()) {
-            const source = findInventorySyncSource(effectiveSlug, allProducts, productForm, i);
-            if (source?.category && String(source.category.sku || '').trim()) {
-              out.sku = source.category.sku;
-            }
+            if (src && String(src.sku || '').trim()) out.sku = src.sku;
           }
           // GUARANTEE: a synced variant always carries a numeric price + string
           // SKU so an empty form input (the synced grid is fully unmounted) can
@@ -3068,10 +3084,27 @@ export default function AdminPortal() {
           // and `out.sku || ''` are no-ops on already-valid values.
           out.price = out.price || 0;
           out.sku = out.sku || '';
+          // A synced variant may carry NO local size string (it inherits its
+          // name from the shared pool). Backfill a valid size so the 1:1
+          // retention guard above keeps it AND the backend schema receives a
+          // valid string — empty-size checks can never fail. Priority: the pool
+          // source's size, then the humanized slug name, then "Synced Pool".
+          if (!String(out.size || '').trim()) {
+            out.size =
+              (src && String(src.size || '').trim()) ||
+              humanizeSlug(effectiveSlug) ||
+              'Synced Pool';
+          }
         } else {
           // No slug resolved — explicitly un-link (null, never absent).
           out.inventorySyncSlug = null;
           out.inventoryPoolId = null;
+          // A variant flagged "sync with existing" but with no resolved slug is
+          // still a synced row — give it a placeholder size so it is preserved
+          // rather than silently dropped by an empty-size guard.
+          if (c.syncWithExisting === true && !String(out.size || '').trim()) {
+            out.size = 'Synced Pool';
+          }
         }
         // ── Compile the universal commerce blocks into valid JSON objects ──
         // The unified "Variant Mode" dropdown + its conditional inputs write into
