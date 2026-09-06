@@ -2760,11 +2760,56 @@ export default function AdminPortal() {
     // slug the operator merely SEES in a badge, can never be dropped on save.
     const domSyncSlugs = scrapeSyncSlugsFromDom();
 
+    // ── BRUTE FORCE global slug recovery ────────────────────────────────────
+    // (1) INHERIT PRODUCT-LEVEL SYNC STATE: if the product form itself carries a
+    //     ROOT-LEVEL sync slug (inventorySyncSlug / inventoryPoolId / _syncDraft),
+    //     copy it down to EVERY variant before the payload is built. A
+    //     product-scoped pool link can never be dropped just because no single
+    //     variant re-stated it.
+    const rootSyncSlug = slugifyName(
+      String(
+        (productForm as any).inventorySyncSlug ||
+        (productForm as any).inventoryPoolId ||
+        (productForm as any)._syncDraft ||
+        '',
+      ).trim(),
+    );
+
+    // (2) UNCONDITIONAL PAGE-WIDE DOM EXTRACTION: read EVERY input on the page
+    //     (regardless of name/id) and scan the whole body text for a sync-slug
+    //     marker ("Synced with <slug>" / "Inherits price …"). If ANY slug-like
+    //     string exists anywhere on screen, recover it and apply it to ALL
+    //     variants so a slug the operator typed or merely SAW can never be lost.
+    const allInputValues: string[] = Array.from(document.querySelectorAll('input')).map((i) => i.value);
+    console.log('[PAGE INPUT VALUES]', allInputValues);
+
+    const bodyText: string = typeof document !== 'undefined' ? (document.body?.innerText || '') : '';
+    let globalSlug = '';
+    const syncedMatch = bodyText.match(/Synced with\s+([A-Za-z0-9_-]+)/);
+    if (syncedMatch) globalSlug = syncedMatch[1];
+    if (!globalSlug) {
+      const inheritsMatch = bodyText.match(/Inherits\s+price[^]*?([A-Za-z0-9][A-Za-z0-9_-]{1,63})/);
+      if (inheritsMatch) globalSlug = inheritsMatch[1];
+    }
+    if (!globalSlug) {
+      for (const raw of allInputValues) {
+        const t = String(raw || '').trim();
+        if (t && /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(t)) {
+          globalSlug = t;
+          break;
+        }
+      }
+    }
+    const bruteForceSlug = slugifyName(globalSlug);
+
     const reconciledCategories = (productForm.priceCategories || []).map((c: any, i: number) => {
       const cat = { ...c };
       const domSlug = String(domSyncSlugs.get(i) || '').trim();
       const fallback = String(cat._syncDraft || cat.inventoryPoolId || '').trim();
-      const foundSlug = domSlug || fallback;
+      // Priority: per-index DOM scrape → per-category draft/pool → PRODUCT-level
+      // inheritance → page-wide brute-force slug. ANY of these proves the
+      // operator intends this variant to be pool-linked.
+      const foundSlug = domSlug || fallback || rootSyncSlug || bruteForceSlug;
       if (foundSlug) {
         const slug = slugifyName(foundSlug);
         // Unconditional reconciliation: overwrite every sync field so the
