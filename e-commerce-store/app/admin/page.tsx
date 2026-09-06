@@ -548,6 +548,7 @@ interface ScrapedVariantRow {
   price: number | null;
   stripeId: string;
   sku: string;
+  stock: number | null;
   slug: string;
 }
 
@@ -581,6 +582,14 @@ function scrapeVariantRowsFromDom(): ScrapedVariantRow[] {
     );
     const sku = String(skuInput?.value ?? '').trim();
 
+    // Stock (units) — matched by placeholder (no stable id on this input).
+    const unitsInput = Array.from(row.querySelectorAll<HTMLInputElement>('input')).find(
+      (el) => (el.placeholder || '').toLowerCase().includes('unit'),
+    );
+    const stockRaw = String(unitsInput?.value ?? '').trim();
+    const stockNum = Number(stockRaw);
+    const stock = stockRaw === '' || !Number.isFinite(stockNum) ? null : stockNum;
+
     // Sync slug — same three-source priority as `scrapeSyncSlugsFromDom`.
     let slug = '';
     const badge = row.querySelector<HTMLElement>('[data-sync-badge-slug]');
@@ -597,7 +606,7 @@ function scrapeVariantRowsFromDom(): ScrapedVariantRow[] {
       }
     }
 
-    rows.push({ idx, size, price, stripeId, sku, slug });
+    rows.push({ idx, size, price, stripeId, sku, stock, slug });
   });
 
   return rows;
@@ -2843,42 +2852,54 @@ export default function AdminPortal() {
     // ── DOM VARIANT RECONCILIATION ──
     // Count the rendered variant editor rows. When the LIVE DOM holds MORE rows
     // than `productForm.priceCategories` (a variant was rendered but its master
-    // state update was dropped), scrape the missing rows' fields straight from
-    // the DOM and APPEND them into the working category list — so a rendered
-    // variant can never be silently dropped at save time. The DOM rows are
-    // returned in document (index) order, so rows at index >= the state length
-    // are exactly the missing tail.
+    // state update was dropped), REPLACE the entire category list with the
+    // DOM-scraped rows so no variant can ever be silently dropped at save time.
+    // Rows that still line up with React state use the state category as their
+    // BASE (preserving commerceMode / winners / limits / sizeConfig / position),
+    // with the DOM-scraped sellable fields (size, price, stripeId, SKU, stock,
+    // slug) overlaid as authoritative; trailing rows are reconstructed from
+    // scratch. Per-size stock is folded back into the inventory map.
     const domVariantRows = scrapeVariantRowsFromDom();
     const domVariantCount = domVariantRows.length;
     const stateVariantCount = (productForm.priceCategories || []).length;
-    const workingCategories: any[] = [...(productForm.priceCategories || [])];
+    let workingCategories: any[] = [...(productForm.priceCategories || [])];
+    const workingInventoryPerSize: Record<string, number> = {
+      ...((productForm.inventoryPerSize && typeof productForm.inventoryPerSize === 'object')
+        ? productForm.inventoryPerSize : {}),
+    };
     if (domVariantCount > stateVariantCount) {
-      const missingRows = domVariantRows.filter(
-        (r) => r.idx >= stateVariantCount && String(r.size || '').trim(),
-      );
-      for (const row of missingRows) {
-        const missing: any = {
-          size: row.size,
-          price: row.price != null ? row.price : UNCONFIGURED_PRICE_SENTINEL,
-          stripeId: row.stripeId || defaultStripePriceId,
-          winnerTiers: '1',
-          position: workingCategories.length,
-        };
-        if (String(row.sku || '').trim()) missing.sku = row.sku;
+      const stateCategories: any[] = productForm.priceCategories || [];
+      workingCategories = domVariantRows.map((row: ScrapedVariantRow) => {
+        const existing = stateCategories[row.idx] ?? null;
+        const base: any = existing ? { ...existing } : { winnerTiers: '1' };
+        base.size = row.size;
+        base.price = row.price != null
+          ? row.price
+          : (existing && existing.price != null ? existing.price : UNCONFIGURED_PRICE_SENTINEL);
+        base.stripeId = row.stripeId || (existing?.stripeId ?? defaultStripePriceId);
+        base.sku = row.sku || existing?.sku || '';
         if (row.slug) {
           // Reconstructed variant carries its shared-inventory link so a DOM
           // badge/input slug is never lost either.
-          missing.inventorySyncSlug = row.slug;
-          missing.inventoryPoolId = row.slug;
-          missing._syncDraft = row.slug;
-          missing.syncWithExisting = true;
+          base.inventorySyncSlug = row.slug;
+          base.inventoryPoolId = row.slug;
+          base._syncDraft = row.slug;
+          base.syncWithExisting = true;
         }
-        workingCategories.push(missing);
-      }
+        // Fold scraped per-size stock back into the inventory map.
+        if (String(row.size || '').trim()) {
+          if (row.stock != null && Number.isFinite(row.stock) && row.stock > 0) {
+            workingInventoryPerSize[row.size] = Math.floor(row.stock);
+          } else if (row.stock != null) {
+            delete workingInventoryPerSize[row.size];
+          }
+        }
+        return base;
+      });
       console.log('[DOM VARIANT RECONCILIATION]', {
         domVariantCount,
         stateVariantCount,
-        appended: missingRows.length,
+        replaced: workingCategories.length,
       });
     }
 
@@ -3006,6 +3027,7 @@ export default function AdminPortal() {
     // operator (or support agent) can verify in F12 that EVERY variant survived
     // reconciliation — no variant was truncated, dropped, or had its slug
     // mis-assigned.
+    console.log('[SAVING VARIANT COUNT]', priceCategories.length);
     console.log('[MULTI-VARIANT PAYLOAD COUNT]', priceCategories.length);
     console.log('[MULTI-VARIANT RECONCILED]', JSON.stringify(priceCategories, null, 2));
 
@@ -3053,10 +3075,13 @@ export default function AdminPortal() {
         maxPerEmail: Math.max(1, Number(productForm.maxPerEmail) || 1),
         maxPerCart: Math.max(1, Number(productForm.maxPerCart) || Number(productForm.maxPerEmail) || 1),
         // Per-size stock (multi-size products keep a separate inventory per size).
-        inventoryPerSize: productForm.inventoryPerSize && typeof productForm.inventoryPerSize === 'object' ? productForm.inventoryPerSize : {},
+        // `workingInventoryPerSize` carries any DOM-scraped stock from the
+        // reconciliation sweep, so a variant reconstructed from the DOM never
+        // loses its Units on save.
+        inventoryPerSize: workingInventoryPerSize,
         // Total inventory is DERIVED from the per-size units — keep the persisted
         // value in sync so sold-out math and the sanity engine never disagree.
-        totalInventory: computedTotalInventory(productForm),
+        totalInventory: computedTotalInventory({ ...productForm, priceCategories, inventoryPerSize: workingInventoryPerSize }),
         // Category tags (admin-managed list lives in Settings → Catalog → Categories).
         categories: Array.isArray(productForm.categories) ? productForm.categories : [],
         // Ensure we send isActive, isArchived, isUpcoming
