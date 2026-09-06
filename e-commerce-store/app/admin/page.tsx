@@ -25,7 +25,8 @@ import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplay
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
 import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
 import { samplerPresentationSeed } from '@/lib/sampler-config';
-import HeroAnimationCanvas, { HERO_SHADER_PRESETS } from '@/components/HeroAnimationCanvas';
+import HeroShaderSettings from '@/components/admin/HeroShaderSettings';
+import { defaultAiHeroSettings, type AiHeroSettings } from '@/lib/shaders/presets';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -1320,12 +1321,7 @@ const DEFAULT_LAYOUT_SETTINGS = {
 // AI Hero Banner & Shader Animation (admin → Settings → AI Hero). The home-page
 // hero renders a GPU canvas shader (or CSS ambient-gradient fallback) behind the
 // hero card. Colors come from the live theme accents; zero product data.
-const DEFAULT_AI_HERO_SETTINGS: { enabled: boolean; preset: string; prompt: string; opacity: number } = {
-  enabled: true,
-  preset: 'ambient_mesh',
-  prompt: '',
-  opacity: 0.55,
-};
+const DEFAULT_AI_HERO_SETTINGS: AiHeroSettings = defaultAiHeroSettings();
 
 const DEFAULT_REF_PREFIX = 'GU';
 
@@ -8151,42 +8147,17 @@ export default function AdminPortal() {
               })()}
 
               <h4 id="settings-aihero" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>AI Hero Banner &amp; Shader</h4>
-              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
-                A GPU-accelerated canvas shader rendered behind the home-page hero card. Falls back to a CSS ambient gradient on low-power devices, battery saver, or when the visitor prefers reduced motion. Colors come from the live theme accents.
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 12px' }}>
+                A luxury multi-mode GPU shader rendered behind the home-page hero: organic domain warping, a
+                cursor-reactive particle mesh, raymarched refractive glass, and an exploded 3D bottle that reassembles
+                from a particle cloud. Falls back to a CSS ambient gradient on low-power devices, battery saver, or when
+                the visitor prefers reduced motion.
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={aiHeroSettings.enabled} onChange={(e) => setAiHeroSettings((p) => ({ ...p, enabled: e.target.checked }))} />
-                  Enable AI hero shader animation
-                </label>
-                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  Shader style
-                  <select value={aiHeroSettings.preset} onChange={(e) => setAiHeroSettings((p) => ({ ...p, preset: e.target.value }))} style={{ ...inputStyle, width: '100%' }}>
-                    {HERO_SHADER_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  Opacity ({Math.round((aiHeroSettings.opacity || 0.55) * 100)}%)
-                  <input type="range" min={0.1} max={1} step={0.05} value={aiHeroSettings.opacity ?? 0.55} onChange={(e) => setAiHeroSettings((p) => ({ ...p, opacity: Number(e.target.value) }))} style={{ width: '100%' }} />
-                </label>
-                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  AI prompt hint
-                  <textarea rows={2} placeholder="Optional instruction for the AI motion engine (e.g. slow ambient drift)" value={aiHeroSettings.prompt} onChange={(e) => setAiHeroSettings((p) => ({ ...p, prompt: e.target.value }))} style={{ ...inputStyle, width: '100%', resize: 'vertical' }} />
-                </label>
-                <div style={{ position: 'relative', height: 140, borderRadius: 12, overflow: 'hidden', border: '1px solid #27272a' }}>
-                  {aiHeroSettings.enabled && (
-                    <HeroAnimationCanvas
-                      preset={aiHeroSettings.preset}
-                      opacity={aiHeroSettings.opacity}
-                      colorA={themeSettings.accentPurple || '#bf5af2'}
-                      colorB={themeSettings.accentBlue || '#0071e3'}
-                      colorC={themeSettings.accentPurple || '#ff375f'}
-                    />
-                  )}
-                </div>
-              </div>
+              <HeroShaderSettings
+                value={aiHeroSettings}
+                onChange={setAiHeroSettings}
+                themeColors={themeSettings}
+              />
 
               <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>

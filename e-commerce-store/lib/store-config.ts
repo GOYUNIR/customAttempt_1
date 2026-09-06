@@ -116,6 +116,15 @@ export interface StoreConfig {
     preset?: string;
     prompt?: string;
     opacity?: number;
+    explosionRadius?: number;
+    particleCount?: number;
+    depthBlur?: number;
+    animationLoop?: string;
+    assemblyProgress?: number;
+    paletteAutoSync?: boolean;
+    accentA?: string;
+    accentB?: string;
+    accentC?: string;
   };
   socialProof: {
     label: string;
@@ -260,9 +269,15 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
   },
   aiHero: {
     enabled: true,
-    preset: 'ambient_mesh',
+    preset: 'dark_organic',
     prompt: '',
     opacity: 0.55,
+    explosionRadius: 60,
+    particleCount: 50000,
+    depthBlur: 30,
+    animationLoop: 'pulse',
+    assemblyProgress: 1,
+    paletteAutoSync: true,
   },
   socialProof: {
     label: 'Limited drop access',

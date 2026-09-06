@@ -185,6 +185,15 @@ export interface StorefrontConfig {
     preset?: string;
     prompt?: string;
     opacity?: number;
+    explosionRadius?: number;
+    particleCount?: number;
+    depthBlur?: number;
+    animationLoop?: string;
+    assemblyProgress?: number;
+    paletteAutoSync?: boolean;
+    accentA?: string;
+    accentB?: string;
+    accentC?: string;
   };
   socialProof: {
     label: string;
@@ -661,7 +670,19 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     animationMechanics: { ...defaultAnimationMechanics, ...(input.animationMechanics ?? {}) },
     raffleRegistrationForm: { ...defaultFormCopy, ...(input.raffleRegistrationForm ?? {}) },
     heroContent: { ...defaultHeroContent, ...(input.heroContent ?? {}) },
-    aiHero: { enabled: true, preset: 'ambient_mesh', prompt: '', opacity: 0.55, ...(input.aiHero ?? {}) },
+    aiHero: {
+      enabled: true,
+      preset: 'dark_organic',
+      prompt: '',
+      opacity: 0.55,
+      explosionRadius: 60,
+      particleCount: 50_000,
+      depthBlur: 30,
+      animationLoop: 'pulse',
+      assemblyProgress: 1,
+      paletteAutoSync: true,
+      ...(input.aiHero ?? {}),
+    },
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },
     brandFooterData: { ...defaultFooter, ...(input.brandFooterData ?? {}) },
     catalogPreview: {

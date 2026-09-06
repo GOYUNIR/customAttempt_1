@@ -32,7 +32,21 @@ export interface LiveThemeValue {
   /** Home-page layout (admin → Settings → Home Layout). */
   layout?: { productsPerRow?: number };
   /** AI Hero Banner & Shader Animation (admin → Settings → AI Hero). */
-  aiHero?: { enabled?: boolean; preset?: string; prompt?: string; opacity?: number };
+  aiHero?: {
+    enabled?: boolean;
+    preset?: string;
+    prompt?: string;
+    opacity?: number;
+    explosionRadius?: number;
+    particleCount?: number;
+    depthBlur?: number;
+    animationLoop?: string;
+    assemblyProgress?: number;
+    paletteAutoSync?: boolean;
+    accentA?: string;
+    accentB?: string;
+    accentC?: string;
+  };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

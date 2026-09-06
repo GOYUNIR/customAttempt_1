@@ -80,9 +80,15 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
   // style; colors come from the live theme accents — zero product data here.
   aiHero: {
     enabled: true,
-    preset: 'ambient_mesh',
+    preset: 'dark_organic',
     prompt: '',
     opacity: 0.55,
+    explosionRadius: 60,
+    particleCount: 50000,
+    depthBlur: 30,
+    animationLoop: 'pulse',
+    assemblyProgress: 1,
+    paletteAutoSync: true,
   },
 
   socialProof: {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
-import HeroAnimationCanvas from '@/components/HeroAnimationCanvas';
+import HeroShaderCanvas from '@/components/HeroShaderCanvas';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -64,7 +64,7 @@ export default function HomePage() {
   // AI Hero Banner & Shader Animation (admin → Settings → AI Hero). Initialized
   // from the server-baked theme, then refreshed from /api/store so admin edits
   // apply within the ~10s cache window. Colors come from the live theme accents.
-  const [aiHero, setAiHero] = useState<any>((liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'ambient_mesh', opacity: 0.55 });
+  const [aiHero, setAiHero] = useState<any>((liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'dark_organic', opacity: 0.55 });
   // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
@@ -278,13 +278,18 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-          <HeroAnimationCanvas
+          <HeroShaderCanvas
             enabled={aiHero.enabled !== false}
             preset={aiHero.preset}
             opacity={aiHero.opacity}
             colorA={configPalette.accentPurple || '#bf5af2'}
             colorB={configPalette.accentBlue || '#0071e3'}
             colorC={configPalette.accentPurple || '#ff375f'}
+            explosionRadius={Number(aiHero.explosionRadius) || 60}
+            particleCount={Number(aiHero.particleCount) || 50_000}
+            depthBlur={Number(aiHero.depthBlur) || 30}
+            animationLoop={aiHero.animationLoop || 'pulse'}
+            assemblyProgress={Number(aiHero.assemblyProgress) || 1}
           />
           <div style={{ position: 'relative', zIndex: 1 }}>
           {heroCoverImage && (
