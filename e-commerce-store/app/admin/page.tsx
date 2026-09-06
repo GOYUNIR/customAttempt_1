@@ -528,6 +528,81 @@ function scrapeSyncSlugsFromDom(): Map<number, string> {
   return map;
 }
 
+/** DOM VARIANT RECONCILIATION source of truth. Scrape EVERY rendered variant
+ *  editor row (`[data-variant-row]`) for its full set of sellable fields —
+ *  size name, price, Stripe price ID, SKU, and its shared-inventory sync slug —
+ *  straight out of the LIVE DOM. This is the safety net for the case where the
+ *  DOM renders MORE variant rows than React state holds (a state update was
+ *  dropped / the row was rendered out-of-band), which used to silently DROP a
+ *  variant at save time. Resolution per field is STRICTLY SCOPED to each row's
+ *  own container so a value can never be mis-assigned to a different variant:
+ *    · size      → `input[id="pf-size-<idx>"]`
+ *    · price     → `input[id="pf-price-<idx>"]`
+ *    · stripeId  → the row's `input[placeholder*="stripe"]` (case-insensitive)
+ *    · sku       → the row's `input[placeholder^="sku"]`
+ *    · slug      → the same three-source priority as `scrapeSyncSlugsFromDom`
+ *                  (badge → sync input → "Synced with <slug>" text). */
+interface ScrapedVariantRow {
+  idx: number;
+  size: string;
+  price: number | null;
+  stripeId: string;
+  sku: string;
+  slug: string;
+}
+
+function scrapeVariantRowsFromDom(): ScrapedVariantRow[] {
+  const rows: ScrapedVariantRow[] = [];
+  if (typeof document === 'undefined') return rows;
+
+  document.querySelectorAll<HTMLElement>('[data-variant-row]').forEach((row) => {
+    const idx = Number(row.getAttribute('data-variant-row'));
+    if (!Number.isFinite(idx) || idx < 0) return;
+
+    // Size name — the dedicated, index-keyed identity input.
+    const sizeInput = row.querySelector<HTMLInputElement>(`input[id="pf-size-${idx}"]`);
+    const size = String(sizeInput?.value ?? '').trim();
+
+    // Price — the dedicated, index-keyed numeric input.
+    const priceInput = row.querySelector<HTMLInputElement>(`input[id="pf-price-${idx}"]`);
+    const priceRaw = String(priceInput?.value ?? '').trim();
+    const priceNum = Number(priceRaw);
+    const price = priceRaw === '' || !Number.isFinite(priceNum) ? null : priceNum;
+
+    // Stripe price ID — matched by placeholder (no stable id on this input).
+    const stripeInput = Array.from(row.querySelectorAll<HTMLInputElement>('input')).find(
+      (el) => (el.placeholder || '').toLowerCase().includes('stripe'),
+    );
+    const stripeId = String(stripeInput?.value ?? '').trim();
+
+    // SKU — matched by placeholder (no stable id on this input).
+    const skuInput = Array.from(row.querySelectorAll<HTMLInputElement>('input')).find(
+      (el) => (el.placeholder || '').toLowerCase().startsWith('sku'),
+    );
+    const sku = String(skuInput?.value ?? '').trim();
+
+    // Sync slug — same three-source priority as `scrapeSyncSlugsFromDom`.
+    let slug = '';
+    const badge = row.querySelector<HTMLElement>('[data-sync-badge-slug]');
+    if (badge) slug = slugifyName(String(badge.getAttribute('data-sync-badge-slug') || '').trim());
+    if (!slug) {
+      const syncInput = row.querySelector<HTMLInputElement>('input[id^="pf-sync-slug-"]');
+      if (syncInput) slug = slugifyName(String(syncInput.value || '').trim());
+    }
+    if (!slug) {
+      const spans = row.querySelectorAll<HTMLElement>('span');
+      for (const el of Array.from(spans)) {
+        const m = (el.textContent || '').trim().match(/Synced with\s+([A-Za-z0-9_-]+)/);
+        if (m) { slug = slugifyName(m[1]); break; }
+      }
+    }
+
+    rows.push({ idx, size, price, stripeId, sku, slug });
+  });
+
+  return rows;
+}
+
 /** FCFS sizes are never drawn, so a "Winners / draw" value on them is
  *  meaningless. Strip it so that invalid state can never even exist — the
  *  "winners on FCFS" sanity warning becomes impossible, not just flagged. */
@@ -2765,7 +2840,49 @@ export default function AdminPortal() {
     // configuration is always preserved verbatim.
     const domSyncSlugs = scrapeSyncSlugsFromDom();
 
-    const reconciledCategories = (productForm.priceCategories || []).map((c: any, i: number) => {
+    // ── DOM VARIANT RECONCILIATION ──
+    // Count the rendered variant editor rows. When the LIVE DOM holds MORE rows
+    // than `productForm.priceCategories` (a variant was rendered but its master
+    // state update was dropped), scrape the missing rows' fields straight from
+    // the DOM and APPEND them into the working category list — so a rendered
+    // variant can never be silently dropped at save time. The DOM rows are
+    // returned in document (index) order, so rows at index >= the state length
+    // are exactly the missing tail.
+    const domVariantRows = scrapeVariantRowsFromDom();
+    const domVariantCount = domVariantRows.length;
+    const stateVariantCount = (productForm.priceCategories || []).length;
+    const workingCategories: any[] = [...(productForm.priceCategories || [])];
+    if (domVariantCount > stateVariantCount) {
+      const missingRows = domVariantRows.filter(
+        (r) => r.idx >= stateVariantCount && String(r.size || '').trim(),
+      );
+      for (const row of missingRows) {
+        const missing: any = {
+          size: row.size,
+          price: row.price != null ? row.price : UNCONFIGURED_PRICE_SENTINEL,
+          stripeId: row.stripeId || defaultStripePriceId,
+          winnerTiers: '1',
+          position: workingCategories.length,
+        };
+        if (String(row.sku || '').trim()) missing.sku = row.sku;
+        if (row.slug) {
+          // Reconstructed variant carries its shared-inventory link so a DOM
+          // badge/input slug is never lost either.
+          missing.inventorySyncSlug = row.slug;
+          missing.inventoryPoolId = row.slug;
+          missing._syncDraft = row.slug;
+          missing.syncWithExisting = true;
+        }
+        workingCategories.push(missing);
+      }
+      console.log('[DOM VARIANT RECONCILIATION]', {
+        domVariantCount,
+        stateVariantCount,
+        appended: missingRows.length,
+      });
+    }
+
+    const reconciledCategories = workingCategories.map((c: any, i: number) => {
       // ALWAYS spread the existing category so no field (price, stripeId,
       // winnerTiers, position, stock, sku, size, …) is ever mutated or dropped
       // during reconciliation — only the sync fields may change, and only for a

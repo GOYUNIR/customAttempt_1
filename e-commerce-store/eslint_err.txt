@@ -1,0 +1,1 @@
+[BABEL] Note: The code generator has deoptimised the styling of C:\Users\markh\GOYUNIR\CODE\customAttempt_1\e-commerce-store\app\admin\page.tsx as it exceeds the max of 500KB.
