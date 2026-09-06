@@ -552,20 +552,79 @@ interface ScrapedVariantRow {
   slug: string;
 }
 
+/** Heuristic — is this DOM node actually a variant editor row? A row is
+ *  "variant-shaped" when it contains a size input, a price input, or a Stripe
+ *  price-id input. This filters the broad structural fallback selectors down to
+ *  real rows so unrelated `.grid` / `.flex` containers are never scraped. */
+function isLikelyVariantRow(el: HTMLElement): boolean {
+  if (el.querySelector('input[id^="pf-size-"]')) return true;
+  if (el.querySelector('input[id^="pf-price-"]')) return true;
+  const inputs = Array.from(el.querySelectorAll('input'));
+  return inputs.some(
+    (i) => (i.placeholder || '').toLowerCase().includes('stripe'),
+  );
+}
+
+/** Resolve the rendered variant row containers using a broad, multi-selector
+ *  strategy so the DOM scrape never depends on the `[data-variant-row]`
+ *  attribute alone. Priority order:
+ *    1. canonical `[data-variant-row]` (index-keyed),
+ *    2. structural `tr.variant-row, div.variant-row, .variant-card, .grid,
+ *       .flex` (filtered to variant-shaped rows), then
+ *    3. grouping sellable inputs (size/price/stripe) by their closest
+ *       `tr, div.grid, div.flex, .border` container. */
+function queryVariantRowElements(): HTMLElement[] {
+  if (typeof document === 'undefined') return [];
+
+  const indexed = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-variant-row]'),
+  );
+  if (indexed.length > 0) return indexed;
+
+  const structural = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      'tr.variant-row, div.variant-row, .variant-card, .grid, .flex',
+    ),
+  ).filter(isLikelyVariantRow);
+  if (structural.length > 0) return structural;
+
+  const inputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>(
+      'input[id^="pf-size-"], input[id^="pf-price-"], input[placeholder*="stripe" i]',
+    ),
+  );
+  const containers = new Map<HTMLElement, HTMLElement>();
+  for (const input of inputs) {
+    const container = input.closest<HTMLElement>(
+      'tr, div.grid, div.flex, .border',
+    );
+    if (container) containers.set(container, container);
+  }
+  return Array.from(containers.values());
+}
+
 function scrapeVariantRowsFromDom(): ScrapedVariantRow[] {
   const rows: ScrapedVariantRow[] = [];
   if (typeof document === 'undefined') return rows;
 
-  document.querySelectorAll<HTMLElement>('[data-variant-row]').forEach((row) => {
-    const idx = Number(row.getAttribute('data-variant-row'));
-    if (!Number.isFinite(idx) || idx < 0) return;
+  queryVariantRowElements().forEach((row, order) => {
+    // Prefer the explicit index-keyed attribute; fall back to DOM order so
+    // non-indexed fallback rows still align with their React state position.
+    const attrIdx = Number(row.getAttribute('data-variant-row'));
+    const idx = Number.isFinite(attrIdx) && attrIdx >= 0 ? attrIdx : order;
 
-    // Size name — the dedicated, index-keyed identity input.
-    const sizeInput = row.querySelector<HTMLInputElement>(`input[id="pf-size-${idx}"]`);
+    // Size name — the dedicated, index-keyed identity input; fall back to any
+    // size input within the row (covers non-indexed fallback rows).
+    const sizeInput =
+      row.querySelector<HTMLInputElement>(`input[id="pf-size-${idx}"]`) ||
+      row.querySelector<HTMLInputElement>('input[id^="pf-size-"]');
     const size = String(sizeInput?.value ?? '').trim();
 
-    // Price — the dedicated, index-keyed numeric input.
-    const priceInput = row.querySelector<HTMLInputElement>(`input[id="pf-price-${idx}"]`);
+    // Price — the dedicated, index-keyed numeric input; fall back to any
+    // price input within the row.
+    const priceInput =
+      row.querySelector<HTMLInputElement>(`input[id="pf-price-${idx}"]`) ||
+      row.querySelector<HTMLInputElement>('input[id^="pf-price-"]');
     const priceRaw = String(priceInput?.value ?? '').trim();
     const priceNum = Number(priceRaw);
     const price = priceRaw === '' || !Number.isFinite(priceNum) ? null : priceNum;
@@ -2859,6 +2918,13 @@ export default function AdminPortal() {
     // with the DOM-scraped sellable fields (size, price, stripeId, SKU, stock,
     // slug) overlaid as authoritative; trailing rows are reconstructed from
     // scratch. Per-size stock is folded back into the inventory map.
+    // ── DOM vs React state diagnostics ──
+    // Log the exact count of detected DOM rows against the React state items so
+    // an operator (or support agent) can verify in F12 whether a rendered
+    // variant has drifted out of `productForm.priceCategories`.
+    console.log('[DOM ROW SELECTOR COUNT]', document.querySelectorAll('[data-variant-row]').length);
+    console.log('[REACT STATE CAT COUNT]', (productForm.priceCategories || []).length);
+
     const domVariantRows = scrapeVariantRowsFromDom();
     const domVariantCount = domVariantRows.length;
     const stateVariantCount = (productForm.priceCategories || []).length;
