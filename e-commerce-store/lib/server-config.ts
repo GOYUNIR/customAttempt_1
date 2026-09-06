@@ -208,10 +208,39 @@ export function aggregateLiveInventoryByProduct(
   return liveStatesByProduct;
 }
 
+/**
+ * Pre-index the cross-product shared-inventory pools (`shared:<slug>` live-state
+ * records) ONCE per request into `Map<slug, {…}>`.
+ *
+ * `findLiveInventoryForProduct` is called for EVERY product in `/api/store` and
+ * `/api/catalog/status`. Before this index existed, each call re-scanned the
+ * ENTIRE `liveStates` array to fold shared pools in — an O(products × liveStates)
+ * scan that pushed Cloudflare Workers over their per-request CPU limit (Error
+ * 1102) on stores with many products/shared pools. Building the index once and
+ * passing it in turns that into O(products) Map lookups.
+ */
+export function indexSharedPools(
+  liveStates: LiveStateRecord[],
+): Map<string, { inventoryRemaining: number; totalInventory: number }> {
+  const pools = new Map<string, { inventoryRemaining: number; totalInventory: number }>();
+  if (!Array.isArray(liveStates)) return pools;
+  for (const state of liveStates) {
+    const slug = normalizeInventorySyncSlug(state.inventorySyncSlug);
+    if (!slug) continue;
+    const existing = pools.get(slug) || { inventoryRemaining: 0, totalInventory: 0 };
+    pools.set(slug, {
+      inventoryRemaining: existing.inventoryRemaining + Math.max(0, Number(state.inventoryRemaining) || 0),
+      totalInventory: existing.totalInventory + Math.max(0, Number(state.totalInventory) || 0),
+    });
+  }
+  return pools;
+}
+
 export function findLiveInventoryForProduct(
   liveStatesByProduct: Map<string, { inventoryRemaining: number; totalInventory: number }>,
   product: { id?: string; slug?: string; priceCategories?: Array<{ size?: string; inventorySyncSlug?: string }> },
   liveStates?: LiveStateRecord[],
+  sharedPools?: Map<string, { inventoryRemaining: number; totalInventory: number }>,
 ): { inventoryRemaining: number; totalInventory: number } | null {
   const byId = product.id ? liveStatesByProduct.get(String(product.id)) : null;
 
@@ -235,19 +264,23 @@ export function findLiveInventoryForProduct(
 
   // Fold in shared pools: each size that carries a sync slug pulls that pool's
   // remaining/total into this product's aggregate. Dedupe by slug so two sizes
-  // sharing one slug are only counted once.
+  // sharing one slug are only counted once. Uses the pre-built index when the
+  // caller supplied one (the hot path); otherwise builds a lazy one for
+  // backward-compatible single-call sites.
   const shared = { inventoryRemaining: 0, totalInventory: 0 };
-  if (liveStates && Array.isArray(product.priceCategories)) {
-    const slugs = new Set<string>();
-    for (const cat of product.priceCategories) {
-      const slug = normalizeInventorySyncSlug(cat?.inventorySyncSlug);
-      if (slug) slugs.add(slug);
-    }
-    for (const state of liveStates) {
-      const slug = normalizeInventorySyncSlug(state.inventorySyncSlug);
-      if (slug && slugs.has(slug)) {
-        shared.inventoryRemaining += Math.max(0, Number(state.inventoryRemaining) || 0);
-        shared.totalInventory += Math.max(0, Number(state.totalInventory) || 0);
+  if (Array.isArray(product.priceCategories)) {
+    const pools = sharedPools ?? (liveStates ? indexSharedPools(liveStates) : null);
+    if (pools && pools.size > 0) {
+      const seen = new Set<string>();
+      for (const cat of product.priceCategories) {
+        const slug = normalizeInventorySyncSlug(cat?.inventorySyncSlug);
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+        const pool = pools.get(slug);
+        if (pool) {
+          shared.inventoryRemaining += pool.inventoryRemaining;
+          shared.totalInventory += pool.totalInventory;
+        }
       }
     }
   }
@@ -960,6 +993,18 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
   if (Object.keys(accessRule).length > 0) out.accessRule = accessRule;
   if (Object.keys(billingRule).length > 0) out.billingRule = billingRule;
   if (Object.keys(scheduleConfig).length > 0) out.scheduleConfig = scheduleConfig;
+  // Preserve the variant's sampler identity + self-contained sampler config
+  // snapshot. A slug-synced SAMPLE variant carries `samplerLabel` (its badge)
+  // and `samplerConfig` (the fully-merged sampler definition + precomputed price
+  // math copied from its shared pool at link time). Dropping them here would
+  // strip the synced sample's incentive display from the storefront after a
+  // reload/round-trip through `loadProducts`.
+  if (category?.samplerLabel !== undefined && category?.samplerLabel !== null && String(category.samplerLabel).trim() !== '') {
+    out.samplerLabel = String(category.samplerLabel).trim();
+  }
+  if (category?.samplerConfig && typeof category.samplerConfig === 'object' && !Array.isArray(category.samplerConfig)) {
+    out.samplerConfig = category.samplerConfig;
+  }
   return out;
 }
 

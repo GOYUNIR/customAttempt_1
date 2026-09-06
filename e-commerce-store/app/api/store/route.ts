@@ -3,6 +3,7 @@ import {
   aggregateLiveInventoryByProduct,
   createRedisClient,
   findLiveInventoryForProduct,
+  indexSharedPools,
   listLiveStates,
   loadStoreConfigCached,
   safeParseRedisItem,
@@ -28,6 +29,12 @@ type PublicPriceCategory = {
   checkoutMode?: 'RAFFLE' | 'FCFS';
   /** Optional shared-inventory sync slug — sizes with the same slug share one stock pool. */
   inventorySyncSlug?: string;
+  /** Badge label for a slug-synced SAMPLE variant (copied from its shared pool). */
+  samplerLabel?: string;
+  /** Self-contained sampler snapshot for a slug-synced SAMPLE variant (merged
+   *  sampler definition + precomputed price math). Lets the storefront render a
+   *  synced sample's full incentives with no cross-product lookup. */
+  samplerConfig?: Record<string, any>;
 };
 
 type PublicStoreProduct = {
@@ -167,6 +174,13 @@ function sanitizeProduct(raw: any): PublicStoreProduct {
       // Shared-inventory sync slug — carried through so the storefront can fold
       // this size's shared pool into the product's aggregate remaining stock.
       inventorySyncSlug: normalizeInventorySyncSlug(category?.inventorySyncSlug) || undefined,
+      // Slug-synced SAMPLE variant identity: carry the badge + full sampler
+      // snapshot so the storefront renders the synced sample's incentives (badge,
+      // credit math, note) exactly like its standalone source page.
+      samplerLabel: typeof category?.samplerLabel === 'string' && category.samplerLabel.trim() ? category.samplerLabel.trim() : undefined,
+      samplerConfig: category?.samplerConfig && typeof category.samplerConfig === 'object' && !Array.isArray(category.samplerConfig)
+        ? category.samplerConfig
+        : undefined,
     })),
     // Category tags from the admin-managed list (Settings → Catalog).
     categories: Array.isArray(raw?.categories) ? raw.categories.map(String) : [],
@@ -274,10 +288,13 @@ function applyLifecycle(
   globalSchedule?: Record<string, any>,
 ) {
   const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
+  // Pre-index the shared pools ONCE so each product lookup is a Map hit instead
+  // of an O(liveStates) rescan — keeps this route's CPU well within Worker limits.
+  const sharedPools = indexSharedPools(liveStates);
   const now = Date.now();
 
   return products.map((item) => {
-    const inventory = findLiveInventoryForProduct(liveStatesByProduct, item, liveStates);
+    const inventory = findLiveInventoryForProduct(liveStatesByProduct, item, liveStates, sharedPools);
     const inventoryRemaining = inventory
       ? inventory.inventoryRemaining
       : Math.max(0, Number(item.totalInventory || 0));

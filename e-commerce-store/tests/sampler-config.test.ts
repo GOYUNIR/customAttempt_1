@@ -6,6 +6,10 @@ import {
   resolveSamplerConfig,
   formatMoneyCents,
   samplerPresentation,
+  categorySampleBadge,
+  resolveCategorySamplerConfig,
+  categorySamplerPresentation,
+  samplerPresentationSeed,
 } from '../lib/sampler-config.ts';
 
 const NOIR = {
@@ -179,5 +183,57 @@ test('samplerPresentation: no samplers configured → nothing shown', () => {
   assert.equal(pres.hasSamplers, false);
   assert.equal(pres.selected.isSampler, false);
   assert.equal(pres.nudge, null);
+});
+
+
+test('samplerPresentationSeed returns null for a non-sampler size and resolves prices for a sampler', () => {
+  assert.equal(samplerPresentationSeed(NOIR, 'Full Bottle').sampler, null);
+  const seed = samplerPresentationSeed(NOIR, 'Sampler Set');
+  assert.ok(seed.sampler);
+  assert.equal(seed.samplePriceCents, 1900);
+  assert.equal(seed.fullPriceCents, 14500);
+});
+
+test('resolveCategorySamplerConfig reads a self-contained samplerConfig blob (slug-synced sample)', () => {
+  const blob = {
+    size: 'Discovery Kit',
+    label: 'Discovery',
+    fullSize: 'Full Bottle',
+    creditCents: 2500,
+    samplePriceCents: 2900,
+    fullPriceCents: 14500,
+  };
+  const category = { size: 'Discovery Kit', samplerLabel: 'Discovery', samplerConfig: blob };
+  // The parent product has NO sampler config of its own (delivery incentive off).
+  const parent = { priceCategories: [category], deliveryIncentiveEnabled: false };
+  const resolved = resolveCategorySamplerConfig(parent, category);
+  assert.ok(resolved);
+  assert.equal(resolved.label, 'Discovery');
+  assert.equal(resolved.creditCents, 2500);
+  assert.equal(resolved.fullSize, 'Full Bottle');
+});
+
+test('categorySamplerPresentation renders a synced sample incentive card with no local sampler', () => {
+  const blob = {
+    size: 'Discovery Kit',
+    label: 'Discovery',
+    fullSize: 'Full Bottle',
+    creditCents: 2500,
+    samplePriceCents: 2900,
+    fullPriceCents: 14500,
+  };
+  const category = { size: 'Discovery Kit', price: 29, samplerLabel: 'Discovery', samplerConfig: blob };
+  // A product that defines NO samplers and has delivery incentives OFF — the
+  // synced variant must still render its badge + full incentive math.
+  const parent = { priceCategories: [category], deliveryIncentiveEnabled: false, samplerSizes: [] };
+  const pres = categorySamplerPresentation(parent, category);
+  assert.equal(pres.enabled, true);
+  assert.equal(pres.hasSamplers, true);
+  assert.equal(pres.selected.isSampler, true);
+  assert.equal(pres.selected.badge, 'Discovery');
+  assert.ok(pres.selected.math);
+  assert.equal(pres.selected.math.creditCents, 2500);
+  assert.equal(pres.selected.math.remainingCents, 12000);
+  assert.equal(categorySampleBadge(parent, category).label, 'Discovery');
 });
 

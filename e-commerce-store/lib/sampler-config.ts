@@ -290,7 +290,7 @@ export function samplerPresentation(product: any, selectedSize: string): Sampler
  * it would on the standalone source product page — with zero hardcoded data.
  */
 export function categorySampleBadge(product: any, category: any): { isSampler: boolean; label: string } {
-  const own = String(category?.samplerLabel || '').trim();
+  const own = String(category?.samplerLabel || category?.samplerConfig?.label || '').trim();
   if (own) return { isSampler: true, label: own };
   const size = String(category?.size || '').trim();
   const rec = size && Array.isArray(product?.samplerSizes)
@@ -298,5 +298,121 @@ export function categorySampleBadge(product: any, category: any): { isSampler: b
     : null;
   if (rec) return { isSampler: true, label: String(rec.label || 'Sample').trim() || 'Sample' };
   return { isSampler: false, label: '' };
+}
+
+/**
+ * The storefront seed for a synced sample variant. Builds the FULLY-MERGED
+ * sampler config for a source product + size (per-sampler overrides over
+ * product defaults) AND pre-resolves the sample + full-size prices so the
+ * synced variant can render its incentive math with ZERO cross-product lookup.
+ * `sampler` is null when the source size is not a sampler.
+ */
+export function samplerPresentationSeed(
+  product: any,
+  size: string,
+): { sampler: ResolvedSampler | null; samplePriceCents: number; fullPriceCents: number } {
+  const resolved = resolveSamplerConfig(product, cleanSize(size));
+  if (!resolved) return { sampler: null, samplePriceCents: 0, fullPriceCents: 0 };
+  return {
+    sampler: resolved,
+    samplePriceCents: priceCentsOf(product, resolved.size),
+    fullPriceCents: resolved.fullSize ? priceCentsOf(product, resolved.fullSize) : 0,
+  };
+}
+
+
+/**
+ * Reconstruct a `ResolvedSampler` from a category's self-contained
+ * `samplerConfig` snapshot (written onto slug-synced variants at link time).
+ * Returns null when the category carries no snapshot.
+ */
+function normalizeSamplerConfigBlob(blob: any, category: any): ResolvedSampler | null {
+  if (!blob || typeof blob !== 'object' || Array.isArray(blob)) return null;
+  const size = cleanSize(category?.size || blob?.size);
+  if (!size) return null;
+  return {
+    size,
+    label: cleanShort(blob.label, 24) || 'Sample',
+    fullSize: cleanSize(blob.fullSize),
+    creditCents: positiveInt(blob.creditCents, 0),
+    minOrderSubtotalCents: positiveInt(blob.minOrderSubtotalCents, 0),
+    neverExpires: blob.neverExpires === true,
+    expiresDays: Math.max(1, positiveInt(blob.expiresDays, 60) || 60),
+    codePrefix: cleanShort(blob.codePrefix, 8).toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    eligibleProductSlugs: Array.isArray(blob.eligibleProductSlugs) ? blob.eligibleProductSlugs.map(String).filter(Boolean) : [],
+    eligibleSizes: Array.isArray(blob.eligibleSizes) ? blob.eligibleSizes.map(String).filter(Boolean) : [],
+    note: cleanShort(blob.note, 200),
+    sampleRefId: cleanShort(blob.sampleRefId, 64),
+    sampleRefName: cleanShort(blob.sampleRefName, 120),
+  };
+}
+
+/**
+ * Resolve the EFFECTIVE sampler config for a SPECIFIC VARIANT (category object),
+ * reading the variant's own `samplerConfig` snapshot first (slug-synced samples)
+ * and falling back to the product-level size-string lookup (standalone samples).
+ */
+export function resolveCategorySamplerConfig(product: any, category: any): ResolvedSampler | null {
+  const blobResolved = normalizeSamplerConfigBlob(category?.samplerConfig, category);
+  if (blobResolved) return blobResolved;
+  const size = cleanSize(category?.size);
+  return size ? resolveSamplerConfig(product, size) : null;
+}
+
+/**
+ * Storefront presentation for a SPECIFIC VARIANT (category object) — the
+ * category-aware counterpart of `samplerPresentation`. When the selected variant
+ * is a slug-synced SAMPLE (its `samplerConfig` snapshot was copied from a shared
+ * pool whose product has no local sampler), this builds the FULL incentive card
+ * (badge, credit math, note) from the variant's own snapshot so a synced sample
+ * variant renders exactly like its standalone source page.
+ */
+export function categorySamplerPresentation(product: any, category: any): SamplerPresentation {
+  const resolved = resolveCategorySamplerConfig(product, category);
+  const base = samplerPresentation(product, cleanSize(category?.size));
+
+  // Fast path: the product-level resolver already produced a selected-sampler
+  // card (standalone sample, or the category matches THIS product's samplerSizes).
+  if (!resolved) return base;
+  if (base.selected.isSampler) return base;
+
+  const blob = category?.samplerConfig && typeof category.samplerConfig === 'object' && !Array.isArray(category.samplerConfig)
+    ? category.samplerConfig
+    : null;
+  const samplePriceCents = blob && Number.isFinite(Number(blob.samplePriceCents))
+    ? Math.max(0, Math.round(Number(blob.samplePriceCents)))
+    : priceCentsOf(product, resolved.size);
+  const fullPriceCents = blob && Number.isFinite(Number(blob.fullPriceCents))
+    ? Math.max(0, Math.round(Number(blob.fullPriceCents)))
+    : (resolved.fullSize ? priceCentsOf(product, resolved.fullSize) : 0);
+  const creditCents = resolved.creditCents;
+  const remainingCents = Math.max(0, fullPriceCents - creditCents);
+  const pctCovered = fullPriceCents > 0 ? Math.round((creditCents / fullPriceCents) * 100) : 0;
+  const badge = resolved.label || 'Sample';
+
+  let body: string;
+  if (resolved.fullSize && fullPriceCents > 0 && creditCents > 0) {
+    body = `Your ${resolved.size} (${formatMoneyCents(samplePriceCents)}) ships with a ${formatMoneyCents(creditCents)} credit after delivery. Put it toward the ${resolved.fullSize} (${formatMoneyCents(fullPriceCents)}) and you only pay ${formatMoneyCents(remainingCents)}.`;
+  } else if (creditCents > 0) {
+    body = `Your ${resolved.size} (${formatMoneyCents(samplePriceCents)}) ships with a ${formatMoneyCents(creditCents)} credit after delivery. Apply it to your next full-size order — you only pay the difference.`;
+  } else {
+    body = `Your ${resolved.size} (${formatMoneyCents(samplePriceCents)}) is the low-risk way in — take your time with it, then come back for the full size when you're ready.`;
+  }
+
+  return {
+    enabled: true,
+    hasSamplers: true,
+    selected: {
+      isSampler: true,
+      badge,
+      headline: `Try the ${badge} first`,
+      body,
+      math: resolved.fullSize && fullPriceCents > 0
+        ? { samplePriceCents, creditCents, fullPriceCents, remainingCents, pctCovered, fullSize: resolved.fullSize }
+        : null,
+      note: resolved.note,
+    },
+    nudge: base.nudge,
+  };
 }
 

@@ -4,6 +4,7 @@ import {
   createRedisClient,
   findLiveInventoryForProduct,
   getCatalogArchiveRecords,
+  indexSharedPools,
   listLiveStates,
   safeParseRedisItem,
   STORE_CONFIG_KEY,
@@ -125,6 +126,9 @@ async function buildCatalogPayload() {
     const categories = normalizeCategories(storeConfig.catalog?.categories ?? GOYUNIR_STORE_SUITE.catalog?.categories);
     const liveStates = await listLiveStates(redis);
     const liveStatesByProduct = aggregateLiveInventoryByProduct(liveStates);
+    // Pre-index shared pools ONCE (see /api/store) so each product's inventory
+    // fold is a Map lookup, not an O(liveStates) rescan.
+    const sharedPools = indexSharedPools(liveStates);
     // Global drop-schedule override merged over the static config — used to
     // compute `nextReleaseEndsAt` exactly like /api/store so the catalog tile
     // timers agree with the product page and the draw engine.
@@ -142,7 +146,7 @@ async function buildCatalogPayload() {
       return 'RAFFLE';
     };
     const sortedProducts = sortProducts(allProducts).map((product) => {
-      const inventory = findLiveInventoryForProduct(liveStatesByProduct, product, liveStates);
+      const inventory = findLiveInventoryForProduct(liveStatesByProduct, product, liveStates, sharedPools);
       const inventoryRemaining = inventory
         ? inventory.inventoryRemaining
         : Math.max(0, Number(product.totalInventory || 0));

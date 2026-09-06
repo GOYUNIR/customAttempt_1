@@ -11,7 +11,7 @@ import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { isVideoMedia, coverStyle, pickCrop, DEFAULT_CROP } from '@/lib/media';
-import { samplerPresentation, formatMoneyCents, categorySampleBadge } from '@/lib/sampler-config';
+import { formatMoneyCents, categorySampleBadge, categorySamplerPresentation } from '@/lib/sampler-config';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -1258,7 +1258,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const mixedFcfsCount = Object.values(sizeModes).filter((m) => m === 'FCFS').length;
   // Per-size trial ("sampler") presentation — the copy + math are specific to
   // the size the customer has selected (never one generic line for all sizes).
-  const samplerPres = samplerPresentation(product, selectedSize);
+  // Resolved from the SELECTED VARIANT OBJECT so a slug-synced SAMPLE variant
+  // (carrying its `samplerConfig` snapshot from a shared pool) renders its full
+  // incentive card exactly like its standalone source page.
+  const samplerPres = categorySamplerPresentation(product, selectedCategory);
   // Sample-badge state derived from the SELECTED VARIANT OBJECT (not a size-string
   // lookup) so a slug-synced variant — which carries `samplerLabel` from its shared
   // pool — renders its "🧪 Sample" tag even when this product defines no sampler.

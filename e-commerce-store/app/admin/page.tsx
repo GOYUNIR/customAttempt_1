@@ -24,6 +24,7 @@ import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
 import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
+import { samplerPresentationSeed } from '@/lib/sampler-config';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -824,6 +825,26 @@ const inputStyle: React.CSSProperties = {
 const errorFieldStyle: React.CSSProperties = {
   border: '1px solid #ef4444',
   boxShadow: '0 0 0 3px rgba(239,68,68,0.18)',
+};
+
+/** Persistent uppercase label above each variant input (Size Name / Price / SKU /
+ *  Stripe Price ID / …). Replaces the old placeholder-only pattern so a populated
+ *  input never loses its context once the placeholder disappears. */
+const variantFieldLabelStyle: React.CSSProperties = {
+  fontSize: 8.5,
+  fontWeight: 700,
+  letterSpacing: '0.6px',
+  textTransform: 'uppercase',
+  color: '#8b95a7',
+  lineHeight: 1,
+};
+
+/** A labeled field column: a persistent uppercase label above an input. */
+const variantFieldWrapStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  flexDirection: 'column',
+  gap: 3,
+  alignItems: 'stretch',
 };
 
 /** A searchable font dropdown for Settings → Font Family (and the top-bar name
@@ -2610,14 +2631,21 @@ export default function AdminPortal() {
     for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'commerceMode', 'accessRule', 'billingRule', 'scheduleConfig', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
       if (source?.[field] !== undefined) merged[field] = source[field];
     }
-    // Carry the source's sampler badge onto the synced variant so the storefront
-    // can render the "🧪 Sample" tag from the variant object alone (no cross-product
-    // lookup needed). Derived from the SOURCE product's samplerSizes matched to the
-    // source variant's size.
-    const sourceSampler = Array.isArray(sourceProduct?.samplerSizes)
-      ? sourceProduct.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === String(source?.size || '').trim().toLowerCase())
-      : null;
-    if (sourceSampler) merged.samplerLabel = String(sourceSampler.label || 'Sample').trim() || 'Sample';
+    // Carry the source's FULL sampler definition onto the synced variant so the
+    // storefront can render the "🧪 Sample" badge AND the complete incentive card
+    // (credit math, full-size target, note) from the variant object alone — with
+    // zero cross-product lookup. The seed includes precomputed sample/full-size
+    // prices so the synced variant's math renders even when its own product has no
+    // full-size variant or sampler config defined locally.
+    const samplerSeed = samplerPresentationSeed(sourceProduct, String(source?.size || ''));
+    if (samplerSeed.sampler) {
+      merged.samplerLabel = String(samplerSeed.sampler.label || 'Sample').trim() || 'Sample';
+      merged.samplerConfig = {
+        ...samplerSeed.sampler,
+        samplePriceCents: samplerSeed.samplePriceCents,
+        fullPriceCents: samplerSeed.fullPriceCents,
+      };
+    }
     const inv = { ...(prev.inventoryPerSize || {}) };
     const sourceStock = Math.max(0, Number(sourceProduct?.inventoryPerSize?.[source?.size] ?? 0) || 0);
     if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
@@ -5761,6 +5789,13 @@ export default function AdminPortal() {
                             replaced by a clean "Synced with [slug]" card + Unlink. */}
                         {synced ? (
                           <div data-sync-badge-idx={idx} data-sync-badge-slug={syncSlug} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: '9px 10px', borderRadius: 8, background: 'rgba(125,211,252,0.08)', border: '1px solid rgba(125,211,252,0.4)' }}>
+                            {/* Reorder handle — synced variants are reorderable too. The
+                                input grid is unmounted for synced rows, so the only place a
+                                synced variant can move up/down is right here on its badge. */}
+                            <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Reorder this synced variant (up/down)">
+                              <button type="button" onClick={() => movePriceCategory(idx, -1)} disabled={idx === 0} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▲</button>
+                              <button type="button" onClick={() => movePriceCategory(idx, 1)} disabled={idx === productForm.priceCategories.length - 1} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▼</button>
+                            </span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: '#7dd3fc', letterSpacing: '0.3px' }}>
                               🔗 Synced with <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#bae6fd' }}>{syncSlug}</span>
                             </span>
@@ -5772,8 +5807,8 @@ export default function AdminPortal() {
                             <button type="button" onClick={() => unlinkInventorySyncSlug(idx)} style={{ ...buttonGhost, padding: '3px 10px', fontSize: 10, color: '#fbbf24', borderColor: '#f59e0b' }}>Unlink</button>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid #232329' }}>
-                            <label style={{ fontSize: 10, display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 8, padding: 8, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid #232329' }}>
+                            <label style={{ fontSize: 10, display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap', alignSelf: 'center' }}>
                               <input
                                 type="checkbox"
                                 checked={syncEnabled}
@@ -5783,25 +5818,28 @@ export default function AdminPortal() {
                             </label>
                             {syncEnabled && (
                               <>
-                                <input
-                                  id={`pf-sync-slug-${idx}`}
-                                  type="text"
-                                  placeholder="Inventory Sync Slug"
-                                  title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool. Click Link (or press Enter) to commit."
-                                  value={cat._syncDraft || cat.inventorySyncSlug || ''}
-                                  onChange={(e) => typeInventorySyncSlug(idx, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      applyInventorySyncSlug(idx);
-                                    }
-                                  }}
-                                  style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11 }}
-                                />
+                                <label htmlFor={`pf-sync-slug-${idx}`} style={variantFieldWrapStyle}>
+                                  <span style={variantFieldLabelStyle}>Sync Slug</span>
+                                  <input
+                                    id={`pf-sync-slug-${idx}`}
+                                    type="text"
+                                    placeholder="shared-stock-key"
+                                    title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool. Click Link (or press Enter) to commit."
+                                    value={cat._syncDraft || cat.inventorySyncSlug || ''}
+                                    onChange={(e) => typeInventorySyncSlug(idx, e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        applyInventorySyncSlug(idx);
+                                      }
+                                    }}
+                                    style={{ ...inputStyle, width: 180, padding: 6, fontSize: 11 }}
+                                  />
+                                </label>
                                 <button
                                   type="button"
                                   onClick={() => applyInventorySyncSlug(idx)}
-                                  style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#7dd3fc', borderColor: '#0ea5e9' }}
+                                  style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#7dd3fc', borderColor: '#0ea5e9', alignSelf: 'flex-end' }}
                                 >
                                   Link
                                 </button>
@@ -5822,65 +5860,78 @@ export default function AdminPortal() {
                         {/* Row 0b — Product Type / Commerce Mode. Placed directly below
                             the sync prompt so the sellable mode is the first decision an
                             unlinked variant makes. */}
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-                          <span style={{ fontSize: 9, color: '#5d6570', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', minWidth: 96 }}>Product Type</span>
-                          <select
-                            title={productForm.checkoutMode === 'FCFS'
-                              ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Other modes are unavailable."
-                              : "How this variant is sold. ⚡ Instant Buy charges at checkout; 🎟 Raffle enters an allocation draw; the other modes map onto the universal commerce primitives (accessRule / billingRule / scheduleConfig)."}
-                            value={variantModeValue(cat) || (effectiveMode === 'RAFFLE' ? 'ALLOCATION_DRAW' : 'INSTANT_BUY')}
-                            onChange={(e) => setVariantCommerceMode(idx, sanitizeCommerceMode(e.target.value) || '')}
-                            disabled={productForm.checkoutMode === 'FCFS'}
-                            style={{ ...inputStyle, width: 190, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
-                          >
-                            {VARIANT_MODE_OPTIONS.map((opt) => (
-                              <option key={opt.mode} value={opt.mode}>{opt.emoji} {opt.label}</option>
-                            ))}
-                          </select>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 8 }}>
+                          <label htmlFor={`pf-mode-${idx}`} style={variantFieldWrapStyle}>
+                            <span style={variantFieldLabelStyle}>Commerce Mode</span>
+                            <select
+                              id={`pf-mode-${idx}`}
+                              title={productForm.checkoutMode === 'FCFS'
+                                ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Other modes are unavailable."
+                                : "How this variant is sold. ⚡ Instant Buy charges at checkout; 🎟 Raffle enters an allocation draw; the other modes map onto the universal commerce primitives (accessRule / billingRule / scheduleConfig)."}
+                              value={variantModeValue(cat) || (effectiveMode === 'RAFFLE' ? 'ALLOCATION_DRAW' : 'INSTANT_BUY')}
+                              onChange={(e) => setVariantCommerceMode(idx, sanitizeCommerceMode(e.target.value) || '')}
+                              disabled={productForm.checkoutMode === 'FCFS'}
+                              style={{ ...inputStyle, width: 190, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
+                            >
+                              {VARIANT_MODE_OPTIONS.map((opt) => (
+                                <option key={opt.mode} value={opt.mode}>{opt.emoji} {opt.label}</option>
+                              ))}
+                            </select>
+                          </label>
                         </div>
                         {/* Row 1 — reorder handle + identity + SKU + price */}
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                        <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none', alignSelf: 'center' }} title="Drag handle — reorder for storefront">
                           <span style={{ fontSize: 12, color: '#5d6570', cursor: 'grab', padding: '0 2px' }}>⠿</span>
                           <button type="button" onClick={() => movePriceCategory(idx, -1)} disabled={idx === 0} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▲</button>
                           <button type="button" onClick={() => movePriceCategory(idx, 1)} disabled={idx === productForm.priceCategories.length - 1} style={{ ...buttonGhost, padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>▼</button>
                         </span>
-                      <input
-                        id={`pf-size-${idx}`}
-                        type="text"
-                        placeholder="Variant / Option / SKU"
-                        value={cat.size}
-                        onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
-                        style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="SKU (auto)"
-                        title="Auto-generated from [product-slug]-[variant-name]; edit to override."
-                        value={cat.sku || ''}
-                        onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
-                        style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setProductForm((p: any) => {
-                          const nextCats = [...(p.priceCategories || [])];
-                          nextCats[idx] = { ...nextCats[idx], sku: autoSkuForVariant(p, idx) };
-                          return { ...p, priceCategories: nextCats };
-                        })}
-                        title="Auto-generate a clean SKU from the product slug + variant name (or index)."
-                        style={{ ...buttonGhost, padding: '2px 7px', fontSize: 9, color: '#7dd3fc', borderColor: '#0ea5e9', whiteSpace: 'nowrap' }}
-                      >
-                        Auto SKU
-                      </button>
-                      <input
-                        id={`pf-price-${idx}`}
-                        type="number"
-                        placeholder="Price ($)"
-                        value={cat.price}
-                        onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
-                        style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}) }}
-                      />
+                        <label htmlFor={`pf-size-${idx}`} style={variantFieldWrapStyle}>
+                          <span style={variantFieldLabelStyle}>Size Name</span>
+                          <input
+                            id={`pf-size-${idx}`}
+                            type="text"
+                            placeholder="e.g. Medium, Size 9"
+                            value={cat.size}
+                            onChange={(e) => updatePriceCategory(idx, 'size', e.target.value)}
+                            style={{ ...inputStyle, width: 130, padding: 6, fontSize: 11, ...(invalidFieldIds.has(`pf-size-${idx}`) ? errorFieldStyle : {}) }}
+                          />
+                        </label>
+                        <label htmlFor={`pf-sku-${idx}`} style={variantFieldWrapStyle}>
+                          <span style={variantFieldLabelStyle}>SKU</span>
+                          <input
+                            id={`pf-sku-${idx}`}
+                            type="text"
+                            placeholder="Auto"
+                            title="Auto-generated from [product-slug]-[variant-name]; edit to override."
+                            value={cat.sku || ''}
+                            onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
+                            style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setProductForm((p: any) => {
+                            const nextCats = [...(p.priceCategories || [])];
+                            nextCats[idx] = { ...nextCats[idx], sku: autoSkuForVariant(p, idx) };
+                            return { ...p, priceCategories: nextCats };
+                          })}
+                          title="Auto-generate a clean SKU from the product slug + variant name (or index)."
+                          style={{ ...buttonGhost, padding: '2px 7px', fontSize: 9, color: '#7dd3fc', borderColor: '#0ea5e9', whiteSpace: 'nowrap', alignSelf: 'flex-end', marginBottom: 2 }}
+                        >
+                          Auto SKU
+                        </button>
+                        <label htmlFor={`pf-price-${idx}`} style={variantFieldWrapStyle}>
+                          <span style={variantFieldLabelStyle}>Price ($)</span>
+                          <input
+                            id={`pf-price-${idx}`}
+                            type="number"
+                            placeholder="0.00"
+                            value={cat.price}
+                            onChange={(e) => updatePriceCategory(idx, 'price', Number(e.target.value))}
+                            style={{ ...inputStyle, width: 80, padding: 6, fontSize: 11, ...(!validatePrice(cat.price).ok ? errorFieldStyle : {}) }}
+                          />
+                        </label>
                       {(() => {
                         const pv = validatePrice(cat.price);
                         if (pv.ok) return null;
@@ -5897,30 +5948,39 @@ export default function AdminPortal() {
                           </span>
                         );
                       })()}
-                      <input
-                        type="number"
-                        min={0}
-                        placeholder="Units"
-                        title="Stock for THIS size — live inventory seeds from this number (blank = falls back to Total inventory)."
-                        value={productForm.inventoryPerSize?.[cat.size] ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setProductForm((p: any) => {
-                            const inv = { ...(p.inventoryPerSize || {}) };
-                            if (v === '' || Number(v) <= 0) delete inv[cat.size];
-                            else inv[cat.size] = Math.max(0, Number(v));
-                            return { ...p, inventoryPerSize: inv };
-                          });
-                        }}
-                        style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11 }}
-                      />
-                      <input
-                        type="text"
-                        placeholder="Stripe Price ID"
-                        value={cat.stripeId}
-                        onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
-                        style={{ ...inputStyle, flex: 1, minWidth: 120, padding: 6, fontSize: 11 }}
-                      />
+                      <label htmlFor={`pf-units-${idx}`} style={variantFieldWrapStyle}>
+                        <span style={variantFieldLabelStyle}>Units</span>
+                        <input
+                          id={`pf-units-${idx}`}
+                          type="number"
+                          min={0}
+                          placeholder="Stock"
+                          title="Stock for THIS size — live inventory seeds from this number (blank = falls back to Total inventory)."
+                          value={productForm.inventoryPerSize?.[cat.size] ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setProductForm((p: any) => {
+                              const inv = { ...(p.inventoryPerSize || {}) };
+                              if (v === '' || Number(v) <= 0) delete inv[cat.size];
+                              else inv[cat.size] = Math.max(0, Number(v));
+                              return { ...p, inventoryPerSize: inv };
+                            });
+                          }}
+                          style={{ ...inputStyle, width: 64, padding: 6, fontSize: 11 }}
+                        />
+                      </label>
+                      <label htmlFor={`pf-stripe-${idx}`} style={{ ...variantFieldWrapStyle, flex: 1, minWidth: 120 }}>
+                        <span style={variantFieldLabelStyle}>Stripe Price ID</span>
+                        <input
+                          id={`pf-stripe-${idx}`}
+                          type="text"
+                          placeholder="price_…"
+                          title="The Stripe price ID charged for THIS variant (blank = inherit the product/global default)."
+                          value={cat.stripeId}
+                          onChange={(e) => updatePriceCategory(idx, 'stripeId', e.target.value)}
+                          style={{ ...inputStyle, width: '100%', padding: 6, fontSize: 11 }}
+                        />
+                      </label>
                       </div>
                       {/* Row 1b — per-item limits. Each option/SKU is its own item, so
                           its purchase caps + raffle cap live here. 0 or blank =
@@ -6007,11 +6067,13 @@ export default function AdminPortal() {
                               style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3 }}
                             />
                           </label>
-                          <label style={{ fontSize: 10, color: '#888' }}>Winner count
+                          <label htmlFor={`pf-winnerstiers-${idx}`} style={{ fontSize: 10, color: '#8b95a7', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            <span style={variantFieldLabelStyle}>Winner Tiers</span>
                             <input
                               id={`pf-winnerstiers-${idx}`}
                               type="text"
-                              placeholder="Winners / draw (e.g. 3,2,2)"
+                              placeholder="e.g. 3,2,2"
+                              title="Comma-separated winner counts per draw round (e.g. 3,2,2 → 3 winners on draw 1, 2 on draw 2)."
                               value={Array.isArray(cat.winnerTiers) ? cat.winnerTiers.join(',') : String(cat.winnerTiers ?? '1')}
                               onChange={(e) => updatePriceCategory(idx, 'winnerTiers', normalizeWinnerTiersCsv(e.target.value))}
                               style={{ ...inputStyle, display: 'block', width: '100%', marginTop: 3, ...(invalidFieldIds.has(`pf-winnerstiers-${idx}`) ? errorFieldStyle : {}) }}
