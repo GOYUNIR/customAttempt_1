@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField, isSyncedSourceReleased, categoryMatchesInventorySyncSlug, productMatchesInventorySyncSlug, findInventorySyncSource } from '../lib/checkout-mode.ts';
+import { getSizeCheckoutMode, getCategoryCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, resolveCategoryLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField, isSyncedSourceReleased, categoryMatchesInventorySyncSlug, productMatchesInventorySyncSlug, findInventorySyncSource } from '../lib/checkout-mode.ts';
 
 // A mixed-format product: sampler sells instantly (FCFS), full size runs a raffle.
 const MIXED = {
@@ -121,6 +121,59 @@ test('resolveSizeLimits: per-size values win, product-level fallback otherwise',
   assert.equal(minimal.maxPerCart, 1);
   assert.equal(minimal.maxRaffleAllocationLimit, 0);
   assert.equal(minimal.inventory, 0);
+});
+
+test('getCategoryCheckoutMode: resolves a duplicate-size variant by its OWN object, not the size string', () => {
+  // Two variants share the SAME size label but different modes. A size-string
+  // lookup would always resolve the FIRST one; the category-object resolver must
+  // return each variant's OWN mode.
+  const dup = {
+    name: 'Collision',
+    checkoutMode: 'RAFFLE',
+    priceCategories: [
+      { size: 'Standard', price: 149, checkoutMode: 'RAFFLE' },
+      { size: 'Standard', price: 19, checkoutMode: 'FCFS' },
+    ],
+  };
+  assert.equal(getCategoryCheckoutMode(dup, dup.priceCategories[0]), 'RAFFLE');
+  assert.equal(getCategoryCheckoutMode(dup, dup.priceCategories[1]), 'FCFS');
+});
+
+test('getCategoryCheckoutMode: falls back to the product mode when the variant has none', () => {
+  const cat = { size: 'Standard', price: 50 };
+  assert.equal(getCategoryCheckoutMode(PLAIN_FCFS, cat), 'FCFS');
+  assert.equal(getCategoryCheckoutMode(PLAIN_RAFFLE, cat), 'RAFFLE');
+});
+
+test('resolveCategoryLimits: resolves a duplicate-size variant by its OWN object', () => {
+  const dup = {
+    totalInventory: 100,
+    maxPerEmail: 2,
+    maxPerCart: 3,
+    inventoryPerSize: {},
+    priceCategories: [
+      { size: 'Standard', price: 149, maxPerEmail: 10, maxPerCart: 10, maxRaffleAllocationLimit: 20 },
+      { size: 'Standard', price: 19, maxPerEmail: 1, maxPerCart: 2, maxRaffleAllocationLimit: 0 },
+    ],
+  };
+  const raffle = resolveCategoryLimits(dup, dup.priceCategories[0]);
+  assert.equal(raffle.maxPerEmail, 10);
+  assert.equal(raffle.maxPerCart, 10);
+  assert.equal(raffle.maxRaffleAllocationLimit, 20);
+
+  const fcfs = resolveCategoryLimits(dup, dup.priceCategories[1]);
+  assert.equal(fcfs.maxPerEmail, 1);
+  assert.equal(fcfs.maxPerCart, 2);
+  assert.equal(fcfs.maxRaffleAllocationLimit, 0);
+});
+
+test('resolveCategoryLimits: product-level fallback when the variant omits limits', () => {
+  const product = { totalInventory: 50, maxPerEmail: 2, maxPerCart: 4, maxRaffleAllocationLimit: 25, priceCategories: [{ size: 'Small', price: 10 }] };
+  const limits = resolveCategoryLimits(product, product.priceCategories[0]);
+  assert.equal(limits.maxPerEmail, 2);
+  assert.equal(limits.maxPerCart, 4);
+  assert.equal(limits.maxRaffleAllocationLimit, 25);
+  assert.equal(limits.inventory, 50);
 });
 
 test('shared inventory: normalizeInventorySyncSlug produces a stable token', () => {

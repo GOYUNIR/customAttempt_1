@@ -17,7 +17,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-  getSizeCheckoutMode,
+  getCategoryCheckoutMode,
   hasMixedCheckoutModes,
   sizeCheckoutModes,
   isConfiguredPrice,
@@ -35,6 +35,23 @@ import { visibleProductCategories } from '@/lib/storefront-config';
 const CARD_W = 300;
 const GALLERY_W = 298;
 
+/**
+ * Format a variant's selectable label. When multiple variants share the SAME
+ * size string, disambiguate by appending the price and the resolved checkout
+ * mode so two otherwise-identical labels can never collide in the preview.
+ * No product/variant/price values are hardcoded.
+ */
+function variantLabel(cats: any[], cat: any, mode: 'RAFFLE' | 'FCFS'): string {
+  const size = String(cat?.size ?? '').trim();
+  const price = Number(cat?.price);
+  const hasPrice = Number.isFinite(price) && price > 0;
+  const normalized = size.toLowerCase();
+  const isDuplicate = cats.filter((c: any) => String(c?.size ?? '').trim().toLowerCase() === normalized).length > 1;
+  const base = hasPrice ? `${size} ($${price})` : size;
+  if (isDuplicate && size) return `${base} - ${mode}`;
+  return base;
+}
+
 export default function ProductLivePreview({ product, theme, copy, categories }: {
   product: any;
   theme: any;
@@ -42,10 +59,12 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
   categories?: string[];
 }) {
   const cats = Array.isArray(product.priceCategories) ? product.priceCategories : [];
-  const [size, setSize] = useState('');
-  const selectedSize = cats.some((c: any) => String(c?.size || '').trim().toLowerCase() === String(size || '').trim().toLowerCase())
-    ? size
-    : (cats[0]?.size || 'Standard');
+  const [variantIndex, setVariantIndex] = useState(0);
+  const activeIndex = cats.length > 0
+    ? (Number.isInteger(variantIndex) && variantIndex >= 0 && variantIndex < cats.length ? variantIndex : 0)
+    : 0;
+  const selectedCategory = cats.length > 0 ? cats[activeIndex] : null;
+  const selectedSize = selectedCategory ? String(selectedCategory.size ?? '') : '';
 
   // Palette from the CURRENT theme settings — the same tokens the storefront reads.
   const pageBg = theme.primaryBackground || '#f2f2f7';
@@ -73,10 +92,9 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
     border: `1px solid ${color}`,
   });
 
-  const priceCat = cats.find((c: any) => String(c?.size || '').trim().toLowerCase() === String(selectedSize || '').trim().toLowerCase());
-  const price = Number(priceCat?.price) || 0;
+  const price = selectedCategory ? (Number(selectedCategory.price) || 0) : 0;
   const priceConfigured = isConfiguredPrice(price);
-  const checkoutMode = getSizeCheckoutMode(product, selectedSize);
+  const checkoutMode = getCategoryCheckoutMode(product, selectedCategory);
   const canCheckoutDirect = checkoutMode === 'FCFS';
   const hasMixed = hasMixedCheckoutModes(product);
   const sizeModes = sizeCheckoutModes(product);
@@ -252,20 +270,21 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
               <div style={{ marginTop: 3 }}>
                 <div style={{ fontSize: 9, letterSpacing: '2px', textTransform: 'uppercase', color: cardText, fontWeight: 700 }}>Select size</div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
-                  {cats.map((cat: any) => {
+                  {cats.map((cat: any, index: number) => {
                     const chipIsSample = isSamplerSize(product, cat.size);
                     const chipBadge = chipIsSample ? String((product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase())?.label || 'Sample') : '';
-                    const chipMode = getSizeCheckoutMode(product, cat.size);
-                    const chipSelected = selectedSize === cat.size;
+                    const chipMode = getCategoryCheckoutMode(product, cat);
+                    const chipSelected = activeIndex === index;
                     const chipPrice = Number(cat?.price) || 0;
+                    const sizeLabel = variantLabel(cats, cat, chipMode);
                     return (
                       <button
-                        key={cat.size}
+                        key={`${index}-${String(cat.size)}-${chipPrice}`}
                         type="button"
-                        onClick={() => setSize(cat.size)}
+                        onClick={() => setVariantIndex(index)}
                         style={{ padding: '5px 8px', borderRadius: 999, border: chipSelected ? `1px solid ${cta}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${cardBorder}`), background: chipSelected ? cta : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (cardText || '#fff'), cursor: 'pointer', fontSize: 10, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}
                       >
-                        {cat.size} {chipPrice > 0 ? `($${chipPrice})` : ''}
+                        {sizeLabel}
                         <span style={{ fontSize: 7, fontWeight: 800, letterSpacing: '0.4px', textTransform: 'uppercase', padding: '1px 5px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                           {chipMode === 'FCFS' ? 'buy' : 'raffle'}
                         </span>

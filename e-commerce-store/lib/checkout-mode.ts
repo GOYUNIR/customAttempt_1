@@ -12,22 +12,33 @@
  * `node --test` runner can import it directly, matching `drop-timestamps.ts`.
  */
 
-/** Resolve the checkout mode for a SPECIFIC size on a product. */
-export function getSizeCheckoutMode(product: any, size?: string | null): 'RAFFLE' | 'FCFS' {
-  const key = String(size || '').trim().toLowerCase();
-  if (key && Array.isArray(product?.priceCategories)) {
-    const category = (product.priceCategories as any[]).find(
-      (c) => String(c?.size || '').trim().toLowerCase() === key,
-    );
-    const categoryMode = String(category?.checkoutMode || '').toUpperCase();
-    if (categoryMode === 'FCFS') return 'FCFS';
-    if (categoryMode === 'RAFFLE') return 'RAFFLE';
-  }
+/**
+ * Resolve the checkout mode for a SPECIFIC variant (a `priceCategories[]`
+ * entry). Unlike `getSizeCheckoutMode` — which re-looks the variant up by its
+ * size string and therefore collides when two variants share a size label —
+ * this reads the category object directly, so each variant resolves its OWN
+ * mode even when its size name is duplicated elsewhere in the array.
+ */
+export function getCategoryCheckoutMode(product: any, category: any): 'RAFFLE' | 'FCFS' {
+  const categoryMode = String(category?.checkoutMode || '').toUpperCase();
+  if (categoryMode === 'FCFS') return 'FCFS';
+  if (categoryMode === 'RAFFLE') return 'RAFFLE';
   const productMode = String(product?.checkoutMode || '').toUpperCase();
   if (productMode === 'FCFS') return 'FCFS';
   if (productMode === 'RAFFLE') return 'RAFFLE';
   if (product?.isRaffle === false || String(product?.productType || '').toLowerCase() === 'fcfs') return 'FCFS';
   return 'RAFFLE';
+}
+
+/** Resolve the checkout mode for a SPECIFIC size on a product (size-string lookup). */
+export function getSizeCheckoutMode(product: any, size?: string | null): 'RAFFLE' | 'FCFS' {
+  const key = String(size || '').trim().toLowerCase();
+  const category = key && Array.isArray(product?.priceCategories)
+    ? (product.priceCategories as any[]).find(
+        (c) => String(c?.size || '').trim().toLowerCase() === key,
+      )
+    : null;
+  return getCategoryCheckoutMode(product, category);
 }
 
 /** Whether the product mixes raffle AND direct-sale sizes under one roof. */
@@ -54,23 +65,24 @@ export function sizeCheckoutModes(product: any): Record<string, 'RAFFLE' | 'FCFS
   return out;
 }
 
-/**
- * Resolve the purchase / inventory limits for ONE size. A size's OWN value on
- * its `priceCategories[]` entry wins, otherwise the product-level fallback is
- * used. This is the single source of truth so the admin UI, the storefront cart
- * guard and the live-state seeding all agree on what "per item" means.
- */
-export function resolveSizeLimits(product: any, size?: string | null): {
+/** Purchase / inventory limits resolved for ONE variant or size. */
+export interface SizeLimits {
   maxPerEmail: number;
   maxPerCart: number;
   maxRaffleAllocationLimit: number;
   inventory: number;
-} {
-  const exact = String(size || '').trim();
+}
+
+/**
+ * Resolve the purchase / inventory limits for a SPECIFIC variant (a
+ * `priceCategories[]` entry). Reading the category object directly — instead of
+ * re-looking it up by its size string — means two variants that share a size
+ * label can never resolve each other's limits.
+ */
+export function resolveCategoryLimits(product: any, category: any): SizeLimits {
+  const exact = String(category?.size ?? '').trim();
   const key = exact.toLowerCase();
-  const cat = key && Array.isArray(product?.priceCategories)
-    ? (product.priceCategories as any[]).find((c) => String(c?.size || '').trim().toLowerCase() === key)
-    : null;
+  const cat = category ?? null;
   const inventoryPerSize =
     product?.inventoryPerSize && typeof product.inventoryPerSize === 'object' && !Array.isArray(product.inventoryPerSize)
       ? (product.inventoryPerSize as Record<string, unknown>)
@@ -83,6 +95,19 @@ export function resolveSizeLimits(product: any, size?: string | null): {
     maxRaffleAllocationLimit: Math.max(0, Number(cat?.maxRaffleAllocationLimit ?? product?.maxRaffleAllocationLimit) || 0),
     inventory: perSizeStock > 0 ? perSizeStock : productStock,
   };
+}
+
+/**
+ * Resolve the purchase / inventory limits for ONE size (size-string lookup).
+ * This is the single source of truth so the admin UI, the storefront cart guard
+ * and the live-state seeding all agree on what "per item" means.
+ */
+export function resolveSizeLimits(product: any, size?: string | null): SizeLimits {
+  const key = String(size || '').trim().toLowerCase();
+  const cat = key && Array.isArray(product?.priceCategories)
+    ? (product.priceCategories as any[]).find((c) => String(c?.size || '').trim().toLowerCase() === key)
+    : null;
+  return resolveCategoryLimits(product, cat ?? (size ? { size: String(size) } : null));
 }
 
 /**

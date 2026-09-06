@@ -923,6 +923,14 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
     winnerTiers,
   };
   if (rawMode === 'RAFFLE' || rawMode === 'FCFS') out.checkoutMode = rawMode;
+  // Preserve the variant-level SKU. `loadProducts` feeds BOTH the storefront
+  // AND the admin product list, so dropping `sku` here blanked the SKU input on
+  // edit (the editor binds `value={cat.sku || ''}`). Keep it verbatim — never
+  // drop it and never substitute a default.
+  const rawSku = category?.sku;
+  if (rawSku !== undefined && rawSku !== null && String(rawSku).trim() !== '') {
+    out.sku = String(rawSku);
+  }
   // Preserve per-item limit fields (max per email / cart / raffle allocation).
   // Same reason as checkoutMode above: `loadProducts` feeds the admin product
   // list, so dropping these would blank the per-size limit inputs on edit.

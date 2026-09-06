@@ -6,7 +6,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
-import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getSizeCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveSizeLimits, visibleProductCategories } from '@/lib/storefront-config';
+import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getCategoryCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveCategoryLimits, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
@@ -33,9 +33,22 @@ function addressValidationError(address: string): string | null {
   return validateShippingAddress(address);
 }
 
-function getProductPriceCategory(product: any, size: string) {
-  const cats = product.priceCategories || [];
-  return cats.find((c: any) => c.size === size) || null;
+/**
+ * Format a variant's selectable label. When multiple variants share the SAME
+ * size string, disambiguate by appending the price and the resolved checkout
+ * mode so two otherwise-identical labels can never collide in the UI. No
+ * product/variant/price values are hardcoded — everything is derived from the
+ * variant's own `size`, `price` and the resolved `mode`.
+ */
+function variantSizeLabel(cats: any[], cat: any, mode: 'RAFFLE' | 'FCFS'): string {
+  const size = String(cat?.size ?? '').trim();
+  const price = Number(cat?.price);
+  const hasPrice = Number.isFinite(price) && price > 0;
+  const normalized = size.toLowerCase();
+  const isDuplicate = cats.filter((c: any) => String(c?.size ?? '').trim().toLowerCase() === normalized).length > 1;
+  const base = hasPrice ? `${size} ($${price})` : size;
+  if (isDuplicate && size) return `${base} - ${mode}`;
+  return base;
 }
 
 /**
@@ -211,7 +224,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSize, setSelectedSize] = useState<string>('');
+  const [selectedVariantIndex, setSelectedVariantIndex] = useState<number>(0);
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   // When a customer is signed in, the entry-form email field is locked to their
@@ -270,6 +283,20 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // effect re-runs — the old local `notified` flag reset on every re-run, which let a
   // re-fetch that returned the same due anchor loop forever.
   const dueHandledRef = useRef<{ productId: string; anchor: number; at: number }>({ productId: '', anchor: NaN, at: 0 });
+
+  // ── Canonical variant selection ───────────────────────────────────────────
+  // Track the SELECTED VARIANT INDEX (not its size string) so two variants that
+  // share the same size label can never collide. Everything downstream — price,
+  // checkout mode, limits, and the size string sent to checkout — derives from
+  // this single index, so selecting a chip always loads THAT exact variant.
+  const priceCategories = Array.isArray(product?.priceCategories) ? product.priceCategories : [];
+  const activeVariantIndex = priceCategories.length > 0
+    ? (Number.isInteger(selectedVariantIndex) && selectedVariantIndex >= 0 && selectedVariantIndex < priceCategories.length
+        ? selectedVariantIndex
+        : 0)
+    : 0;
+  const selectedCategory = priceCategories.length > 0 ? priceCategories[activeVariantIndex] : null;
+  const selectedSize = selectedCategory ? String(selectedCategory.size ?? '') : '';
 
   // Live Mapbox autofill hint (drives the small status line under the shipping
   // field). Updated whenever lib/mapbox-autofill.ts refreshes its status, plus a
@@ -349,9 +376,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         const nextProductId = String(data.product.id || '');
         const isSameProduct = productIdRef.current === nextProductId;
         productIdRef.current = nextProductId;
-        setSelectedSize((prev) => {
-          if (prev && cats.some((cat: any) => cat.size === prev)) return prev;
-          return cats.length > 0 ? cats[0].size : prev;
+        setSelectedVariantIndex((prev) => {
+          if (isSameProduct && cats.length > 0) {
+            return Number.isInteger(prev) && prev >= 0 && prev < cats.length ? prev : 0;
+          }
+          return 0;
         });
         // Only reset the gallery when the visitor actually switched products —
         // never on a same-product re-fetch (which would also flicker the photo
@@ -415,10 +444,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   useEffect(() => {
     if (!product) return;
     const cats = product.priceCategories || [];
-    if (cats.length > 0 && !cats.some((cat: any) => cat.size === selectedSize)) {
-      setSelectedSize(cats[0].size);
-    }
-  }, [product, selectedSize]);
+    if (cats.length === 0) return;
+    setSelectedVariantIndex((prev) =>
+      Number.isInteger(prev) && prev >= 0 && prev < cats.length ? prev : 0,
+    );
+  }, [product]);
 
   // ── Per-size countdown anchors ─────────────────────────────────────────────
   // The displayed countdown AND the draw-trigger anchor depend on the SELECTED
@@ -430,7 +460,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // timer the visitor saw hits zero.
   useEffect(() => {
     if (!product) return;
-    const size = selectedSize || String((product.priceCategories || [])[0]?.size || '');
+    const cats = product.priceCategories || [];
+    const idx = Number.isInteger(selectedVariantIndex) && selectedVariantIndex >= 0 && selectedVariantIndex < cats.length ? selectedVariantIndex : 0;
+    const size = (cats[idx] && String(cats[idx].size || '').trim()) || String(cats[0]?.size || '');
     selectedSizeRef.current = size;
     if (product.isArchived) {
       setRaffleEndsAt(null);
@@ -443,7 +475,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     const dueMs = anchors.dueAnchor ? dropTimestampToMsOrNaN(anchors.dueAnchor, storeTz) : NaN;
     setRaffleEndsAt(Number.isFinite(anchorMs) && anchorMs > 0 ? anchorMs : null);
     setRaffleDueAt(Number.isFinite(dueMs) && dueMs > 0 ? dueMs : null);
-  }, [product, selectedSize]);
+  }, [product, selectedVariantIndex]);
 
   // Attach Mapbox address autofill once the product (and its address input) is
   // rendered. The helper is a singleton, so calling it from multiple components
@@ -850,13 +882,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
   const addToCart = async () => {
     if (!product) return;
-    const cat = getProductPriceCategory(product, selectedSize);
+    const cat = selectedCategory;
     if (!cat || !isConfiguredPrice(cat.price)) {
       setMessage('Price not set for this size. Please set in admin.');
       notify({ type: 'error', message: 'This size is not ready yet.' });
       return;
     }
-    const checkoutMode = getSizeCheckoutMode(product, selectedSize);
+    const checkoutMode = getCategoryCheckoutMode(product, selectedCategory);
     const isRaffleEntry = checkoutMode === 'RAFFLE';
 
     // Block re-adding an item the customer already secured as a raffle/waitlist
@@ -921,7 +953,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         checkoutMode: checkoutMode,
         productType: isRaffleEntry ? 'raffle' : 'fcfs',
       };
-      const maxPerCart = resolveSizeLimits(product, selectedSize).maxPerCart;
+      const maxPerCart = resolveCategoryLimits(product, selectedCategory).maxPerCart;
       const inCartCount = cart.filter((entry) => entry.productId === product.id && entry.size === selectedSize).length;
       if (inCartCount >= maxPerCart) {
         setMessage(`Limit reached: ${maxPerCart} for ${product.name} (${selectedSize}).`);
@@ -1208,8 +1240,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   if (error === 'Product not found') return <NotFoundView />;
   if (error || !product) return <div style={{ padding: 40, color: '#f87171' }}>{error || 'Product not found'}</div>;
 
-  const priceCat = getProductPriceCategory(product, selectedSize);
-  const price = priceCat?.price || 0;
+  const price = selectedCategory ? (Number(selectedCategory.price) || 0) : 0;
   // Rewards incentive: "You'll earn X points" for the selected size. Only
   // advertised when the earn rate is configured AND the price is a real
   // configured amount (never the placeholder sentinel).
@@ -1218,7 +1249,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // Mixed-format releases: each size can be a raffle OR a direct-sale (FCFS)
   // item — e.g. a sampler sells instantly while the full bottle runs a raffle.
   // The selected size decides the CTA, the countdown and the cart line mode.
-  const checkoutMode = getSizeCheckoutMode(product, selectedSize);
+  const checkoutMode = getCategoryCheckoutMode(product, selectedCategory);
   const canCheckoutDirect = checkoutMode === 'FCFS';
   const isRaffleProduct = checkoutMode === 'RAFFLE';
   const hasMixedModes = hasMixedCheckoutModes(product);
@@ -1523,17 +1554,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-              {(product.priceCategories || []).map((cat: any) => {
+              {(product.priceCategories || []).map((cat: any, index: number) => {
                 const chipIsSample = isSamplerSize(product, cat.size);
                 const chipBadge = chipIsSample
                   ? String((product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase())?.label || 'Sample')
                   : '';
-                const chipMode = getSizeCheckoutMode(product, cat.size);
+                const chipMode = getCategoryCheckoutMode(product, cat);
                 const accent = configPalette.checkoutCtaButton || '#635bff';
-                const chipSelected = selectedSize === cat.size;
+                const chipSelected = activeVariantIndex === index;
+                const sizeLabel = variantSizeLabel(product.priceCategories || [], cat, chipMode);
                 return (
-                  <button key={cat.size} type="button" onClick={() => setSelectedSize(cat.size)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    {cat.size} {cat.price > 0 ? `($${cat.price})` : ''}
+                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {sizeLabel}
                     <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                       {chipMode === 'FCFS' ? 'buy' : 'raffle'}
                     </span>
