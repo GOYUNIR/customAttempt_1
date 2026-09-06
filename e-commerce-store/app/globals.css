@@ -307,3 +307,60 @@ textarea {
   from { transform: translateY(100%); }
   to { transform: none; }
 }
+
+/* ── Product-detail (PDP) responsive grid ────────────────────────────────────────
+   Mobile is a single column (media → purchase panel → notes/cart). On >=768px the
+   media gallery sits left and the purchase panel (size chips → sample incentive →
+   checkout fields → CTA) sits right, sticky under the fixed header. The
+   notes/cart rows span the full width below. Colors stay inline (theme-driven);
+   this file only owns the STRUCTURE + responsive breakpoint. */
+.goyunir-pdp-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+.goyunir-pdp-full {
+  grid-column: 1 / -1;
+}
+@media (min-width: 768px) {
+  .goyunir-pdp-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
+    gap: 24px;
+  }
+  .goyunir-pdp-sticky {
+    position: sticky;
+    top: 84px;
+    max-height: calc(100dvh - 104px);
+    overflow-y: auto;
+  }
+}
+
+/* ── Mobile sticky bottom checkout bar ───────────────────────────────────────────
+   Keeps the primary CTA ("Enter allocation" / "Secure piece · $X") pinned above
+   the iOS home indicator + in-app browser chrome. dvh-safe, safe-area padded,
+   hidden on desktop where the sticky right panel owns the action. */
+.goyunir-pdp-cta-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+@media (min-width: 768px) {
+  .goyunir-pdp-cta-bar {
+    display: none;
+  }
+}
+
+/* ── Zero-image gallery fallback ─────────────────────────────────────────────────
+   A slow ambient shimmer so a product with no uploaded media never renders a blank
+   black box on social/in-app webviews. */
+@keyframes goyunirZeroImage {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}

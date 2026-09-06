@@ -240,6 +240,7 @@ function mergePublicConfig(redisConfig: Record<string, any> = {}) {
       ? { ...(defaults.heroContent || {}) }
       : { ...(defaults.heroContent || {}), ...(redisConfig.heroContent || {}) },
     socialProof: { ...(defaults.socialProof || {}), ...(redisConfig.socialProof || {}) },
+    aiHero: { ...(defaults.aiHero || {}), ...(redisConfig.aiHero || {}) },
     brandFooterData: { ...(defaults.brandFooterData || {}), ...(redisConfig.brandFooterData || {}) },
     catalogPreview: {
       upcomingDrops: Array.isArray(redisConfig?.catalogPreview?.upcomingDrops)

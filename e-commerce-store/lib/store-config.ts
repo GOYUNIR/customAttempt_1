@@ -110,6 +110,13 @@ export interface StoreConfig {
     showCta?: boolean;
     showStory?: boolean;
   };
+  /** AI Hero Banner & Shader Animation settings (admin → Settings → AI Hero). */
+  aiHero?: {
+    enabled?: boolean;
+    preset?: string;
+    prompt?: string;
+    opacity?: number;
+  };
   socialProof: {
     label: string;
     baseCount: number;
@@ -251,6 +258,12 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     showCta: true,
     showStory: true,
   },
+  aiHero: {
+    enabled: true,
+    preset: 'ambient_mesh',
+    prompt: '',
+    opacity: 0.55,
+  },
   socialProof: {
     label: 'Limited drop access',
     baseCount: 0,
@@ -337,6 +350,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
       animationMechanics: { ...DEFAULT_CONFIG.animationMechanics, ...config.animationMechanics },
       raffleRegistrationForm: { ...DEFAULT_CONFIG.raffleRegistrationForm, ...config.raffleRegistrationForm },
       heroContent: { ...DEFAULT_CONFIG.heroContent, ...config.heroContent },
+      aiHero: { ...DEFAULT_CONFIG.aiHero, ...config.aiHero },
       socialProof: { ...DEFAULT_CONFIG.socialProof, ...config.socialProof },
       brandFooterData: { ...DEFAULT_CONFIG.brandFooterData, ...config.brandFooterData },
       catalogPreview: { ...DEFAULT_CONFIG.catalogPreview, ...config.catalogPreview },

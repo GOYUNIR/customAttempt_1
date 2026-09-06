@@ -179,6 +179,13 @@ export interface StorefrontConfig {
     showCta?: boolean;
     showStory?: boolean;
   };
+  /** AI Hero Banner & Shader Animation settings (admin → Settings → AI Hero). */
+  aiHero?: {
+    enabled?: boolean;
+    preset?: string;
+    prompt?: string;
+    opacity?: number;
+  };
   socialProof: {
     label: string;
     baseCount: number;
@@ -654,6 +661,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     animationMechanics: { ...defaultAnimationMechanics, ...(input.animationMechanics ?? {}) },
     raffleRegistrationForm: { ...defaultFormCopy, ...(input.raffleRegistrationForm ?? {}) },
     heroContent: { ...defaultHeroContent, ...(input.heroContent ?? {}) },
+    aiHero: { enabled: true, preset: 'ambient_mesh', prompt: '', opacity: 0.55, ...(input.aiHero ?? {}) },
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },
     brandFooterData: { ...defaultFooter, ...(input.brandFooterData ?? {}) },
     catalogPreview: {

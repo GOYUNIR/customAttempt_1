@@ -25,6 +25,7 @@ import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplay
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
 import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
 import { samplerPresentationSeed } from '@/lib/sampler-config';
+import HeroAnimationCanvas, { HERO_SHADER_PRESETS } from '@/components/HeroAnimationCanvas';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
 
@@ -305,6 +306,7 @@ const SETTINGS_SECTIONS: [string, string][] = [
   ['settings-presets', 'Design'],
   ['settings-theme', 'Theme'],
   ['settings-hero', 'Hero'],
+  ['settings-aihero', 'AI Hero'],
   ['settings-behavior', 'Behavior'],
   ['settings-layout', 'Layout'],
   ['settings-form', 'Form'],
@@ -1315,6 +1317,16 @@ const DEFAULT_LAYOUT_SETTINGS = {
   homepageFallback: 'upcoming' as string,
 };
 
+// AI Hero Banner & Shader Animation (admin → Settings → AI Hero). The home-page
+// hero renders a GPU canvas shader (or CSS ambient-gradient fallback) behind the
+// hero card. Colors come from the live theme accents; zero product data.
+const DEFAULT_AI_HERO_SETTINGS: { enabled: boolean; preset: string; prompt: string; opacity: number } = {
+  enabled: true,
+  preset: 'ambient_mesh',
+  prompt: '',
+  opacity: 0.55,
+};
+
 const DEFAULT_REF_PREFIX = 'GU';
 
 // ---------------------------------------------------------------------------
@@ -1888,6 +1900,8 @@ export default function AdminPortal() {
   // Home-page layout (admin → Settings → Home Layout). How many featured
   // products share a row on the home page (1 = full width, 2 = side by side).
   const [layoutSettings, setLayoutSettings] = useState<{ productsPerRow: 1 | 2; homepageFallback: string }>(DEFAULT_LAYOUT_SETTINGS);
+  // AI Hero Banner & Shader Animation (admin → Settings → AI Hero).
+  const [aiHeroSettings, setAiHeroSettings] = useState(DEFAULT_AI_HERO_SETTINGS);
   // Reference-code prefix (admin → Settings → Checkout & Orders). Every order /
   // entry reference starts with this prefix (default `GU-`). Stored under
   // store:config.refPrefix.
@@ -2097,6 +2111,7 @@ export default function AdminPortal() {
           behavior: { ...DEFAULT_BEHAVIOR_SETTINGS, ...(s.behavior || {}) },
           checkout: { ...DEFAULT_CHECKOUT_SETTINGS, ...(s.checkout || {}) },
           layout: { ...DEFAULT_LAYOUT_SETTINGS, ...(s.layout || {}) },
+          aiHero: { ...DEFAULT_AI_HERO_SETTINGS, ...(s.aiHero || {}) },
           refPrefix: (() => {
             const raw = String(s.refPrefix || '').trim().toUpperCase();
             return /^[A-Z0-9]{1,4}$/.test(raw) ? raw : DEFAULT_REF_PREFIX;
@@ -2117,6 +2132,7 @@ export default function AdminPortal() {
         setBehaviorSettings(next.behavior);
         setCheckoutSettings(next.checkout);
         setLayoutSettings(next.layout);
+        setAiHeroSettings(next.aiHero);
         setRefPrefix(next.refPrefix);
         setOrbSettings(next.orbs);
         setRequireSignup2FA(s.requireSignup2FA !== false);
@@ -4074,6 +4090,7 @@ export default function AdminPortal() {
           behavior: behaviorSettings,
           checkout: checkoutSettings,
           layout: layoutSettings,
+          aiHero: aiHeroSettings,
           refPrefix,
           productNotes,
           orbs: orbSettings,
@@ -4099,6 +4116,7 @@ export default function AdminPortal() {
           behavior: behaviorSettings,
           checkout: checkoutSettings,
           layout: layoutSettings,
+          aiHero: aiHeroSettings,
           refPrefix,
           orbs: orbSettings,
           requireSignup2FA,
@@ -8131,6 +8149,44 @@ export default function AdminPortal() {
                   </div>
                 );
               })()}
+
+              <h4 id="settings-aihero" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>AI Hero Banner &amp; Shader</h4>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>
+                A GPU-accelerated canvas shader rendered behind the home-page hero card. Falls back to a CSS ambient gradient on low-power devices, battery saver, or when the visitor prefers reduced motion. Colors come from the live theme accents.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={aiHeroSettings.enabled} onChange={(e) => setAiHeroSettings((p) => ({ ...p, enabled: e.target.checked }))} />
+                  Enable AI hero shader animation
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  Shader style
+                  <select value={aiHeroSettings.preset} onChange={(e) => setAiHeroSettings((p) => ({ ...p, preset: e.target.value }))} style={{ ...inputStyle, width: '100%' }}>
+                    {HERO_SHADER_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  Opacity ({Math.round((aiHeroSettings.opacity || 0.55) * 100)}%)
+                  <input type="range" min={0.1} max={1} step={0.05} value={aiHeroSettings.opacity ?? 0.55} onChange={(e) => setAiHeroSettings((p) => ({ ...p, opacity: Number(e.target.value) }))} style={{ width: '100%' }} />
+                </label>
+                <label style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  AI prompt hint
+                  <textarea rows={2} placeholder="Optional instruction for the AI motion engine (e.g. slow ambient drift)" value={aiHeroSettings.prompt} onChange={(e) => setAiHeroSettings((p) => ({ ...p, prompt: e.target.value }))} style={{ ...inputStyle, width: '100%', resize: 'vertical' }} />
+                </label>
+                <div style={{ position: 'relative', height: 140, borderRadius: 12, overflow: 'hidden', border: '1px solid #27272a' }}>
+                  {aiHeroSettings.enabled && (
+                    <HeroAnimationCanvas
+                      preset={aiHeroSettings.preset}
+                      opacity={aiHeroSettings.opacity}
+                      colorA={themeSettings.accentPurple || '#bf5af2'}
+                      colorB={themeSettings.accentBlue || '#0071e3'}
+                      colorC={themeSettings.accentPurple || '#ff375f'}
+                    />
+                  )}
+                </div>
+              </div>
 
               <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 10px' }}>

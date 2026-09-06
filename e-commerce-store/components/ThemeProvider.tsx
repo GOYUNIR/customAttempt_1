@@ -31,6 +31,8 @@ export interface LiveThemeValue {
   checkout?: { requireAddressAutofill?: boolean };
   /** Home-page layout (admin → Settings → Home Layout). */
   layout?: { productsPerRow?: number };
+  /** AI Hero Banner & Shader Animation (admin → Settings → AI Hero). */
+  aiHero?: { enabled?: boolean; preset?: string; prompt?: string; opacity?: number };
 }
 
 const ThemeContext = createContext<LiveThemeValue | null>(null);

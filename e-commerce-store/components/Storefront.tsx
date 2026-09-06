@@ -1387,9 +1387,44 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         fcfsBorder: 'rgba(59,130,246,0.45)',
       };
 
+  // ── Primary CTA (shared by the in-panel button and the mobile sticky bar) ────
+  // The sticky bottom checkout bar duplicates ONLY the primary action ("Enter
+  // allocation" / "Secure piece · $X") so the one-tap checkout flow is never more
+  // than a thumb-reach away inside iOS Safari + Instagram/TikTok in-app webviews.
+  // The label + handler derive from the SAME checkout-mode/price/sold-out state as
+  // the in-panel buttons — zero hardcoded product copy.
+  const primaryCtaLabel = soldOut
+    ? 'Sold out'
+    : isRaffleProduct
+      ? (product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation'))
+      : canCheckoutDirect
+        ? `Secure piece · $${price.toFixed(2)}`
+        : '';
+  const handlePrimaryCta = () => {
+    if (isSubmitting || checkoutDisabled) return;
+    if (isRaffleProduct) handleRaffleSubmit();
+    else if (canCheckoutDirect) handleDirectCheckout();
+  };
+  const primaryCtaStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    padding: '15px 16px',
+    borderRadius: 999,
+    background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`,
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,0.28)',
+    fontWeight: 800,
+    letterSpacing: '0.5px',
+    textTransform: 'uppercase',
+    fontSize: 13,
+    cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer',
+    opacity: isSubmitting || checkoutDisabled ? 0.6 : 1,
+  };
+
   return (
-    <main style={{ minHeight: 'calc(100vh - 56px)', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px ${Math.round(72 * contentSpacingScale(configPalette))}px` }}>
-      <div style={{ maxWidth: 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
+    <main style={{ minHeight: '100dvh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(24 * contentSpacingScale(configPalette))}px 16px calc(${Math.round(104 * contentSpacingScale(configPalette))}px + env(safe-area-inset-bottom))` }}>
+      <div className="goyunir-pdp-grid" style={{ maxWidth: 1120, margin: '0 auto' }}>
+        <div className="goyunir-pdp-media" style={{ display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
         <section style={{ borderRadius: themeRadius(configPalette, 26), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 16) }}>
           <div
             id="goyunir-gallery-surface"
@@ -1410,6 +1445,11 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 transition: galleryDragging ? 'none' : 'transform 260ms cubic-bezier(.22,1,.36,1)',
               }}
             >
+              {galleryImages.length === 0 && (
+                <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(135deg, color-mix(in srgb, ${configPalette.accentPurple} 16%, transparent), color-mix(in srgb, ${configPalette.accentBlue} 16%, transparent), color-mix(in srgb, ${configPalette.accentPurple} 16%, transparent))`, backgroundSize: '220% 220%', animation: 'goyunirZeroImage 6s ease-in-out infinite', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', background: 'rgba(0,0,0,0.3)', padding: '8px 14px', borderRadius: 999 }}>{String(product.name || '')}</span>
+                </div>
+              )}
               {currentMediaIsVideo ? (
                 /* Video gallery item — plays inline with controls; videos are
                    never cropped (the admin crop tool applies to photos only). */
@@ -1562,7 +1602,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
         </section>
+        </div>
 
+        <div className="goyunir-pdp-sticky" style={{ display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
         <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: configPalette.cardBackground, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
@@ -1732,7 +1774,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
 
           {message && <div style={{ marginTop: 10, fontSize: 12, color: '#f5c542' }}>{message}</div>}
         </section>
+        </div>
 
+        <div className="goyunir-pdp-full" style={{ display: 'flex', flexDirection: 'column', gap: Math.round(16 * contentSpacingScale(configPalette)) }}>
         {product.showNotesSection !== false && (product.notes || []).length > 0 && (
         <section style={{ borderRadius: themeRadius(configPalette, 20), border: `1px solid ${configPalette.cardBorder}`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency), backgroundImage: cardSheen, padding: 14, color: configPalette.cardTextMain }}>
           <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMuted, marginBottom: 8 }}>Why this drop matters</div>
@@ -1760,7 +1804,20 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <button onClick={() => window.dispatchEvent(new CustomEvent('goyunir-open-cart'))} style={{ marginTop: 8, padding: '10px 14px', borderRadius: 999, background: configPalette.textMain, color: configPalette.primaryBackground, border: 'none', fontWeight: 700 }}>Review prepared bag</button>
           </section>
         )}
+        </div>
       </div>
+
+      {/* Mobile sticky bottom checkout bar — the primary action stays one tap away
+          in iOS Safari + in-app webviews (Instagram/TikTok). dvh-safe padding +
+          env(safe-area-inset-bottom) keep it above the home indicator; hidden on
+          desktop (>=768px) where the sticky right panel owns the CTA. */}
+      {!soldOut && primaryCtaLabel && (
+        <div className="goyunir-pdp-cta-bar" style={{ background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#0e0e10'), borderTop: `1px solid ${configPalette.cardBorder}`, boxShadow: '0 -8px 30px rgba(0,0,0,0.25)' }}>
+          <button onClick={handlePrimaryCta} disabled={isSubmitting || checkoutDisabled} style={primaryCtaStyle}>
+            {isSubmitting ? (<><ButtonSpinner /> Processing</>) : primaryCtaLabel}
+          </button>
+        </div>
+      )}
     </main>
   );
 }

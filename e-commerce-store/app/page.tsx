@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
+import HeroAnimationCanvas from '@/components/HeroAnimationCanvas';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -60,6 +61,10 @@ export default function HomePage() {
   // Social-proof counter settings (admin → Draws → Automation → Social Proof
   // Counter) — `showSection`/`showCaption` hide the counter or its caption.
   const [socialProofCfg, setSocialProofCfg] = useState<any>((liveCtx as any)?.socialProof || GOYUNIR_STORE_SUITE.socialProof);
+  // AI Hero Banner & Shader Animation (admin → Settings → AI Hero). Initialized
+  // from the server-baked theme, then refreshed from /api/store so admin edits
+  // apply within the ~10s cache window. Colors come from the live theme accents.
+  const [aiHero, setAiHero] = useState<any>((liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'ambient_mesh', opacity: 0.55 });
   // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
@@ -126,6 +131,7 @@ export default function HomePage() {
         if (data?.config?.socialProof) setSocialProofCfg(data.config.socialProof);
         if (data?.config?.copy) setCopyOverrides((prev) => ({ ...prev, ...data.config.copy }));
         if (data?.config?.layout?.productsPerRow) setProductsPerRow(data.config.layout.productsPerRow === 1 ? 1 : 2);
+        if (data?.config?.aiHero) setAiHero({ ...(GOYUNIR_STORE_SUITE as any).aiHero, ...data.config.aiHero });
         // `/api/store` returns ONE canonical `allProducts` array (lifecycle
         // flags on each product) — derive the active releases here, then apply
         // the Home-page fallback when there are no active releases (show
@@ -271,7 +277,16 @@ export default function HomePage() {
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
-        <section style={{ border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+        <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+          <HeroAnimationCanvas
+            enabled={aiHero.enabled !== false}
+            preset={aiHero.preset}
+            opacity={aiHero.opacity}
+            colorA={configPalette.accentPurple || '#bf5af2'}
+            colorB={configPalette.accentBlue || '#0071e3'}
+            colorC={configPalette.accentPurple || '#ff375f'}
+          />
+          <div style={{ position: 'relative', zIndex: 1 }}>
           {heroCoverImage && (
             <div
               className="goyunir-ai"
@@ -336,6 +351,7 @@ export default function HomePage() {
               Total raffle entries: <strong>{socialProofDisplay.toLocaleString()}</strong>
             </div>
           )}
+          </div>
         </section>
 
         {activeProducts.length > 0 && (

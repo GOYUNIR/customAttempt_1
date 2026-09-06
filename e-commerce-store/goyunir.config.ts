@@ -74,6 +74,17 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     storyBody: 'take control.',
   },
 
+  // AI Hero Banner & Shader Animation (admin → Settings → AI Hero). The
+  // home-page hero renders a GPU canvas shader (or a CSS ambient gradient
+  // fallback) behind the hero card. `preset` selects a generic procedural
+  // style; colors come from the live theme accents — zero product data here.
+  aiHero: {
+    enabled: true,
+    preset: 'ambient_mesh',
+    prompt: '',
+    opacity: 0.55,
+  },
+
   socialProof: {
     label: 'Limited drop access',
     baseCount: 0,

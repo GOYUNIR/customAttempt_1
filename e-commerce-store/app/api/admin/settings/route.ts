@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       animationMechanics, dropSchedule,
       socialProof, homeRedirectSlug, catalogPreview, orbs,
       copy, legal, catalog, behavior, checkout, refPrefix, layout,
-      requireSignup2FA, productDefaults
+      requireSignup2FA, productDefaults, aiHero
     } = body;
     
     // Get current config to merge
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       animationMechanics: animationMechanics || current.animationMechanics || {},
       dropSchedule: dropSchedule || current.dropSchedule || {},
       socialProof: socialProof || current.socialProof || {},
+      aiHero: aiHero || current.aiHero || {},
       homeRedirectSlug: homeRedirectSlug || current.homeRedirectSlug || undefined,
       catalogPreview: catalogPreview || current.catalogPreview || { upcomingDrops: [], archiveScents: [] },
       orbs: orbs || current.orbs || {},
