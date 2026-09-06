@@ -82,16 +82,20 @@ export async function POST(request: Request) {
   // Reuse the driver resolved above (a second read would double the Supabase
   // round-trips and re-risk a transient failure).
   if (driver?.configured) {
-    const completion = await driver.complete(buildShaderPrompt({ prompt, product }));
-    if (completion.ok) {
-      const parsed = parseShaderParamsResult(completion.text);
-      if (parsed) {
-        // Merge the AI refinement over the deterministic floor (never trust the
-        // model to fully replace a safe, bounded compile).
-        params = { ...floor, ...parsed, productSilhouette: parsed.productSilhouette || floor.productSilhouette };
-        source = 'ai';
-        provider = completion.provider;
+    try {
+      const completion = await driver.complete(buildShaderPrompt({ prompt, product }));
+      if (completion.ok) {
+        const parsed = parseShaderParamsResult(completion.text);
+        if (parsed) {
+          // Merge the AI refinement over the deterministic floor (never trust the
+          // model to fully replace a safe, bounded compile).
+          params = { ...floor, ...parsed, productSilhouette: parsed.productSilhouette || floor.productSilhouette };
+          source = 'ai';
+          provider = completion.provider;
+        }
       }
+    } catch {
+      // AI provider failed — keep the deterministic floor; never 503 the admin.
     }
   }
 
