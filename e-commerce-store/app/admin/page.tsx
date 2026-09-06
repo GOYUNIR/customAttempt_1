@@ -2750,70 +2750,38 @@ export default function AdminPortal() {
       window.alert('Save prevented: Add a URL slug (or a name to auto-generate one) before saving.');
       return;
     }
-    // ── NUCLEAR pre-save DOM + badge reconciliation ──
-    // Scrape every visible sync slug from the LIVE DOM (both the dedicated
-    // "Inventory Sync Slug" input AND the "🔗 Synced with [slug]" badge) once,
-    // then reconcile each variant against it UNCONDITIONALLY. If a slug exists
-    // in the DOM badge, the input, the transient draft, OR the canonical pool
-    // id, EVERY sync field is overwritten to the SAME slug — so state, DOM and
-    // the payload can never disagree. A typed-but-never-committed slug, and a
-    // slug the operator merely SEES in a badge, can never be dropped on save.
+    // ── SCOPED pre-save DOM + badge reconciliation ──
+    // Scrape every visible shared-inventory sync slug from the LIVE DOM (both
+    // the dedicated "Inventory Sync Slug" input AND the "🔗 Synced with [slug]"
+    // badge) once, then reconcile ONLY the variants that are explicitly flagged
+    // for sync or already carry an active sync slug/input. A slug the operator
+    // typed or committed can never be dropped — but an INDEPENDENT variant is
+    // never touched, so its own price/stripeId/winners/stock/sku/position
+    // configuration is always preserved verbatim.
     const domSyncSlugs = scrapeSyncSlugsFromDom();
 
-    // ── BRUTE FORCE global slug recovery ────────────────────────────────────
-    // (1) INHERIT PRODUCT-LEVEL SYNC STATE: if the product form itself carries a
-    //     ROOT-LEVEL sync slug (inventorySyncSlug / inventoryPoolId / _syncDraft),
-    //     copy it down to EVERY variant before the payload is built. A
-    //     product-scoped pool link can never be dropped just because no single
-    //     variant re-stated it.
-    const rootSyncSlug = slugifyName(
-      String(
-        (productForm as any).inventorySyncSlug ||
-        (productForm as any).inventoryPoolId ||
-        (productForm as any)._syncDraft ||
-        '',
-      ).trim(),
-    );
-
-    // (2) UNCONDITIONAL PAGE-WIDE DOM EXTRACTION: read EVERY input on the page
-    //     (regardless of name/id) and scan the whole body text for a sync-slug
-    //     marker ("Synced with <slug>" / "Inherits price …"). If ANY slug-like
-    //     string exists anywhere on screen, recover it and apply it to ALL
-    //     variants so a slug the operator typed or merely SAW can never be lost.
-    const allInputValues: string[] = Array.from(document.querySelectorAll('input')).map((i) => i.value);
-    console.log('[PAGE INPUT VALUES]', allInputValues);
-
-    const bodyText: string = typeof document !== 'undefined' ? (document.body?.innerText || '') : '';
-    let globalSlug = '';
-    const syncedMatch = bodyText.match(/Synced with\s+([A-Za-z0-9_-]+)/);
-    if (syncedMatch) globalSlug = syncedMatch[1];
-    if (!globalSlug) {
-      const inheritsMatch = bodyText.match(/Inherits\s+price[^]*?([A-Za-z0-9][A-Za-z0-9_-]{1,63})/);
-      if (inheritsMatch) globalSlug = inheritsMatch[1];
-    }
-    if (!globalSlug) {
-      for (const raw of allInputValues) {
-        const t = String(raw || '').trim();
-        if (t && /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(t)) {
-          globalSlug = t;
-          break;
-        }
-      }
-    }
-    const bruteForceSlug = slugifyName(globalSlug);
-
     const reconciledCategories = (productForm.priceCategories || []).map((c: any, i: number) => {
+      // ALWAYS spread the existing category so no field (price, stripeId,
+      // winnerTiers, position, stock, sku, size, …) is ever mutated or dropped
+      // during reconciliation — only the sync fields may change, and only for a
+      // variant that is genuinely pool-linked.
       const cat = { ...c };
       const domSlug = String(domSyncSlugs.get(i) || '').trim();
-      const fallback = String(cat._syncDraft || cat.inventoryPoolId || '').trim();
-      // Priority: per-index DOM scrape → per-category draft/pool → PRODUCT-level
-      // inheritance → page-wide brute-force slug. ANY of these proves the
-      // operator intends this variant to be pool-linked.
-      const foundSlug = domSlug || fallback || rootSyncSlug || bruteForceSlug;
-      if (foundSlug) {
-        const slug = slugifyName(foundSlug);
-        // Unconditional reconciliation: overwrite every sync field so the
-        // committed slug, draft, pool id and toggle all agree on ONE value.
+      const existingSlug = String(
+        cat.inventorySyncSlug || cat._syncDraft || cat.inventoryPoolId || '',
+      ).trim();
+      const isSyncFlagged = cat.syncWithExisting === true;
+      // A variant is reconciled ONLY when it is (a) explicitly sync-flagged,
+      // (b) already carrying an active sync slug/input, or (c) showing a
+      // DOM-scraped slug at its OWN row index. Everything else is independent
+      // and is returned untouched — no slug is ever forced onto it.
+      const shouldSync = isSyncFlagged || Boolean(existingSlug) || Boolean(domSlug);
+      if (!shouldSync) return cat;
+
+      const slug = slugifyName(domSlug || existingSlug);
+      if (slug) {
+        // Apply the resolved slug to every sync field so state, DOM and payload
+        // agree on ONE value — but never touch the variant's commerce fields.
         cat.inventorySyncSlug = slug;
         cat.inventoryPoolId = slug;
         cat._syncDraft = slug;
