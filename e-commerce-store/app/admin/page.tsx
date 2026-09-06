@@ -2365,7 +2365,7 @@ export default function AdminPortal() {
       inventorySyncSlug: slug,
       inventoryPoolId: slug,
       syncWithExisting: true,
-      _syncDraft: '',
+      _syncDraft: slug,
     };
     cats[index] = cat;
     if (!slug) return { ...prev, priceCategories: cats };
@@ -2694,6 +2694,7 @@ export default function AdminPortal() {
         return true;
       })
       .map((c: any, i: number) => {
+        console.log('[DEBUG CAT KEYS]', JSON.stringify(c));
         const out = { ...c, position: i };
         // ── Slug-sync auto-commit (never lose a saved/typed sync slug) ──
         // The shared-inventory slug can live in THREE places while editing:
@@ -5386,7 +5387,7 @@ export default function AdminPortal() {
                                   type="text"
                                   placeholder="Inventory Sync Slug"
                                   title="Shared-stock key. Type a slug that another variant already uses to inherit its price, stock, SKU, Stripe ID and limits — or a NEW slug to start a shared pool. Click Link (or press Enter) to commit."
-                                  value={cat._syncDraft ?? cat.inventorySyncSlug ?? ''}
+                                  value={cat._syncDraft || cat.inventorySyncSlug || ''}
                                   onChange={(e) => typeInventorySyncSlug(idx, e.target.value)}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') {

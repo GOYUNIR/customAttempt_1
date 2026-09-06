@@ -643,6 +643,11 @@ is the backing endpoint.
 - `lib/mapbox-autofill.ts` — read the Mapbox notes above before touching it.
 
 ## Change Log (append every change)
+- **2026-09-05 — Sync-slug state disconnect fix: input binding + commit consistency + save-time dump (`sync-slug-binding-disconnect-fix`):**
+  - **🔗 Input binding hardened.** The "Inventory Sync Slug" input `value` now uses `cat._syncDraft || cat.inventorySyncSlug || ''` (was `??`), so an empty-string `_syncDraft` can never mask a committed `inventorySyncSlug` — the binding now agrees with the `||`-based resolution used in `saveProduct`'s payload builder.
+  - **🧱 Commit state consistency.** `commitInventorySyncSlug` now sets `_syncDraft: slug` (was `''`) so the in-memory committed state matches `hydrateCategorySyncState` (which sets `_syncDraft: committedSlug` on reload) — no more shape mismatch between the just-committed and the reloaded category object.
+  - **📡 Save-time category dump.** `saveProduct`'s `priceCategories` map now logs `[DEBUG CAT KEYS]` with `JSON.stringify(c)` so an operator can inspect every key on the category object at save time in F12.
+  - **🧪 Verified:** `npx tsc --noEmit` clean, `npm test` **345/345**. No new Redis keys (the link fields remain `inventorySyncSlug`/`inventoryPoolId`).
 - **2026-09-04 — Product panel UI/UX cleanup (`product-panel-cleanup`):**
   - **🧹 Collapsed top bloat & moved Live Preview.** Removed the verbose "Manage all products…" paragraph and the sticky **Math & health check** banner (blocking errors now surface via inline field highlights + a red **"Save Blocked: Fix highlighted errors"** Save button state). The **Live Preview** moved out of the main vertical flow into a toggleable side drawer (👁 Preview button) that renders `ProductLivePreview` as a fixed right-hand overlay.
   - **🧹 Purged legacy microcopy.** Removed tooltips/descriptions referencing "sentinels", "Base64 storage", "fallback limits", and the duplicated "Upcoming" status explanation; replaced paragraph-long section intros with 1-sentence subtitles.
