@@ -16,6 +16,7 @@ export async function GET(request: Request) {
   const productId = String(url.searchParams.get('productId') || '').trim().slice(0, 200);
   const size = String(url.searchParams.get('size') || '').trim().slice(0, 50);
   const orderSubtotalCents = Math.max(0, Math.round(Number(url.searchParams.get('orderSubtotal') || 0) * 100));
+  const itemCount = Math.max(0, Math.round(Number(url.searchParams.get('itemCount') || 0)));
   // Load-time re-validation (stored promo sanity check on page load) must NOT
   // inflate the click counter — only explicit user actions should track.
   const quiet = url.searchParams.get('quiet') === '1';
@@ -37,9 +38,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ valid: false, error: 'Invalid or inactive code' });
   }
 
-  // Giftable codes (store credit redeemed with the admin "gift/share"
-  // toggle on) are transferable — the issuedForEmail reservation is skipped.
-  if (promo.giftable !== true && promo.issuedForEmail && email && String(promo.issuedForEmail).toLowerCase() !== email) {
+  // Giftable / shareable codes (store credit redeemed with the admin "gift/share"
+  // toggle on, or a promo flagged "Shareable") are transferable — the
+  // issuedForEmail reservation is skipped so they can be shared across accounts.
+  if (promo.shareable !== true && promo.giftable !== true && promo.issuedForEmail && email && String(promo.issuedForEmail).toLowerCase() !== email) {
     return NextResponse.json({ valid: false, error: 'This code is reserved for a different account' });
   }
 
@@ -90,6 +92,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ valid: false, error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}` });
   }
 
+  const minimumItemCount = Math.max(0, Number(promo.minimumItemCount || 0));
+  if (minimumItemCount > 0 && itemCount > 0 && itemCount < minimumItemCount) {
+    return NextResponse.json({ valid: false, error: `This code unlocks on carts with at least ${minimumItemCount} item${minimumItemCount === 1 ? '' : 's'}` });
+  }
+
   if (!quiet) {
     await trackPromoClick(redis, code);
   }
@@ -100,6 +107,8 @@ export async function GET(request: Request) {
     customerDiscountPercent: Math.min(50, Math.max(0, Number(promo.customerDiscountPercent) || 0)),
     fixedDiscountCents: Math.max(0, Number(promo.fixedDiscountCents || 0)),
     minimumOrderSubtotalCents,
+    minimumItemCount: Math.max(0, Number(promo.minimumItemCount || 0)),
+    shareable: promo.shareable === true || promo.giftable === true,
     eligibleProductSlugs: Array.isArray(promo.eligibleProductSlugs) ? promo.eligibleProductSlugs : [],
     eligibleSizes: Array.isArray(promo.eligibleSizes) ? promo.eligibleSizes : [],
     maxUsesPerEmail: maxPerEmail,

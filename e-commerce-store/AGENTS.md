@@ -482,8 +482,9 @@ input like `123 realstreet` can never be saved.
 ### Promo codes
 
 - Codes stored in `promo:codes` (hash). Customer discount %, promoter payout
-  %, per-email/per-total use caps, per-product/size eligibility, min order,
-  giftable (transferable) flag, `issuedForEmail` reservation.
+  %, per-email/per-total use caps, per-product/size eligibility, min order
+  subtotal + min item count, shareable (transferable) flag, `issuedForEmail`
+  reservation.
 - `?ref=` / `?promo=` links lock a promoter code for the session
   (`goyunir-promo-code` localStorage) and are preserved through checkout
   metadata. Promoters can't use their own code.
@@ -1868,6 +1869,15 @@ is the backing endpoint.
     fixed end-to-end: `lib/customer-verify.ts` returns `retryAfterSeconds` on the
     throttle, `/api/auth/resend-verification` echoes it (+ `Retry-After` header),
     and BOTH `/account` and `/auth/signup` now show a live cooldown-timer button
+
+- **2026-09-06 — Multi-feature system update: admin UI, storefront stability, synced metadata, auto-SKU & promo engine (`admin-ui-storefront-sync-sku-promo`):**
+  - **📋 Product Type dropdown repositioned + "Follow product" removed (`app/admin/page.tsx`).** Each variant card's "Variant Mode" `<select>` moved OUT of the old bottom "Row 2 — mode selector" into a new **Row 0b** directly below the "Sync with existing slug?" prompt, so the sellable mode is the FIRST decision an unlinked variant makes. The `<option value="">Follow product …</option>` option is deleted — variants only allow explicit standalone modes (⚡ Instant Buy / 🎟 Raffle / 📦 Preorder / ⏰ Time Slot / 🔒 Gated Access / 👥 Group Buy / 📉 Dutch Auction / 💬 RFQ). The select's `value` now falls back to the product-level effective mode (`effectiveSizeCheckoutMode` → `ALLOCATION_DRAW`/`INSTANT_BUY`) when a legacy variant has no explicit mode, and `setVariantCommerceMode` still writes `commerceMode` + the derived `checkoutMode` (survives save reconciliation + drives the live storefront via `getCategoryCheckoutMode`). The old Row 2 now holds only the 🧪 sampler toggle + mode summary + ✕ remove.
+  - **🖱 Storefront variant button layout-shift fixed (`components/Storefront.tsx`).** The "Select size" chip used `fontWeight: chipSelected ? 700 : 500`, so tapping an option re-bolded its text and widened the button, shifting adjacent chips. It now uses a constant `fontWeight: 600`, `boxSizing: 'border-box'`, and an **inset box-shadow ring** (`inset 0 0 0 1px accent`) for the selected state instead of a layout-altering weight/border change — selection never changes button dimensions or pushes siblings.
+  - **🧪 Synced-variant metadata derived from the variant object (`lib/sampler-config.ts` + `components/Storefront.tsx`).** New `categorySampleBadge(product, category)` resolves a variant's "Sample" badge from the VARIANT OBJECT first (`samplerLabel`, copied at link time), then falls back to the product-level `samplerSizes` lookup by size. `commitInventorySyncSlug` (`app/admin/page.tsx`) now copies `commerceMode` + the three JSON blocks (`accessRule`/`billingRule`/`scheduleConfig`) AND the source's sampler badge (`samplerLabel`) onto the synced variant. The storefront size chips + a new details-panel tag row now read from the selected variant index object, and a new 🔗 shared-pool tag renders when the selected variant carries `inventorySyncSlug`/`inventoryPoolId` — so a slug-synced variant shows its badge/tier/pool tags exactly as the standalone source page does.
+  - **🔤 Dynamic "Auto SKU" button (`app/admin/page.tsx`).** New `autoSkuForVariant(product, index)` builds `[product-slug]-[variant-name]` (or `[product-slug]-v<index+1>` when unnamed) with zero hardcoded data. A new **"Auto SKU"** button sits beside the SKU input and writes `productForm.priceCategories[i].sku` via a functional state update, so the controlled input re-renders immediately; existing SKUs still re-hydrate on edit (`normalizePriceCategory` unchanged).
+  - **🏷 Promo rule engine expanded + Shareable toggle (`app/api/admin/promos`, `app/api/promo/validate`, `app/api/checkout`, `app/api/checkout/cart`, `app/api/account/redeem-points`, `app/admin/page.tsx`).** `PromoRecord` gained `minimumItemCount` (require the cart to contain ≥ X items — prevents single low-value item abuse) and `shareable` (transferable across accounts, OR-ed with the existing `giftable` flag everywhere `issuedForEmail` is gated). The admin Promotions form gained a "Min items in cart (0=none)" input + a "Shareable" checkbox (both persisted + re-hydrated on Edit), and the validate/checkout/cart routes enforce both constraints server-side.
+  - **🧪 Verified:** `npx tsc --noEmit` clean, `npm test` **350/350**, `eslint` 0 errors on all touched files. No new Redis keys — `minimumItemCount`/`shareable`/`samplerLabel`/`commerceMode` live inside existing `promo:codes` / `store:products` records.
+
     (`Resend code (Ns)`) that disables itself, so a double-tap can never hit the
     60s throttle and log a raw 429. (b) Storefront locked-email UI de-cluttered:
     removed the redundant `🔒 {email}` span next to the (already greyed/disabled)

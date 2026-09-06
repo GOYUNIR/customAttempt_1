@@ -214,7 +214,7 @@ export async function POST(request: Request) {
         if (!promo || promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
         }
-        if (promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== email) {
+        if (promo.shareable !== true && promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== email) {
           return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
         }
         if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === email) {
@@ -239,6 +239,12 @@ export async function POST(request: Request) {
         const minimumOrderSubtotalCents = Math.max(0, Number(promo.minimumOrderSubtotalCents || 0));
         if (minimumOrderSubtotalCents > 0 && promoSubtotalCents < minimumOrderSubtotalCents) {
           return NextResponse.json({ error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}.` }, { status: 409 });
+        }
+        const minimumItemCount = Math.max(0, Number(promo.minimumItemCount || 0));
+        const totalItemCount = fcfsLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0)
+          + raffleLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
+        if (minimumItemCount > 0 && totalItemCount < minimumItemCount) {
+          return NextResponse.json({ error: `This code unlocks on carts with at least ${minimumItemCount} item${minimumItemCount === 1 ? '' : 's'}.` }, { status: 409 });
         }
         for (const line of fcfsLines) {
           line.eligible = (eligibleProductSlugs.length === 0 || eligibleProductSlugs.includes(String(line.product.slug || '')))

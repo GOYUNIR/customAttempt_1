@@ -282,3 +282,21 @@ export function samplerPresentation(product: any, selectedSize: string): Sampler
   return { enabled, hasSamplers, selected, nudge };
 }
 
+/**
+ * Derive a variant's sample badge from the VARIANT OBJECT itself (a slug-synced
+ * variant carries `samplerLabel` copied from its shared pool at link time),
+ * falling back to the product-level `samplerSizes` lookup by size string. This
+ * lets the storefront render the "🧪 Sample" tag for a synced variant exactly as
+ * it would on the standalone source product page — with zero hardcoded data.
+ */
+export function categorySampleBadge(product: any, category: any): { isSampler: boolean; label: string } {
+  const own = String(category?.samplerLabel || '').trim();
+  if (own) return { isSampler: true, label: own };
+  const size = String(category?.size || '').trim();
+  const rec = size && Array.isArray(product?.samplerSizes)
+    ? product.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === size.toLowerCase())
+    : null;
+  if (rec) return { isSampler: true, label: String(rec.label || 'Sample').trim() || 'Sample' };
+  return { isSampler: false, label: '' };
+}
+

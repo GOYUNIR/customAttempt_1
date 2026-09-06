@@ -11,7 +11,7 @@ import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { isVideoMedia, coverStyle, pickCrop, DEFAULT_CROP } from '@/lib/media';
-import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
+import { samplerPresentation, formatMoneyCents, categorySampleBadge } from '@/lib/sampler-config';
 import NotFoundView from '@/components/NotFoundView';
 
 const CART_KEY = 'goyunir-cart';
@@ -1259,6 +1259,10 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // Per-size trial ("sampler") presentation — the copy + math are specific to
   // the size the customer has selected (never one generic line for all sizes).
   const samplerPres = samplerPresentation(product, selectedSize);
+  // Sample-badge state derived from the SELECTED VARIANT OBJECT (not a size-string
+  // lookup) so a slug-synced variant — which carries `samplerLabel` from its shared
+  // pool — renders its "🧪 Sample" tag even when this product defines no sampler.
+  const selectedSample = categorySampleBadge(product, selectedCategory);
   const fallbackImage = getFallbackImage(product);
   const galleryImages = Array.isArray(product.images) && product.images.length > 0 ? product.images.filter(Boolean) : (fallbackImage ? [fallbackImage] : []);
 
@@ -1487,6 +1491,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: canCheckoutDirect ? modePill.fcfsBg : modePill.raffleBg, color: canCheckoutDirect ? modePill.fcfsText : modePill.raffleText, border: `1px solid ${canCheckoutDirect ? modePill.fcfsBorder : modePill.raffleBorder}` }}>
                   {canCheckoutDirect ? 'FCFS' : 'RAFFLE'}
                 </span>
+                {selectedSample.isSampler && (
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: trialColors.chipBg, color: trialColors.chipText, border: `1px solid ${trialColors.chipBorder}` }}>🧪 {selectedSample.label}</span>
+                )}
+                {(selectedCategory?.inventorySyncSlug || selectedCategory?.inventoryPoolId) && (
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.7px', padding: '3px 7px', borderRadius: 999, background: 'color-mix(in srgb, #0ea5e9 14%, transparent)', color: cardIsLight ? '#075985' : '#7dd3fc', border: '1px solid color-mix(in srgb, #0ea5e9 40%, transparent)' }} title="This option draws from a shared inventory pool.">🔗 {String(selectedCategory.inventorySyncSlug || selectedCategory.inventoryPoolId)}</span>
+                )}
               </div>
             </div>
             <h1 style={{ fontSize: 24, fontFamily: 'serif', margin: 0, color: configPalette.cardTextMain }}>{product.name}</h1>
@@ -1555,16 +1565,15 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
             <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: configPalette.cardTextMain || '#fff' }}>Select size</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {(product.priceCategories || []).map((cat: any, index: number) => {
-                const chipIsSample = isSamplerSize(product, cat.size);
-                const chipBadge = chipIsSample
-                  ? String((product.samplerSizes || []).find((s: any) => String(s?.size || '').trim().toLowerCase() === String(cat.size || '').trim().toLowerCase())?.label || 'Sample')
-                  : '';
+                const chipSample = categorySampleBadge(product, cat);
+                const chipIsSample = chipSample.isSampler;
+                const chipBadge = chipSample.label;
                 const chipMode = getCategoryCheckoutMode(product, cat);
                 const accent = configPalette.checkoutCtaButton || '#635bff';
                 const chipSelected = activeVariantIndex === index;
                 const sizeLabel = variantSizeLabel(product.priceCategories || [], cat, chipMode);
                 return (
-                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, border: chipSelected ? `1px solid ${accent}` : (chipIsSample ? trialColors.chipBorder : `1px solid ${configPalette.cardBorder}`), background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: chipSelected ? 700 : 500, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, boxSizing: 'border-box', border: `1px solid ${chipSelected ? accent : (chipIsSample ? trialColors.chipBorder : configPalette.cardBorder)}`, background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: 600, boxShadow: chipSelected ? `inset 0 0 0 1px ${accent}` : 'none', display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     {sizeLabel}
                     <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                       {chipMode === 'FCFS' ? 'buy' : 'raffle'}

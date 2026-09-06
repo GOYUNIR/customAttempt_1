@@ -440,7 +440,8 @@ const VARIANT_MODE_OPTIONS: { mode: CommerceMode; label: string; emoji: string }
 
 /** Resolve the dropdown's selected value for a variant, deriving from the legacy
  *  `checkoutMode` when the newer `commerceMode` is unset (so legacy RAFFLE/FCFS
- *  variants still show their real mode instead of "Follow product"). */
+ *  variants still show their real mode). Returns '' when no explicit mode exists —
+ *  the caller then falls back to the product-level effective mode. */
 function variantModeValue(cat: any): CommerceMode | '' {
   const commerce = sanitizeCommerceMode(cat?.commerceMode);
   if (commerce) return commerce;
@@ -747,6 +748,19 @@ function variantSku(productSlug: string, variantName: string): string {
   const slug = slugifyName(String(productSlug || ''));
   const part = slugifyName(String(variantName || ''));
   return [slug, part].filter(Boolean).join('-').toUpperCase().slice(0, 64);
+}
+
+/** Deterministic "Auto SKU" for a variant: `[product-slug]-[variant-name]`, or
+ *  `[product-slug]-v<index+1>` when the variant has no name yet. Never hardcodes
+ *  product data — everything derives from the product slug/title + variant index. */
+function autoSkuForVariant(product: any, index: number): string {
+  const cats = Array.isArray(product?.priceCategories) ? product.priceCategories : [];
+  const variantName = String(cats?.[index]?.size || '').trim();
+  const productSlug = slugifyName(String(product?.slug || product?.name || ''));
+  const variantPart = slugifyName(variantName) || `v${index + 1}`;
+  const base = [productSlug, variantPart].filter(Boolean).join('-');
+  if (base) return base.toUpperCase().slice(0, 64);
+  return `SKU-${index + 1}`;
 }
 
 /** Treat 0 or blank as "Unlimited" for the per-item cap fields (Max per email,
@@ -1586,7 +1600,7 @@ export default function AdminPortal() {
   const [selectedAlertProductId, setSelectedAlertProductId] = useState('');
   const [promoForm, setPromoForm] = useState({
     code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '',
-    timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '',
+    timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', minimumItemCount: '', shareable: false,
   });
   const [promoMsg, setPromoMsg] = useState('');
   const [audit, setAudit] = useState<any[]>([]);
@@ -2593,9 +2607,17 @@ export default function AdminPortal() {
     const source = found.category;
     const sourceProduct = found.product;
     const merged = { ...cat };
-    for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
+    for (const field of ['price', 'stripeId', 'sku', 'checkoutMode', 'commerceMode', 'accessRule', 'billingRule', 'scheduleConfig', 'winnerTiers', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'weight', 'weightUnit', 'dimensions', 'sizeLabel']) {
       if (source?.[field] !== undefined) merged[field] = source[field];
     }
+    // Carry the source's sampler badge onto the synced variant so the storefront
+    // can render the "🧪 Sample" tag from the variant object alone (no cross-product
+    // lookup needed). Derived from the SOURCE product's samplerSizes matched to the
+    // source variant's size.
+    const sourceSampler = Array.isArray(sourceProduct?.samplerSizes)
+      ? sourceProduct.samplerSizes.find((s: any) => String(s?.size || '').trim().toLowerCase() === String(source?.size || '').trim().toLowerCase())
+      : null;
+    if (sourceSampler) merged.samplerLabel = String(sourceSampler.label || 'Sample').trim() || 'Sample';
     const inv = { ...(prev.inventoryPerSize || {}) };
     const sourceStock = Math.max(0, Number(sourceProduct?.inventoryPerSize?.[source?.size] ?? 0) || 0);
     if (sourceStock > 0 && String(cat.size || '').trim()) inv[String(cat.size).trim()] = sourceStock;
@@ -3572,6 +3594,8 @@ export default function AdminPortal() {
           promoterPayoutPercent: promoterPayout,
           maxUsesPerEmail: maxUses,
           maxUsesTotal: maxUsesTotal,
+          minimumItemCount: Number(promoForm.minimumItemCount) || 0,
+          shareable: Boolean(promoForm.shareable),
           timeLimited: promoForm.timeLimited,
           startAt: promoForm.startAt || null,
           endAt: promoForm.endAt || null,
@@ -3581,7 +3605,7 @@ export default function AdminPortal() {
       const data = await res.json();
       if (res.ok) {
         setPromoMsg(`Saved ${data.promo?.code}.`); showToast('UPDATED · Promo');
-        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '', timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '' });
+        setPromoForm({ code: '', promoterName: '', promoterEmail: '', customerDiscountPercent: '', promoterPayoutPercent: '', maxUsesPerEmail: '', timeLimited: false, startAt: '', endAt: '', maxUsesTotal: '', minimumItemCount: '', shareable: false });
         await fetchPromos();
       } else setPromoMsg(data.error || 'Failed');
     } catch {
@@ -5795,6 +5819,25 @@ export default function AdminPortal() {
                         )}
                         {!isSyncEnabled && (
                         <>
+                        {/* Row 0b — Product Type / Commerce Mode. Placed directly below
+                            the sync prompt so the sellable mode is the first decision an
+                            unlinked variant makes. */}
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 9, color: '#5d6570', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase', minWidth: 96 }}>Product Type</span>
+                          <select
+                            title={productForm.checkoutMode === 'FCFS'
+                              ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Other modes are unavailable."
+                              : "How this variant is sold. ⚡ Instant Buy charges at checkout; 🎟 Raffle enters an allocation draw; the other modes map onto the universal commerce primitives (accessRule / billingRule / scheduleConfig)."}
+                            value={variantModeValue(cat) || (effectiveMode === 'RAFFLE' ? 'ALLOCATION_DRAW' : 'INSTANT_BUY')}
+                            onChange={(e) => setVariantCommerceMode(idx, sanitizeCommerceMode(e.target.value) || '')}
+                            disabled={productForm.checkoutMode === 'FCFS'}
+                            style={{ ...inputStyle, width: 190, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
+                          >
+                            {VARIANT_MODE_OPTIONS.map((opt) => (
+                              <option key={opt.mode} value={opt.mode}>{opt.emoji} {opt.label}</option>
+                            ))}
+                          </select>
+                        </div>
                         {/* Row 1 — reorder handle + identity + SKU + price */}
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                         <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', userSelect: 'none' }} title="Drag handle — reorder for storefront">
@@ -5818,6 +5861,18 @@ export default function AdminPortal() {
                         onChange={(e) => updatePriceCategory(idx, 'sku', e.target.value)}
                         style={{ ...inputStyle, width: 120, padding: 6, fontSize: 10, color: cat.sku ? '#7dd3fc' : undefined }}
                       />
+                      <button
+                        type="button"
+                        onClick={() => setProductForm((p: any) => {
+                          const nextCats = [...(p.priceCategories || [])];
+                          nextCats[idx] = { ...nextCats[idx], sku: autoSkuForVariant(p, idx) };
+                          return { ...p, priceCategories: nextCats };
+                        })}
+                        title="Auto-generate a clean SKU from the product slug + variant name (or index)."
+                        style={{ ...buttonGhost, padding: '2px 7px', fontSize: 9, color: '#7dd3fc', borderColor: '#0ea5e9', whiteSpace: 'nowrap' }}
+                      >
+                        Auto SKU
+                      </button>
                       <input
                         id={`pf-price-${idx}`}
                         type="number"
@@ -5911,24 +5966,10 @@ export default function AdminPortal() {
                           </span>
                         )}
                       </div>
-                      {/* Row 2 — mode selector + sampler toggle + actions. The raffle
-                          "Draw date / time" and "Winner count" inputs are rendered
-                          conditionally below this row (see the commerce-input block). */}
+                      {/* Row 2 — sampler toggle + actions. The Product Type selector now
+                          lives directly below the sync prompt (Row 0b); the raffle/preorder/
+                          gated commerce inputs remain conditionally rendered below. */}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
-                      <select
-                        title={productForm.checkoutMode === 'FCFS'
-                          ? "Product Checkout Mode is ⚡ FCFS — every variant is locked to instant-buy. Other modes are unavailable."
-                          : "How this variant is sold. ⚡ Instant Buy charges at checkout; 🎟 Raffle enters an allocation draw; the other modes map onto the universal commerce primitives (accessRule / billingRule / scheduleConfig). 'Follow product' inherits the product's Checkout Mode."}
-                        value={variantModeValue(cat)}
-                        onChange={(e) => setVariantCommerceMode(idx, sanitizeCommerceMode(e.target.value) || '')}
-                        disabled={productForm.checkoutMode === 'FCFS'}
-                        style={{ ...inputStyle, width: 190, padding: 6, fontSize: 10, opacity: productForm.checkoutMode === 'FCFS' ? 0.75 : 1, color: effectiveMode === 'RAFFLE' ? '#fbbf24' : '#60a5fa' }}
-                      >
-                        <option value="">Follow product ({productForm.checkoutMode === 'FCFS' ? 'FCFS' : 'RAFFLE'})</option>
-                        {VARIANT_MODE_OPTIONS.map((opt) => (
-                          <option key={opt.mode} value={opt.mode}>{opt.emoji} {opt.label}</option>
-                        ))}
-                      </select>
                           <button
                             onClick={() => toggleSampler(idx)}
                             title={isSamplerCat
@@ -6903,12 +6944,17 @@ export default function AdminPortal() {
               <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Total max uses (0=unlimited)" value={promoForm.maxUsesTotal} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesTotal: e.target.value }))} style={inputStyle} />
+              <input type="number" min="0" placeholder="Min items in cart (0=none)" title="Require the cart to contain at least this many items before the code unlocks (prevents single low-value item abuse)." value={promoForm.minimumItemCount} onChange={(e) => setPromoForm((f) => ({ ...f, minimumItemCount: e.target.value }))} style={inputStyle} />
             </div>
             
             <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
               <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={promoForm.timeLimited} onChange={(e) => setPromoForm((f) => ({ ...f, timeLimited: e.target.checked }))} />
                 Time Limited
+              </label>
+              <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }} title="When enabled this code is transferable — it can be shared with friends or used across different accounts.">
+                <input type="checkbox" checked={promoForm.shareable} onChange={(e) => setPromoForm((f) => ({ ...f, shareable: e.target.checked }))} />
+                Shareable
               </label>
               {promoForm.timeLimited && (
                 <>
@@ -6942,6 +6988,8 @@ export default function AdminPortal() {
                         startAt: p.startAt || '',
                         endAt: p.endAt || '',
                         maxUsesTotal: String(p.maxUsesTotal || ''),
+                        minimumItemCount: String(p.minimumItemCount || ''),
+                        shareable: Boolean(p.shareable),
                       });}} style={buttonGhost}>Edit</button>
                       <button onClick={() => deletePromo(p.code)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
                     </div>

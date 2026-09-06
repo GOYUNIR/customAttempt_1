@@ -12,6 +12,8 @@ export type PromoRecord = {
   customerDiscountPercent: number;
   fixedDiscountCents?: number;
   minimumOrderSubtotalCents?: number;
+  minimumItemCount?: number;
+  shareable?: boolean;
   eligibleProductSlugs?: string[];
   eligibleSizes?: string[];
   issuedForEmail?: string;
@@ -120,6 +122,8 @@ export async function POST(request: Request) {
     customerDiscountPercent: Math.min(50, Math.max(0, Number(body?.customerDiscountPercent ?? existing?.customerDiscountPercent ?? 0))),
     fixedDiscountCents: Math.max(0, Number(body?.fixedDiscountCents ?? existing?.fixedDiscountCents ?? 0)) || 0,
     minimumOrderSubtotalCents: Math.max(0, Number(body?.minimumOrderSubtotalCents ?? existing?.minimumOrderSubtotalCents ?? 0)) || 0,
+    minimumItemCount: Math.max(0, Number(body?.minimumItemCount ?? existing?.minimumItemCount ?? 0)) || 0,
+    shareable: body?.shareable ?? existing?.shareable ?? false,
     eligibleProductSlugs: Array.isArray(body?.eligibleProductSlugs) ? body.eligibleProductSlugs.map(String) : (existing?.eligibleProductSlugs || []),
     eligibleSizes: Array.isArray(body?.eligibleSizes) ? body.eligibleSizes.map(String) : (existing?.eligibleSizes || []),
     issuedForEmail: String(body?.issuedForEmail ?? existing?.issuedForEmail ?? '').trim().toLowerCase() || undefined,

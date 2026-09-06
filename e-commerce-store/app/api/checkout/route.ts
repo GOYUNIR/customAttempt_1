@@ -163,7 +163,7 @@ export async function POST(request: Request) {
       if (!promo || promo.active === false) {
         return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
       }
-      if (promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
+      if (promo.shareable !== true && promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
         return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
       }
       if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === normalizedEmail) {
@@ -195,6 +195,10 @@ export async function POST(request: Request) {
       if (minimumOrderSubtotalCents > 0 && basePriceCents < minimumOrderSubtotalCents) {
         return NextResponse.json({ error: `This code unlocks on orders over $${(minimumOrderSubtotalCents / 100).toFixed(2)}.` }, { status: 409 });
       }
+      const minimumItemCount = Math.max(0, Number(promo.minimumItemCount || 0));
+      if (minimumItemCount > 1) {
+        return NextResponse.json({ error: `This code unlocks on carts with at least ${minimumItemCount} items.` }, { status: 409 });
+      }
       const fixedDiscountCents = Math.max(0, Number(promo.fixedDiscountCents || 0));
       const percentDiscount = Math.min(50, Math.max(0, Number(promo.customerDiscountPercent ?? promo.discountPercent ?? 0) || 0));
       if (fixedDiscountCents > 0) {
@@ -213,7 +217,7 @@ export async function POST(request: Request) {
         if (promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
         }
-        if (promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
+        if (promo.shareable !== true && promo.giftable !== true && promo.issuedForEmail && String(promo.issuedForEmail).toLowerCase() !== normalizedEmail) {
           return NextResponse.json({ error: 'This code is reserved for a different account.' }, { status: 403 });
         }
         if (promo.promoterEmail && String(promo.promoterEmail).toLowerCase() === normalizedEmail) {
