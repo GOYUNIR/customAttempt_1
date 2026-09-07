@@ -127,6 +127,7 @@ export interface StoreConfig {
     accentB?: string;
     accentC?: string;
     containerTarget?: 'background' | 'banner';
+    layoutPreset?: 'heroCard' | 'fullBleed' | 'splitBanner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
     speed?: number;
@@ -300,6 +301,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     assemblyProgress: 1,
     paletteAutoSync: true,
     containerTarget: 'background',
+    layoutPreset: 'heroCard',
     canvasHeight: 'medium',
     blendMode: 'normal',
     heroHeight: 'standard',

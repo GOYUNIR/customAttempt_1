@@ -94,6 +94,44 @@ export type HeroHeight = 'compact' | 'standard' | 'tall' | 'custom';
 /** Where the hero canvas paints relative to the hero card content. */
 export type HeroContainerTarget = 'background' | 'banner';
 
+/**
+ * High-level hero layout preset (admin → "Layout"). Three primary looks, mapped
+ * onto the existing canvas placement + full-bleed styling so the storefront and
+ * the admin Live Viewport Preview can never drift:
+ *   • `heroCard`   — floating rounded container (canvas behind the copy).
+ *   • `fullBleed`  — edge-to-edge canvas (no radius / border / card chrome).
+ *   • `splitBanner`— half canvas / half content (inline banner block).
+ */
+export type HeroLayoutPreset = 'heroCard' | 'fullBleed' | 'splitBanner';
+
+/** Admin "Layout" selector — three primary presets, front and center. */
+export const LAYOUT_PRESET_OPTIONS: ReadonlyArray<{ value: HeroLayoutPreset; label: string; hint: string }> = [
+  { value: 'heroCard', label: 'Hero Card', hint: 'Floating rounded container' },
+  { value: 'fullBleed', label: 'Full Bleed', hint: 'Edge-to-edge canvas' },
+  { value: 'splitBanner', label: 'Split Banner', hint: 'Half canvas / half content' },
+];
+
+/** Resolve the hero layout preset (missing/legacy → `heroCard`). */
+export function resolveHeroLayoutPreset(
+  aiHero: { layoutPreset?: string } | undefined | null,
+): HeroLayoutPreset {
+  const raw = String(aiHero?.layoutPreset || '').trim().toLowerCase();
+  if (raw === 'fullbleed' || raw === 'full_bleed') return 'fullBleed';
+  if (raw === 'splitbanner' || raw === 'split_banner' || raw === 'banner') return 'splitBanner';
+  if (raw === 'herocard' || raw === 'hero_card' || raw === 'background') return 'heroCard';
+  return 'heroCard';
+}
+
+/** Map a layout preset onto the legacy canvas placement (`background` vs `banner`). */
+export function layoutPresetToContainerTarget(preset: HeroLayoutPreset): HeroContainerTarget {
+  return preset === 'splitBanner' ? 'banner' : 'background';
+}
+
+/** True when the layout should render edge-to-edge (no card chrome). */
+export function isFullBleedLayout(preset: HeroLayoutPreset): boolean {
+  return preset === 'fullBleed';
+}
+
 /** Preset canvas heights for the inline banner placement (and the aspect hint). */
 export type HeroCanvasHeight = 'slim' | 'medium' | 'expanded';
 
@@ -163,6 +201,8 @@ export interface AiHeroSettings {
   accentC?: string;
   /** Canvas layout: full-card background vs inline sub-text banner. */
   containerTarget: HeroContainerTarget;
+  /** High-level layout preset (Hero Card / Full Bleed / Split Banner). */
+  layoutPreset: HeroLayoutPreset;
   /** Canvas height / aspect ratio when placed as an inline banner. */
   canvasHeight: HeroCanvasHeight;
   /** How the canvas blends with the hero card surface (admin → "Overlay Mode"). */
@@ -447,6 +487,7 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     accentB: '',
     accentC: '',
     containerTarget: 'background',
+    layoutPreset: 'heroCard',
     canvasHeight: 'medium',
     blendMode: 'normal',
     heroHeight: 'standard',

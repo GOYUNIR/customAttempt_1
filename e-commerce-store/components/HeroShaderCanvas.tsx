@@ -4,7 +4,7 @@ import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
 import { buildProductGeometry } from '@/lib/shaders/bottleGeometry';
-import { FRAGMENT_VS, FRAGMENT_FS, PARTICLE_VS, PARTICLE_FS } from '@/lib/shaders/glsl';
+import { FRAGMENT_VS, FRAGMENT_FS, PARTICLE_VS, PARTICLE_FS, IMAGE_VS, IMAGE_FS } from '@/lib/shaders/glsl';
 
 /**
  * Hero shader engine — a multi-mode GPU renderer painted behind the home-page
@@ -61,6 +61,35 @@ function prefersReducedMotion(): boolean {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
+}
+
+/**
+ * Load a product image (data URL, same-origin `/media/…` ref, or a CDN URL)
+ * into an `<img>` so the real-image shader can upload it as a WebGL texture.
+ * Resolves `null` on ANY failure (CORS, 404, decode error) so the engine can
+ * silently fall back to the procedural point-cloud / ambient gradient — the
+ * hero must never crash because an image couldn't load.
+ */
+function loadProductImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    if (typeof Image === 'undefined' || !url) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    const img = new Image();
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok ? img : null);
+    };
+    img.onload = () => done(true);
+    img.onerror = () => done(false);
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    // Safety valve — a stalled image must never leave the promise dangling.
+    setTimeout(() => done(false), 8000);
+  });
 }
 
 /**
@@ -178,6 +207,7 @@ export function HeroShaderCanvas({
   placement = 'background',
   blendMode = 'normal',
   productSilhouette,
+  productImageUrl,
   paused = false,
   speed = 1,
   onCanvasRef,
@@ -203,6 +233,8 @@ export function HeroShaderCanvas({
   blendMode?: 'normal' | 'overlay' | 'screen';
   /** Generic silhouette key the exploded mesh derives from the target product. */
   productSilhouette?: string;
+  /** Primary product image URL (data URL / `/media/…` ref / CDN). The exploded preset samples it as a texture. */
+  productImageUrl?: string;
   /** Freeze the animation timeline + particles (pause/resume control). */
   paused?: boolean;
   /** Animation speed multiplier (0.5×..2×) — scales the accumulated timeline. */
@@ -299,8 +331,123 @@ export function HeroShaderCanvas({
     const dispose: Array<() => void> = [];
     let pointCount = 0;
     let draw: (now: number, time: number, mouse: [number, number]) => void;
+    let cancelled = false;
 
-    if (exploded) {
+    if (exploded && productImageUrl) {
+      // --- Real product-image shader (the overhauled exploded preset) ----------
+      // Samples the selected product's PRIMARY image through a 2D sampler and
+      // drives disassembly / assembly / spin / explosion on the crisp graphic,
+      // instead of the generic procedural point-cloud.
+      const linked = linkProgram(gl, IMAGE_VS, IMAGE_FS);
+      if (!linked) {
+        showFallback();
+        return;
+      }
+      const { program, vs, fs } = linked;
+      dispose.push(
+        () => gl!.deleteProgram(program),
+        () => gl!.deleteShader(vs),
+        () => gl!.deleteShader(fs),
+      );
+
+      // Full-screen quad (2 triangles).
+      const buffer = gl.createBuffer();
+      if (!buffer) {
+        showFallback();
+        return;
+      }
+      dispose.push(() => gl!.deleteBuffer(buffer));
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+        gl.STATIC_DRAW,
+      );
+      const loc = gl.getAttribLocation(program, 'a_position');
+      if (loc >= 0) {
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      }
+
+      // 1×1 placeholder so the sampler is ALWAYS bound to a valid texture even
+      // while the real image is still loading (or if it never loads).
+      const placeholder = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, placeholder);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      let currentTexture: WebGLTexture = placeholder;
+      let textureToDispose: WebGLTexture = placeholder;
+      dispose.push(() => {
+        if (textureToDispose) gl!.deleteTexture(textureToDispose);
+      });
+
+      gl.useProgram(program);
+      const uTime = gl.getUniformLocation(program, 'u_time');
+      const uRes = gl.getUniformLocation(program, 'u_resolution');
+      const uHasTex = gl.getUniformLocation(program, 'u_hasTexture');
+      const uTexAspect = gl.getUniformLocation(program, 'u_texAspect');
+      const uAssembly = gl.getUniformLocation(program, 'u_assemblyProgress');
+      const uDispersion = gl.getUniformLocation(program, 'u_dispersion');
+      const uSpin = gl.getUniformLocation(program, 'u_spin');
+      gl.uniform3f(gl.getUniformLocation(program, 'u_colorA'), ra, ga, ba);
+      gl.uniform3f(gl.getUniformLocation(program, 'u_colorB'), rb, gb, bb);
+      gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), opacity01);
+      gl.uniform1i(gl.getUniformLocation(program, 'u_productTexture'), 0);
+
+      let hasTexture = 0;
+      let texAspect = 1;
+      const spinOn = animationLoop === 'spin' ? 1 : 0;
+      gl.uniform1f(uHasTex, 0);
+      gl.uniform1f(uTexAspect, 1);
+      gl.uniform1f(uDispersion, clamp01(Number(explosionRadius) / 150));
+      gl.uniform1f(uSpin, spinOn);
+
+      // Load the REAL product image asynchronously — never block the first paint
+      // and never crash the hero if it fails (the placeholder gradient shows).
+      loadProductImage(productImageUrl)
+        .then((img) => {
+          if (cancelled || !img) return;
+          const tex = gl!.createTexture();
+          if (!tex) return;
+          gl!.bindTexture(gl!.TEXTURE_2D, tex);
+          gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
+          try {
+            gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, img);
+          } catch {
+            gl!.deleteTexture(tex);
+            return;
+          }
+          // NPOT-safe: LINEAR min filter (no mipmaps) + clamp-to-edge.
+          gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
+          gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
+          gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
+          gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+          gl!.bindTexture(gl!.TEXTURE_2D, null);
+          if (textureToDispose && textureToDispose !== tex) gl!.deleteTexture(textureToDispose);
+          textureToDispose = tex;
+          currentTexture = tex;
+          hasTexture = 1;
+          texAspect = (img.naturalWidth || img.width || 1) / Math.max(1, img.naturalHeight || img.height || 1);
+        })
+        .catch(() => {});
+
+      draw = (_now, time, mouse) => {
+        gl!.activeTexture(gl!.TEXTURE0);
+        gl!.bindTexture(gl!.TEXTURE_2D, currentTexture);
+        gl!.uniform1f(uTime, time);
+        gl!.uniform2f(uRes, canvas.width, canvas.height);
+        gl!.uniform1f(uHasTex, hasTexture);
+        gl!.uniform1f(uTexAspect, texAspect);
+        const prog = computeAssemblyProgress(animationLoop, assemblyProgress, time, mouse);
+        gl!.uniform1f(uAssembly, prog);
+        gl!.uniform1f(uSpin, spinOn);
+        gl!.drawArrays(gl!.TRIANGLES, 0, 6);
+      };
+    } else if (exploded) {
       const linked = linkProgram(gl, PARTICLE_VS, PARTICLE_FS);
       if (!linked) {
         showFallback();
@@ -523,6 +670,7 @@ export function HeroShaderCanvas({
 
     return () => {
       running = false;
+      cancelled = true;
       cancelAnimationFrame(raf);
       ro.disconnect();
       window.removeEventListener('pointermove', onPointer);
@@ -544,7 +692,7 @@ export function HeroShaderCanvas({
       onCanvasRefRef.current?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productSilhouette]);
+  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productSilhouette, productImageUrl]);
 
   if (!enabled) return null;
 

@@ -11,6 +11,7 @@ import {
   SPEED_MIN,
   SPEED_MAX,
   TEXT_DISTRIBUTION_OPTIONS,
+  LAYOUT_PRESET_OPTIONS,
   RENDER_MODE_OPTIONS,
   CONTRAST_SCRIM_MAX,
   resolveHeroIntensity,
@@ -22,6 +23,7 @@ import {
   resolveHeroContrastScrim,
   resolveHeroRenderMode,
   resolveHeroClips,
+  resolveHeroLayoutPreset,
   motionTypeToPreset,
   motionTypeToLoop,
   type AiHeroSettings,
@@ -30,6 +32,7 @@ import {
   type HeroBlendMode,
   type HeroTextDistribution,
   type HeroRenderMode,
+  type HeroLayoutPreset,
   type HeroClip,
 } from '@/lib/shaders/presets';
 import {
@@ -41,6 +44,7 @@ import {
 import { buildProductTarget } from '@/lib/shaders/productTarget';
 import { recordCanvasVideo, mediaRecorderSupported } from '@/lib/shaders/videoExport';
 import { themeRadiusNumber } from '@/lib/storefront-config';
+import { isImageMedia } from '@/lib/media';
 
 /**
  * Streamlined 2-column control suite for the AI Hero Banner & Shader.
@@ -137,6 +141,7 @@ export default function HeroShaderSettings({
   const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [recording, setRecording] = useState(false);
   const [clipMsg, setClipMsg] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const catalog = Array.isArray(products) ? products : [];
@@ -155,6 +160,15 @@ export default function HeroShaderSettings({
   const effectiveSpeed = resolveHeroSpeed(value);
   // Silhouette is auto-derived from the selected product target (no manual override).
   const effectiveSilhouette = selectedTarget?.silhouette || value.productSilhouette || 'generic';
+  // The selected product's primary IMAGE feeds the real-image shader in the live
+  // preview (mirrors the storefront's `heroCoverImage` resolution).
+  const previewImageUrl = (() => {
+    const p = selectedProduct as any;
+    const imgs = Array.isArray(p?.images) ? p.images : [];
+    const first = imgs.find((src: unknown) => typeof src === 'string' && src && isImageMedia(src));
+    return String(first || p?.featuredImage || p?.catalogImage || '').trim();
+  })();
+  const layoutPreset = resolveHeroLayoutPreset(value);
 
   const patch = (next: Partial<AiHeroSettings>) => onChange((prev) => ({ ...prev, ...next }));
 
@@ -216,6 +230,8 @@ export default function HeroShaderSettings({
       const deterministic = compileShaderParams(prompt, selectedTarget);
       applyParams(deterministic);
       logStep(35, 'Extracting product geometry');
+      await sleep(300);
+      logStep(45, 'Processing product image alpha channels');
       await sleep(300);
       logStep(70, 'Compiling GLSL shader uniforms with AI…');
       const res = await fetch('/api/ai/shader-prompt', {
@@ -318,6 +334,7 @@ export default function HeroShaderSettings({
         : previewDistribution === 'split'
           ? 'space-between'
           : 'center';
+  const previewFullBleed = layoutPreset === 'fullBleed';
 
   const statusLabel = status
     ? `${status.backend === 'css' ? 'CSS Ambient Fallback' : status.backend === 'webgl2' ? 'WebGL 2.0' : 'WebGL'} · ${status.fps} FPS`
@@ -470,6 +487,60 @@ export default function HeroShaderSettings({
         <div style={cardStyle}>
           <div style={sectionTitleStyle}>Layout</div>
 
+          <label style={labelStyle}>Layout Preset</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {LAYOUT_PRESET_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                title={opt.hint}
+                onClick={() => patch({ layoutPreset: opt.value as HeroLayoutPreset })}
+                style={chipActive(layoutPreset === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={labelStyle}>Text Distribution</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {TEXT_DISTRIBUTION_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ textDistribution: opt.value as HeroTextDistribution })}
+                style={chipActive(resolveHeroTextDistribution(value) === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={labelStyle}>Contrast Scrim — {resolveHeroContrastScrim(value)}% overlay tint</label>
+          <input
+            type="range"
+            min={0}
+            max={CONTRAST_SCRIM_MAX}
+            step={1}
+            value={resolveHeroContrastScrim(value)}
+            onChange={(e) => patch({ contrastScrim: Number(e.target.value) })}
+            style={rangeStyle}
+          />
+
+          <label style={{ ...labelStyle, marginTop: 14 }}>Overlay Mode</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {OVERLAY_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ blendMode: opt.value })}
+                style={chipActive((value.blendMode || 'normal') === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <label style={labelStyle}>Hero Box Height / Aspect Ratio</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
             {HERO_HEIGHT_OPTIONS.map((opt) => (
@@ -498,76 +569,52 @@ export default function HeroShaderSettings({
             </>
           )}
 
-          <label style={{ ...labelStyle, marginTop: 14 }}>Max Width — {Math.round(previewMaxWidth)}px</label>
-          <input
-            type="range"
-            min={360}
-            max={1200}
-            step={10}
-            value={Math.round(previewMaxWidth)}
-            onChange={(e) => patch({ maxWidth: Number(e.target.value) })}
-            style={rangeStyle}
-          />
+          {/* Fine-grained metric sliders collapsed by default (Advanced Metrics). */}
+          <div style={{ marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((o) => !o)}
+              style={{ ...chipBase, justifyContent: 'space-between', width: '100%' }}
+            >
+              <span>⚙️ Advanced Metrics</span>
+              <span>{advancedOpen ? '▴' : '▾'}</span>
+            </button>
+            {advancedOpen && (
+              <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <label style={labelStyle}>Max Width — {Math.round(previewMaxWidth)}px</label>
+                <input
+                  type="range"
+                  min={360}
+                  max={1200}
+                  step={10}
+                  value={Math.round(previewMaxWidth)}
+                  onChange={(e) => patch({ maxWidth: Number(e.target.value) })}
+                  style={rangeStyle}
+                />
 
-          <label style={{ ...labelStyle, marginTop: 14 }}>Corner Radius — {Math.round(previewRadius)}px</label>
-          <input
-            type="range"
-            min={0}
-            max={60}
-            step={1}
-            value={Math.round(previewRadius)}
-            onChange={(e) => patch({ cornerRadius: Number(e.target.value) })}
-            style={rangeStyle}
-          />
+                <label style={{ ...labelStyle, marginTop: 14 }}>Corner Radius — {Math.round(previewRadius)}px</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={60}
+                  step={1}
+                  value={Math.round(previewRadius)}
+                  onChange={(e) => patch({ cornerRadius: Number(e.target.value) })}
+                  style={rangeStyle}
+                />
 
-          <label style={{ ...labelStyle, marginTop: 14 }}>Padding — {Math.round(previewPadding)}px</label>
-          <input
-            type="range"
-            min={0}
-            max={80}
-            step={2}
-            value={Math.round(previewPadding)}
-            onChange={(e) => patch({ padding: Number(e.target.value) })}
-            style={rangeStyle}
-          />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Text Distribution</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-            {TEXT_DISTRIBUTION_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ textDistribution: opt.value as HeroTextDistribution })}
-                style={chipActive(resolveHeroTextDistribution(value) === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <label style={labelStyle}>Contrast Scrim / Overlay Tint — {resolveHeroContrastScrim(value)}%</label>
-          <input
-            type="range"
-            min={0}
-            max={CONTRAST_SCRIM_MAX}
-            step={1}
-            value={resolveHeroContrastScrim(value)}
-            onChange={(e) => patch({ contrastScrim: Number(e.target.value) })}
-            style={rangeStyle}
-          />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Overlay Mode</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {OVERLAY_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ blendMode: opt.value })}
-                style={chipActive((value.blendMode || 'normal') === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
+                <label style={{ ...labelStyle, marginTop: 14 }}>Padding — {Math.round(previewPadding)}px</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={80}
+                  step={2}
+                  value={Math.round(previewPadding)}
+                  onChange={(e) => patch({ padding: Number(e.target.value) })}
+                  style={rangeStyle}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -667,13 +714,13 @@ export default function HeroShaderSettings({
             style={{
               position: 'relative',
               overflow: 'hidden',
-              borderRadius: previewRadius,
-              border: `1px solid ${previewBorder}`,
+              borderRadius: previewFullBleed ? 0 : previewRadius,
+              border: previewFullBleed ? 'none' : `1px solid ${previewBorder}`,
               background: `color-mix(in srgb, ${previewCardBg} ${previewSurface == null ? 100 : Number(previewSurface)}%, transparent)`,
               height: previewHeight,
               margin: '0 auto',
-              maxWidth: viewport === 'desktop' ? '100%' : 280,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.12), 0 10px 30px rgba(0,0,0,0.18)',
+              maxWidth: previewFullBleed ? '100%' : viewport === 'desktop' ? '100%' : 280,
+              boxShadow: previewFullBleed ? 'none' : '0 1px 2px rgba(0,0,0,0.12), 0 10px 30px rgba(0,0,0,0.18)',
             }}
           >
             {value.enabled ? (
@@ -688,6 +735,7 @@ export default function HeroShaderSettings({
                 assemblyProgress={value.assemblyProgress}
                 blendMode={value.blendMode}
                 productSilhouette={effectiveSilhouette}
+                productImageUrl={previewImageUrl}
                 paused={paused}
                 interactive
                 speed={effectiveSpeed}

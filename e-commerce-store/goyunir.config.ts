@@ -93,6 +93,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     assemblyProgress: 1,
     paletteAutoSync: true,
     containerTarget: 'background',
+    layoutPreset: 'heroCard',
     canvasHeight: 'medium',
     blendMode: 'normal',
     heroHeight: 'standard',

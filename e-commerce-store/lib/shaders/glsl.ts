@@ -184,3 +184,109 @@ void main() {
   gl_FragColor = vec4(col, alpha * v_alpha * u_opacity * depthFade);
 }
 `;
+
+// ---------------------------------------------------------------------------
+// Real product-image shader engine.
+//
+// Instead of a procedural point-cloud, the exploded-rebuild preset now samples
+// the selected product's PRIMARY image through a WebGL 2D sampler
+// (`u_productTexture`) and drives disassembly / assembly / spin / explosion on
+// the crisp graphic directly. The product is broken into a grid of tiles whose
+// per-cell offset + shrinkage reveals seams during an explosion, then reassembles
+// into a clean cover-fit product. The alpha channel is sampled verbatim so a
+// transparent PNG keeps its crisp silhouette while an opaque JPEG still reads as
+// a product (the tile seams carry the "breaking apart" look).
+// ---------------------------------------------------------------------------
+
+export const IMAGE_VS = `
+attribute vec2 a_position;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+export const IMAGE_FS = `
+precision highp float;
+uniform sampler2D u_productTexture;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform float u_hasTexture;
+uniform float u_texAspect;
+uniform float u_assemblyProgress;
+uniform float u_dispersion;
+uniform float u_spin;
+uniform float u_opacity;
+uniform vec3 u_colorA;
+uniform vec3 u_colorB;
+
+varying vec2 v_uv;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+// Cover-fit the texture into the canvas (center-crop, preserve aspect ratio).
+vec2 coverUv(vec2 uv, float texAspect) {
+  float ca = u_resolution.x / max(u_resolution.y, 1.0);
+  vec2 out = uv;
+  if (texAspect >= ca) {
+    out.x = 0.5 + (uv.x - 0.5) * (ca / texAspect);
+  } else {
+    out.y = 0.5 + (uv.y - 0.5) * (texAspect / ca);
+  }
+  return out;
+}
+
+vec2 rotateUv(vec2 uv, float ang) {
+  vec2 c = uv - 0.5;
+  float cs = cos(ang);
+  float sn = sin(ang);
+  return vec2(c.x * cs - c.y * sn, c.x * sn + c.y * cs) + 0.5;
+}
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 texUv = coverUv(uv, max(u_texAspect, 0.01));
+
+  // Continuous 3D product rotation (the "spin" motion type).
+  if (u_spin > 0.5) {
+    texUv = rotateUv(texUv, u_time * 0.6);
+  }
+
+  // Disassembly / assembly / explosion on crisp product tiles.
+  float explode = (1.0 - u_assemblyProgress) * u_dispersion;
+  float cells = 26.0;
+  vec2 g = texUv * cells;
+  vec2 cell = floor(g);
+  vec2 local = fract(g);
+  float h1 = hash21(cell);
+  float h2 = hash21(cell + 19.19);
+  vec2 dir = (vec2(h1, h2) - 0.5) * 2.0;
+
+  // Shrink each tile toward its own center as the explosion grows so seams
+  // open up between the pieces.
+  float shrink = explode * 0.16;
+  vec2 cLocal = (local - 0.5) / max(1.0 - shrink, 0.001) + 0.5;
+  vec2 sampleUv = (cell + cLocal) / cells + dir * explode * 0.12;
+
+  vec4 texel;
+  if (u_hasTexture > 0.5) {
+    texel = texture2D(u_productTexture, clamp(sampleUv, 0.0, 1.0));
+  } else {
+    texel = vec4(mix(u_colorA, u_colorB, uv.y), 1.0);
+  }
+
+  // Sample the alpha mask directly; opaque JPEGs keep full opacity and rely on
+  // the tile seams for the "graphic breaking apart" effect.
+  float mask = texel.a;
+  float edge = min(min(cLocal.x, 1.0 - cLocal.x), min(cLocal.y, 1.0 - cLocal.y));
+  float seam = smoothstep(0.0, 0.05, edge);
+  float alpha = mix(1.0, seam, step(0.001, explode)) * mask;
+
+  gl_FragColor = vec4(texel.rgb, alpha * u_opacity);
+}
+`;

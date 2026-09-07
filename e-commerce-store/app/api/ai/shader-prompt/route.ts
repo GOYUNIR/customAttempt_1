@@ -50,6 +50,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * A hallucinated key can never reach the GPU.
  */
 export async function POST(request: Request) {
+  // Every failure inside this route is caught and returned as HTTP 200 fallback
+  // JSON — a transient Redis/Supabase/AI-provider error must never surface as an
+  // unhandled 503/500 to the admin client.
+  try {
   const limited = await rateLimitedResponse('ai_shader_prompt', request, 30, 60);
   if (limited) return limited;
 
@@ -145,6 +149,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
+    success: true,
     source,
     provider,
     aiError,
@@ -153,4 +158,25 @@ export async function POST(request: Request) {
     silhouette: normalizeSilhouette(params.productSilhouette ?? product?.silhouette),
     product: product ? { id: product.id, name: product.name, slug: product.slug, category: product.category, silhouette: product.silhouette } : null,
   });
+  } catch (err) {
+    // Never 503 the admin — degrade to the deterministic floor and report a
+    // masked `aiError` so the UI can explain WHY the refinement didn't run.
+    const message =
+      err instanceof Error ? err.message : 'Unexpected error in the shader compiler.';
+    const floor = compileShaderParams('', null);
+    return NextResponse.json(
+      {
+        ok: false,
+        success: false,
+        source: 'fallback',
+        provider: null,
+        aiError: `The AI shader compiler could not complete (${message.slice(0, 240)}) — using the deterministic fallback.`,
+        preset: paramsToPreset(floor),
+        params: floor,
+        silhouette: normalizeSilhouette(floor.productSilhouette),
+        product: null,
+      },
+      { status: 200 },
+    );
+  }
 }

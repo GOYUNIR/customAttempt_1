@@ -48,6 +48,7 @@ export interface LiveThemeValue {
     accentB?: string;
     accentC?: string;
     containerTarget?: 'background' | 'banner';
+    layoutPreset?: 'heroCard' | 'fullBleed' | 'splitBanner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
     speed?: number;

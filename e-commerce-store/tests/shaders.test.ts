@@ -20,6 +20,9 @@ import {
   resolveHeroClips,
   pickHeroClip,
   resolveEffectiveHeroRender,
+  resolveHeroLayoutPreset,
+  layoutPresetToContainerTarget,
+  isFullBleedLayout,
 } from '../lib/shaders/presets.ts';
 import { parsePromptToParams, enhancePrompt } from '../lib/shaders/promptParser.ts';
 import { hexToRgb, extractAccentPalette, paletteToCss } from '../lib/shaders/palette.ts';
@@ -130,6 +133,29 @@ test('resolveHeroContrastScrim clamps to 0..100 and defaults to 0', () => {
   assert.equal(resolveHeroContrastScrim({ contrastScrim: 999 }), 100);
   assert.equal(resolveHeroContrastScrim({ contrastScrim: -5 }), 0);
   assert.equal(resolveHeroContrastScrim({ contrastScrim: NaN }), 0);
+});
+
+test('resolveHeroLayoutPreset defaults to heroCard and normalizes aliases', () => {
+  assert.equal(resolveHeroLayoutPreset(undefined), 'heroCard');
+  assert.equal(resolveHeroLayoutPreset(null), 'heroCard');
+  assert.equal(resolveHeroLayoutPreset({}), 'heroCard');
+  assert.equal(resolveHeroLayoutPreset({ layoutPreset: 'fullBleed' }), 'fullBleed');
+  assert.equal(resolveHeroLayoutPreset({ layoutPreset: 'full_bleed' }), 'fullBleed');
+  assert.equal(resolveHeroLayoutPreset({ layoutPreset: 'splitBanner' }), 'splitBanner');
+  assert.equal(resolveHeroLayoutPreset({ layoutPreset: 'banner' }), 'splitBanner');
+  assert.equal(resolveHeroLayoutPreset({ layoutPreset: 'bogus' }), 'heroCard');
+});
+
+test('layoutPresetToContainerTarget maps splitBanner to banner placement', () => {
+  assert.equal(layoutPresetToContainerTarget('heroCard'), 'background');
+  assert.equal(layoutPresetToContainerTarget('fullBleed'), 'background');
+  assert.equal(layoutPresetToContainerTarget('splitBanner'), 'banner');
+});
+
+test('isFullBleedLayout is true only for the fullBleed preset', () => {
+  assert.equal(isFullBleedLayout('fullBleed'), true);
+  assert.equal(isFullBleedLayout('heroCard'), false);
+  assert.equal(isFullBleedLayout('splitBanner'), false);
 });
 
 test('resolveHeroRenderMode defaults to live', () => {

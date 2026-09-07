@@ -25,6 +25,9 @@ import {
   resolveHeroContrastScrim,
   resolveEffectiveHeroRender,
   pickHeroClip,
+  resolveHeroLayoutPreset,
+  layoutPresetToContainerTarget,
+  isFullBleedLayout,
 } from '@/lib/shaders/presets';
 import { isMobileViewport, isLowPowerDevice } from '@/lib/shaders/videoExport';
 
@@ -290,7 +293,16 @@ export default function HomePage() {
   // Layout): full-card background vs an inline sub-text banner, with a preset
   // height and a CSS blend mode. Every value derives from the admin settings —
   // zero hardcoded product/layout assumptions.
-  const aiHeroContainerTarget = aiHero?.containerTarget === 'banner' ? 'banner' : 'background';
+  // High-level layout preset (Hero Card / Full Bleed / Split Banner). When a
+  // `layoutPreset` is stored it wins; otherwise fall back to the legacy
+  // `containerTarget` field so an existing config keeps its exact look.
+  const aiHeroLayoutPreset = resolveHeroLayoutPreset(aiHero);
+  const aiHeroFullBleed = isFullBleedLayout(aiHeroLayoutPreset);
+  const aiHeroContainerTarget = aiHero?.layoutPreset
+    ? layoutPresetToContainerTarget(aiHeroLayoutPreset)
+    : aiHero?.containerTarget === 'banner'
+      ? 'banner'
+      : 'background';
   const aiHeroBlendMode = aiHero?.blendMode || 'normal';
   // Single "Intensity & Speed" knob — drives both the exploded dispersion and the
   // animation speed. Resolved from `intensity` (falling back to the legacy
@@ -343,6 +355,7 @@ export default function HomePage() {
     assemblyProgress: Number(aiHero?.assemblyProgress) || 1,
     blendMode: aiHeroBlendMode,
     productSilhouette: String(aiHero?.productSilhouette || ''),
+    productImageUrl: heroCoverImage,
     speed: aiHeroSpeed,
   };
 
@@ -350,7 +363,7 @@ export default function HomePage() {
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
-        <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: `${aiHeroCornerRadius}px`, padding: `${aiHeroPadding}px 22px`, minHeight: aiHeroBoxHeight, width: '100%', maxWidth: aiHeroMaxWidth, margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+        <section style={{ position: 'relative', overflow: 'hidden', border: aiHeroFullBleed ? 'none' : `1px solid ${configPalette.cardBorder}`, borderRadius: aiHeroFullBleed ? 0 : `${aiHeroCornerRadius}px`, padding: `${aiHeroPadding}px 22px`, minHeight: aiHeroBoxHeight, width: '100%', maxWidth: aiHeroFullBleed ? '100%' : aiHeroMaxWidth, margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: aiHeroFullBleed ? 'none' : cardSheen, boxShadow: aiHeroFullBleed ? 'none' : cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           {aiHeroContainerTarget === 'background' && !aiHeroUseVideo && (
             <HeroShaderCanvas {...heroCanvasProps} placement="background" />
           )}

@@ -196,6 +196,7 @@ export interface StorefrontConfig {
     accentB?: string;
     accentC?: string;
     containerTarget?: 'background' | 'banner';
+    layoutPreset?: 'heroCard' | 'fullBleed' | 'splitBanner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
     speed?: number;
@@ -703,6 +704,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       assemblyProgress: 1,
       paletteAutoSync: true,
       containerTarget: 'background',
+      layoutPreset: 'heroCard',
       canvasHeight: 'medium',
       blendMode: 'normal',
       heroHeight: 'standard',
