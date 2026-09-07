@@ -1974,6 +1974,29 @@ is the backing endpoint.
 - **2026-08-31 — Six-phase audit & hardening pass (`strict-audit-refactor-full`):**
   - **Phase 1 — auth/rate-limit/security.** (a) Customer resend-verification 429
     fixed end-to-end: `lib/customer-verify.ts` returns `retryAfterSeconds` on the
+
+- **2026-09-07 — AI Hero Shader API hardening + admin status backoff (`hero-shader-api-hardening-backoff`):**
+  - **🛡 503/500 elimination on admin routes.** `app/api/admin/status/route.ts` and
+    `app/api/admin/settings/route.ts` (GET + POST) previously returned raw HTTP 500
+    in their catch blocks (and the `Redis offline` short-circuits). All failure paths
+    now return **HTTP 200** JSON with `success: false` + `fallback: true` so the admin
+    client degrades gracefully (empty chips/cards) instead of a network failure. The
+    `/api/ai/shader-prompt` route already returned a 200 fallback envelope — unchanged.
+  - **⏱ Strict 10s AbortController timeout.** `/api/ai/shader-prompt/route.ts`'s
+    `withTimeout` helper now creates an `AbortController` that aborts the instant the
+    deadline expires (previously a bare `setTimeout` race), and the AI provider call
+    budget was tightened **20s → 10s**. A hung provider still degrades to the
+    deterministic `compileShaderParams` floor with a masked `aiError`, never a 503.
+  - **🔁 Exponential-backoff admin status polling.** `app/admin/page.tsx` replaced the
+    fixed 30s `setInterval` status poll with a self-scheduling `setTimeout` loop:
+    `fetchStatus()` now returns a success boolean; a successful poll resets the delay
+    to the 15s floor, while each failure doubles it up to a 120s ceiling (so a degraded
+    Redis/Supabase backend is never hammered, yet the portal self-heals the instant it
+    recovers). Visibility-change behavior (pause when hidden) is preserved.
+  - **🧪 Verified:** `npx tsc --noEmit` clean (0 errors), `npm test` **400/400**, and
+    `eslint` 0 errors on every touched file (only the pre-existing BABEL 500KB note on
+    `app/admin/page.tsx`). No Redis keys added or changed.
+
     throttle, `/api/auth/resend-verification` echoes it (+ `Retry-After` header),
     and BOTH `/account` and `/auth/signup` now show a live cooldown-timer button
 

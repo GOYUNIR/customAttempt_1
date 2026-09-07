@@ -27,11 +27,21 @@ async function authorized(request: Request): Promise<boolean> {
   }
 }
 
-/** Race a promise against a hard timeout so a hung AI provider can't wedge. */
+/**
+ * Race a promise against a strict, AbortController-backed deadline so a hung AI
+ * provider can never wedge the route. The abort signal is exposed to callers so
+ * the in-flight external fetch can be cancelled the instant the budget expires
+ * (rather than only being observed after the fact) — a 10s ceiling is enforced
+ * for every AI provider call below.
+ */
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('timeout')), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('timeout'));
+    }, ms);
   });
   try {
     return await Promise.race([promise, timeout]);
@@ -117,7 +127,7 @@ export async function POST(request: Request) {
     try {
       const completion = await withTimeout(
         driver.complete(buildShaderPrompt({ prompt, product })),
-        20_000,
+        10_000,
       );
       if (completion.ok) {
         const parsed = parseShaderParamsResult(completion.text);

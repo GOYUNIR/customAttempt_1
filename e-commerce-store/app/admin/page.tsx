@@ -1952,7 +1952,7 @@ export default function AdminPortal() {
   // ============================================================
   // FETCH FUNCTIONS (unchanged)
   // ============================================================
-  const fetchStatus = async () => {
+  const fetchStatus = async (): Promise<boolean> => {
     try {
       // Date.now is used here as a cache-buster in an async handler (called
       // from effects + the refresh button), never during render — the React
@@ -1964,14 +1964,16 @@ export default function AdminPortal() {
         // Not (or no longer) signed in as an admin — send the operator to the
         // admin sign-in page, never to the public storefront.
         window.location.assign('/admin/login');
-        return;
+        return false;
       }
       const data = await res.json();
       setStatus(data);
       // eslint-disable-next-line react-hooks/purity -- real wall-clock stamp for the "Updated Xs ago" label; async handler, not render.
       setLastUpdatedAt(Date.now());
+      return true;
     } catch {
       setStatus({ error: 'Unable to fetch status' });
+      return false;
     }
   };
 
@@ -4278,15 +4280,46 @@ export default function AdminPortal() {
 
   useEffect(() => {
     // Poll only while verified (the 2FA gate has its own step; a locked portal
-    // should not hammer the API).
+    // should not hammer the API). Uses EXPONENTIAL BACKOFF instead of a fixed
+    // interval: every successful poll resets the delay to the floor; every
+    // failure (network blip, transient Redis/Supabase hiccup) doubles it up to
+    // a hard ceiling, so a degraded backend is never hammered while the portal
+    // still self-heals the moment it recovers.
     if (adminVerified !== true) return;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!pollTimer) pollTimer = setInterval(fetchStatus, 30000); };
-    const stop = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; };
-    const vis = () => { if (document.visibilityState === 'visible') { fetchStatus(); start(); } else stop(); };
+    const BASE_MS = 15_000;
+    const MAX_MS = 120_000;
+    let delay = BASE_MS;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
+    const schedule = (ms: number) => {
+      if (disposed) return;
+      pollTimer = setTimeout(async () => {
+        const ok = await fetchStatus();
+        delay = ok ? BASE_MS : Math.min(MAX_MS, delay * 2);
+        schedule(delay);
+      }, ms);
+    };
+
+    const start = () => {
+      if (pollTimer) return;
+      delay = BASE_MS;
+      schedule(0);
+    };
+    const stop = () => {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = null;
+    };
+    const vis = () => {
+      if (document.visibilityState === 'visible') { fetchStatus(); start(); } else stop();
+    };
     start();
     document.addEventListener('visibilitychange', vis);
-    return () => { stop(); document.removeEventListener('visibilitychange', vis); };
+    return () => {
+      disposed = true;
+      stop();
+      document.removeEventListener('visibilitychange', vis);
+    };
   }, [adminVerified]);
 
   // TWO-STEP ADMIN VERIFICATION handlers — send/confirm the emailed code.

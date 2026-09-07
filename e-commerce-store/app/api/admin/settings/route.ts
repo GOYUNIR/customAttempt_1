@@ -13,21 +13,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     const redis = createRedisClient();
-    if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
+    if (!redis) return NextResponse.json({ success: false, fallback: true, error: 'Redis offline', settings: {} }, { status: 200 });
 
     const raw = await redis.get(SETTINGS_KEY);
     const settings = safeParseRedisItem<any>(raw) || {};
     return NextResponse.json({ settings });
   } catch (err: any) {
     console.error('[Settings API] GET Error:', err);
-    return NextResponse.json({ error: err.message, settings: {} }, { status: 500 });
+    return NextResponse.json({ success: false, fallback: true, error: err.message, settings: {} }, { status: 200 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const redis = createRedisClient();
-    if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
+    if (!redis) return NextResponse.json({ success: false, fallback: true, error: 'Redis offline' }, { status: 200 });
 
     const body = await request.json();
     const password = String(body?.password || '');
@@ -106,6 +106,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, settings });
   } catch (err: any) {
     console.error('[Settings API] POST Error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, fallback: true, error: err.message }, { status: 200 });
   }
 }

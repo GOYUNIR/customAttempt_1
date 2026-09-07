@@ -214,8 +214,13 @@ export async function GET(request: Request) {
 
     return NextResponse.json(status);
   } catch (err: any) {
+    // NEVER return a raw 500 to the admin client — a transient Redis/Stripe/
+    // Supabase hiccup must degrade to a benign HTTP 200 payload so the header
+    // chips + status cards render empty instead of crashing the portal.
     return NextResponse.json(
       {
+        success: false,
+        fallback: true,
         error: err?.message || 'status failed',
         storageProvider: detectStorageProvider(),
         integrations: [],
@@ -228,7 +233,7 @@ export async function GET(request: Request) {
         pools: [],
         fallbackEntries: [],
       },
-      { status: 500 },
+      { status: 200 },
     );
   }
 }
