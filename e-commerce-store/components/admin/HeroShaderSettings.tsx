@@ -29,8 +29,10 @@ import { buildProductTarget, silhouetteLabel } from '@/lib/shaders/productTarget
 import { toHexColor } from '@/lib/share-card-config';
 
 /**
- * Luxury 2-column control suite for the AI Hero Banner & Shader.
- * Left (7/12): presets, prompt, motion, palette. Right (5/12): sticky live preview.
+ * 2-column control suite for the AI Hero Banner & Shader.
+ * Left (7/12): the Smart AI Prompt Compiler (product target, prompt, action
+ * controls) with secondary presets / motion / layout / palette in collapsible
+ * accordions. Right (5/12): the sticky live viewport preview.
  */
 
 const cardStyle: CSSProperties = {
@@ -169,10 +171,11 @@ export default function HeroShaderSettings({
 }) {
   const [status, setStatus] = useState<HeroShaderStatus>({ backend: 'css', fps: 0 });
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
-  const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'compiling' | 'generating'>('idle');
   const [paused, setPaused] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const generating = phase !== 'idle';
 
   const catalog = Array.isArray(products) ? products : [];
   const selectedProduct =
@@ -212,14 +215,19 @@ export default function HeroShaderSettings({
     abortRef.current?.abort();
     const snapshot = value;
     setGenError(null);
-    setGenerating(true);
-    // Instant deterministic compile first — never blocks on the network, so the
-    // preview updates even if the AI provider is unconfigured or slow.
+    setPhase('compiling');
+    // Deterministic compile runs first (instant, never blocks on the network) so
+    // the preview updates even when the AI provider is unconfigured or slow.
     applyParams(compileShaderParams(value.prompt, selectedTarget));
 
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      // Yield one tick so the "Compiling shader…" state paints before the network
+      // phase begins, then hand off to the AI route.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (controller.signal.aborted) return;
+      setPhase('generating');
       const res = await fetch('/api/ai/shader-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -228,7 +236,7 @@ export default function HeroShaderSettings({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        if (data?.error) setGenError(String(data.error));
+        setGenError(data?.error ? String(data.error) : `Request failed (${res.status}).`);
         return;
       }
       const data = await res.json();
@@ -243,13 +251,13 @@ export default function HeroShaderSettings({
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
-      setGenerating(false);
+      setPhase('idle');
     }
   };
 
   const cancelGeneration = () => {
     abortRef.current?.abort();
-    setGenerating(false);
+    setPhase('idle');
     setGenError(null);
   };
 
@@ -286,34 +294,6 @@ export default function HeroShaderSettings({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
       <div className="lg:col-span-7">
-        <Section title="Engine Presets" hint="Pick the renderer — GLSL fragment shader or 3D particle assembly." defaultOpen>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {HERO_SHADER_PRESETS.map((preset) => {
-              const isActive = value.preset === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => patch({ preset: preset.id })}
-                  style={{
-                    textAlign: 'left',
-                    borderRadius: 14,
-                    border: `1px solid ${isActive ? '#7c5cff' : 'rgba(255,255,255,0.10)'}`,
-                    boxShadow: isActive ? '0 0 0 3px rgba(124,92,255,0.25)' : 'none',
-                    background: 'rgba(255,255,255,0.03)',
-                    padding: 10,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ height: 64, borderRadius: 10, marginBottom: 8, ...presetSwatch(preset.id, palette) }} />
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#eee' }}>{preset.name}</div>
-                  <div style={{ fontSize: 10, color: '#9a9aa4', marginTop: 2 }}>{preset.category}</div>
-                </button>
-              );
-            })}
-          </div>
-        </Section>
-
         <div style={cardStyle}>
           <div style={sectionTitleStyle}>Smart AI Prompt Compiler</div>
           <label style={labelStyle}>Product target</label>
@@ -403,7 +383,7 @@ export default function HeroShaderSettings({
               opacity: generating ? 0.7 : 1,
             }}
           >
-            {generating ? '⏳ Generating…' : '🎬 Execute Prompt & Generate Preview'}
+            {phase === 'compiling' ? '⏳ Compiling shader…' : phase === 'generating' ? '⏳ Generating preview…' : '🎬 Execute Prompt & Generate Preview'}
           </button>
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <button
@@ -430,13 +410,40 @@ export default function HeroShaderSettings({
             )}
           </div>
           {genError && <div style={{ marginTop: 8, fontSize: 10, color: '#ffb3ba', lineHeight: 1.5 }}>{genError}</div>}
-          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94', lineHeight: 1.7 }}>
-            Derived: mode <b style={{ color: '#c9b8ff' }}>{derived.mode}</b>
-            {derived.productSilhouette ? <> · silhouette <b style={{ color: '#c9b8ff' }}>{derived.productSilhouette}</b></> : null}
-            {' · '}viscosity {(derived.viscosity * 100).toFixed(0)}% · turbulence {(derived.turbulence * 100).toFixed(0)}%
-            {derived.spin ? <> · <b style={{ color: '#c9b8ff' }}>continuous spin</b></> : null}
+          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94' }}>
+            Derived: <b style={{ color: '#c9b8ff' }}>{derived.mode}</b>
+            {derived.productSilhouette ? <> · <b style={{ color: '#c9b8ff' }}>{derived.productSilhouette}</b></> : null}
+            {derived.spin ? ' · spin' : null}
           </div>
         </div>
+
+        <Section title="Engine Presets" hint="Renderer — GLSL fragment shader or 3D particle assembly.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {HERO_SHADER_PRESETS.map((preset) => {
+              const isActive = value.preset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => patch({ preset: preset.id })}
+                  style={{
+                    textAlign: 'left',
+                    borderRadius: 14,
+                    border: `1px solid ${isActive ? '#7c5cff' : 'rgba(255,255,255,0.10)'}`,
+                    boxShadow: isActive ? '0 0 0 3px rgba(124,92,255,0.25)' : 'none',
+                    background: 'rgba(255,255,255,0.03)',
+                    padding: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ height: 64, borderRadius: 10, marginBottom: 8, ...presetSwatch(preset.id, palette) }} />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#eee' }}>{preset.name}</div>
+                  <div style={{ fontSize: 10, color: '#9a9aa4', marginTop: 2 }}>{preset.category}</div>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
 
         <Section title="Motion & Primitive Parameters" hint="Sliders, particle density, opacity and the animation loop.">
 
@@ -563,10 +570,6 @@ export default function HeroShaderSettings({
               </button>
             ))}
           </div>
-
-          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94' }}>
-            Canvas behind the whole hero card, or an inline banner beneath the copy.
-          </div>
         </Section>
 
         <Section title="Theme & Palette" hint="Sync accents from the storefront theme or override per hero.">
@@ -590,11 +593,6 @@ export default function HeroShaderSettings({
                 />
               </div>
             ))}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 10, color: '#8a8a94' }}>
-            {value.paletteAutoSync
-              ? 'Extracted live from the active theme accent colors.'
-              : 'Custom accent vectors — override the theme palette per hero.'}
           </div>
         </Section>
       </div>
@@ -659,8 +657,7 @@ export default function HeroShaderSettings({
                   zIndex: 2,
                 }}
               >
-                <span>⏳ Compiling shader…</span>
-                <span style={{ fontSize: 10, fontWeight: 500, color: '#8a8a94' }}>Keeping the ambient fallback active</span>
+                <span>{phase === 'compiling' ? '⏳ Compiling shader…' : '⏳ Generating preview…'}</span>
               </div>
             )}
           </div>
@@ -690,7 +687,7 @@ export default function HeroShaderSettings({
           />
 
           <div style={{ marginTop: 12, fontSize: 10, color: '#8a8a94' }}>
-            0% exploded → 100% assembled · drives the timeline on <b style={{ color: '#c9b8ff' }}>Manual Scrub</b>.
+            0% exploded → 100% assembled.
           </div>
         </div>
       </div>

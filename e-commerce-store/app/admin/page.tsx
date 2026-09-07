@@ -8150,10 +8150,7 @@ export default function AdminPortal() {
 
               <h4 id="settings-aihero" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>AI Hero Banner &amp; Shader</h4>
               <p style={{ fontSize: 11, color: '#888', margin: '0 0 12px' }}>
-                A luxury multi-mode GPU shader rendered behind the home-page hero: organic domain warping, a
-                cursor-reactive particle mesh, raymarched refractive glass, and an exploded 3D bottle that reassembles
-                from a particle cloud. Falls back to a CSS ambient gradient on low-power devices, battery saver, or when
-                the visitor prefers reduced motion.
+                An AI-driven GPU shader behind the home-page hero — pick a product, describe the motion, and generate a preview.
               </p>
               <HeroShaderSettings
                 value={aiHeroSettings}
