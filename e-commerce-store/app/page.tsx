@@ -21,7 +21,12 @@ import {
   motionTypeToPreset,
   motionTypeToLoop,
   resolveHeroHeightPx,
+  resolveHeroTextDistribution,
+  resolveHeroContrastScrim,
+  resolveEffectiveHeroRender,
+  pickHeroClip,
 } from '@/lib/shaders/presets';
+import { isMobileViewport, isLowPowerDevice } from '@/lib/shaders/videoExport';
 
 // AI product-image animation for the hero. This is the SAME fallback preset the
 // `/api/ai/animation` pipeline emits when no AI provider is configured — a pure-
@@ -306,6 +311,24 @@ export default function HomePage() {
   const aiHeroCornerRadius = Number(aiHero?.cornerRadius) > 0 ? Number(aiHero?.cornerRadius) : themeRadiusNumber(configPalette, 26);
   const aiHeroPadding = Number(aiHero?.padding) > 0 ? Number(aiHero?.padding) : Math.round(28 * spacing);
   const aiHeroBoxHeight = resolveHeroHeightPx(aiHero);
+  // Text distribution + contrast scrim (admin → Settings → AI Hero → Layout).
+  const aiHeroDistribution = resolveHeroTextDistribution(aiHero);
+  const aiHeroScrim = resolveHeroContrastScrim(aiHero);
+  // 'split' renders the title block at the top and the buttons at the bottom via
+  // a flex spacer — the container itself anchors to `flex-start`.
+  const aiHeroJustify =
+    aiHeroDistribution === 'top' || aiHeroDistribution === 'split'
+      ? 'flex-start'
+      : aiHeroDistribution === 'bottom'
+        ? 'flex-end'
+        : 'center';
+  const aiHeroSplit = aiHeroDistribution === 'split';
+  // Pre-rendered video fallback (mobile / low-power / explicit admin choice).
+  const aiHeroClip = pickHeroClip(aiHero);
+  const aiHeroUseVideo =
+    aiHeroClip != null &&
+    resolveEffectiveHeroRender(aiHero, { isMobile: isMobileViewport(), isLowPower: isLowPowerDevice() }) ===
+      'video';
   const heroCanvasProps = {
     enabled: aiHero?.enabled !== false,
     preset: aiHeroPreset,
@@ -328,10 +351,32 @@ export default function HomePage() {
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
         <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: `${aiHeroCornerRadius}px`, padding: `${aiHeroPadding}px 22px`, minHeight: aiHeroBoxHeight, width: '100%', maxWidth: aiHeroMaxWidth, margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
-          {aiHeroContainerTarget === 'background' && (
+          {aiHeroContainerTarget === 'background' && !aiHeroUseVideo && (
             <HeroShaderCanvas {...heroCanvasProps} placement="background" />
           )}
-          <div style={{ position: 'relative', zIndex: 10 }}>
+          {aiHeroContainerTarget === 'background' && aiHeroUseVideo && aiHeroClip && (
+            <video
+              src={aiHeroClip.url}
+              autoPlay
+              muted
+              loop
+              playsInline
+              aria-hidden="true"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, pointerEvents: 'none' }}
+            />
+          )}
+          {aiHeroScrim > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 5,
+                background: `color-mix(in srgb, ${configPalette.cardBackground} ${aiHeroScrim}%, transparent)`,
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+          <div style={{ position: 'relative', zIndex: 10, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: aiHeroJustify }}>
           {aiHeroContainerTarget === 'banner' && (
             <div style={{ position: 'relative', height: aiHeroBannerHeight, marginBottom: 18, borderRadius: themeRadius(configPalette, 18), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}` }}>
               <HeroShaderCanvas {...heroCanvasProps} placement="banner" />
@@ -371,6 +416,7 @@ export default function HomePage() {
               {heroSubtitle}
             </p>
           )}
+          {aiHeroSplit && <div style={{ flex: 1, minHeight: 16 }} />}
           {(heroContent.showCta !== false || heroContent.showStory !== false) && (
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {heroContent.showCta !== false && (

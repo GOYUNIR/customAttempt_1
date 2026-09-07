@@ -208,6 +208,10 @@ export interface StorefrontConfig {
     targetProductId?: string;
     targetProductName?: string;
     productSilhouette?: string;
+    textDistribution?: 'centered' | 'top' | 'split' | 'bottom';
+    contrastScrim?: number;
+    renderMode?: 'live' | 'video';
+    clips?: unknown[];
   };
   socialProof: {
     label: string;
@@ -709,6 +713,10 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       targetProductId: '',
       targetProductName: '',
       productSilhouette: '',
+      textDistribution: 'centered',
+      contrastScrim: 0,
+      renderMode: 'live',
+      clips: [],
       ...(input.aiHero ?? {}),
     },
     socialProof: { ...defaultSocialProof, ...(input.socialProof ?? {}) },

@@ -139,6 +139,10 @@ export interface StoreConfig {
     targetProductId?: string;
     targetProductName?: string;
     productSilhouette?: string;
+    textDistribution?: 'centered' | 'top' | 'split' | 'bottom';
+    contrastScrim?: number;
+    renderMode?: 'live' | 'video';
+    clips?: unknown[];
   };
   socialProof: {
     label: string;
@@ -306,6 +310,10 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     targetProductId: '',
     targetProductName: '',
     productSilhouette: '',
+    textDistribution: 'centered',
+    contrastScrim: 0,
+    renderMode: 'live',
+    clips: [],
   },
   socialProof: {
     label: 'Limited drop access',

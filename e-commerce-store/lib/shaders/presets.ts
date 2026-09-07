@@ -100,6 +100,41 @@ export type HeroCanvasHeight = 'slim' | 'medium' | 'expanded';
 /** CSS blend mode the canvas composes against the hero card surface. */
 export type HeroBlendMode = 'normal' | 'overlay' | 'screen';
 
+/**
+ * How the hero copy is distributed inside the hero card (admin → "Text
+ * Distribution"). Centered is the template default; the others let a buyer
+ * push the title up, split the title/buttons, or anchor everything to the
+ * bottom of the card without touching the shader.
+ */
+export type HeroTextDistribution = 'centered' | 'top' | 'split' | 'bottom';
+
+/**
+ * Render mode for the hero animation. `live` renders the WebGL canvas in
+ * real time; `video` serves a pre-rendered looping WebM/MP4 clip instead
+ * (the mobile / low-power fallback).
+ */
+export type HeroRenderMode = 'live' | 'video';
+
+/** A saved hero clip (admin → Clip Management), stored inside `store:config.aiHero.clips`. */
+export interface HeroClip {
+  /** Stable id (timestamp-derived) used to key the library + delete clips. */
+  id: string;
+  /** Immutable data URL (WebM/MP4) the storefront `<video>` loops. */
+  url: string;
+  /** MIME type — `video/webm` or `video/mp4`. */
+  mime: string;
+  /** Encoded byte size (for the admin readout). */
+  bytes: number;
+  /** Rendered width in px. */
+  width: number;
+  /** Rendered height in px. */
+  height: number;
+  /** Clip duration in ms. */
+  durationMs: number;
+  /** ISO creation timestamp (admin ordering). */
+  createdAt: string;
+}
+
 export interface AiHeroSettings {
   enabled: boolean;
   preset: string;
@@ -152,6 +187,14 @@ export interface AiHeroSettings {
   targetProductName?: string;
   /** Generic silhouette key the exploded mesh derives from the target product. */
   productSilhouette?: string;
+  /** Text layout within the hero card (admin → "Text Distribution"). */
+  textDistribution: HeroTextDistribution;
+  /** Contrast scrim / overlay tint strength (0–100) for guaranteed legibility. */
+  contrastScrim: number;
+  /** Render mode: live WebGL canvas vs a pre-rendered looping video clip. */
+  renderMode: HeroRenderMode;
+  /** Saved video clips (admin → Clip Management). */
+  clips: HeroClip[];
 }
 
 export const PARTICLE_COUNT_OPTIONS = [10_000, 50_000, 100_000] as const;
@@ -200,6 +243,97 @@ export const HERO_HEIGHT_MAX = 900;
 
 export const SPEED_MIN = 0.5;
 export const SPEED_MAX = 2;
+
+/** Admin "Text Distribution" selector + the max contrast-scrim strength. */
+export const TEXT_DISTRIBUTION_OPTIONS: ReadonlyArray<{ value: HeroTextDistribution; label: string }> = [
+  { value: 'centered', label: 'Centered' },
+  { value: 'top', label: 'Top Heavy' },
+  { value: 'split', label: 'Split View (Title top, Buttons bottom)' },
+  { value: 'bottom', label: 'Bottom Anchored' },
+];
+
+export const CONTRAST_SCRIM_MAX = 100;
+
+/** Admin "Render Mode" selector (Live WebGL vs Pre-rendered Video). */
+export const RENDER_MODE_OPTIONS: ReadonlyArray<{ value: HeroRenderMode; label: string }> = [
+  { value: 'live', label: 'Live WebGL' },
+  { value: 'video', label: 'Pre-rendered Video' },
+];
+
+/** Resolve the hero copy distribution (missing → centered). */
+export function resolveHeroTextDistribution(
+  aiHero: { textDistribution?: string } | undefined | null,
+): HeroTextDistribution {
+  const raw = aiHero?.textDistribution;
+  if (raw === 'top' || raw === 'split' || raw === 'bottom') return raw;
+  return 'centered';
+}
+
+/** Resolve the contrast-scrim strength (0–100, missing → 0 = no scrim). */
+export function resolveHeroContrastScrim(
+  aiHero: { contrastScrim?: number } | undefined | null,
+): number {
+  const n = Number(aiHero?.contrastScrim);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(CONTRAST_SCRIM_MAX, Math.round(n)));
+}
+
+/** Resolve the hero render mode (missing → live WebGL). */
+export function resolveHeroRenderMode(
+  aiHero: { renderMode?: string } | undefined | null,
+): HeroRenderMode {
+  return aiHero?.renderMode === 'video' ? 'video' : 'live';
+}
+
+/** Normalize the saved clip library (defensive: drops malformed entries). */
+export function resolveHeroClips(aiHero: { clips?: unknown } | undefined | null): HeroClip[] {
+  const raw = aiHero?.clips;
+  if (!Array.isArray(raw)) return [];
+  const out: HeroClip[] = [];
+  for (const c of raw) {
+    if (!c || typeof c !== 'object') continue;
+    const clip = c as Partial<HeroClip>;
+    if (typeof clip.id !== 'string' || !clip.id) continue;
+    if (typeof clip.url !== 'string' || !clip.url.startsWith('data:video/')) continue;
+    out.push({
+      id: clip.id,
+      url: clip.url,
+      mime: typeof clip.mime === 'string' ? clip.mime : 'video/webm',
+      bytes: Number(clip.bytes) || 0,
+      width: Number(clip.width) || 0,
+      height: Number(clip.height) || 0,
+      durationMs: Number(clip.durationMs) || 0,
+      createdAt: typeof clip.createdAt === 'string' ? clip.createdAt : new Date().toISOString(),
+    });
+  }
+  return out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+/** Pick the clip the storefront should loop when in `video` render mode. */
+export function pickHeroClip(
+  aiHero: { clips?: unknown } | undefined | null,
+): HeroClip | null {
+  const clips = resolveHeroClips(aiHero);
+  return clips.length > 0 ? clips[0] : null;
+}
+
+/**
+ * Decide whether the storefront hero should render the live WebGL canvas or a
+ * pre-rendered video clip. `video` wins when (a) the admin explicitly selected
+ * "Pre-rendered Video" AND a clip exists, or (b) the visitor is on a mobile
+ * viewport / low-power GPU AND a clip exists (the automatic performance
+ * fallback). With no clip there is nothing to loop, so it always stays live.
+ */
+export function resolveEffectiveHeroRender(
+  aiHero: { renderMode?: string; clips?: unknown } | undefined | null,
+  device: { isMobile?: boolean; isLowPower?: boolean } = {},
+): HeroRenderMode {
+  const hasClip = pickHeroClip(aiHero) !== null;
+  if (!hasClip) return 'live';
+  if (resolveHeroRenderMode(aiHero) === 'video') return 'video';
+  if (device.isMobile || device.isLowPower) return 'video';
+  return 'live';
+}
 
 /**
  * Map a high-level motion type onto the concrete engine preset id. `spin` +
@@ -323,6 +457,10 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     targetProductId: '',
     targetProductName: '',
     productSilhouette: '',
+    textDistribution: 'centered',
+    contrastScrim: 0,
+    renderMode: 'live',
+    clips: [],
   };
 }
 

@@ -14,6 +14,12 @@ import {
   motionTypeToPreset,
   motionTypeToLoop,
   resolveHeroHeightPx,
+  resolveHeroTextDistribution,
+  resolveHeroContrastScrim,
+  resolveHeroRenderMode,
+  resolveHeroClips,
+  pickHeroClip,
+  resolveEffectiveHeroRender,
 } from '../lib/shaders/presets.ts';
 import { parsePromptToParams, enhancePrompt } from '../lib/shaders/promptParser.ts';
 import { hexToRgb, extractAccentPalette, paletteToCss } from '../lib/shaders/palette.ts';
@@ -108,6 +114,74 @@ test('resolveHeroHeightPx resolves presets and clamps the custom slider', () => 
   assert.equal(resolveHeroHeightPx({ heroHeight: 'custom', heroHeightPx: 500 }), 500);
   assert.equal(resolveHeroHeightPx({ heroHeight: 'custom', heroHeightPx: 9999 }), 900); // clamped
   assert.equal(resolveHeroHeightPx({}), 480); // default standard
+});
+
+test('resolveHeroTextDistribution defaults to centered and passes through valid values', () => {
+  assert.equal(resolveHeroTextDistribution(undefined), 'centered');
+  assert.equal(resolveHeroTextDistribution({ textDistribution: 'bogus' }), 'centered');
+  assert.equal(resolveHeroTextDistribution({ textDistribution: 'top' }), 'top');
+  assert.equal(resolveHeroTextDistribution({ textDistribution: 'split' }), 'split');
+  assert.equal(resolveHeroTextDistribution({ textDistribution: 'bottom' }), 'bottom');
+});
+
+test('resolveHeroContrastScrim clamps to 0..100 and defaults to 0', () => {
+  assert.equal(resolveHeroContrastScrim(undefined), 0);
+  assert.equal(resolveHeroContrastScrim({ contrastScrim: 37 }), 37);
+  assert.equal(resolveHeroContrastScrim({ contrastScrim: 999 }), 100);
+  assert.equal(resolveHeroContrastScrim({ contrastScrim: -5 }), 0);
+  assert.equal(resolveHeroContrastScrim({ contrastScrim: NaN }), 0);
+});
+
+test('resolveHeroRenderMode defaults to live', () => {
+  assert.equal(resolveHeroRenderMode(undefined), 'live');
+  assert.equal(resolveHeroRenderMode({ renderMode: 'video' }), 'video');
+  assert.equal(resolveHeroRenderMode({ renderMode: 'live' }), 'live');
+});
+
+test('resolveHeroClips drops malformed entries and sorts newest first', () => {
+  const clip = (id: string, createdAt: string) => ({
+    id,
+    url: `data:video/webm;base64,AAAA${id}`,
+    mime: 'video/webm',
+    bytes: 100,
+    width: 640,
+    height: 360,
+    durationMs: 3000,
+    createdAt,
+  });
+  const out = resolveHeroClips({
+    clips: [
+      clip('a', '2026-01-01T00:00:00.000Z'),
+      { id: 'bad', url: 'https://not-a-data-url' },
+      { id: '', url: 'data:video/webm;base64,x' },
+      null,
+      clip('b', '2026-02-01T00:00:00.000Z'),
+    ],
+  });
+  assert.equal(out.length, 2);
+  assert.equal(out[0].id, 'b');
+  assert.equal(out[1].id, 'a');
+});
+
+test('pickHeroClip returns the first clip or null', () => {
+  const clip = { id: 'c1', url: 'data:video/webm;base64,x', mime: 'video/webm', bytes: 1, width: 2, height: 2, durationMs: 1, createdAt: '2026-01-01T00:00:00.000Z' };
+  assert.equal(pickHeroClip({ clips: [clip] })?.id, 'c1');
+  assert.equal(pickHeroClip({ clips: [] }), null);
+  assert.equal(pickHeroClip(undefined), null);
+});
+
+test('resolveEffectiveHeroRender prefers live with no clip and falls back on mobile/low-power', () => {
+  const clip = { id: 'c1', url: 'data:video/webm;base64,x', mime: 'video/webm', bytes: 1, width: 2, height: 2, durationMs: 1, createdAt: '2026-01-01T00:00:00.000Z' };
+  // No clip → always live.
+  assert.equal(resolveEffectiveHeroRender({ renderMode: 'video', clips: [] }, { isMobile: true }), 'live');
+  // Explicit video mode + clip → video.
+  assert.equal(resolveEffectiveHeroRender({ renderMode: 'video', clips: [clip] }, {}), 'video');
+  // Live mode + mobile → automatic fallback.
+  assert.equal(resolveEffectiveHeroRender({ renderMode: 'live', clips: [clip] }, { isMobile: true }), 'video');
+  // Live mode + low-power → automatic fallback.
+  assert.equal(resolveEffectiveHeroRender({ renderMode: 'live', clips: [clip] }, { isLowPower: true }), 'video');
+  // Live mode, desktop, capable GPU → live.
+  assert.equal(resolveEffectiveHeroRender({ renderMode: 'live', clips: [clip] }, {}), 'live');
 });
 
 // --- prompt parser ---

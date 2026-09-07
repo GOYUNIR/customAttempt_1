@@ -10,17 +10,27 @@ import {
   HERO_HEIGHT_MAX,
   SPEED_MIN,
   SPEED_MAX,
+  TEXT_DISTRIBUTION_OPTIONS,
+  RENDER_MODE_OPTIONS,
+  CONTRAST_SCRIM_MAX,
   resolveHeroIntensity,
   intensityToRadius,
   resolveHeroSpeed,
   resolveHeroMotionType,
   resolveHeroHeightPx,
+  resolveHeroTextDistribution,
+  resolveHeroContrastScrim,
+  resolveHeroRenderMode,
+  resolveHeroClips,
   motionTypeToPreset,
   motionTypeToLoop,
   type AiHeroSettings,
   type HeroMotionType,
   type HeroHeight,
   type HeroBlendMode,
+  type HeroTextDistribution,
+  type HeroRenderMode,
+  type HeroClip,
 } from '@/lib/shaders/presets';
 import {
   enhancePrompt,
@@ -29,6 +39,7 @@ import {
   type ShaderParams,
 } from '@/lib/shaders/promptParser';
 import { buildProductTarget } from '@/lib/shaders/productTarget';
+import { recordCanvasVideo, mediaRecorderSupported } from '@/lib/shaders/videoExport';
 import { themeRadiusNumber } from '@/lib/storefront-config';
 
 /**
@@ -83,13 +94,7 @@ const selectStyle: CSSProperties = {
   padding: '8px 10px',
 };
 
-/** Three-step generation progress trail shown under the Execute button. */
-const STEP_LABELS: ReadonlyArray<string> = [
-  '⏳ 1/3 Resolving product geometry & silhouette…',
-  '⚡ 2/3 Compiling shader uniforms with AI…',
-  '🎨 3/3 Applying GLSL render payload to canvas…',
-];
-
+/** Overlay/blend mode selector. */
 const OVERLAY_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: string }> = [
   { value: 'normal', label: 'Normal' },
   { value: 'overlay', label: 'Overlay' },
@@ -126,7 +131,12 @@ export default function HeroShaderSettings({
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState('');
-  const [progressStep, setProgressStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [progressLog, setProgressLog] = useState<Array<{ pct: number; label: string }>>([]);
+  const [logOpen, setLogOpen] = useState(false);
+  const [previewCanvas, setPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [clipMsg, setClipMsg] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
   const catalog = Array.isArray(products) ? products : [];
@@ -182,6 +192,12 @@ export default function HeroShaderSettings({
   };
 
 
+  /** Append a granular progress step (0–100) to the expandable log. */
+  const logStep = (pct: number, label: string) => {
+    setProgress(Math.max(0, Math.min(100, Math.round(pct))));
+    setProgressLog((prev) => [...prev, { pct: Math.round(pct), label }]);
+  };
+
   const executePrompt = async () => {
     const prompt = String(value.prompt || '').trim();
     if (!prompt && !selectedTarget) return;
@@ -191,14 +207,17 @@ export default function HeroShaderSettings({
     setGenerating(true);
     setGenError('');
     setPaused(false);
+    setProgress(0);
+    setProgressLog([]);
     try {
-      setProgressStep(1);
-      await sleep(350);
+      logStep(8, 'Resolving product geometry & silhouette…');
+      await sleep(300);
       // Deterministic floor first — instant preview, then the AI refines it.
       const deterministic = compileShaderParams(prompt, selectedTarget);
       applyParams(deterministic);
-      setProgressStep(2);
-      await sleep(350);
+      logStep(35, 'Extracting product geometry');
+      await sleep(300);
+      logStep(70, 'Compiling GLSL shader uniforms with AI…');
       const res = await fetch('/api/ai/shader-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -216,16 +235,17 @@ export default function HeroShaderSettings({
         throw new Error(msg);
       }
       const data = await res.json();
+      logStep(90, 'Applying GLSL render payload to canvas…');
       if (data?.params) applyParams(data.params);
       if (data?.aiError) setGenError(String(data.aiError));
-      setProgressStep(3);
-      await sleep(350);
+      await sleep(300);
+      logStep(100, 'Complete — live canvas applied');
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
       setGenError(err?.message || 'AI generation failed — the deterministic shader remains active.');
+      logStep(100, 'Deterministic fallback applied');
     } finally {
       setGenerating(false);
-      setProgressStep(0);
       abortRef.current = null;
     }
   };
@@ -233,8 +253,47 @@ export default function HeroShaderSettings({
   const cancel = () => {
     abortRef.current?.abort();
     setGenerating(false);
-    setProgressStep(0);
+    setProgress(0);
+    setProgressLog([]);
     setGenError('');
+  };
+
+  const recordClip = async () => {
+    if (!previewCanvas) {
+      setClipMsg('Canvas not ready — enable the shader and wait a moment, then try again.');
+      return;
+    }
+    if (!mediaRecorderSupported()) {
+      setClipMsg('This browser cannot record the canvas (MediaRecorder is unsupported).');
+      return;
+    }
+    setRecording(true);
+    setClipMsg('');
+    try {
+      const capture = await recordCanvasVideo(previewCanvas, { durationMs: 3000 });
+      if (!capture) {
+        setClipMsg('Recording failed — the browser could not capture the canvas stream.');
+        return;
+      }
+      const clip: HeroClip = {
+        id: `clip-${Date.now()}`,
+        url: capture.dataUrl,
+        mime: capture.mime,
+        bytes: capture.bytes,
+        width: capture.width,
+        height: capture.height,
+        durationMs: capture.durationMs,
+        createdAt: new Date().toISOString(),
+      };
+      onChange((prev) => ({ ...prev, clips: [clip, ...(prev.clips || [])] }));
+      setClipMsg('Clip saved to the library.');
+    } finally {
+      setRecording(false);
+    }
+  };
+
+  const deleteClip = (id: string) => {
+    onChange((prev) => ({ ...prev, clips: (prev.clips || []).filter((c) => c.id !== id) }));
   };
 
   // Preview theme tokens (fall back to brand-safe neutrals on an unseeded theme).
@@ -249,6 +308,16 @@ export default function HeroShaderSettings({
   const previewMaxWidth = Number(value.maxWidth) > 0 ? Number(value.maxWidth) : 720;
   const previewPadding = Number(value.padding) > 0 ? Number(value.padding) : 28;
   const previewHeight = resolveHeroHeightPx(value);
+  const previewDistribution = resolveHeroTextDistribution(value);
+  const previewScrim = resolveHeroContrastScrim(value);
+  const distributionJustify =
+    previewDistribution === 'top'
+      ? 'flex-start'
+      : previewDistribution === 'bottom'
+        ? 'flex-end'
+        : previewDistribution === 'split'
+          ? 'space-between'
+          : 'center';
 
   const statusLabel = status
     ? `${status.backend === 'css' ? 'CSS Ambient Fallback' : status.backend === 'webgl2' ? 'WebGL 2.0' : 'WebGL'} · ${status.fps} FPS`
@@ -306,24 +375,22 @@ export default function HeroShaderSettings({
           <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               type="button"
-              disabled={generating}
-              onClick={executePrompt}
+              disabled={!generating && !String(value.prompt || '').trim() && !selectedTarget}
+              onClick={generating ? (paused ? () => setPaused(false) : () => setPaused(true)) : executePrompt}
               style={{
                 ...chipBase,
                 background: '#7c5cff',
                 borderColor: '#7c5cff',
                 color: '#fff',
                 fontWeight: 700,
-                opacity: generating ? 0.6 : 1,
-                cursor: generating ? 'default' : 'pointer',
               }}
             >
-              {generating ? 'Generating…' : 'Execute Prompt & Generate Preview'}
+              {generating ? (paused ? '▶ Resume' : '⏸ Pause') : '⚡ Generate AI Animation'}
             </button>
-            {!generating && (
-              <button type="button" onClick={() => setPaused((p) => !p)} style={chipBase}>
-                {paused ? '▶ Resume Timeline' : '⏸ Pause Timeline'}
-              </button>
+            {generating && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#c9b8ff', fontVariantNumeric: 'tabular-nums', minWidth: 44 }}>
+                {progress}%
+              </span>
             )}
             {generating && (
               <button type="button" onClick={cancel} style={chipBase}>
@@ -332,9 +399,29 @@ export default function HeroShaderSettings({
             )}
           </div>
 
-          {generating && progressStep > 0 && (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#c9b8ff', fontWeight: 700 }}>{STEP_LABELS[progressStep - 1]}</div>
+          {progressLog.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => setLogOpen((o) => !o)}
+                style={{ ...chipBase, justifyContent: 'space-between', width: '100%' }}
+              >
+                <span>📋 Progress log ({progressLog.length})</span>
+                <span>{logOpen ? '▴' : '▾'}</span>
+              </button>
+              {logOpen && (
+                <div style={{ marginTop: 8, background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 12px', maxHeight: 200, overflowY: 'auto' }}>
+                  {progressLog.map((step, i) => (
+                    <div key={`${step.pct}-${i}`} style={{ display: 'flex', gap: 10, fontSize: 11, color: '#c8c8d0', padding: '3px 0', fontVariantNumeric: 'tabular-nums' }}>
+                      <span style={{ minWidth: 42, color: '#c9b8ff', fontWeight: 700 }}>{step.pct}%</span>
+                      <span>{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
+
           {genError && (
             <div style={{ marginTop: 10, fontSize: 12, color: '#f87171', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, padding: '8px 10px' }}>
               ⚠ {genError}
@@ -444,6 +531,31 @@ export default function HeroShaderSettings({
             style={rangeStyle}
           />
 
+          <label style={{ ...labelStyle, marginTop: 14 }}>Text Distribution</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {TEXT_DISTRIBUTION_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ textDistribution: opt.value as HeroTextDistribution })}
+                style={chipActive(resolveHeroTextDistribution(value) === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <label style={labelStyle}>Contrast Scrim / Overlay Tint — {resolveHeroContrastScrim(value)}%</label>
+          <input
+            type="range"
+            min={0}
+            max={CONTRAST_SCRIM_MAX}
+            step={1}
+            value={resolveHeroContrastScrim(value)}
+            onChange={(e) => patch({ contrastScrim: Number(e.target.value) })}
+            style={rangeStyle}
+          />
+
           <label style={{ ...labelStyle, marginTop: 14 }}>Overlay Mode</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {OVERLAY_MODE_OPTIONS.map((opt) => (
@@ -458,10 +570,90 @@ export default function HeroShaderSettings({
             ))}
           </div>
         </div>
+
+        {/* Render Mode & Clip Management */}
+        <div style={cardStyle}>
+          <div style={sectionTitleStyle}>Render Mode &amp; Clips</div>
+
+          <label style={labelStyle}>Render Mode</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            {RENDER_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => patch({ renderMode: opt.value as HeroRenderMode })}
+                style={chipActive(resolveHeroRenderMode(value) === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 11, color: '#888', margin: '0 0 12px', lineHeight: 1.5 }}>
+            In <b>Pre-rendered Video</b> mode (or automatically on mobile / low-power GPUs when a clip
+            exists), the storefront loops the saved clip instead of running the live WebGL canvas.
+          </div>
+
+          <button
+            type="button"
+            disabled={recording || !value.enabled}
+            onClick={recordClip}
+            style={{
+              ...chipBase,
+              background: '#0f9d58',
+              borderColor: '#0f9d58',
+              color: '#fff',
+              fontWeight: 700,
+              opacity: recording || !value.enabled ? 0.55 : 1,
+            }}
+          >
+            {recording ? '● Recording…' : '🎬 Record WebM Clip'}
+          </button>
+          {clipMsg && <div style={{ marginTop: 8, fontSize: 11, color: '#c8c8d0' }}>{clipMsg}</div>}
+
+          {resolveHeroClips(value).length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <label style={labelStyle}>Clip library ({resolveHeroClips(value).length})</label>
+              {resolveHeroClips(value).map((clip) => (
+                <div
+                  key={clip.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    justifyContent: 'space-between',
+                    background: 'rgba(0,0,0,0.22)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#e8e8ee' }}>
+                      {clip.mime} · {clip.width}×{clip.height} · {(clip.durationMs / 1000).toFixed(1)}s
+                    </div>
+                    <div style={{ fontSize: 10, color: '#888' }}>
+                      {(clip.bytes / 1024).toFixed(0)} KB · {new Date(clip.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <video
+                    src={clip.url}
+                    muted
+                    loop
+                    autoPlay
+                    playsInline
+                    style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 6, background: '#000' }}
+                  />
+                  <button type="button" onClick={() => deleteClip(clip.id)} style={chipBase} title="Delete clip">
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-
-
-      {/* Right column — Live Viewport Preview */}
       <div style={{ gridColumn: 'span 5', minWidth: 0 }}>
         <div style={{ ...cardStyle, position: 'sticky', top: 96 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -500,12 +692,28 @@ export default function HeroShaderSettings({
                 interactive
                 speed={effectiveSpeed}
                 onStatus={setStatus}
+                onCanvasRef={setPreviewCanvas}
                 themeColors={themeColors}
               />
             ) : (
               <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8a94', fontSize: 12 }}>
                 Shader disabled
               </div>
+            )}
+
+            {/* Contrast scrim — a theme-tinted overlay between the shader and the
+                text so copy stays legible regardless of how bright/dark the
+                shader renders. Strength follows the admin "Contrast Scrim". */}
+            {previewScrim > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 5,
+                  background: `color-mix(in srgb, ${previewCardBg} ${previewScrim}%, transparent)`,
+                  pointerEvents: 'none',
+                }}
+              />
             )}
 
             {/* Public hero content overlay — zIndex 10 keeps it above the canvas (zIndex 0). */}
@@ -516,7 +724,7 @@ export default function HeroShaderSettings({
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'center',
+                justifyContent: distributionJustify,
                 padding: previewPadding,
                 pointerEvents: 'none',
               }}
@@ -560,7 +768,9 @@ export default function HeroShaderSettings({
                   zIndex: 20,
                 }}
               >
-                <span>{STEP_LABELS[progressStep - 1]}</span>
+                <span>
+                  {progress}% — {progressLog.length > 0 ? progressLog[progressLog.length - 1].label : 'Working…'}
+                </span>
               </div>
             )}
           </div>

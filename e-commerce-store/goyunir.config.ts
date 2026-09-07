@@ -103,6 +103,10 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     targetProductId: '',
     targetProductName: '',
     productSilhouette: '',
+    textDistribution: 'centered',
+    contrastScrim: 0,
+    renderMode: 'live',
+    clips: [],
   },
 
   socialProof: {

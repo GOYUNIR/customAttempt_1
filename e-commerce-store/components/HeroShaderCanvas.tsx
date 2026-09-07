@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
 import { buildProductGeometry } from '@/lib/shaders/bottleGeometry';
@@ -61,6 +61,27 @@ function prefersReducedMotion(): boolean {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
+}
+
+/**
+ * Disable every enabled vertex-attribute array on the context. This is the fix
+ * for `INVALID_OPERATION: drawArrays: no buffer is bound to enabled attribute`
+ * — a stale attribute left enabled by a previous program (e.g. the 3-attribute
+ * particle program) has no buffer once its VBO is deleted, so the next draw
+ * throws. Disabling all attributes before teardown guarantees the next program
+ * starts from a clean attribute table.
+ */
+function disableAllVertexAttribs(gl: WebGLRenderingContext): void {
+  try {
+    const max = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
+    for (let i = 0; i < max; i++) {
+      if (gl.getVertexAttrib(i, gl.VERTEX_ATTRIB_ARRAY_ENABLED)) {
+        gl.disableVertexAttribArray(i);
+      }
+    }
+  } catch {
+    /* context may already be lost */
+  }
 }
 
 function scrollProgress(): number {
@@ -138,7 +159,7 @@ function linkProgram(
   return { program, vs, fs };
 }
 
-export default function HeroShaderCanvas({
+export function HeroShaderCanvas({
   enabled = true,
   preset = 'dark_organic',
   colorA,
@@ -159,6 +180,7 @@ export default function HeroShaderCanvas({
   productSilhouette,
   paused = false,
   speed = 1,
+  onCanvasRef,
 }: {
   enabled?: boolean;
   preset?: string;
@@ -185,6 +207,8 @@ export default function HeroShaderCanvas({
   paused?: boolean;
   /** Animation speed multiplier (0.5×..2×) — scales the accumulated timeline. */
   speed?: number;
+  /** Expose the live canvas element (admin clip recording). Null on unmount. */
+  onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HeroShaderStatus>({ backend: 'css', fps: 0 });
@@ -202,10 +226,19 @@ export default function HeroShaderCanvas({
     speedRef.current = Number.isFinite(speed) ? speed : 1;
   }, [speed]);
 
+  // Latest-value ref for the canvas-exposure callback so a changing callback
+  // identity (an inline arrow in the admin panel) never tears down the GL
+  // context — it is only read inside the setup effect and its cleanup.
+  const onCanvasRefRef = useRef<((canvas: HTMLCanvasElement | null) => void) | undefined>(onCanvasRef);
+  useEffect(() => {
+    onCanvasRefRef.current = onCanvasRef;
+  }, [onCanvasRef]);
+
   useEffect(() => {
     if (!enabled) return;
 
     const canvas = canvasRef.current;
+    onCanvasRefRef.current?.(canvas);
     const fallbackEl = canvas?.nextElementSibling as HTMLElement | null;
     const showFallback = () => {
       if (fallbackEl) fallbackEl.style.display = 'block';
@@ -306,12 +339,21 @@ export default function HeroShaderCanvas({
       const posLoc = gl.getAttribLocation(program, 'a_position');
       const nrmLoc = gl.getAttribLocation(program, 'a_normal');
       const cmpLoc = gl.getAttribLocation(program, 'a_component');
-      gl.enableVertexAttribArray(posLoc);
-      gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
-      gl.enableVertexAttribArray(nrmLoc);
-      gl.vertexAttribPointer(nrmLoc, 3, gl.FLOAT, false, stride, 12);
-      gl.enableVertexAttribArray(cmpLoc);
-      gl.vertexAttribPointer(cmpLoc, 1, gl.FLOAT, false, stride, 24);
+      // Bind a VBO to every enabled attribute BEFORE drawing (and only enable an
+      // attribute whose location the linker actually kept) so `drawArrays` can
+      // never report "no buffer is bound to enabled attribute".
+      if (posLoc >= 0) {
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
+      }
+      if (nrmLoc >= 0) {
+        gl.enableVertexAttribArray(nrmLoc);
+        gl.vertexAttribPointer(nrmLoc, 3, gl.FLOAT, false, stride, 12);
+      }
+      if (cmpLoc >= 0) {
+        gl.enableVertexAttribArray(cmpLoc);
+        gl.vertexAttribPointer(cmpLoc, 1, gl.FLOAT, false, stride, 24);
+      }
 
       gl.useProgram(program);
       const uTime = gl.getUniformLocation(program, 'u_time');
@@ -360,8 +402,10 @@ export default function HeroShaderCanvas({
         gl.STATIC_DRAW,
       );
       const loc = gl.getAttribLocation(program, 'a_position');
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      if (loc >= 0) {
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      }
 
       gl.useProgram(program);
       const uTime = gl.getUniformLocation(program, 'u_time');
@@ -427,7 +471,16 @@ export default function HeroShaderCanvas({
       const dt = pausedRef.current ? 0 : Math.min(0.1, (now - lastNow) / 1000);
       lastNow = now;
       if (!pausedRef.current) animTime += dt;
-      draw(now, animTime * speedRef.current, mouse);
+      try {
+        draw(now, animTime * speedRef.current, mouse);
+      } catch {
+        // A GPU context crash mid-draw must never take down the RAF loop (or
+        // leak an unhandled exception). Degrade to the CSS ambient fallback and
+        // stop scheduling frames — the fallback gradient keeps the hero alive.
+        running = false;
+        showFallback();
+        return;
+      }
 
       frames++;
       const elapsed = now - fpsStart;
@@ -476,6 +529,11 @@ export default function HeroShaderCanvas({
       document.removeEventListener('visibilitychange', onVisibility);
       canvas.removeEventListener('webglcontextlost', onLost);
       canvas.removeEventListener('webglcontextrestored', onRestored);
+      // Clear the attribute table BEFORE deleting buffers so the next program
+      // (effect re-run on preset/theme switch) never inherits an enabled
+      // attribute whose buffer was just deleted — the source of the
+      // `no buffer is bound to enabled attribute` drawArrays error.
+      disableAllVertexAttribs(gl);
       for (const fn of dispose) {
         try {
           fn();
@@ -483,6 +541,7 @@ export default function HeroShaderCanvas({
           /* context may already be lost */
         }
       }
+      onCanvasRefRef.current?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productSilhouette]);
@@ -512,6 +571,53 @@ export default function HeroShaderCanvas({
         }}
       />
     </div>
+  );
+}
+
+type HeroShaderCanvasProps = React.ComponentProps<typeof HeroShaderCanvas>;
+
+interface HeroShaderErrorBoundaryState {
+  failed: boolean;
+}
+
+class HeroShaderErrorBoundary extends Component<
+  { children: ReactNode },
+  HeroShaderErrorBoundaryState
+> {
+  state: HeroShaderErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): HeroShaderErrorBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    // Log for the operator; never re-throw (the hero must degrade, not crash).
+    try {
+      console.error('[HeroShaderCanvas] GPU/render error captured by boundary:', error);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
+
+/**
+ * Default export wraps the WebGL engine in a React Error Boundary so a GPU
+ * context crash during render/effect setup degrades to the hero card's own
+ * background (the canvas unmounts) instead of white-screening the page. The
+ * in-loop draw path is additionally guarded by an internal try/catch that flips
+ * to the CSS ambient fallback, because async errors don't reach an error
+ * boundary.
+ */
+export default function HeroShaderCanvasBoundary(props: HeroShaderCanvasProps) {
+  return (
+    <HeroShaderErrorBoundary>
+      <HeroShaderCanvas {...props} />
+    </HeroShaderErrorBoundary>
   );
 }
 

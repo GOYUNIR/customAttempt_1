@@ -18,8 +18,26 @@ import { buildProductTarget, normalizeSilhouette } from '@/lib/shaders/productTa
 export const dynamic = 'force-dynamic';
 
 async function authorized(request: Request): Promise<boolean> {
-  if (adminRequestAuthorized(request)) return true;
-  return isSuperAdminSession(request);
+  try {
+    if (adminRequestAuthorized(request)) return true;
+    return await isSuperAdminSession(request);
+  } catch {
+    // A transient Redis/Supabase read must never 503 the route — deny safely.
+    return false;
+  }
+}
+
+/** Race a promise against a hard timeout so a hung AI provider can't wedge. */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
@@ -53,7 +71,14 @@ export async function POST(request: Request) {
   // Demo Mode only blocks AI generation when NO AI provider is configured — an
   // operator who wired a paid key has effectively unlocked the model and must
   // not be locked out of the prompt compiler.
-  const license = await getLicenseStatus();
+  let license: Awaited<ReturnType<typeof getLicenseStatus>>;
+  try {
+    license = await getLicenseStatus();
+  } catch {
+    // A license-server/Redis hiccup is not a reason to 503 the admin — the AI
+    // compiler is non-destructive, so fall back to a permissive local verdict.
+    license = { status: 'ACTIVE', keyMasked: '', graceDaysRemaining: 0, reason: '', writesAllowed: true };
+  }
   if (!isWriteAllowed(license.status) && !aiConfigured) {
     return NextResponse.json(
       { error: 'Demo Mode: AI generation is disabled until a license is active.', license: license.status },
@@ -86,7 +111,10 @@ export async function POST(request: Request) {
   // admin sees WHY the refinement fell back to the deterministic floor.
   if (driver?.configured) {
     try {
-      const completion = await driver.complete(buildShaderPrompt({ prompt, product }));
+      const completion = await withTimeout(
+        driver.complete(buildShaderPrompt({ prompt, product })),
+        20_000,
+      );
       if (completion.ok) {
         const parsed = parseShaderParamsResult(completion.text);
         if (parsed) {
@@ -101,9 +129,12 @@ export async function POST(request: Request) {
       } else {
         aiError = 'The AI provider failed — using the deterministic compile.';
       }
-    } catch {
-      // AI provider failed — keep the deterministic floor; never 503 the admin.
-      aiError = 'The AI provider errored — using the deterministic compile.';
+    } catch (err) {
+      // AI provider failed (or timed out) — keep the deterministic floor; never 503.
+      aiError =
+        err instanceof Error && err.message === 'timeout'
+          ? 'The AI provider timed out — using the deterministic compile.'
+          : 'The AI provider errored — using the deterministic compile.';
     }
   }
 

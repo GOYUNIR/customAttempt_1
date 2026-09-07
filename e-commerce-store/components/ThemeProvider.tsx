@@ -60,6 +60,10 @@ export interface LiveThemeValue {
     targetProductId?: string;
     targetProductName?: string;
     productSilhouette?: string;
+    textDistribution?: 'centered' | 'top' | 'split' | 'bottom';
+    contrastScrim?: number;
+    renderMode?: 'live' | 'video';
+    clips?: unknown[];
   };
 }
 
