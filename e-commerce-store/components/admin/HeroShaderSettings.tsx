@@ -327,13 +327,15 @@ export default function HeroShaderSettings({
   const previewDistribution = resolveHeroTextDistribution(value);
   const previewScrim = resolveHeroContrastScrim(value);
   const distributionJustify =
-    previewDistribution === 'top'
+    previewDistribution === 'top' || previewDistribution === 'split'
       ? 'flex-start'
       : previewDistribution === 'bottom'
         ? 'flex-end'
-        : previewDistribution === 'split'
-          ? 'space-between'
-          : 'center';
+        : 'center';
+  // 'split' anchors the container to `flex-start` and pushes the CTA row to the
+  // bottom with a flex spacer — the SAME approach as the storefront hero so the
+  // admin preview and the public page are pixel-identical.
+  const previewSplit = previewDistribution === 'split';
   const previewFullBleed = layoutPreset === 'fullBleed';
 
   const statusLabel = status
@@ -516,7 +518,7 @@ export default function HeroShaderSettings({
             ))}
           </div>
 
-          <label style={labelStyle}>Contrast Scrim — {resolveHeroContrastScrim(value)}% overlay tint</label>
+          <label style={{ ...labelStyle, marginTop: 14 }}>Contrast Scrim — {resolveHeroContrastScrim(value)}% overlay tint</label>
           <input
             type="range"
             min={0}
@@ -526,48 +528,6 @@ export default function HeroShaderSettings({
             onChange={(e) => patch({ contrastScrim: Number(e.target.value) })}
             style={rangeStyle}
           />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Overlay Mode</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-            {OVERLAY_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ blendMode: opt.value })}
-                style={chipActive((value.blendMode || 'normal') === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <label style={labelStyle}>Hero Box Height / Aspect Ratio</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            {HERO_HEIGHT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ heroHeight: opt.value as HeroHeight })}
-                style={chipActive((value.heroHeight || 'standard') === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          {(value.heroHeight || 'standard') === 'custom' && (
-            <>
-              <label style={labelStyle}>Custom height — {Math.round(resolveHeroHeightPx(value))}px</label>
-              <input
-                type="range"
-                min={HERO_HEIGHT_MIN}
-                max={HERO_HEIGHT_MAX}
-                step={10}
-                value={resolveHeroHeightPx(value)}
-                onChange={(e) => patch({ heroHeightPx: Number(e.target.value) })}
-                style={rangeStyle}
-              />
-            </>
-          )}
 
           {/* Fine-grained metric sliders collapsed by default (Advanced Metrics). */}
           <div style={{ marginTop: 14 }}>
@@ -581,7 +541,49 @@ export default function HeroShaderSettings({
             </button>
             {advancedOpen && (
               <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                <label style={labelStyle}>Max Width — {Math.round(previewMaxWidth)}px</label>
+                <label style={labelStyle}>Overlay Mode</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                  {OVERLAY_MODE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => patch({ blendMode: opt.value })}
+                      style={chipActive((value.blendMode || 'normal') === opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label style={labelStyle}>Hero Box Height / Aspect Ratio</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {HERO_HEIGHT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => patch({ heroHeight: opt.value as HeroHeight })}
+                      style={chipActive((value.heroHeight || 'standard') === opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {(value.heroHeight || 'standard') === 'custom' && (
+                  <>
+                    <label style={labelStyle}>Custom height — {Math.round(resolveHeroHeightPx(value))}px</label>
+                    <input
+                      type="range"
+                      min={HERO_HEIGHT_MIN}
+                      max={HERO_HEIGHT_MAX}
+                      step={10}
+                      value={resolveHeroHeightPx(value)}
+                      onChange={(e) => patch({ heroHeightPx: Number(e.target.value) })}
+                      style={rangeStyle}
+                    />
+                  </>
+                )}
+
+                <label style={{ ...labelStyle, marginTop: 14 }}>Max Width — {Math.round(previewMaxWidth)}px</label>
                 <input
                   type="range"
                   min={360}
@@ -742,6 +744,7 @@ export default function HeroShaderSettings({
                 onStatus={setStatus}
                 onCanvasRef={setPreviewCanvas}
                 themeColors={themeColors}
+                respectReducedMotion={false}
               />
             ) : (
               <div style={{ position: 'absolute', inset: 0, zIndex: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8a94', fontSize: 12 }}>
@@ -786,6 +789,7 @@ export default function HeroShaderSettings({
               <div style={{ fontSize: 12, color: previewTextMuted, marginTop: 10, whiteSpace: 'pre-line', lineHeight: 1.6, maxWidth: 440 }}>
                 homemade &amp; designed, with real ingredients, with real hands. for real people.
               </div>
+              {previewSplit && <div style={{ flex: 1, minHeight: 16 }} />}
               <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ background: previewAccent, color: '#04101f', padding: '10px 20px', borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
                   Browse drops

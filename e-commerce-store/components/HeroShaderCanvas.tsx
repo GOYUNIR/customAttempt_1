@@ -3,8 +3,7 @@
 import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
-import { buildProductGeometry } from '@/lib/shaders/bottleGeometry';
-import { FRAGMENT_VS, FRAGMENT_FS, PARTICLE_VS, PARTICLE_FS, IMAGE_VS, IMAGE_FS } from '@/lib/shaders/glsl';
+import { FRAGMENT_VS, FRAGMENT_FS, IMAGE_VS, IMAGE_FS } from '@/lib/shaders/glsl';
 
 /**
  * Hero shader engine — a multi-mode GPU renderer painted behind the home-page
@@ -63,32 +62,92 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
 }
 
+/** True when a URL shares the page origin (data:/blob:/root-relative are same-origin). */
+function isSameOriginUrl(url: string): boolean {
+  if (/^(data|blob):/i.test(url) || url.startsWith('/')) return true;
+  try {
+    const u = new URL(url);
+    if (typeof window === 'undefined') return false;
+    return u.protocol === window.location.protocol && u.host === window.location.host;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Load a product image (data URL, same-origin `/media/…` ref, or a CDN URL)
  * into an `<img>` so the real-image shader can upload it as a WebGL texture.
- * Resolves `null` on ANY failure (CORS, 404, decode error) so the engine can
- * silently fall back to the procedural point-cloud / ambient gradient — the
- * hero must never crash because an image couldn't load.
+ *
+ * CORS is handled explicitly — this is the fix for "database product images
+ * never bind to WebGL":
+ *   • First we load with `crossOrigin = 'anonymous'`, which produces a
+ *     CORS-clean bitmap that `texImage2D` is allowed to upload. This works for
+ *     data URLs, same-origin `/media/…` refs and CDN buckets that send
+ *     `Access-Control-Allow-Origin`.
+ *   • If that fails (a CDN bucket omitting the CORS header — the classic
+ *     cross-origin "taint"), we retry WITHOUT the attribute so the image still
+ *     decodes for DISPLAY, but flag it `tainted` so the caller skips the
+ *     (guaranteed-to-throw) `texImage2D` upload instead of letting a
+ *     `SecurityError` silently destroy the WebGL context.
+ *
+ * Every failure is logged so an operator sees WHY a graphic is missing instead
+ * of discovering it as an unexplained CSS fallback. Resolves `null` (never
+ * throws/rejects) so the hero can never crash on a broken image.
  */
-function loadProductImage(url: string): Promise<HTMLImageElement | null> {
+function loadProductImage(url: string): Promise<{ image: HTMLImageElement; tainted: boolean } | null> {
   return new Promise((resolve) => {
     if (typeof Image === 'undefined' || !url) {
+      if (url) console.warn('[HeroShaderCanvas] Empty product image URL — texture disabled.');
       resolve(null);
       return;
     }
-    let settled = false;
-    const img = new Image();
-    const done = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok ? img : null);
-    };
-    img.onload = () => done(true);
-    img.onerror = () => done(false);
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-    // Safety valve — a stalled image must never leave the promise dangling.
-    setTimeout(() => done(false), 8000);
+
+    const load = (crossOrigin: boolean): Promise<HTMLImageElement | null> =>
+      new Promise((res) => {
+        const img = new Image();
+        if (crossOrigin) img.crossOrigin = 'anonymous';
+        let settled = false;
+        const done = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          res(ok ? img : null);
+        };
+        img.onload = () => done(true);
+        img.onerror = () => done(false);
+        const timer = setTimeout(() => {
+          console.warn('[HeroShaderCanvas] Product image load timed out (8s).');
+          done(false);
+        }, 8000);
+        img.src = url;
+      });
+
+    // Pass 1 — CORS-clean load (required for a WebGL texture upload).
+    load(true).then((img) => {
+      if (img) {
+        resolve({ image: img, tainted: false });
+        return;
+      }
+      // Pass 2 — a cross-origin CDN that omits `Access-Control-Allow-Origin`
+      // still decodes without the CORS attribute, but the bitmap is tainted and
+      // must NOT be uploaded to WebGL.
+      if (/^https?:\/\//i.test(url) && !isSameOriginUrl(url)) {
+        load(false).then((fallback) => {
+          if (fallback) {
+            console.warn(
+              '[HeroShaderCanvas] Product image is cross-origin without CORS headers — tainted (WebGL upload skipped).',
+            );
+            resolve({ image: fallback, tainted: true });
+          } else {
+            console.error(`[HeroShaderCanvas] Product image failed to load (CORS + fallback): ${url}`);
+            resolve(null);
+          }
+        });
+        return;
+      }
+      console.error(`[HeroShaderCanvas] Product image failed to load (CORS/404/decode): ${url}`);
+      resolve(null);
+    });
   });
 }
 
@@ -152,6 +211,7 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string):
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error('[HeroShaderCanvas] GLSL shader compilation failed:', gl.getShaderInfoLog(shader) || 'unknown error');
     gl.deleteShader(shader);
     return null;
   }
@@ -180,6 +240,7 @@ function linkProgram(
   gl.attachShader(program, fs);
   gl.linkProgram(program);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error('[HeroShaderCanvas] GLSL program link failed:', gl.getProgramInfoLog(program) || 'unknown error');
     gl.deleteProgram(program);
     gl.deleteShader(vs);
     gl.deleteShader(fs);
@@ -196,7 +257,6 @@ export function HeroShaderCanvas({
   colorC,
   opacity = 0.55,
   explosionRadius = 60,
-  particleCount = 50_000,
   depthBlur = 30,
   animationLoop = 'pulse',
   assemblyProgress = 1,
@@ -206,11 +266,11 @@ export function HeroShaderCanvas({
   style,
   placement = 'background',
   blendMode = 'normal',
-  productSilhouette,
   productImageUrl,
   paused = false,
   speed = 1,
   onCanvasRef,
+  respectReducedMotion = true,
 }: {
   enabled?: boolean;
   preset?: string;
@@ -219,6 +279,7 @@ export function HeroShaderCanvas({
   colorC?: string;
   opacity?: number;
   explosionRadius?: number;
+  /** @deprecated The procedural point-cloud engine was replaced by the textured-quad image shader. Accepted for backward compatibility; ignored. */
   particleCount?: number;
   depthBlur?: number;
   animationLoop?: AnimationLoopMode;
@@ -231,7 +292,7 @@ export function HeroShaderCanvas({
   placement?: 'background' | 'banner';
   /** CSS mix-blend-mode applied to the canvas against the card surface. */
   blendMode?: 'normal' | 'overlay' | 'screen';
-  /** Generic silhouette key the exploded mesh derives from the target product. */
+  /** @deprecated The procedural geometry was replaced by the product-image texture. Accepted for backward compatibility; ignored. */
   productSilhouette?: string;
   /** Primary product image URL (data URL / `/media/…` ref / CDN). The exploded preset samples it as a texture. */
   productImageUrl?: string;
@@ -241,6 +302,9 @@ export function HeroShaderCanvas({
   speed?: number;
   /** Expose the live canvas element (admin clip recording). Null on unmount. */
   onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
+  /** Honor `prefers-reduced-motion`. The admin Live Viewport Preview sets this
+   *  false so an operator configuring the shader ALWAYS sees WebGL render. */
+  respectReducedMotion?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HeroShaderStatus>({ backend: 'css', fps: 0 });
@@ -272,14 +336,17 @@ export function HeroShaderCanvas({
     const canvas = canvasRef.current;
     onCanvasRefRef.current?.(canvas);
     const fallbackEl = canvas?.nextElementSibling as HTMLElement | null;
-    const showFallback = () => {
+    const showFallback = (reason?: string) => {
+      // Log WHY we dropped to CSS instead of silently degrading — this is the
+      // single most useful signal for "the hero shows a flat gradient".
+      if (reason) console.warn(`[HeroShaderCanvas] WebGL → CSS ambient fallback: ${reason}`);
       if (fallbackEl) fallbackEl.style.display = 'block';
       statusRef.current = { backend: 'css', fps: 0 };
       onStatus?.({ ...statusRef.current });
     };
 
-    if (prefersReducedMotion() || isLowPower()) {
-      showFallback();
+    if ((respectReducedMotion && prefersReducedMotion()) || isLowPower()) {
+      showFallback(respectReducedMotion ? 'prefers-reduced-motion or low-power device' : 'low-power device');
       return;
     }
     if (!canvas) return;
@@ -314,7 +381,7 @@ export function HeroShaderCanvas({
       }
     }
     if (!gl) {
-      showFallback();
+      showFallback('WebGL context unavailable (webgl2 + webgl both failed)');
       return;
     }
 
@@ -329,18 +396,20 @@ export function HeroShaderCanvas({
     const modeIndex = canonical === 'cyber_mesh' ? 1 : canonical === 'ambient_glass' ? 2 : 0;
 
     const dispose: Array<() => void> = [];
-    let pointCount = 0;
     let draw: (now: number, time: number, mouse: [number, number]) => void;
     let cancelled = false;
 
-    if (exploded && productImageUrl) {
+    if (exploded) {
       // --- Real product-image shader (the overhauled exploded preset) ----------
-      // Samples the selected product's PRIMARY image through a 2D sampler and
-      // drives disassembly / assembly / spin / explosion on the crisp graphic,
-      // instead of the generic procedural point-cloud.
+      // This is the GUARANTEED WebGL fallback: a full-screen textured quad with
+      // spin/assemble/disassembly deformation. It renders in WebGL even when the
+      // AI returns simple or partial uniforms, and even when NO product image is
+      // available — the in-shader `u_hasTexture=0` branch drives a gradient while
+      // still applying the spin/assemble motion. It only drops to CSS if WebGL
+      // itself is unavailable or this fixed GLSL fails to compile (which is logged).
       const linked = linkProgram(gl, IMAGE_VS, IMAGE_FS);
       if (!linked) {
-        showFallback();
+        showFallback('image shader failed to link (GLSL compile/link error)');
         return;
       }
       const { program, vs, fs } = linked;
@@ -353,7 +422,7 @@ export function HeroShaderCanvas({
       // Full-screen quad (2 triangles).
       const buffer = gl.createBuffer();
       if (!buffer) {
-        showFallback();
+        showFallback('failed to allocate a vertex buffer for the image quad');
         return;
       }
       dispose.push(() => gl!.deleteBuffer(buffer));
@@ -406,21 +475,35 @@ export function HeroShaderCanvas({
       gl.uniform1f(uDispersion, clamp01(Number(explosionRadius) / 150));
       gl.uniform1f(uSpin, spinOn);
 
-      // Load the REAL product image asynchronously — never block the first paint
-      // and never crash the hero if it fails (the placeholder gradient shows).
-      loadProductImage(productImageUrl)
-        .then((img) => {
-          if (cancelled || !img) return;
+      // Load the REAL product image asynchronously — the texture is only
+      // uploaded AFTER the image has fully decoded (never block first paint,
+      // never crash the hero). A CORS-tainted or failed image is logged and the
+      // in-shader gradient fallback keeps the spin/assemble motion alive.
+      loadProductImage(productImageUrl || '')
+        .then((result) => {
+          if (cancelled || !result) return;
+          // A cross-origin bitmap without CORS headers is "tainted": WebGL would
+          // throw a SecurityError (and can destroy the context) if we uploaded it.
+          if (result.tainted) {
+            console.warn('[HeroShaderCanvas] Skipping tainted texture upload — using in-shader gradient fallback.');
+            return;
+          }
+          const img = result.image;
           const tex = gl!.createTexture();
-          if (!tex) return;
+          if (!tex) {
+            console.error('[HeroShaderCanvas] Failed to create a WebGL texture for the product image.');
+            return;
+          }
           gl!.bindTexture(gl!.TEXTURE_2D, tex);
           gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, true);
           try {
             gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, img);
-          } catch {
+          } catch (err) {
             gl!.deleteTexture(tex);
+            console.error('[HeroShaderCanvas] WebGL texture upload failed (image may be tainted):', err);
             return;
           }
+          gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, false);
           // NPOT-safe: LINEAR min filter (no mipmaps) + clamp-to-edge.
           gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
           gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
@@ -432,8 +515,13 @@ export function HeroShaderCanvas({
           currentTexture = tex;
           hasTexture = 1;
           texAspect = (img.naturalWidth || img.width || 1) / Math.max(1, img.naturalHeight || img.height || 1);
+          console.log(
+            `[HeroShaderCanvas] Product texture bound (${img.naturalWidth || img.width}×${img.naturalHeight || img.height}).`,
+          );
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error('[HeroShaderCanvas] Product image load promise rejected:', err);
+        });
 
       draw = (_now, time, mouse) => {
         gl!.activeTexture(gl!.TEXTURE0);
@@ -447,86 +535,10 @@ export function HeroShaderCanvas({
         gl!.uniform1f(uSpin, spinOn);
         gl!.drawArrays(gl!.TRIANGLES, 0, 6);
       };
-    } else if (exploded) {
-      const linked = linkProgram(gl, PARTICLE_VS, PARTICLE_FS);
-      if (!linked) {
-        showFallback();
-        return;
-      }
-      const { program, vs, fs } = linked;
-      dispose.push(
-        () => gl!.deleteProgram(program),
-        () => gl!.deleteShader(vs),
-        () => gl!.deleteShader(fs),
-      );
-
-      const geom = buildProductGeometry(productSilhouette, particleCount);
-      pointCount = geom.pointCount;
-      const buffer = gl.createBuffer();
-      if (!buffer) {
-        showFallback();
-        return;
-      }
-      dispose.push(() => gl!.deleteBuffer(buffer));
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-
-      const stride = 7 * 4;
-      const interleaved = new Float32Array(geom.pointCount * 7);
-      for (let i = 0; i < geom.pointCount; i++) {
-        interleaved[i * 7 + 0] = geom.points[i * 3];
-        interleaved[i * 7 + 1] = geom.points[i * 3 + 1];
-        interleaved[i * 7 + 2] = geom.points[i * 3 + 2];
-        interleaved[i * 7 + 3] = geom.normals[i * 3];
-        interleaved[i * 7 + 4] = geom.normals[i * 3 + 1];
-        interleaved[i * 7 + 5] = geom.normals[i * 3 + 2];
-        interleaved[i * 7 + 6] = geom.components[i];
-      }
-      gl.bufferData(gl.ARRAY_BUFFER, interleaved, gl.STATIC_DRAW);
-
-      const posLoc = gl.getAttribLocation(program, 'a_position');
-      const nrmLoc = gl.getAttribLocation(program, 'a_normal');
-      const cmpLoc = gl.getAttribLocation(program, 'a_component');
-      // Bind a VBO to every enabled attribute BEFORE drawing (and only enable an
-      // attribute whose location the linker actually kept) so `drawArrays` can
-      // never report "no buffer is bound to enabled attribute".
-      if (posLoc >= 0) {
-        gl.enableVertexAttribArray(posLoc);
-        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
-      }
-      if (nrmLoc >= 0) {
-        gl.enableVertexAttribArray(nrmLoc);
-        gl.vertexAttribPointer(nrmLoc, 3, gl.FLOAT, false, stride, 12);
-      }
-      if (cmpLoc >= 0) {
-        gl.enableVertexAttribArray(cmpLoc);
-        gl.vertexAttribPointer(cmpLoc, 1, gl.FLOAT, false, stride, 24);
-      }
-
-      gl.useProgram(program);
-      const uTime = gl.getUniformLocation(program, 'u_time');
-      const uProgress = gl.getUniformLocation(program, 'u_assemblyProgress');
-      const uDispersion = gl.getUniformLocation(program, 'u_dispersion');
-      const uRadius = gl.getUniformLocation(program, 'u_explosionRadius');
-      const uMouse = gl.getUniformLocation(program, 'u_mouse');
-      gl.uniform3f(gl.getUniformLocation(program, 'u_colorA'), ra, ga, ba);
-      gl.uniform3f(gl.getUniformLocation(program, 'u_colorB'), rb, gb, bb);
-      gl.uniform3f(gl.getUniformLocation(program, 'u_colorC'), rc, gc, bc);
-      gl.uniform1f(gl.getUniformLocation(program, 'u_opacity'), opacity01);
-      gl.uniform1f(gl.getUniformLocation(program, 'u_depthBlur'), clamp01(Number(depthBlur) / 100));
-      gl.uniform1f(uDispersion, 0.9);
-      gl.uniform1f(uRadius, clamp01(Number(explosionRadius) / 150) * 1.6);
-
-      draw = (_now, time, mouse) => {
-        gl!.uniform1f(uTime, time);
-        gl!.uniform2f(uMouse, mouse[0], mouse[1]);
-        const prog = computeAssemblyProgress(animationLoop, assemblyProgress, time, mouse);
-        gl!.uniform1f(uProgress, prog);
-        gl!.drawArrays(gl!.POINTS, 0, pointCount);
-      };
     } else {
       const linked = linkProgram(gl, FRAGMENT_VS, FRAGMENT_FS);
       if (!linked) {
-        showFallback();
+        showFallback('fragment shader failed to link (GLSL compile/link error)');
         return;
       }
       const { program, vs, fs } = linked;
@@ -538,7 +550,7 @@ export function HeroShaderCanvas({
 
       const buffer = gl.createBuffer();
       if (!buffer) {
-        showFallback();
+        showFallback('failed to allocate a vertex buffer for the fragment shader');
         return;
       }
       dispose.push(() => gl!.deleteBuffer(buffer));
@@ -625,7 +637,7 @@ export function HeroShaderCanvas({
         // leak an unhandled exception). Degrade to the CSS ambient fallback and
         // stop scheduling frames — the fallback gradient keeps the hero alive.
         running = false;
-        showFallback();
+        showFallback('GPU context crash mid-draw (draw call threw)');
         return;
       }
 
@@ -660,7 +672,7 @@ export function HeroShaderCanvas({
 
     const onLost = (e: Event) => {
       e.preventDefault();
-      showFallback();
+      showFallback('WebGL context lost');
     };
     const onRestored = () => {
       if (fallbackEl) fallbackEl.style.display = 'none';
@@ -692,7 +704,7 @@ export function HeroShaderCanvas({
       onCanvasRefRef.current?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, particleCount, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productSilhouette, productImageUrl]);
+  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productImageUrl, respectReducedMotion]);
 
   if (!enabled) return null;
 
