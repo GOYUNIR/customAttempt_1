@@ -50,6 +50,13 @@ export interface LiveThemeValue {
     containerTarget?: 'background' | 'banner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
+    speed?: number;
+    motionType?: 'spin' | 'assembly' | 'hover';
+    heroHeight?: 'compact' | 'standard' | 'tall' | 'custom';
+    heroHeightPx?: number;
+    maxWidth?: number;
+    cornerRadius?: number;
+    padding?: number;
     targetProductId?: string;
     targetProductName?: string;
     productSilhouette?: string;

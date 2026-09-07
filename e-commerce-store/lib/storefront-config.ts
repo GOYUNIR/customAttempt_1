@@ -198,6 +198,13 @@ export interface StorefrontConfig {
     containerTarget?: 'background' | 'banner';
     canvasHeight?: 'slim' | 'medium' | 'expanded';
     blendMode?: 'normal' | 'overlay' | 'screen';
+    speed?: number;
+    motionType?: 'spin' | 'assembly' | 'hover';
+    heroHeight?: 'compact' | 'standard' | 'tall' | 'custom';
+    heroHeightPx?: number;
+    maxWidth?: number;
+    cornerRadius?: number;
+    padding?: number;
     targetProductId?: string;
     targetProductName?: string;
     productSilhouette?: string;
@@ -679,19 +686,26 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
     heroContent: { ...defaultHeroContent, ...(input.heroContent ?? {}) },
     aiHero: {
       enabled: true,
-      preset: 'dark_organic',
+      preset: 'exploded_rebuild',
       prompt: '',
       opacity: 0.55,
       explosionRadius: 60,
       intensity: 0.4,
+      speed: 1,
+      motionType: 'spin',
       particleCount: 50_000,
       depthBlur: 30,
-      animationLoop: 'pulse',
+      animationLoop: 'spin',
       assemblyProgress: 1,
       paletteAutoSync: true,
       containerTarget: 'background',
       canvasHeight: 'medium',
       blendMode: 'normal',
+      heroHeight: 'standard',
+      heroHeightPx: 480,
+      maxWidth: 720,
+      cornerRadius: 26,
+      padding: 28,
       targetProductId: '',
       targetProductName: '',
       productSilhouette: '',

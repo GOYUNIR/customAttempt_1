@@ -78,7 +78,18 @@ export function isExplodedPreset(id: string | undefined | null): boolean {
   return normalizePresetId(id) === 'exploded_rebuild';
 }
 
-export type AnimationLoopMode = 'pulse' | 'scroll' | 'mouse' | 'scrub';
+export type AnimationLoopMode = 'pulse' | 'scroll' | 'mouse' | 'scrub' | 'spin';
+
+/**
+ * High-level hero motion selector surfaced in the admin panel. Each value maps
+ * onto a concrete engine preset + loop mode so a single control drives the whole
+ * render: `spin` = continuous 3D product rotation (fully assembled), `assembly`
+ * = the exploded → assembled particle loop, `hover` = cursor-reactive grid.
+ */
+export type HeroMotionType = 'spin' | 'assembly' | 'hover';
+
+/** Preset hero-box heights (and the `custom` slider). */
+export type HeroHeight = 'compact' | 'standard' | 'tall' | 'custom';
 
 /** Where the hero canvas paints relative to the hero card content. */
 export type HeroContainerTarget = 'background' | 'banner';
@@ -119,8 +130,22 @@ export interface AiHeroSettings {
   containerTarget: HeroContainerTarget;
   /** Canvas height / aspect ratio when placed as an inline banner. */
   canvasHeight: HeroCanvasHeight;
-  /** How the canvas blends with the hero card surface. */
+  /** How the canvas blends with the hero card surface (admin → "Overlay Mode"). */
   blendMode: HeroBlendMode;
+  /** Explicit animation speed multiplier (0.5×–2×), independent of intensity. */
+  speed: number;
+  /** High-level motion selector (spin / exploded assembly / hover interactive). */
+  motionType: HeroMotionType;
+  /** Hero-box height preset (compact / standard / tall / custom). */
+  heroHeight: HeroHeight;
+  /** Custom hero-box height in px when `heroHeight === 'custom'`. */
+  heroHeightPx: number;
+  /** Max width of the hero card in px (0 = theme default). */
+  maxWidth: number;
+  /** Corner radius of the hero card in px (0 = theme default). */
+  cornerRadius: number;
+  /** Hero card padding in px (0 = theme default). */
+  padding: number;
   /** Live catalog item the hero shader targets (id/slug from `store:products`). */
   targetProductId?: string;
   /** Human name of the target product (echoed for the admin readout only). */
@@ -155,6 +180,93 @@ export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: st
 export const SILHOUETTE_OPTIONS: ReadonlyArray<{ value: SilhouetteKey; label: string }> =
   SILHOUETTE_KEYS.map((key) => ({ value: key, label: silhouetteLabel(key) }));
 
+/** Admin "Motion Type" selector — one high-level control for the whole render. */
+export const MOTION_TYPE_OPTIONS: ReadonlyArray<{ value: HeroMotionType; label: string }> = [
+  { value: 'spin', label: 'Continuous Spin' },
+  { value: 'assembly', label: 'Exploded Assembly' },
+  { value: 'hover', label: 'Hover Interactive' },
+];
+
+/** Admin "Hero Box Height / Aspect Ratio" selector + the custom slider bounds. */
+export const HERO_HEIGHT_OPTIONS: ReadonlyArray<{ value: HeroHeight; label: string; px: number }> = [
+  { value: 'compact', label: 'Compact', px: 360 },
+  { value: 'standard', label: 'Standard', px: 480 },
+  { value: 'tall', label: 'Tall', px: 640 },
+  { value: 'custom', label: 'Custom', px: 0 },
+];
+
+export const HERO_HEIGHT_MIN = 320;
+export const HERO_HEIGHT_MAX = 900;
+
+export const SPEED_MIN = 0.5;
+export const SPEED_MAX = 2;
+
+/**
+ * Map a high-level motion type onto the concrete engine preset id. `spin` +
+ * `assembly` both render the 3D product particle cloud (the geometry the engine
+ * is built around); `hover` renders the cursor-reactive grid fragment shader.
+ */
+export function motionTypeToPreset(motionType: HeroMotionType | string | undefined | null): string {
+  switch (motionType) {
+    case 'hover':
+      return 'cyber_mesh';
+    case 'assembly':
+    case 'spin':
+    default:
+      return 'exploded_rebuild';
+  }
+}
+
+/**
+ * Map a high-level motion type onto the engine loop mode. `spin` pins the
+ * assembly timeline at 1 (fully assembled) so the product rotates continuously;
+ * `assembly` oscillates the timeline so the product reassembles in a loop.
+ */
+export function motionTypeToLoop(motionType: HeroMotionType | string | undefined | null): AnimationLoopMode {
+  switch (motionType) {
+    case 'hover':
+      return 'mouse';
+    case 'spin':
+      return 'spin';
+    case 'assembly':
+    default:
+      return 'pulse';
+  }
+}
+
+/** Resolve the admin motion-type selector from a config (missing → `spin`). */
+export function resolveHeroMotionType(
+  aiHero: { motionType?: string } | undefined | null,
+): HeroMotionType {
+  const raw = aiHero?.motionType;
+  if (raw === 'spin' || raw === 'assembly' || raw === 'hover') return raw;
+  return 'spin';
+}
+
+/** Resolve the explicit animation speed (0.5×–2×), falling back to intensity. */
+export function resolveHeroSpeed(
+  aiHero: { speed?: number; intensity?: number; explosionRadius?: number } | undefined | null,
+): number {
+  const raw = Number(aiHero?.speed);
+  if (Number.isFinite(raw) && raw > 0) return Math.max(SPEED_MIN, Math.min(SPEED_MAX, raw));
+  return intensityToSpeed(resolveHeroIntensity(aiHero));
+}
+
+/** Resolve the hero-box height in px from the preset (or the custom slider). */
+export function resolveHeroHeightPx(
+  aiHero: { heroHeight?: string; heroHeightPx?: number } | undefined | null,
+): number {
+  const kind = aiHero?.heroHeight === 'custom' ? 'custom' : (aiHero?.heroHeight || 'standard');
+  if (kind === 'custom') {
+    const px = Number(aiHero?.heroHeightPx);
+    if (Number.isFinite(px) && px > 0) {
+      return Math.max(HERO_HEIGHT_MIN, Math.min(HERO_HEIGHT_MAX, Math.round(px)));
+    }
+  }
+  const match = HERO_HEIGHT_OPTIONS.find((o) => o.value === kind);
+  return match ? match.px : 480;
+}
+
 /**
  * Resolve the single "Intensity & Speed" value (0..1) that drives the exploded
  * dispersion AND the animation speed. Falls back to the legacy `explosionRadius`
@@ -185,14 +297,16 @@ export function intensityToSpeed(intensity: number): number {
 export function defaultAiHeroSettings(): AiHeroSettings {
   return {
     enabled: true,
-    preset: 'dark_organic',
+    preset: 'exploded_rebuild',
     prompt: '',
     opacity: 0.55,
     explosionRadius: 60,
     intensity: 0.4,
+    speed: 1,
+    motionType: 'spin',
     particleCount: 50_000,
     depthBlur: 30,
-    animationLoop: 'pulse',
+    animationLoop: 'spin',
     assemblyProgress: 1,
     paletteAutoSync: true,
     accentA: '',
@@ -201,6 +315,11 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     containerTarget: 'background',
     canvasHeight: 'medium',
     blendMode: 'normal',
+    heroHeight: 'standard',
+    heroHeightPx: 480,
+    maxWidth: 720,
+    cornerRadius: 26,
+    padding: 28,
     targetProductId: '',
     targetProductName: '',
     productSilhouette: '',

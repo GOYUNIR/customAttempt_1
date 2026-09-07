@@ -40,9 +40,11 @@ function isLowPower(): boolean {
   try {
     const nav = navigator as any;
     const cores = Number(nav?.hardwareConcurrency);
-    const mem = Number(nav?.deviceMemory);
-    if (Number.isFinite(cores) && cores > 0 && cores <= 2) return true;
-    if (Number.isFinite(mem) && mem > 0 && mem <= 2) return true;
+    // Only a genuinely constrained device (single core) opts out of WebGL.
+    // `navigator.deviceMemory` is deliberately NOT consulted here — many capable
+    // machines and remote/Virtualized browsers report 2GB (or omit it entirely),
+    // which previously forced the engine into the CSS fallback far too eagerly.
+    if (Number.isFinite(cores) && cores > 0 && cores <= 1) return true;
   } catch {
     /* ignore */
   }
@@ -84,6 +86,10 @@ function computeAssemblyProgress(
       return scrollProgress();
     case 'mouse':
       return clamp01(1 - Math.hypot(mouse[0], mouse[1]) / 1.3);
+    case 'spin':
+      // Fully assembled — the product spins continuously via `u_time` in the
+      // vertex shader without the explode/reassemble timeline ever moving.
+      return 1;
     case 'pulse':
     default:
       return clamp01(0.5 + 0.5 * Math.sin(time * 0.4));
@@ -219,7 +225,12 @@ export default function HeroShaderCanvas({
       gl = (canvas.getContext('webgl2', {
         alpha: true,
         premultipliedAlpha: false,
-        failIfMajorPerformanceCaveat: true,
+        // Software-rendered WebGL (SwiftShader / remote / VM) is still WebGL —
+        // requiring a hardware caveat-free context made the engine fall back to
+        // the CSS gradient in dev/remote/Virtualized environments for no good
+        // reason. The low-power + reduced-motion guards above still protect
+        // genuinely constrained devices.
+        failIfMajorPerformanceCaveat: false,
       }) as WebGLRenderingContext | null) || null;
       if (gl) backend = 'webgl2';
     } catch {
@@ -230,7 +241,7 @@ export default function HeroShaderCanvas({
         gl = (canvas.getContext('webgl', {
           alpha: true,
           premultipliedAlpha: false,
-          failIfMajorPerformanceCaveat: true,
+          failIfMajorPerformanceCaveat: false,
         }) as WebGLRenderingContext | null) || null;
         if (gl) backend = 'webgl';
       } catch {
@@ -482,7 +493,7 @@ export default function HeroShaderCanvas({
   const positionStyle: React.CSSProperties =
     placement === 'banner'
       ? { position: 'relative', inset: 'auto', width: '100%', height: '100%' }
-      : { position: 'absolute', inset: 0 };
+      : { position: 'absolute', inset: 0, zIndex: 0 };
   const mixStyle: React.CSSProperties =
     blendMode && blendMode !== 'normal' ? { mixBlendMode: blendMode } : {};
 

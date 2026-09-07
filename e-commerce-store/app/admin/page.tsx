@@ -8157,6 +8157,7 @@ export default function AdminPortal() {
                 onChange={setAiHeroSettings}
                 themeColors={themeSettings}
                 products={allProducts}
+                brandName={String(brandingSettings.brandName || '').trim() || 'YOUR BRAND'}
               />
 
               <h4 id="settings-behavior" style={{ fontSize: 11, color: '#aaa', margin: '12px 0 8px', textTransform: 'uppercase' }}>Behavior</h4>

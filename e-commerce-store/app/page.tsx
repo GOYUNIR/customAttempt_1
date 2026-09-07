@@ -8,12 +8,20 @@ import HeroShaderCanvas from '@/components/HeroShaderCanvas';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, hasMixedCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
+import { surfaceBackground, themeRadius, themeRadiusNumber, cardShadowStyle, contentSpacingScale, cardSheen, hasMixedCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { isImageMedia, isVideoMedia, zeroImageStyle } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
 import { fallbackAnimation } from '@/lib/ai-animation';
-import { resolveHeroIntensity, intensityToRadius, intensityToSpeed } from '@/lib/shaders/presets';
+import {
+  resolveHeroIntensity,
+  intensityToRadius,
+  resolveHeroSpeed,
+  resolveHeroMotionType,
+  motionTypeToPreset,
+  motionTypeToLoop,
+  resolveHeroHeightPx,
+} from '@/lib/shaders/presets';
 
 // AI product-image animation for the hero. This is the SAME fallback preset the
 // `/api/ai/animation` pipeline emits when no AI provider is configured — a pure-
@@ -283,11 +291,24 @@ export default function HomePage() {
   // animation speed. Resolved from `intensity` (falling back to the legacy
   // `explosionRadius` field) so a pre-migration config keeps its exact look.
   const aiHeroIntensity = resolveHeroIntensity(aiHero);
+  const aiHeroSpeed = resolveHeroSpeed(aiHero);
+  // Motion type is the high-level selector; it maps onto the engine preset +
+  // loop when the legacy `preset`/`animationLoop` fields are empty so an older
+  // config (no motionType) keeps its exact stored look.
+  const aiHeroMotionType = resolveHeroMotionType(aiHero);
+  const aiHeroPreset = String(aiHero?.preset || motionTypeToPreset(aiHeroMotionType));
+  const aiHeroLoop = aiHero?.animationLoop || motionTypeToLoop(aiHeroMotionType);
   const aiHeroBannerHeight =
     aiHero?.canvasHeight === 'slim' ? 120 : aiHero?.canvasHeight === 'expanded' ? 300 : 240;
+  // Hero-box layout (admin → Settings → AI Hero → Layout). 0 = inherit the
+  // storefront theme default so a legacy config is unchanged.
+  const aiHeroMaxWidth = Number(aiHero?.maxWidth) > 0 ? Number(aiHero?.maxWidth) : productsPerRow === 2 ? 720 : 560;
+  const aiHeroCornerRadius = Number(aiHero?.cornerRadius) > 0 ? Number(aiHero?.cornerRadius) : themeRadiusNumber(configPalette, 26);
+  const aiHeroPadding = Number(aiHero?.padding) > 0 ? Number(aiHero?.padding) : Math.round(28 * spacing);
+  const aiHeroBoxHeight = resolveHeroHeightPx(aiHero);
   const heroCanvasProps = {
     enabled: aiHero?.enabled !== false,
-    preset: String(aiHero?.preset || 'dark_organic'),
+    preset: aiHeroPreset,
     opacity: Number(aiHero?.opacity) || 0.55,
     colorA: configPalette.accentPurple || '#bf5af2',
     colorB: configPalette.accentBlue || '#0071e3',
@@ -295,22 +316,22 @@ export default function HomePage() {
     explosionRadius: intensityToRadius(aiHeroIntensity),
     particleCount: Number(aiHero?.particleCount) || 50_000,
     depthBlur: Number(aiHero?.depthBlur) || 30,
-    animationLoop: aiHero?.animationLoop || 'pulse',
+    animationLoop: aiHeroLoop,
     assemblyProgress: Number(aiHero?.assemblyProgress) || 1,
     blendMode: aiHeroBlendMode,
     productSilhouette: String(aiHero?.productSilhouette || ''),
-    speed: intensityToSpeed(aiHeroIntensity),
+    speed: aiHeroSpeed,
   };
 
   return (
     <main style={{ minHeight: '100vh', background: configPalette.primaryBackground, color: configPalette.textMain, padding: `${Math.round(30 * spacing)}px 20px ${Math.round(80 * spacing)}px`, fontFamily: 'system-ui, sans-serif' }}>
       <style>{`@keyframes goyunirFadeUp { 0% { opacity: 0; transform: translateY(16px); } 100% { opacity: 1; transform: none; } } @keyframes goyunirPulse { 0%, 100% { opacity: 0.65; transform: scale(1); } 50% { opacity: 1; transform: scale(1.18); } } ${heroAiCss}`}</style>
       <div style={{ maxWidth: productsPerRow === 2 ? 720 : 560, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: Math.round(20 * spacing) }}>
-        <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: themeRadius(configPalette, 26), padding: `${Math.round(28 * spacing)}px 22px`, background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
+        <section style={{ position: 'relative', overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}`, borderRadius: `${aiHeroCornerRadius}px`, padding: `${aiHeroPadding}px 22px`, minHeight: aiHeroBoxHeight, width: '100%', maxWidth: aiHeroMaxWidth, margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: surfaceBackground(configPalette.cardBackground, configPalette.surfaceTransparency, '#ffffff'), backgroundImage: cardSheen, boxShadow: cardShadowStyle(configPalette, 18), animation: 'goyunirFadeUp 700ms cubic-bezier(.22,1,.36,1) backwards' }}>
           {aiHeroContainerTarget === 'background' && (
             <HeroShaderCanvas {...heroCanvasProps} placement="background" />
           )}
-          <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ position: 'relative', zIndex: 10 }}>
           {aiHeroContainerTarget === 'banner' && (
             <div style={{ position: 'relative', height: aiHeroBannerHeight, marginBottom: 18, borderRadius: themeRadius(configPalette, 18), overflow: 'hidden', border: `1px solid ${configPalette.cardBorder}` }}>
               <HeroShaderCanvas {...heroCanvasProps} placement="banner" />

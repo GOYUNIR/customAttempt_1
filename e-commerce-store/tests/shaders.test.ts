@@ -9,6 +9,11 @@ import {
   resolveHeroIntensity,
   intensityToRadius,
   intensityToSpeed,
+  resolveHeroSpeed,
+  resolveHeroMotionType,
+  motionTypeToPreset,
+  motionTypeToLoop,
+  resolveHeroHeightPx,
 } from '../lib/shaders/presets.ts';
 import { parsePromptToParams, enhancePrompt } from '../lib/shaders/promptParser.ts';
 import { hexToRgb, extractAccentPalette, paletteToCss } from '../lib/shaders/palette.ts';
@@ -71,6 +76,38 @@ test('intensityToSpeed maps 0..1 to a 0.5×..2× speed multiplier', () => {
   assert.ok(Math.abs(intensityToSpeed(0.4) - 1.1) < 1e-9);
   assert.equal(intensityToSpeed(1), 2);
   assert.equal(intensityToSpeed(9), 2); // clamped
+});
+
+test('resolveHeroSpeed prefers the explicit speed field and clamps to 0.5×..2×', () => {
+  assert.equal(resolveHeroSpeed({ speed: 1.25, intensity: 0.4 }), 1.25);
+  assert.equal(resolveHeroSpeed({ speed: 9 }), 2); // clamped
+  assert.equal(resolveHeroSpeed({ speed: 0 }), 1.1); // invalid (0) → intensity-derived fallback
+});
+
+test('resolveHeroMotionType defaults to spin for missing/unknown values', () => {
+  assert.equal(resolveHeroMotionType(null), 'spin');
+  assert.equal(resolveHeroMotionType({}), 'spin');
+  assert.equal(resolveHeroMotionType({ motionType: 'hover' }), 'hover');
+  assert.equal(resolveHeroMotionType({ motionType: 'assembly' }), 'assembly');
+  assert.equal(resolveHeroMotionType({ motionType: 'nonsense' }), 'spin');
+});
+
+test('motionTypeToPreset / motionTypeToLoop map motion types onto the engine', () => {
+  assert.equal(motionTypeToPreset('spin'), 'exploded_rebuild');
+  assert.equal(motionTypeToPreset('assembly'), 'exploded_rebuild');
+  assert.equal(motionTypeToPreset('hover'), 'cyber_mesh');
+  assert.equal(motionTypeToLoop('spin'), 'spin');
+  assert.equal(motionTypeToLoop('assembly'), 'pulse');
+  assert.equal(motionTypeToLoop('hover'), 'mouse');
+});
+
+test('resolveHeroHeightPx resolves presets and clamps the custom slider', () => {
+  assert.equal(resolveHeroHeightPx({ heroHeight: 'compact' }), 360);
+  assert.equal(resolveHeroHeightPx({ heroHeight: 'standard' }), 480);
+  assert.equal(resolveHeroHeightPx({ heroHeight: 'tall' }), 640);
+  assert.equal(resolveHeroHeightPx({ heroHeight: 'custom', heroHeightPx: 500 }), 500);
+  assert.equal(resolveHeroHeightPx({ heroHeight: 'custom', heroHeightPx: 9999 }), 900); // clamped
+  assert.equal(resolveHeroHeightPx({}), 480); // default standard
 });
 
 // --- prompt parser ---
