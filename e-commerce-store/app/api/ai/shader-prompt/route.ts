@@ -14,6 +14,8 @@ import {
   type ShaderParams,
 } from '@/lib/shaders/promptParser';
 import { buildProductTarget, normalizeSilhouette } from '@/lib/shaders/productTarget';
+import { sanitizeGlslSource } from '@/lib/shaders/glslSanitize';
+import { DEFAULT_VS, DEFAULT_FS } from '@/lib/shaders/glsl';
 
 export const dynamic = 'force-dynamic';
 
@@ -166,6 +168,12 @@ export async function POST(request: Request) {
     preset: paramsToPreset(params),
     params,
     silhouette: normalizeSilhouette(params.productSilhouette ?? product?.silhouette),
+    // Guaranteed-clean GLSL 300 es payloads — the sanitizer strips markdown /
+    // conversational noise, removes any `#version` directive, and prepends the
+    // exact `#version 300 es\nprecision highp float;\n` header so the client can
+    // never hit `'out' : syntax error`.
+    vertexShader: sanitizeGlslSource(DEFAULT_VS),
+    fragmentShader: sanitizeGlslSource(DEFAULT_FS),
     product: product ? { id: product.id, name: product.name, slug: product.slug, category: product.category, silhouette: product.silhouette } : null,
   });
   } catch (err) {
@@ -184,6 +192,8 @@ export async function POST(request: Request) {
         preset: paramsToPreset(floor),
         params: floor,
         silhouette: normalizeSilhouette(floor.productSilhouette),
+        vertexShader: sanitizeGlslSource(DEFAULT_VS),
+        fragmentShader: sanitizeGlslSource(DEFAULT_FS),
         product: null,
       },
       { status: 200 },

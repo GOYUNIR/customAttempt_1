@@ -3,7 +3,8 @@
 import { Component, useEffect, useRef, type ReactNode } from 'react';
 import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
-import { FRAGMENT_VS, FRAGMENT_FS, IMAGE_VS, IMAGE_FS } from '@/lib/shaders/glsl';
+import { FRAGMENT_VS, FRAGMENT_FS, IMAGE_VS, IMAGE_FS, DEFAULT_VS, DEFAULT_FS } from '@/lib/shaders/glsl';
+import { sanitizeGlslSource } from '@/lib/shaders/glslSanitize';
 
 /**
  * Hero shader engine — a multi-mode GPU renderer painted behind the home-page
@@ -249,6 +250,28 @@ function linkProgram(
   return { program, vs, fs };
 }
 
+/**
+ * Link a program with a guaranteed-working fallback. When the primary GLSL
+ * fails to compile/link (the `'out' : syntax error` class of failure), this
+ * recompiles a bulletproof hardcoded GLSL 300 es textured quad (DEFAULT_VS /
+ * DEFAULT_FS) instead of dropping to the CSS ambient gradient — so the badge
+ * stays `WebGL 2.0 · N FPS` and the database product image still renders.
+ */
+function linkProgramWithFallback(
+  gl: WebGLRenderingContext,
+  vsSource: string,
+  fsSource: string,
+): { program: WebGLProgram; vs: WebGLShader; fs: WebGLShader; usedDefault: boolean } | null {
+  const primary = linkProgram(gl, vsSource, fsSource);
+  if (primary) return { ...primary, usedDefault: false };
+  console.warn(
+    '[HeroShaderCanvas] Primary GLSL failed to compile/link — retrying with the bulletproof default shader (no CSS fallback).',
+  );
+  const fallback = linkProgram(gl, sanitizeGlslSource(DEFAULT_VS), sanitizeGlslSource(DEFAULT_FS));
+  if (fallback) return { ...fallback, usedDefault: true };
+  return null;
+}
+
 export function HeroShaderCanvas({
   enabled = true,
   preset = 'dark_organic',
@@ -351,37 +374,31 @@ export function HeroShaderCanvas({
     }
     if (!canvas) return;
 
-    let gl: WebGLRenderingContext | null = null;
-    let backend: ShaderBackend = 'css';
+    let gl: WebGL2RenderingContext | null = null;
+    const backend: ShaderBackend = 'webgl2';
     try {
+      // Strictly request a WebGL 2.0 context — the shaders are GLSL ES 3.00 and
+      // MUST NOT be compiled against a WebGL1 context (that is the source of the
+      // `'out' : syntax error`). `preserveDrawingBuffer: true` also lets the
+      // admin clip recorder capture the canvas, and `antialias: true` keeps the
+      // product texture crisp.
       gl = (canvas.getContext('webgl2', {
         alpha: true,
+        antialias: true,
+        preserveDrawingBuffer: true,
         premultipliedAlpha: false,
-        // Software-rendered WebGL (SwiftShader / remote / VM) is still WebGL —
+        // Software-rendered WebGL (SwiftShader / remote / VM) is still WebGL 2.0 —
         // requiring a hardware caveat-free context made the engine fall back to
         // the CSS gradient in dev/remote/Virtualized environments for no good
         // reason. The low-power + reduced-motion guards above still protect
         // genuinely constrained devices.
         failIfMajorPerformanceCaveat: false,
-      }) as WebGLRenderingContext | null) || null;
-      if (gl) backend = 'webgl2';
+      }) as WebGL2RenderingContext | null) || null;
     } catch {
       gl = null;
     }
     if (!gl) {
-      try {
-        gl = (canvas.getContext('webgl', {
-          alpha: true,
-          premultipliedAlpha: false,
-          failIfMajorPerformanceCaveat: false,
-        }) as WebGLRenderingContext | null) || null;
-        if (gl) backend = 'webgl';
-      } catch {
-        gl = null;
-      }
-    }
-    if (!gl) {
-      showFallback('WebGL context unavailable (webgl2 + webgl both failed)');
+      showFallback('WebGL 2.0 context unavailable');
       return;
     }
 
@@ -407,9 +424,9 @@ export function HeroShaderCanvas({
       // available — the in-shader `u_hasTexture=0` branch drives a gradient while
       // still applying the spin/assemble motion. It only drops to CSS if WebGL
       // itself is unavailable or this fixed GLSL fails to compile (which is logged).
-      const linked = linkProgram(gl, IMAGE_VS, IMAGE_FS);
+      const linked = linkProgramWithFallback(gl, sanitizeGlslSource(IMAGE_VS), sanitizeGlslSource(IMAGE_FS));
       if (!linked) {
-        showFallback('image shader failed to link (GLSL compile/link error)');
+        showFallback('image shader AND default shader failed to link (GLSL compile/link error)');
         return;
       }
       const { program, vs, fs } = linked;
@@ -536,9 +553,9 @@ export function HeroShaderCanvas({
         gl!.drawArrays(gl!.TRIANGLES, 0, 6);
       };
     } else {
-      const linked = linkProgram(gl, FRAGMENT_VS, FRAGMENT_FS);
+      const linked = linkProgramWithFallback(gl, sanitizeGlslSource(FRAGMENT_VS), sanitizeGlslSource(FRAGMENT_FS));
       if (!linked) {
-        showFallback('fragment shader failed to link (GLSL compile/link error)');
+        showFallback('fragment shader AND default shader failed to link (GLSL compile/link error)');
         return;
       }
       const { program, vs, fs } = linked;

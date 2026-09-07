@@ -1,17 +1,22 @@
 // GLSL source strings for the hero shader engine.
 //
 // Kept in a separate PURE module so the component file stays readable and the
-// shaders are easy to version/test. All shaders are GLSL ES 1.00 (compatible
-// with both WebGL1 and WebGL2 contexts).
+// shaders are easy to version/test. All shaders are GLSL ES 3.00 (`#version
+// 300 es` on line 1, `in`/`out`/`texture()` syntax) and are compiled against a
+// strictly requested WebGL 2.0 context. Mixing `#version 300 es` with WebGL1
+// syntax (`attribute`/`varying`/`texture2D()`/`gl_FragColor`) is what produces
+// the `'out' : syntax error` — these sources are deliberately written in pure
+// 3.00 form so that can never happen.
 
-export const FRAGMENT_VS = `
-attribute vec2 a_position;
+export const FRAGMENT_VS = `#version 300 es
+precision highp float;
+in vec2 a_position;
 void main() {
   gl_Position = vec4(a_position, 0.0, 1.0);
 }
 `;
 
-export const FRAGMENT_FS = `
+export const FRAGMENT_FS = `#version 300 es
 precision highp float;
 uniform float u_time;
 uniform vec2 u_resolution;
@@ -25,6 +30,7 @@ uniform float u_viscosity;
 uniform float u_warpFrequency;
 uniform float u_turbulence;
 uniform float u_depthBlur;
+out vec4 fragColor;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -120,23 +126,23 @@ void main() {
     }
   }
 
-  gl_FragColor = vec4(col, u_opacity);
+  fragColor = vec4(col, u_opacity);
 }
 `;
 
-export const PARTICLE_VS = `
+export const PARTICLE_VS = `#version 300 es
 precision highp float;
-attribute vec3 a_position;
-attribute vec3 a_normal;
-attribute float a_component;
+in vec3 a_position;
+in vec3 a_normal;
+in float a_component;
 uniform float u_time;
 uniform float u_assemblyProgress;
 uniform float u_dispersion;
 uniform float u_explosionRadius;
 uniform vec2 u_mouse;
-varying float v_component;
-varying float v_alpha;
-varying float v_depth;
+out float v_component;
+out float v_alpha;
+out float v_depth;
 
 void main() {
   vec3 dir = normalize(a_normal + 0.4 * normalize(a_position + 0.0001));
@@ -162,16 +168,17 @@ void main() {
 }
 `;
 
-export const PARTICLE_FS = `
+export const PARTICLE_FS = `#version 300 es
 precision highp float;
-varying float v_component;
-varying float v_alpha;
-varying float v_depth;
+in float v_component;
+in float v_alpha;
+in float v_depth;
 uniform vec3 u_colorA;
 uniform vec3 u_colorB;
 uniform vec3 u_colorC;
 uniform float u_opacity;
 uniform float u_depthBlur;
+out vec4 fragColor;
 
 void main() {
   vec2 c = gl_PointCoord - vec2(0.5);
@@ -181,7 +188,7 @@ void main() {
   vec3 col = mix(u_colorB, u_colorA, step(1.5, v_component));
   col = mix(col, u_colorC, step(2.5, v_component));
   float depthFade = 1.0 - u_depthBlur * 0.5 * smoothstep(3.0, 4.6, v_depth);
-  gl_FragColor = vec4(col, alpha * v_alpha * u_opacity * depthFade);
+  fragColor = vec4(col, alpha * v_alpha * u_opacity * depthFade);
 }
 `;
 
@@ -198,16 +205,17 @@ void main() {
 // a product (the tile seams carry the "breaking apart" look).
 // ---------------------------------------------------------------------------
 
-export const IMAGE_VS = `
-attribute vec2 a_position;
-varying vec2 v_uv;
+export const IMAGE_VS = `#version 300 es
+precision highp float;
+in vec2 a_position;
+out vec2 v_uv;
 void main() {
   v_uv = a_position * 0.5 + 0.5;
   gl_Position = vec4(a_position, 0.0, 1.0);
 }
 `;
 
-export const IMAGE_FS = `
+export const IMAGE_FS = `#version 300 es
 precision highp float;
 uniform sampler2D u_productTexture;
 uniform float u_time;
@@ -221,7 +229,8 @@ uniform float u_opacity;
 uniform vec3 u_colorA;
 uniform vec3 u_colorB;
 
-varying vec2 v_uv;
+in vec2 v_uv;
+out vec4 fragColor;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -275,7 +284,7 @@ void main() {
 
   vec4 texel;
   if (u_hasTexture > 0.5) {
-    texel = texture2D(u_productTexture, clamp(sampleUv, 0.0, 1.0));
+    texel = texture(u_productTexture, clamp(sampleUv, 0.0, 1.0));
   } else {
     texel = vec4(mix(u_colorA, u_colorB, uv.y), 1.0);
   }
@@ -287,6 +296,53 @@ void main() {
   float seam = smoothstep(0.0, 0.05, edge);
   float alpha = mix(1.0, seam, step(0.001, explode)) * mask;
 
-  gl_FragColor = vec4(texel.rgb, alpha * u_opacity);
+  fragColor = vec4(texel.rgb, alpha * u_opacity);
+}
+`;
+
+// ---------------------------------------------------------------------------
+// Guaranteed-working default shader (GLSL 300 es).
+//
+// This is the bulletproof fallback compiled the instant the primary shader
+// fails to compile/link — it NEVER drops to the CSS ambient gradient. It takes
+// the same `u_productTexture` sampler, applies a gentle 3D float/spin around
+// the center, and renders the database product image cleanly (or a theme
+// gradient when no image is bound, via `u_hasTexture`).
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_VS = `#version 300 es
+precision highp float;
+in vec2 a_position;
+out vec2 v_uv;
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+export const DEFAULT_FS = `#version 300 es
+precision highp float;
+uniform sampler2D u_productTexture;
+uniform float u_time;
+uniform float u_hasTexture;
+uniform vec2 u_resolution;
+uniform vec3 u_colorA;
+uniform vec3 u_colorB;
+in vec2 v_uv;
+out vec4 fragColor;
+void main() {
+  vec2 uv = v_uv;
+  // Gentle 3D float/spin around the center (cover-fit preserved by clamping).
+  vec2 c = uv - 0.5;
+  float ang = u_time * 0.35;
+  float cs = cos(ang);
+  float sn = sin(ang);
+  vec2 r = vec2(c.x * cs - c.y * sn, c.x * sn + c.y * cs);
+  vec2 sampleUv = clamp(r + 0.5, 0.0, 1.0);
+  if (u_hasTexture > 0.5) {
+    fragColor = texture(u_productTexture, sampleUv);
+  } else {
+    fragColor = vec4(mix(u_colorA, u_colorB, uv.y), 1.0);
+  }
 }
 `;
