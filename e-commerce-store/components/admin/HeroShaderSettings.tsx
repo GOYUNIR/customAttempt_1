@@ -4,35 +4,30 @@ import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import HeroShaderCanvas, { type HeroShaderStatus } from '@/components/HeroShaderCanvas';
 import {
   HERO_SHADER_PRESETS,
-  PARTICLE_COUNT_OPTIONS,
-  EXPLOSION_RADIUS_MIN,
   EXPLOSION_RADIUS_MAX,
-  CONTAINER_TARGET_OPTIONS,
-  CANVAS_HEIGHT_OPTIONS,
-  BLEND_MODE_OPTIONS,
   SILHOUETTE_OPTIONS,
+  resolveHeroIntensity,
+  intensityToRadius,
+  intensityToSpeed,
   type AiHeroSettings,
   type AnimationLoopMode,
   type HeroContainerTarget,
-  type HeroCanvasHeight,
-  type HeroBlendMode,
 } from '@/lib/shaders/presets';
 import {
   enhancePrompt,
   paramsToPreset,
   compileShaderParams,
-  MAGIC_PROMPT_PILLS,
   type ShaderParams,
 } from '@/lib/shaders/promptParser';
-import { extractAccentPalette, paletteToCss, type AccentPalette } from '@/lib/shaders/palette';
-import { buildProductTarget, silhouetteLabel } from '@/lib/shaders/productTarget';
+import { extractAccentPalette, paletteToCss } from '@/lib/shaders/palette';
+import { buildProductTarget } from '@/lib/shaders/productTarget';
 import { toHexColor } from '@/lib/share-card-config';
 
 /**
- * 2-column control suite for the AI Hero Banner & Shader.
- * Left (7/12): the Smart AI Prompt Compiler (product target, prompt, action
- * controls) with secondary presets / motion / layout / palette in collapsible
- * accordions. Right (5/12): the sticky live viewport preview.
+ * Minimal, powerful 2-column control suite for the AI Hero Banner & Shader.
+ * Left (7/12): the Smart AI Prompt Compiler + four lean accordions (Engine
+ * Presets, Motion, Layout, Theme & Palette). Right (5/12): the sticky live
+ * viewport preview.
  */
 
 const cardStyle: CSSProperties = {
@@ -70,30 +65,22 @@ const chipBase: CSSProperties = {
   transition: 'all 120ms ease',
 };
 
-function presetSwatch(presetId: string, palette: AccentPalette): CSSProperties {
-  const [a, b, c] = paletteToCss(palette);
-  switch (presetId) {
-    case 'exploded_rebuild':
-      return {
-        background: `radial-gradient(circle at 50% 40%, ${a} 0%, transparent 55%), radial-gradient(circle at 30% 60%, ${b} 0%, transparent 45%), radial-gradient(circle at 70% 60%, ${c} 0%, transparent 45%), #0c0c10`,
-      };
-    case 'cyber_mesh':
-      return {
-        background: `linear-gradient(135deg, ${a}, ${b}), repeating-linear-gradient(45deg, transparent 0 6px, ${c}40 6px 7px)`,
-      };
-    case 'ambient_glass':
-      return { background: `linear-gradient(135deg, ${b}cc, ${a}cc)` };
-    case 'dark_organic':
-    default:
-      return { background: `linear-gradient(135deg, ${c}, ${a}, ${b})` };
-  }
-}
+/** Three-step generation progress trail shown under the Execute button. */
+const STEP_LABELS: ReadonlyArray<string> = [
+  '⏳ 1/3 Resolving product geometry & silhouette…',
+  '⚡ 2/3 Compiling shader uniforms with AI…',
+  '🎨 3/3 Applying GLSL render payload to canvas…',
+];
 
-const LOOP_OPTIONS: ReadonlyArray<{ value: AnimationLoopMode; label: string }> = [
-  { value: 'pulse', label: 'Infinite Loop (Pulse)' },
+const ANIMATION_MODE_OPTIONS: ReadonlyArray<{ value: AnimationLoopMode; label: string }> = [
+  { value: 'pulse', label: 'Infinite Loop' },
   { value: 'scroll', label: 'On Scroll Scrub' },
-  { value: 'mouse', label: 'Mouse Interactive Distance' },
-  { value: 'scrub', label: 'Manual Scrub (preview)' },
+  { value: 'mouse', label: 'Mouse Interactive' },
+];
+
+const CANVAS_MODE_OPTIONS: ReadonlyArray<{ value: HeroContainerTarget; label: string }> = [
+  { value: 'background', label: 'Full Hero Background' },
+  { value: 'banner', label: 'Sub-Text Banner' },
 ];
 
 const selectStyle: CSSProperties = {
@@ -106,19 +93,10 @@ const selectStyle: CSSProperties = {
   padding: '8px 10px',
 };
 
-/** Collapsible accordion module — keeps secondary controls out of the primary
- *  hero row until the operator expands them. */
-function Section({
-  title,
-  hint,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Collapsible accordion — keeps secondary controls out of the primary hero row. */
+function Section({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
@@ -151,7 +129,6 @@ function Section({
           ▾
         </span>
       </button>
-      {!open && hint ? <div style={{ padding: '0 16px 12px', fontSize: 10, color: '#8a8a94' }}>{hint}</div> : null}
       {open ? <div style={{ padding: '0 16px 16px' }}>{children}</div> : null}
     </div>
   );
@@ -164,18 +141,18 @@ export default function HeroShaderSettings({
   products,
 }: {
   value: AiHeroSettings;
-  onChange: (next: AiHeroSettings) => void;
+  onChange: (next: AiHeroSettings | ((prev: AiHeroSettings) => AiHeroSettings)) => void;
   themeColors: Record<string, any>;
   /** Live catalog items (from /api/admin/products) — the dynamic product selector. */
   products?: any[];
 }) {
   const [status, setStatus] = useState<HeroShaderStatus>({ backend: 'css', fps: 0 });
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
-  const [phase, setPhase] = useState<'idle' | 'compiling' | 'generating'>('idle');
+  const [progressStep, setProgressStep] = useState<0 | 1 | 2 | 3>(0);
   const [paused, setPaused] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const generating = phase !== 'idle';
+  const generating = progressStep !== 0;
 
   const catalog = Array.isArray(products) ? products : [];
   const selectedProduct =
@@ -191,31 +168,31 @@ export default function HeroShaderSettings({
 
   const palette = extractAccentPalette(themeColors);
   const [a, b, c] = paletteToCss(palette);
-  const derived = compileShaderParams(value.prompt, selectedTarget);
+  // Single "Intensity & Speed" knob — drives both dispersion and animation speed.
+  const intensity = resolveHeroIntensity(value);
 
-  const patch = (next: Partial<AiHeroSettings>) => onChange({ ...value, ...next });
+  const patch = (next: Partial<AiHeroSettings>) => onChange((prev) => ({ ...prev, ...next }));
 
-  /** Apply compiled (deterministic or AI) params to the live canvas state. */
+  /** Apply compiled (deterministic or AI) params straight into the live canvas. */
   const applyParams = (params: ShaderParams) => {
-    onChange({
-      ...value,
+    onChange((prev) => ({
+      ...prev,
       preset: paramsToPreset(params),
-      assemblyProgress: params.assemblyProgress,
+      intensity: params.dispersion,
       explosionRadius: Math.round(params.dispersion * EXPLOSION_RADIUS_MAX),
-      animationLoop: params.spin ? 'pulse' : value.animationLoop,
-      productSilhouette: params.productSilhouette || value.productSilhouette || '',
-    });
+      animationLoop: params.spin ? 'pulse' : prev.animationLoop,
+      productSilhouette: params.productSilhouette || prev.productSilhouette || '',
+    }));
   };
 
-  // Execute/Generate: compile locally for instant feedback, then (when an AI
-  // provider is configured) refine via the admin AI endpoint. Cancel aborts the
-  // in-flight request and restores the previous safe state; Pause/Resume freezes
-  // and resumes the timeline in both the preview and the active canvas.
+  // Execute: 1/3 resolve geometry + silhouette deterministically, 2/3 compile
+  // uniforms via the AI endpoint, 3/3 apply the payload to the canvas. Cancel
+  // aborts the in-flight request and restores the pre-execute snapshot.
   const executePrompt = async () => {
     abortRef.current?.abort();
     const snapshot = value;
     setGenError(null);
-    setPhase('compiling');
+    setProgressStep(1);
     // Deterministic compile runs first (instant, never blocks on the network) so
     // the preview updates even when the AI provider is unconfigured or slow.
     applyParams(compileShaderParams(value.prompt, selectedTarget));
@@ -223,11 +200,9 @@ export default function HeroShaderSettings({
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      // Yield one tick so the "Compiling shader…" state paints before the network
-      // phase begins, then hand off to the AI route.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await sleep(400);
       if (controller.signal.aborted) return;
-      setPhase('generating');
+      setProgressStep(2);
       const res = await fetch('/api/ai/shader-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,8 +215,11 @@ export default function HeroShaderSettings({
         return;
       }
       const data = await res.json();
+      setProgressStep(3);
       if (data?.params) applyParams(data.params);
       if (data?.silhouette) patch({ productSilhouette: String(data.silhouette) });
+      await sleep(300);
+      if (data?.aiError) setGenError(String(data.aiError));
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         // Cancel path — restore the snapshot captured at Execute time.
@@ -251,14 +229,12 @@ export default function HeroShaderSettings({
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
-      setPhase('idle');
+      setProgressStep(0);
     }
   };
 
   const cancelGeneration = () => {
     abortRef.current?.abort();
-    setPhase('idle');
-    setGenError(null);
   };
 
   const togglePause = () => setPaused((p) => !p);
@@ -266,11 +242,12 @@ export default function HeroShaderSettings({
   const onProductSelect = (id: string) => {
     const prod = catalog.find((p) => String(p?.id || p?.slug) === id) || null;
     const target = buildProductTarget(prod);
-    patch({
+    onChange((prev) => ({
+      ...prev,
       targetProductId: target ? target.id : '',
       targetProductName: target ? target.name : '',
       productSilhouette: target ? target.silhouette : '',
-    });
+    }));
   };
 
   const previewColors = value.paletteAutoSync
@@ -309,16 +286,6 @@ export default function HeroShaderSettings({
               </option>
             ))}
           </select>
-          <div style={{ marginTop: 6, fontSize: 10, color: '#8a8a94' }}>
-            {selectedTarget ? (
-              <>
-                Silhouette: <b style={{ color: '#c9b8ff' }}>{silhouetteLabel(selectedTarget.silhouette)}</b>
-                {selectedTarget.category ? <> · {selectedTarget.category}</> : null}
-              </>
-            ) : (
-              'No product — neutral container.'
-            )}
-          </div>
           <label style={{ ...labelStyle, marginTop: 10 }}>Silhouette override</label>
           <select
             value={value.productSilhouette || ''}
@@ -349,12 +316,7 @@ export default function HeroShaderSettings({
               resize: 'vertical',
             }}
           />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-            {MAGIC_PROMPT_PILLS.map((pill) => (
-              <span key={pill.label} style={chipBase} onClick={() => patch({ prompt: pill.prompt })} role="button" tabIndex={0}>
-                ✨ {pill.label}
-              </span>
-            ))}
+          <div style={{ display: 'flex', marginTop: 10 }}>
             <span
               style={{ ...chipBase, borderColor: 'rgba(124,92,255,0.5)', color: '#c9b8ff' }}
               onClick={() => patch({ prompt: enhancePrompt(value.prompt) })}
@@ -383,8 +345,13 @@ export default function HeroShaderSettings({
               opacity: generating ? 0.7 : 1,
             }}
           >
-            {phase === 'compiling' ? '⏳ Compiling shader…' : phase === 'generating' ? '⏳ Generating preview…' : '🎬 Execute Prompt & Generate Preview'}
+            {generating ? 'Generating…' : '🎬 Execute Prompt & Generate Preview'}
           </button>
+          {generating && (
+            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: '#c9b8ff' }}>
+              {STEP_LABELS[progressStep - 1]}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <button
               type="button"
@@ -409,117 +376,41 @@ export default function HeroShaderSettings({
               </button>
             )}
           </div>
-          {genError && <div style={{ marginTop: 8, fontSize: 10, color: '#ffb3ba', lineHeight: 1.5 }}>{genError}</div>}
-          <div style={{ marginTop: 10, fontSize: 10, color: '#8a8a94' }}>
-            Derived: <b style={{ color: '#c9b8ff' }}>{derived.mode}</b>
-            {derived.productSilhouette ? <> · <b style={{ color: '#c9b8ff' }}>{derived.productSilhouette}</b></> : null}
-            {derived.spin ? ' · spin' : null}
-          </div>
+          {genError && (
+            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 10, background: 'rgba(255,80,90,0.10)', border: '1px solid rgba(255,80,90,0.35)', fontSize: 11, color: '#ffb3ba', lineHeight: 1.5 }}>
+              ⚠ {genError}
+            </div>
+          )}
         </div>
 
-        <Section title="Engine Presets" hint="Renderer — GLSL fragment shader or 3D particle assembly.">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {HERO_SHADER_PRESETS.map((preset) => {
-              const isActive = value.preset === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => patch({ preset: preset.id })}
-                  style={{
-                    textAlign: 'left',
-                    borderRadius: 14,
-                    border: `1px solid ${isActive ? '#7c5cff' : 'rgba(255,255,255,0.10)'}`,
-                    boxShadow: isActive ? '0 0 0 3px rgba(124,92,255,0.25)' : 'none',
-                    background: 'rgba(255,255,255,0.03)',
-                    padding: 10,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ height: 64, borderRadius: 10, marginBottom: 8, ...presetSwatch(preset.id, palette) }} />
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#eee' }}>{preset.name}</div>
-                  <div style={{ fontSize: 10, color: '#9a9aa4', marginTop: 2 }}>{preset.category}</div>
-                </button>
-              );
-            })}
-          </div>
+        <Section title="Engine Presets">
+          <select value={value.preset} onChange={(e) => patch({ preset: e.target.value })} style={selectStyle}>
+            {HERO_SHADER_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id} style={{ background: '#141419' }}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
         </Section>
 
-        <Section title="Motion & Primitive Parameters" hint="Sliders, particle density, opacity and the animation loop.">
-
-          <label style={labelStyle}>Explosion radius — {value.explosionRadius}mm</label>
-          <input
-            type="range"
-            min={EXPLOSION_RADIUS_MIN}
-            max={EXPLOSION_RADIUS_MAX}
-            step={1}
-            value={value.explosionRadius}
-            onChange={(e) => patch({ explosionRadius: Number(e.target.value) })}
-            style={rangeStyle}
-          />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Particle count &amp; density</label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {PARTICLE_COUNT_OPTIONS.map((count) => (
-              <button
-                key={count}
-                type="button"
-                onClick={() => patch({ particleCount: count })}
-                style={{
-                  ...chipBase,
-                  borderColor: value.particleCount === count ? '#7c5cff' : 'rgba(255,255,255,0.12)',
-                  color: value.particleCount === count ? '#c9b8ff' : '#c8c8d0',
-                }}
-              >
-                {(count / 1000).toFixed(0)}k
-              </button>
-            ))}
-          </div>
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Opacity — {Math.round((value.opacity || 0.55) * 100)}%</label>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-            {[0.25, 0.5, 0.75, 1].map((o) => (
-              <button key={o} type="button" onClick={() => patch({ opacity: o })} style={chipBase}>
-                {Math.round(o * 100)}%
-              </button>
-            ))}
-          </div>
-          <input
-            type="range"
-            min={0.1}
-            max={1}
-            step={0.05}
-            value={value.opacity ?? 0.55}
-            onChange={(e) => patch({ opacity: Number(e.target.value) })}
-            style={rangeStyle}
-          />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Depth blur — {value.depthBlur}</label>
+        <Section title="Motion">
+          <label style={labelStyle}>Intensity &amp; Speed — {Math.round(intensity * 100)}%</label>
           <input
             type="range"
             min={0}
             max={100}
             step={1}
-            value={value.depthBlur}
-            onChange={(e) => patch({ depthBlur: Number(e.target.value) })}
+            value={Math.round(intensity * 100)}
+            onChange={(e) => patch({ intensity: Number(e.target.value) / 100 })}
             style={rangeStyle}
           />
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Animation loop</label>
+          <label style={{ ...labelStyle, marginTop: 14 }}>Animation Mode</label>
           <select
             value={value.animationLoop}
             onChange={(e) => patch({ animationLoop: e.target.value as AnimationLoopMode })}
-            style={{
-              width: '100%',
-              background: 'rgba(0,0,0,0.25)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 10,
-              color: '#eee',
-              fontSize: 12,
-              padding: '8px 10px',
-            }}
+            style={selectStyle}
           >
-            {LOOP_OPTIONS.map((opt) => (
+            {ANIMATION_MODE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value} style={{ background: '#141419' }}>
                 {opt.label}
               </option>
@@ -527,11 +418,10 @@ export default function HeroShaderSettings({
           </select>
         </Section>
 
-        <Section title="Placement & Canvas Layout" hint="Where the canvas sits and how it blends with the card.">
-
-          <label style={labelStyle}>Container target</label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {CONTAINER_TARGET_OPTIONS.map((opt) => (
+        <Section title="Layout">
+          <label style={labelStyle}>Canvas Mode</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {CANVAS_MODE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
@@ -542,40 +432,12 @@ export default function HeroShaderSettings({
               </button>
             ))}
           </div>
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Canvas height / aspect ratio</label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {CANVAS_HEIGHT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ canvasHeight: opt.value as HeroCanvasHeight })}
-                style={{ ...chipBase, borderColor: value.canvasHeight === opt.value ? '#7c5cff' : 'rgba(255,255,255,0.12)', color: value.canvasHeight === opt.value ? '#c9b8ff' : '#c8c8d0' }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <label style={{ ...labelStyle, marginTop: 14 }}>Blend mode</label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {BLEND_MODE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ blendMode: opt.value as HeroBlendMode })}
-                style={{ ...chipBase, borderColor: value.blendMode === opt.value ? '#7c5cff' : 'rgba(255,255,255,0.12)', color: value.blendMode === opt.value ? '#c9b8ff' : '#c8c8d0' }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
         </Section>
 
-        <Section title="Theme & Palette" hint="Sync accents from the storefront theme or override per hero.">
+        <Section title="Theme &amp; Palette">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer', color: '#ddd' }}>
             <input type="checkbox" checked={value.paletteAutoSync} onChange={(e) => patch({ paletteAutoSync: e.target.checked })} />
-            Sync accent vectors from the storefront theme
+            Sync with Storefront Theme
           </label>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             {[a, b, c].map((col, i) => (
@@ -623,7 +485,7 @@ export default function HeroShaderSettings({
                 enabled
                 preset={value.preset}
                 opacity={value.opacity}
-                explosionRadius={value.explosionRadius}
+                explosionRadius={intensityToRadius(intensity)}
                 particleCount={value.particleCount}
                 depthBlur={value.depthBlur}
                 animationLoop={value.animationLoop}
@@ -632,6 +494,7 @@ export default function HeroShaderSettings({
                 productSilhouette={effectiveSilhouette}
                 paused={paused}
                 interactive
+                speed={intensityToSpeed(intensity)}
                 onStatus={setStatus}
                 {...previewColors}
               />
@@ -657,7 +520,7 @@ export default function HeroShaderSettings({
                   zIndex: 2,
                 }}
               >
-                <span>{phase === 'compiling' ? '⏳ Compiling shader…' : '⏳ Generating preview…'}</span>
+                <span>{STEP_LABELS[progressStep - 1]}</span>
               </div>
             )}
           </div>
@@ -675,7 +538,7 @@ export default function HeroShaderSettings({
             ))}
           </div>
 
-          <label style={{ ...labelStyle, marginTop: 14 }}>Assembly scrubber — {Math.round(value.assemblyProgress * 100)}%</label>
+          <label style={{ ...labelStyle, marginTop: 14 }}>Assembly — {Math.round(value.assemblyProgress * 100)}%</label>
           <input
             type="range"
             min={0}
@@ -685,10 +548,6 @@ export default function HeroShaderSettings({
             onChange={(e) => patch({ assemblyProgress: Number(e.target.value), animationLoop: 'scrub' })}
             style={rangeStyle}
           />
-
-          <div style={{ marginTop: 12, fontSize: 10, color: '#8a8a94' }}>
-            0% exploded → 100% assembled.
-          </div>
         </div>
       </div>
     </div>

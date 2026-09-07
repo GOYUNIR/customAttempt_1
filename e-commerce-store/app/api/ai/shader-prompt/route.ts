@@ -78,9 +78,12 @@ export async function POST(request: Request) {
   let params: ShaderParams = floor;
   let source: 'ai' | 'fallback' = 'fallback';
   let provider: string | null = null;
+  let aiError: string | null = null;
 
   // Reuse the driver resolved above (a second read would double the Supabase
-  // round-trips and re-risk a transient failure).
+  // round-trips and re-risk a transient failure). When the provider IS wired up
+  // but the call fails or returns garbage, surface a masked `aiError` so the
+  // admin sees WHY the refinement fell back to the deterministic floor.
   if (driver?.configured) {
     try {
       const completion = await driver.complete(buildShaderPrompt({ prompt, product }));
@@ -92,10 +95,15 @@ export async function POST(request: Request) {
           params = { ...floor, ...parsed, productSilhouette: parsed.productSilhouette || floor.productSilhouette };
           source = 'ai';
           provider = completion.provider;
+        } else {
+          aiError = 'The AI provider returned an unusable response — using the deterministic compile.';
         }
+      } else {
+        aiError = 'The AI provider failed — using the deterministic compile.';
       }
     } catch {
       // AI provider failed — keep the deterministic floor; never 503 the admin.
+      aiError = 'The AI provider errored — using the deterministic compile.';
     }
   }
 
@@ -108,6 +116,7 @@ export async function POST(request: Request) {
     ok: true,
     source,
     provider,
+    aiError,
     preset: paramsToPreset(params),
     params,
     silhouette: normalizeSilhouette(params.productSilhouette ?? product?.silhouette),

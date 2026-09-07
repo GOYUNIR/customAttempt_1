@@ -96,6 +96,12 @@ export interface AiHeroSettings {
   opacity: number;
   /** Explosion radius in mm (0–150) — mapped to the particle dispersion scale. */
   explosionRadius: number;
+  /**
+   * Single "Intensity & Speed" knob (0–1) — the one admin control that drives
+   * both the exploded dispersion and the animation speed. Kept alongside
+   * `explosionRadius` so a legacy config without `intensity` still renders.
+   */
+  intensity: number;
   /** Point count for the 3D exploded mesh. */
   particleCount: number;
   /** Depth blur (0–100) — fades far particles / far raymarch geometry. */
@@ -149,6 +155,33 @@ export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: st
 export const SILHOUETTE_OPTIONS: ReadonlyArray<{ value: SilhouetteKey; label: string }> =
   SILHOUETTE_KEYS.map((key) => ({ value: key, label: silhouetteLabel(key) }));
 
+/**
+ * Resolve the single "Intensity & Speed" value (0..1) that drives the exploded
+ * dispersion AND the animation speed. Falls back to the legacy `explosionRadius`
+ * field so a pre-migration config keeps its exact look.
+ */
+export function resolveHeroIntensity(
+  aiHero: { intensity?: number; explosionRadius?: number } | undefined | null,
+): number {
+  const raw = Number(aiHero?.intensity);
+  if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
+  const radius = Number(aiHero?.explosionRadius);
+  if (Number.isFinite(radius)) return Math.max(0, Math.min(1, radius / 150));
+  return 0.4;
+}
+
+/** Map the 0..1 intensity to the exploded dispersion radius (0..150 mm). */
+export function intensityToRadius(intensity: number): number {
+  const n = Number.isFinite(intensity) ? intensity : 0.4;
+  return Math.round(Math.max(0, Math.min(1, n)) * 150);
+}
+
+/** Map the 0..1 intensity to an animation speed multiplier (0.5×..2×). */
+export function intensityToSpeed(intensity: number): number {
+  const n = Number.isFinite(intensity) ? intensity : 0.4;
+  return 0.5 + Math.max(0, Math.min(1, n)) * 1.5;
+}
+
 export function defaultAiHeroSettings(): AiHeroSettings {
   return {
     enabled: true,
@@ -156,6 +189,7 @@ export function defaultAiHeroSettings(): AiHeroSettings {
     prompt: '',
     opacity: 0.55,
     explosionRadius: 60,
+    intensity: 0.4,
     particleCount: 50_000,
     depthBlur: 30,
     animationLoop: 'pulse',

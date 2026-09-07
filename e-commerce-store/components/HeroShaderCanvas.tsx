@@ -152,6 +152,7 @@ export default function HeroShaderCanvas({
   blendMode = 'normal',
   productSilhouette,
   paused = false,
+  speed = 1,
 }: {
   enabled?: boolean;
   preset?: string;
@@ -176,6 +177,8 @@ export default function HeroShaderCanvas({
   productSilhouette?: string;
   /** Freeze the animation timeline + particles (pause/resume control). */
   paused?: boolean;
+  /** Animation speed multiplier (0.5×..2×) — scales the accumulated timeline. */
+  speed?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HeroShaderStatus>({ backend: 'css', fps: 0 });
@@ -185,6 +188,13 @@ export default function HeroShaderCanvas({
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  // Latest-value ref for the speed multiplier — changing it must never tear down
+  // the GL context (it only scales the timeline in the RAF loop).
+  const speedRef = useRef<number>(Number.isFinite(speed) ? speed : 1);
+  useEffect(() => {
+    speedRef.current = Number.isFinite(speed) ? speed : 1;
+  }, [speed]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -406,7 +416,7 @@ export default function HeroShaderCanvas({
       const dt = pausedRef.current ? 0 : Math.min(0.1, (now - lastNow) / 1000);
       lastNow = now;
       if (!pausedRef.current) animTime += dt;
-      draw(now, animTime, mouse);
+      draw(now, animTime * speedRef.current, mouse);
 
       frames++;
       const elapsed = now - fpsStart;

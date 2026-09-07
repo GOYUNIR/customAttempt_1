@@ -13,6 +13,7 @@ import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { isImageMedia, isVideoMedia, zeroImageStyle } from '@/lib/media';
 import { neutralBrandName } from '@/lib/env';
 import { fallbackAnimation } from '@/lib/ai-animation';
+import { resolveHeroIntensity, intensityToRadius, intensityToSpeed } from '@/lib/shaders/presets';
 
 // AI product-image animation for the hero. This is the SAME fallback preset the
 // `/api/ai/animation` pipeline emits when no AI provider is configured — a pure-
@@ -278,6 +279,10 @@ export default function HomePage() {
   // zero hardcoded product/layout assumptions.
   const aiHeroContainerTarget = aiHero?.containerTarget === 'banner' ? 'banner' : 'background';
   const aiHeroBlendMode = aiHero?.blendMode || 'normal';
+  // Single "Intensity & Speed" knob — drives both the exploded dispersion and the
+  // animation speed. Resolved from `intensity` (falling back to the legacy
+  // `explosionRadius` field) so a pre-migration config keeps its exact look.
+  const aiHeroIntensity = resolveHeroIntensity(aiHero);
   const aiHeroBannerHeight =
     aiHero?.canvasHeight === 'slim' ? 120 : aiHero?.canvasHeight === 'expanded' ? 300 : 240;
   const heroCanvasProps = {
@@ -287,13 +292,14 @@ export default function HomePage() {
     colorA: configPalette.accentPurple || '#bf5af2',
     colorB: configPalette.accentBlue || '#0071e3',
     colorC: configPalette.accentPurple || '#ff375f',
-    explosionRadius: Number(aiHero?.explosionRadius) || 60,
+    explosionRadius: intensityToRadius(aiHeroIntensity),
     particleCount: Number(aiHero?.particleCount) || 50_000,
     depthBlur: Number(aiHero?.depthBlur) || 30,
     animationLoop: aiHero?.animationLoop || 'pulse',
     assemblyProgress: Number(aiHero?.assemblyProgress) || 1,
     blendMode: aiHeroBlendMode,
     productSilhouette: String(aiHero?.productSilhouette || ''),
+    speed: intensityToSpeed(aiHeroIntensity),
   };
 
   return (

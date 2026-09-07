@@ -38,6 +38,7 @@ export interface LiveThemeValue {
     prompt?: string;
     opacity?: number;
     explosionRadius?: number;
+    intensity?: number;
     particleCount?: number;
     depthBlur?: number;
     animationLoop?: string;

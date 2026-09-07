@@ -186,6 +186,7 @@ export interface StorefrontConfig {
     prompt?: string;
     opacity?: number;
     explosionRadius?: number;
+    intensity?: number;
     particleCount?: number;
     depthBlur?: number;
     animationLoop?: string;
@@ -682,6 +683,7 @@ export function buildStorefrontConfig(input: Partial<StorefrontConfig> = {}): St
       prompt: '',
       opacity: 0.55,
       explosionRadius: 60,
+      intensity: 0.4,
       particleCount: 50_000,
       depthBlur: 30,
       animationLoop: 'pulse',

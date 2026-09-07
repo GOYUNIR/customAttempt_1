@@ -6,8 +6,11 @@ import {
   isExplodedPreset,
   defaultAiHeroSettings,
   HERO_SHADER_PRESETS,
+  resolveHeroIntensity,
+  intensityToRadius,
+  intensityToSpeed,
 } from '../lib/shaders/presets.ts';
-import { parsePromptToParams, enhancePrompt, MAGIC_PROMPT_PILLS } from '../lib/shaders/promptParser.ts';
+import { parsePromptToParams, enhancePrompt } from '../lib/shaders/promptParser.ts';
 import { hexToRgb, extractAccentPalette, paletteToCss } from '../lib/shaders/palette.ts';
 import { buildBottleGeometry, bottleBoundsCenter } from '../lib/shaders/bottleGeometry.ts';
 
@@ -41,6 +44,33 @@ test('defaultAiHeroSettings has sane bounds', () => {
   assert.ok(d.opacity >= 0 && d.opacity <= 1);
   assert.ok(d.explosionRadius >= 0 && d.explosionRadius <= 150);
   assert.ok(d.assemblyProgress >= 0 && d.assemblyProgress <= 1);
+  assert.ok(d.intensity >= 0 && d.intensity <= 1);
+});
+
+test('resolveHeroIntensity prefers the explicit intensity field', () => {
+  assert.equal(resolveHeroIntensity({ intensity: 0.75, explosionRadius: 30 }), 0.75);
+});
+
+test('resolveHeroIntensity falls back to explosionRadius / 150 for legacy configs', () => {
+  assert.equal(resolveHeroIntensity({ explosionRadius: 75 }), 0.5);
+  assert.equal(resolveHeroIntensity({ explosionRadius: 0 }), 0);
+  assert.equal(resolveHeroIntensity({}), 0.4);
+  assert.equal(resolveHeroIntensity(null), 0.4);
+});
+
+test('intensityToRadius maps 0..1 to the 0..150 dispersion radius', () => {
+  assert.equal(intensityToRadius(0), 0);
+  assert.equal(intensityToRadius(0.4), 60);
+  assert.equal(intensityToRadius(1), 150);
+  assert.equal(intensityToRadius(2), 150); // clamped
+  assert.equal(intensityToRadius(-1), 0); // clamped
+});
+
+test('intensityToSpeed maps 0..1 to a 0.5×..2× speed multiplier', () => {
+  assert.equal(intensityToSpeed(0), 0.5);
+  assert.ok(Math.abs(intensityToSpeed(0.4) - 1.1) < 1e-9);
+  assert.equal(intensityToSpeed(1), 2);
+  assert.equal(intensityToSpeed(9), 2); // clamped
 });
 
 // --- prompt parser ---
@@ -76,14 +106,6 @@ test('enhancePrompt always produces a non-empty enriched prompt', () => {
   const out = enhancePrompt('exploded view');
   assert.ok(out.length > 0);
   assert.match(out, /surface normals/i);
-});
-
-test('MAGIC_PROMPT_PILLS are non-empty and descriptive', () => {
-  assert.ok(MAGIC_PROMPT_PILLS.length >= 4);
-  for (const pill of MAGIC_PROMPT_PILLS) {
-    assert.ok(pill.label.length > 0);
-    assert.ok(pill.prompt.length > 0);
-  }
 });
 
 // --- palette ---

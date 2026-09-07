@@ -117,6 +117,7 @@ export interface StoreConfig {
     prompt?: string;
     opacity?: number;
     explosionRadius?: number;
+    intensity?: number;
     particleCount?: number;
     depthBlur?: number;
     animationLoop?: string;
@@ -279,6 +280,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
     prompt: '',
     opacity: 0.55,
     explosionRadius: 60,
+    intensity: 0.4,
     particleCount: 50000,
     depthBlur: 30,
     animationLoop: 'pulse',

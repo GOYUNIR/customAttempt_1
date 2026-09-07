@@ -93,19 +93,6 @@ export function parsePromptToParams(prompt: string, base: Partial<ShaderParams> 
   return params;
 }
 
-export interface MagicPromptPill {
-  label: string;
-  prompt: string;
-}
-
-export const MAGIC_PROMPT_PILLS: ReadonlyArray<MagicPromptPill> = [
-  { label: 'Exploded Bottle View', prompt: 'Exploded bottle view — construction, rebuild, assemble' },
-  { label: 'Spinning Geometry', prompt: 'Spinning geometry — rotating 3D shapes, mesh, continuous rotation' },
-  { label: 'Particle Rebuild', prompt: 'Particle rebuild — cosmic dust, points, assemble' },
-  { label: 'Liquid Glass', prompt: 'Liquid glass — refractive raymarched crystal' },
-  { label: 'Slow Motion Drift', prompt: 'Slow motion drift — fluid organic smoke, gentle viscous warp' },
-];
-
 /**
  * Map a parsed prompt onto the canonical hero preset id the engine renders, so
  * the admin "Execute Prompt & Generate Preview" action can update the live

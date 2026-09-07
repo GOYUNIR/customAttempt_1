@@ -84,6 +84,7 @@ export const GOYUNIR_STORE_SUITE = buildStorefrontConfig({
     prompt: '',
     opacity: 0.55,
     explosionRadius: 60,
+    intensity: 0.4,
     particleCount: 50000,
     depthBlur: 30,
     animationLoop: 'pulse',
