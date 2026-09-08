@@ -1,10 +1,11 @@
 'use client';
 
 import { Component, useEffect, useRef, type ReactNode } from 'react';
-import { normalizePresetId, isExplodedPreset, type AnimationLoopMode } from '@/lib/shaders/presets';
+import { normalizePresetId, isExplodedPreset, LOOP_PERIOD_SECONDS, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
 import { FRAGMENT_VS, FRAGMENT_FS, IMAGE_VS, IMAGE_FS, DEFAULT_VS, DEFAULT_FS } from '@/lib/shaders/glsl';
 import { sanitizeGlslSource } from '@/lib/shaders/glslSanitize';
+import { buildGridGeometry } from '@/lib/shaders/gridGeometry';
 
 /**
  * Hero shader engine — a multi-mode GPU renderer painted behind the home-page
@@ -202,7 +203,10 @@ function computeAssemblyProgress(
       return 1;
     case 'pulse':
     default:
-      return clamp01(0.5 + 0.5 * Math.sin(time * 0.4));
+      // A canonical 4.0s loop so a pre-rendered WebM clip (recorded for exactly
+      // LOOP_PERIOD_SECONDS / speed wall-clock seconds) loops seamlessly: the
+      // phase at `time = 0` and `time = LOOP_PERIOD_SECONDS` is identical.
+      return clamp01(0.5 + 0.5 * Math.sin((time * Math.PI * 2) / LOOP_PERIOD_SECONDS));
   }
 }
 
@@ -292,7 +296,9 @@ export function HeroShaderCanvas({
   productImageUrl,
   paused = false,
   speed = 1,
+  twistIntensity = 0.5,
   onCanvasRef,
+  onResetRef,
   respectReducedMotion = true,
 }: {
   enabled?: boolean;
@@ -323,8 +329,12 @@ export function HeroShaderCanvas({
   paused?: boolean;
   /** Animation speed multiplier (0.5×..2×) — scales the accumulated timeline. */
   speed?: number;
+  /** Radial twist intensity (0..1) — drives `u_twistIntensity` in the 3D mesh. */
+  twistIntensity?: number;
   /** Expose the live canvas element (admin clip recording). Null on unmount. */
   onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
+  /** Register a timeline-reset function so clip recording can sync `u_time = 0`. */
+  onResetRef?: (reset: (() => void) | null) => void;
   /** Honor `prefers-reduced-motion`. The admin Live Viewport Preview sets this
    *  false so an operator configuring the shader ALWAYS sees WebGL render. */
   respectReducedMotion?: boolean;
@@ -352,6 +362,13 @@ export function HeroShaderCanvas({
   useEffect(() => {
     onCanvasRefRef.current = onCanvasRef;
   }, [onCanvasRef]);
+
+  // Latest-value ref for the timeline-reset registration so clip recording can
+  // reset `u_time` to 0 without tearing down (or re-running) the GL setup.
+  const onResetRefRef = useRef<((reset: (() => void) | null) => void) | undefined>(onResetRef);
+  useEffect(() => {
+    onResetRefRef.current = onResetRef;
+  }, [onResetRef]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -436,23 +453,36 @@ export function HeroShaderCanvas({
         () => gl!.deleteShader(fs),
       );
 
-      // Full-screen quad (2 triangles).
+      // Subdivided 3D plane grid (32×32 shards) — the rich deconstruction mesh.
+      // Each vertex carries [x, y, u, v] (stride 4 floats); the vertex shader
+      // disassembles the grid into floating 3D shards, twists them radially,
+      // and extrudes them by image luminance (a true 3D relief, not a flat quad).
+      const grid = buildGridGeometry(32);
       const buffer = gl.createBuffer();
       if (!buffer) {
-        showFallback('failed to allocate a vertex buffer for the image quad');
+        showFallback('failed to allocate a vertex buffer for the image grid');
         return;
       }
       dispose.push(() => gl!.deleteBuffer(buffer));
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      gl.bufferData(
-        gl.ARRAY_BUFFER,
-        new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
-        gl.STATIC_DRAW,
-      );
+      gl.bufferData(gl.ARRAY_BUFFER, grid.vertices, gl.STATIC_DRAW);
+
+      const indexBuffer = gl.createBuffer();
+      if (indexBuffer) {
+        dispose.push(() => gl!.deleteBuffer(indexBuffer));
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, grid.indices, gl.STATIC_DRAW);
+      }
+
       const loc = gl.getAttribLocation(program, 'a_position');
       if (loc >= 0) {
         gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 16, 0);
+      }
+      const uvLoc = gl.getAttribLocation(program, 'a_uv');
+      if (uvLoc >= 0) {
+        gl.enableVertexAttribArray(uvLoc);
+        gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 16, 8);
       }
 
       // 1×1 placeholder so the sampler is ALWAYS bound to a valid texture even
@@ -477,7 +507,8 @@ export function HeroShaderCanvas({
       const uHasTex = gl.getUniformLocation(program, 'u_hasTexture');
       const uTexAspect = gl.getUniformLocation(program, 'u_texAspect');
       const uAssembly = gl.getUniformLocation(program, 'u_assemblyProgress');
-      const uDispersion = gl.getUniformLocation(program, 'u_dispersion');
+      const uExplodeRadius = gl.getUniformLocation(program, 'u_explodeRadius');
+      const uTwist = gl.getUniformLocation(program, 'u_twistIntensity');
       const uSpin = gl.getUniformLocation(program, 'u_spin');
       gl.uniform3f(gl.getUniformLocation(program, 'u_colorA'), ra, ga, ba);
       gl.uniform3f(gl.getUniformLocation(program, 'u_colorB'), rb, gb, bb);
@@ -489,7 +520,8 @@ export function HeroShaderCanvas({
       const spinOn = animationLoop === 'spin' ? 1 : 0;
       gl.uniform1f(uHasTex, 0);
       gl.uniform1f(uTexAspect, 1);
-      gl.uniform1f(uDispersion, clamp01(Number(explosionRadius) / 150));
+      gl.uniform1f(uExplodeRadius, clamp01(Number(explosionRadius) / 150));
+      gl.uniform1f(uTwist, clamp01(Number(twistIntensity) || 0.5));
       gl.uniform1f(uSpin, spinOn);
 
       // Load the REAL product image asynchronously — the texture is only
@@ -550,7 +582,7 @@ export function HeroShaderCanvas({
         const prog = computeAssemblyProgress(animationLoop, assemblyProgress, time, mouse);
         gl!.uniform1f(uAssembly, prog);
         gl!.uniform1f(uSpin, spinOn);
-        gl!.drawArrays(gl!.TRIANGLES, 0, 6);
+        gl!.drawElements(gl!.TRIANGLES, grid.indexCount, gl!.UNSIGNED_SHORT, 0);
       };
     } else {
       const linked = linkProgramWithFallback(gl, sanitizeGlslSource(FRAGMENT_VS), sanitizeGlslSource(FRAGMENT_FS));
@@ -642,6 +674,13 @@ export function HeroShaderCanvas({
     let animTime = 0;
     let lastNow = performance.now();
 
+    // Expose a timeline reset so clip recording can sync `u_time = 0` exactly —
+    // this is what makes a pre-rendered WebM clip loop seamlessly (the first and
+    // last captured frames are at the same phase).
+    onResetRefRef.current?.(() => {
+      animTime = 0;
+    });
+
     const render = (now: number) => {
       if (!running) return;
       const dt = pausedRef.current ? 0 : Math.min(0.1, (now - lastNow) / 1000);
@@ -719,9 +758,10 @@ export function HeroShaderCanvas({
         }
       }
       onCanvasRefRef.current?.(null);
+      onResetRefRef.current?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productImageUrl, respectReducedMotion]);
+  }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, twistIntensity, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productImageUrl, respectReducedMotion]);
 
   if (!enabled) return null;
 

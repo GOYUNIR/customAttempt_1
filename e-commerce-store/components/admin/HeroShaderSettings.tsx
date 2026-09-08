@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import HeroShaderCanvas, { type HeroShaderStatus } from '@/components/HeroShaderCanvas';
 import {
   EXPLOSION_RADIUS_MAX,
@@ -20,6 +20,8 @@ import {
   resolveHeroMotionType,
   resolveHeroHeightPx,
   resolveHeroTextDistribution,
+  heroTextJustify,
+  isSplitHeroTextLayout,
   resolveHeroContrastScrim,
   resolveHeroRenderMode,
   resolveHeroClips,
@@ -43,6 +45,7 @@ import {
 } from '@/lib/shaders/promptParser';
 import { buildProductTarget } from '@/lib/shaders/productTarget';
 import { recordCanvasVideo, mediaRecorderSupported } from '@/lib/shaders/videoExport';
+import { putHeroClipBlob, getHeroClipBlob, deleteHeroClipBlob } from '@/lib/shaders/clipStore';
 import { themeRadiusNumber } from '@/lib/storefront-config';
 import { isImageMedia } from '@/lib/media';
 
@@ -107,6 +110,32 @@ const OVERLAY_MODE_OPTIONS: ReadonlyArray<{ value: HeroBlendMode; label: string 
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Clip thumbnail that resolves a locally-stored (IndexedDB) blob on mount. */
+function ClipThumb({ clip }: { clip: HeroClip }) {
+  const [src, setSrc] = useState<string>(clip.url || '');
+  useEffect(() => {
+    let alive = true;
+    if (clip.storedLocally && !clip.url) {
+      getHeroClipBlob(clip.id).then((blob) => {
+        if (alive && blob) setSrc(blob);
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [clip.id, clip.storedLocally, clip.url]);
+  return (
+    <video
+      src={src}
+      muted
+      loop
+      autoPlay
+      playsInline
+      style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 6, background: '#000' }}
+    />
+  );
+}
+
 /** Map an AI-compiled preset (+ spin flag) back onto a high-level motion type. */
 function motionTypeForPreset(preset: string, spin: boolean): HeroMotionType {
   const p = String(preset || '');
@@ -143,6 +172,9 @@ export default function HeroShaderSettings({
   const [clipMsg, setClipMsg] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Holds the live timeline-reset fn from the preview canvas so clip recording
+  // can sync `u_time = 0` before capture (seamless WebM loop).
+  const resetRef = useRef<(() => void) | null>(null);
 
   const catalog = Array.isArray(products) ? products : [];
   const selectedProduct =
@@ -286,14 +318,23 @@ export default function HeroShaderSettings({
     setRecording(true);
     setClipMsg('');
     try {
-      const capture = await recordCanvasVideo(previewCanvas, { durationMs: 3000 });
+      // Record exactly one seamless loop period at the current speed, and reset
+      // the shader timeline to `u_time = 0` on the same tick capture begins so
+      // the WebM loops without a visible jump on the storefront mobile viewport.
+      const capture = await recordCanvasVideo(previewCanvas, {
+        speed: effectiveSpeed,
+        onStart: () => resetRef.current?.(),
+      });
       if (!capture) {
         setClipMsg('Recording failed — the browser could not capture the canvas stream.');
         return;
       }
       const clip: HeroClip = {
         id: `clip-${Date.now()}`,
-        url: capture.dataUrl,
+        // The blob lives in browser IndexedDB (NOT the Redis/Edge config) so the
+        // multi-MB video never round-trips through the Cloudflare Edge — the
+        // definitive fix for Worker Error 1102. Only metadata is persisted.
+        storedLocally: true,
         mime: capture.mime,
         bytes: capture.bytes,
         width: capture.width,
@@ -301,14 +342,22 @@ export default function HeroShaderSettings({
         durationMs: capture.durationMs,
         createdAt: new Date().toISOString(),
       };
+      const persisted = await putHeroClipBlob(clip.id, capture.dataUrl);
+      if (!persisted) {
+        // IndexedDB unavailable — fall back to the legacy in-config data URL so
+        // the clip still works (at the cost of a larger config payload).
+        clip.storedLocally = false;
+        clip.url = capture.dataUrl;
+      }
       onChange((prev) => ({ ...prev, clips: [clip, ...(prev.clips || [])] }));
-      setClipMsg('Clip saved to the library.');
+      setClipMsg(persisted ? 'Clip saved to browser storage (lightweight config).' : 'Clip saved to the library (in-config blob — IndexedDB unavailable).');
     } finally {
       setRecording(false);
     }
   };
 
   const deleteClip = (id: string) => {
+    deleteHeroClipBlob(id);
     onChange((prev) => ({ ...prev, clips: (prev.clips || []).filter((c) => c.id !== id) }));
   };
 
@@ -326,16 +375,11 @@ export default function HeroShaderSettings({
   const previewHeight = resolveHeroHeightPx(value);
   const previewDistribution = resolveHeroTextDistribution(value);
   const previewScrim = resolveHeroContrastScrim(value);
-  const distributionJustify =
-    previewDistribution === 'top' || previewDistribution === 'split'
-      ? 'flex-start'
-      : previewDistribution === 'bottom'
-        ? 'flex-end'
-        : 'center';
-  // 'split' anchors the container to `flex-start` and pushes the CTA row to the
-  // bottom with a flex spacer — the SAME approach as the storefront hero so the
-  // admin preview and the public page are pixel-identical.
-  const previewSplit = previewDistribution === 'split';
+  // Split (and bottom-anchored) layouts pin the brand/title block to the top and
+  // the CTA + raffle pill to the bottom — identical to the storefront hero so the
+  // admin preview and the public page stay pixel-identical.
+  const distributionJustify = heroTextJustify(previewDistribution);
+  const previewSplit = isSplitHeroTextLayout(previewDistribution);
   const previewFullBleed = layoutPreset === 'fullBleed';
 
   const statusLabel = status
@@ -686,14 +730,7 @@ export default function HeroShaderSettings({
                       {(clip.bytes / 1024).toFixed(0)} KB · {new Date(clip.createdAt).toLocaleString()}
                     </div>
                   </div>
-                  <video
-                    src={clip.url}
-                    muted
-                    loop
-                    autoPlay
-                    playsInline
-                    style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 6, background: '#000' }}
-                  />
+                  <ClipThumb clip={clip} />
                   <button type="button" onClick={() => deleteClip(clip.id)} style={chipBase} title="Delete clip">
                     ✕
                   </button>
@@ -741,8 +778,12 @@ export default function HeroShaderSettings({
                 paused={paused}
                 interactive
                 speed={effectiveSpeed}
+                twistIntensity={resolveHeroIntensity(value)}
                 onStatus={setStatus}
                 onCanvasRef={setPreviewCanvas}
+                onResetRef={(reset) => {
+                  resetRef.current = reset;
+                }}
                 themeColors={themeColors}
                 respectReducedMotion={false}
               />

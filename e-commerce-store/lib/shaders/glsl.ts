@@ -207,30 +207,28 @@ void main() {
 
 export const IMAGE_VS = `#version 300 es
 precision highp float;
-in vec2 a_position;
-out vec2 v_uv;
-void main() {
-  v_uv = a_position * 0.5 + 0.5;
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}
-`;
 
-export const IMAGE_FS = `#version 300 es
-precision highp float;
-uniform sampler2D u_productTexture;
+// Subdivided 3D plane grid (N x N shards). The vertex shader is where the rich
+// 3D deconstruction happens: each grid vertex is displaced along its own shard
+// direction, twisted radially around the center, extruded along Z by the
+// product image's luminance (an image-relief effect), and projected through a
+// simple perspective so shards visibly float in 3D space rather than rotating
+// as one flat quad.
+in vec2 a_position; // grid vertex in [-1, 1]^2
+in vec2 a_uv;       // 0..1 UV
+
 uniform float u_time;
-uniform vec2 u_resolution;
+uniform float u_assemblyProgress; // 1 = assembled, 0 = exploded
+uniform float u_explodeRadius;    // 0..1 shard dispersion
+uniform float u_twistIntensity;   // 0..1 radial twist
+uniform float u_spin;             // 1 = continuous product rotation
 uniform float u_hasTexture;
+uniform sampler2D u_productTexture;
 uniform float u_texAspect;
-uniform float u_assemblyProgress;
-uniform float u_dispersion;
-uniform float u_spin;
-uniform float u_opacity;
-uniform vec3 u_colorA;
-uniform vec3 u_colorB;
+uniform vec2 u_resolution;
 
-in vec2 v_uv;
-out vec4 fragColor;
+out vec2 v_uv;
+out float v_luminance;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -238,65 +236,89 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
-// Cover-fit the texture into the canvas (center-crop, preserve aspect ratio).
-vec2 coverUv(vec2 uv, float texAspect) {
-  float ca = u_resolution.x / max(u_resolution.y, 1.0);
-  vec2 out = uv;
-  if (texAspect >= ca) {
-    out.x = 0.5 + (uv.x - 0.5) * (ca / texAspect);
-  } else {
-    out.y = 0.5 + (uv.y - 0.5) * (texAspect / ca);
-  }
-  return out;
-}
-
-vec2 rotateUv(vec2 uv, float ang) {
-  vec2 c = uv - 0.5;
-  float cs = cos(ang);
-  float sn = sin(ang);
-  return vec2(c.x * cs - c.y * sn, c.x * sn + c.y * cs) + 0.5;
-}
-
 void main() {
-  vec2 uv = v_uv;
-  vec2 texUv = coverUv(uv, max(u_texAspect, 0.01));
-
-  // Continuous 3D product rotation (the "spin" motion type).
-  if (u_spin > 0.5) {
-    texUv = rotateUv(texUv, u_time * 0.6);
+  // Cover-fit UV (center-crop to preserve aspect ratio).
+  vec2 uv = a_uv;
+  vec2 texUv = uv;
+  float ca = u_resolution.x / max(u_resolution.y, 1.0);
+  if (u_texAspect >= ca) {
+    texUv.x = 0.5 + (uv.x - 0.5) * (ca / u_texAspect);
+  } else {
+    texUv.y = 0.5 + (uv.y - 0.5) * (u_texAspect / ca);
   }
 
-  // Disassembly / assembly / explosion on crisp product tiles.
-  float explode = (1.0 - u_assemblyProgress) * u_dispersion;
-  float cells = 26.0;
+  // Shard cell + per-cell pseudo-random 3D direction.
+  float cells = 32.0;
   vec2 g = texUv * cells;
   vec2 cell = floor(g);
-  vec2 local = fract(g);
   float h1 = hash21(cell);
   float h2 = hash21(cell + 19.19);
-  vec2 dir = (vec2(h1, h2) - 0.5) * 2.0;
+  float h3 = hash21(cell + 7.77);
+  vec3 dir = vec3(h1 - 0.5, h2 - 0.5, h3 - 0.5) * 2.0;
 
-  // Shrink each tile toward its own center as the explosion grows so seams
-  // open up between the pieces.
-  float shrink = explode * 0.16;
-  vec2 cLocal = (local - 0.5) / max(1.0 - shrink, 0.001) + 0.5;
-  vec2 sampleUv = (cell + cLocal) / cells + dir * explode * 0.12;
-
-  vec4 texel;
+  // Luminance of the product image drives z-extrusion (image "relief").
+  float lum = 1.0;
   if (u_hasTexture > 0.5) {
-    texel = texture(u_productTexture, clamp(sampleUv, 0.0, 1.0));
-  } else {
-    texel = vec4(mix(u_colorA, u_colorB, uv.y), 1.0);
+    lum = dot(texture(u_productTexture, clamp(texUv, 0.0, 1.0)).rgb, vec3(0.299, 0.587, 0.114));
   }
 
-  // Sample the alpha mask directly; opaque JPEGs keep full opacity and rely on
-  // the tile seams for the "graphic breaking apart" effect.
-  float mask = texel.a;
-  float edge = min(min(cLocal.x, 1.0 - cLocal.x), min(cLocal.y, 1.0 - cLocal.y));
-  float seam = smoothstep(0.0, 0.05, edge);
-  float alpha = mix(1.0, seam, step(0.001, explode)) * mask;
+  // 0 = assembled, 1 = exploded (smoothstep-eased so assembly is silky).
+  float explode = 1.0 - u_assemblyProgress;
+  explode = explode * explode * (3.0 - 2.0 * explode);
 
-  fragColor = vec4(texel.rgb, alpha * u_opacity);
+  vec3 p = vec3(a_position, 0.0);
+
+  // Continuous Y-axis rotation — full speed while "spinning", gentle idle drift otherwise.
+  float spinAmt = (u_spin > 0.5) ? u_time * 0.6 : u_time * 0.12;
+  float cy = cos(spinAmt);
+  float sy = sin(spinAmt);
+  p = vec3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
+
+  // Radial twist around the center — strengthens as the explosion grows.
+  float r = length(p.xy);
+  float twist = u_twistIntensity * (1.5 + explode) * u_time * 0.25;
+  float tc = cos(twist * r);
+  float ts = sin(twist * r);
+  p.xy = vec2(p.x * tc - p.y * ts, p.x * ts + p.y * tc);
+
+  // Extrude along Z by luminance, then shove shards outward + bob them in 3D.
+  p.z += lum * 0.35 * explode;
+  p += dir * u_explodeRadius * 1.1 * explode;
+  p.z += sin(u_time * 1.1 + h1 * 6.2831) * 0.12 * explode;
+
+  // Simple perspective projection (matches the legacy particle engine).
+  float fov = 2.6;
+  float zc = p.z + 3.2;
+  vec2 ndc = p.xy * fov / zc;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+
+  v_uv = texUv;
+  v_luminance = lum;
+}
+`;
+
+export const IMAGE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D u_productTexture;
+uniform float u_hasTexture;
+uniform float u_opacity;
+uniform vec3 u_colorA;
+uniform vec3 u_colorB;
+
+in vec2 v_uv;
+in float v_luminance;
+out vec4 fragColor;
+
+void main() {
+  vec4 texel;
+  if (u_hasTexture > 0.5) {
+    texel = texture(u_productTexture, clamp(v_uv, 0.0, 1.0));
+  } else {
+    texel = vec4(mix(u_colorA, u_colorB, v_uv.y), 1.0);
+  }
+  // Subtle depth shading from the luminance extrusion keeps the 3D relief readable.
+  float shade = mix(0.92, 1.08, v_luminance);
+  fragColor = vec4(texel.rgb * shade, texel.a * u_opacity);
 }
 `;
 

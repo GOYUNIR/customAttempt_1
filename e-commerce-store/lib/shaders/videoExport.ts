@@ -6,6 +6,8 @@
 // The actual clip storage + admin UI live in the `aiHero.clips` config array
 // (see `lib/shaders/presets.ts`), so no new Redis keys are introduced.
 
+import { LOOP_PERIOD_SECONDS } from './presets.ts';
+
 export interface HeroVideoCapture {
   dataUrl: string;
   mime: string;
@@ -82,18 +84,40 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 /**
- * Record a short looping clip of a canvas. Defaults to ~3s of WebM — long
- * enough for a seamless loop without shipping a huge data URL. Returns null
- * when the browser can't record (so the admin can show a clear message).
+ * The exact wall-clock duration (ms) of one seamless animation loop at a given
+ * speed. The shader's `pulse` timeline is periodic with `LOOP_PERIOD_SECONDS`
+ * seconds of scaled time; recording for `LOOP_PERIOD_SECONDS / speed` seconds
+ * captures exactly one full cycle, so the last frame lands on the same phase as
+ * the first and the pre-rendered WebM loops with zero visible jump.
+ */
+export function heroLoopDurationMs(speed: number): number {
+  const s = Number.isFinite(speed) && speed > 0 ? speed : 1;
+  return Math.round((LOOP_PERIOD_SECONDS * 1000) / s);
+}
+
+/**
+ * Record a short looping clip of a canvas. When `opts.speed` is provided the
+ * recorder captures exactly one seamless loop period (`heroLoopDurationMs`);
+ * `opts.onStart` (if provided) is invoked on the same tick recording begins so
+ * the caller can reset the shader timeline to `u_time = 0` — this is what makes
+ * the WebM loop seamless on the storefront mobile viewport. Returns null when
+ * the browser can't record (so the admin can show a clear message).
  */
 export async function recordCanvasVideo(
   canvas: HTMLCanvasElement,
-  opts: { durationMs?: number; mimeType?: string } = {},
+  opts: { durationMs?: number; mimeType?: string; speed?: number; onStart?: () => void } = {},
 ): Promise<HeroVideoCapture | null> {
   if (typeof window === 'undefined' || !canvas) return null;
   if (!mediaRecorderSupported()) return null;
 
-  const durationMs = Math.max(500, Math.min(10_000, opts.durationMs || 3000));
+  const rawSpeed = opts.speed;
+  const speed = rawSpeed != null && Number.isFinite(rawSpeed) && rawSpeed > 0 ? rawSpeed : 1;
+  // Prefer an explicit duration; otherwise record exactly one loop period so the
+  // clip is seamless (4.0s / speed).
+  const durationMs = Math.max(
+    500,
+    Math.min(12_000, opts.durationMs ?? heroLoopDurationMs(speed)),
+  );
   const mime = opts.mimeType || pickSupportedMime();
   if (!mime) return null;
 
@@ -117,6 +141,9 @@ export async function recordCanvasVideo(
 
   try {
     recorder.start(100);
+    // Reset the shader timeline to `u_time = 0` on the same tick the capture
+    // begins so the recorded loop starts at the canonical phase.
+    opts.onStart?.();
     await new Promise((r) => setTimeout(r, durationMs));
     if (recorder.state !== 'inactive') recorder.stop();
     const blob = await done;

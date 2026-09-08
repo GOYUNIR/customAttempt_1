@@ -22,6 +22,8 @@ import {
   motionTypeToLoop,
   resolveHeroHeightPx,
   resolveHeroTextDistribution,
+  heroTextJustify,
+  isSplitHeroTextLayout,
   resolveHeroContrastScrim,
   resolveEffectiveHeroRender,
   pickHeroClip,
@@ -30,6 +32,7 @@ import {
   isFullBleedLayout,
 } from '@/lib/shaders/presets';
 import { isMobileViewport, isLowPowerDevice } from '@/lib/shaders/videoExport';
+import { getHeroClipBlob } from '@/lib/shaders/clipStore';
 
 // AI product-image animation for the hero. This is the SAME fallback preset the
 // `/api/ai/animation` pipeline emits when no AI provider is configured — a pure-
@@ -82,6 +85,34 @@ export default function HomePage() {
   // from the server-baked theme, then refreshed from /api/store so admin edits
   // apply within the ~10s cache window. Colors come from the live theme accents.
   const [aiHero, setAiHero] = useState<any>((liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'dark_organic', opacity: 0.55 });
+  // The resolved `<video>` source for the pre-rendered hero clip. Clips flagged
+  // `storedLocally` live in browser IndexedDB (client storage) rather than the
+  // Redis/Edge config — resolving them here keeps the Cloudflare Edge payload tiny
+  // (the definitive fix for Worker Error 1102) while the visitor still gets the
+  // seamless mobile video loop.
+  const [aiHeroClipUrl, setAiHeroClipUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const clip = pickHeroClip(aiHero);
+    if (!clip) {
+      setAiHeroClipUrl(null);
+      return () => {
+        alive = false;
+      };
+    }
+    if (!clip.storedLocally) {
+      setAiHeroClipUrl(clip.url || null);
+      return () => {
+        alive = false;
+      };
+    }
+    getHeroClipBlob(clip.id).then((blob) => {
+      if (alive) setAiHeroClipUrl(blob);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [aiHero]);
   // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
@@ -326,15 +357,11 @@ export default function HomePage() {
   // Text distribution + contrast scrim (admin → Settings → AI Hero → Layout).
   const aiHeroDistribution = resolveHeroTextDistribution(aiHero);
   const aiHeroScrim = resolveHeroContrastScrim(aiHero);
-  // 'split' renders the title block at the top and the buttons at the bottom via
-  // a flex spacer — the container itself anchors to `flex-start`.
-  const aiHeroJustify =
-    aiHeroDistribution === 'top' || aiHeroDistribution === 'split'
-      ? 'flex-start'
-      : aiHeroDistribution === 'bottom'
-        ? 'flex-end'
-        : 'center';
-  const aiHeroSplit = aiHeroDistribution === 'split';
+  // Split (and bottom-anchored) layouts pin the brand/title block to the top
+  // edge and the CTA + raffle pill to the bottom edge via a flex spacer, keeping
+  // the center of the hero box clear for the 3D product animation.
+  const aiHeroJustify = heroTextJustify(aiHeroDistribution);
+  const aiHeroSplit = isSplitHeroTextLayout(aiHeroDistribution);
   // Pre-rendered video fallback (mobile / low-power / explicit admin choice).
   const aiHeroClip = pickHeroClip(aiHero);
   const aiHeroUseVideo =
@@ -357,6 +384,7 @@ export default function HomePage() {
     productSilhouette: String(aiHero?.productSilhouette || ''),
     productImageUrl: heroCoverImage,
     speed: aiHeroSpeed,
+    twistIntensity: aiHeroIntensity,
   };
 
   return (
@@ -367,9 +395,9 @@ export default function HomePage() {
           {aiHeroContainerTarget === 'background' && !aiHeroUseVideo && (
             <HeroShaderCanvas {...heroCanvasProps} placement="background" />
           )}
-          {aiHeroContainerTarget === 'background' && aiHeroUseVideo && aiHeroClip && (
+          {aiHeroContainerTarget === 'background' && aiHeroUseVideo && aiHeroClip && aiHeroClipUrl && (
             <video
-              src={aiHeroClip.url}
+              src={aiHeroClipUrl}
               autoPlay
               muted
               loop

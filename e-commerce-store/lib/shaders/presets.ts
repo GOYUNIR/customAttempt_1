@@ -81,6 +81,14 @@ export function isExplodedPreset(id: string | undefined | null): boolean {
 export type AnimationLoopMode = 'pulse' | 'scroll' | 'mouse' | 'scrub' | 'spin';
 
 /**
+ * Canonical loop period (in seconds) of the `pulse` assembly timeline. The
+ * shader's assembly phase is periodic with this exact period, and the admin
+ * clip recorder captures `LOOP_PERIOD_SECONDS / speed` wall-clock seconds so a
+ * pre-rendered WebM loops seamlessly (first frame phase == last frame phase).
+ */
+export const LOOP_PERIOD_SECONDS = 4.0;
+
+/**
  * High-level hero motion selector surfaced in the admin panel. Each value maps
  * onto a concrete engine preset + loop mode so a single control drives the whole
  * render: `spin` = continuous 3D product rotation (fully assembled), `assembly`
@@ -157,8 +165,15 @@ export type HeroRenderMode = 'live' | 'video';
 export interface HeroClip {
   /** Stable id (timestamp-derived) used to key the library + delete clips. */
   id: string;
-  /** Immutable data URL (WebM/MP4) the storefront `<video>` loops. */
-  url: string;
+  /**
+   * Immutable data URL (WebM/MP4) the storefront `<video>` loops. Optional: the
+   * video BLOB may instead live in browser IndexedDB (see `storedLocally`) so
+   * the multi-MB base64 payload never round-trips through Redis / the Cloudflare
+   * Edge — the exact cause of Worker Error 1102 (resource exceeded).
+   */
+  url?: string;
+  /** True when the blob lives in browser IndexedDB (client storage) under `id`. */
+  storedLocally?: boolean;
   /** MIME type — `video/webm` or `video/mp4`. */
   mime: string;
   /** Encoded byte size (for the admin readout). */
@@ -309,6 +324,32 @@ export function resolveHeroTextDistribution(
   return 'centered';
 }
 
+/**
+ * True when the hero copy should be SPLIT — the brand/title block pinned to the
+ * top edge and the CTA + raffle pill pinned to the bottom edge, leaving the
+ * center of the hero box clear for the 3D product animation. Both `split` and
+ * `bottom` now use this layout (the old `bottom` mode bundled the title and CTA
+ * together at the bottom, which pushed copy over the product).
+ */
+export function isSplitHeroTextLayout(
+  distribution: HeroTextDistribution | string | undefined | null,
+): boolean {
+  return distribution === 'split' || distribution === 'bottom';
+}
+
+/**
+ * The flexbox `justifyContent` for the hero copy column. Split/top/bottom pin
+ * the title block to the top (the split spacer then pushes the CTA to the
+ * bottom); `centered` centers the whole block.
+ */
+export function heroTextJustify(
+  distribution: HeroTextDistribution | string | undefined | null,
+): 'flex-start' | 'center' {
+  return distribution === 'top' || distribution === 'split' || distribution === 'bottom'
+    ? 'flex-start'
+    : 'center';
+}
+
 /** Resolve the contrast-scrim strength (0–100, missing → 0 = no scrim). */
 export function resolveHeroContrastScrim(
   aiHero: { contrastScrim?: number } | undefined | null,
@@ -334,10 +375,16 @@ export function resolveHeroClips(aiHero: { clips?: unknown } | undefined | null)
     if (!c || typeof c !== 'object') continue;
     const clip = c as Partial<HeroClip>;
     if (typeof clip.id !== 'string' || !clip.id) continue;
-    if (typeof clip.url !== 'string' || !clip.url.startsWith('data:video/')) continue;
+    // A clip is valid when it carries a data-URL blob (legacy) OR is flagged as
+    // stored locally in browser IndexedDB (the payload-free path that keeps the
+    // Redis/Edge config tiny and avoids Cloudflare Error 1102).
+    const hasUrl = typeof clip.url === 'string' && clip.url.startsWith('data:video/');
+    const hasLocal = clip.storedLocally === true;
+    if (!hasUrl && !hasLocal) continue;
     out.push({
       id: clip.id,
-      url: clip.url,
+      url: hasUrl ? clip.url : undefined,
+      storedLocally: hasLocal || undefined,
       mime: typeof clip.mime === 'string' ? clip.mime : 'video/webm',
       bytes: Number(clip.bytes) || 0,
       width: Number(clip.width) || 0,
