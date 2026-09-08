@@ -98,6 +98,8 @@ export interface GlobalPlatformSettings {
   ai3d_key?: string | null;
   /** 3D engine base URL / endpoint — NOT a secret (echoed back for editing). */
   ai3d_endpoint?: string | null;
+  /** Optional model selector for the 3D asset / image-to-3D engine (e.g. `tripo3d-v2.0`, `meshy-4`). NOT a secret — echoed back for editing. */
+  ai3d_model?: string | null;
   /**
    * Operational (env-var-style) settings the unified setup dashboard persists.
    * Stored as a JSONB blob on the settings row — never returned to the browser
@@ -134,6 +136,8 @@ export interface PlatformSettingsInput {
   ai3d_key?: string | null;
   /** 3D engine base URL / endpoint (not a secret). */
   ai3d_endpoint?: string;
+  /** Optional model selector for the 3D asset / image-to-3D engine (not a secret). */
+  ai3d_model?: string;
 }
 
 /**
@@ -161,6 +165,8 @@ export interface PlatformSettingsPublicSummary {
   ai3d_provider: Ai3dProvider | null;
   /** 3D engine base URL / endpoint (not a secret). */
   ai3d_endpoint: string | null;
+  /** Model selector for the 3D asset / image-to-3D engine (not a secret). */
+  ai3d_model: string | null;
 }
 
 /** Strip every secret from a settings row → safe for client responses. */
@@ -176,6 +182,7 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
     ai_model: settings?.ai_model ?? null,
     ai3d_provider: settings?.ai3d_provider ?? null,
     ai3d_endpoint: settings?.ai3d_endpoint ?? null,
+    ai3d_model: settings?.ai3d_model ?? null,
   };
 }
 
@@ -212,6 +219,10 @@ export interface OperationalSettings {
   groq_api_key?: string;
   mistral_api_key?: string;
   google_gemini_api_key?: string;
+  /** Supabase personal access token (starts with `sbp_`) — persisted so the
+   *  schema self-heal can reuse it after a serverless cold start. NEVER returned
+   *  to the browser by `toPublicSummary()`. */
+  supabase_access_token?: string;
   [key: string]: string | undefined;
 }
 
@@ -242,6 +253,7 @@ export const OPERATIONAL_SETTING_KEYS: readonly string[] = [
   'groq_api_key',
   'mistral_api_key',
   'google_gemini_api_key',
+  'supabase_access_token',
 ];
 
 /** Coerce an untrusted operational_settings blob → typed shape (drop unknown keys + blanks). */
@@ -289,6 +301,7 @@ export function parseSettingsRow(raw: Record<string, unknown> | null | undefined
     ai3d_provider: sanitizeAi3dProvider(raw.ai3d_provider),
     ai3d_key: sanitizeAi3dProvider(raw.ai3d_provider) ? String(raw.ai3d_key || '').trim() || null : null,
     ai3d_endpoint: String(raw.ai3d_endpoint || '').trim() || null,
+    ai3d_model: String(raw.ai3d_model || '').trim() || null,
     operational_settings: parseOperationalSettings(raw.operational_settings),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,

@@ -42,7 +42,18 @@ export interface MeshDriver {
   readonly configured: boolean;
   /** Standardized image-to-3D task (start + poll until complete). */
   generate(imageUrl: string, prompt: string): Promise<MeshGenerateResult>;
+  /** OPTIONAL two-step surface for async providers: submit a task and return its
+   *  id immediately so the client can poll progress without hitting an Edge
+   *  worker's short timeout. Absent on synchronous drivers. */
+  submitTask?(imageUrl: string, prompt: string): Promise<MeshSubmitResult>;
+  /** OPTIONAL two-step surface: poll a previously submitted task to completion. */
+  pollTask?(taskId: string): Promise<MeshGenerateResult>;
 }
+
+/** The first half of a two-step async mesh task (submit → task id). */
+export type MeshSubmitResult =
+  | { ok: true; taskId: string; provider: Ai3dProvider }
+  | { ok: false; error?: unknown; provider: Ai3dProvider; skipped?: boolean };
 
 /** Options shared by every mesh driver (injectable fetch + poll tuning). */
 export interface MeshDriverResolutionOptions {
@@ -50,6 +61,8 @@ export interface MeshDriverResolutionOptions {
   baseUrl?: string;
   maxPolls?: number;
   pollDelayMs?: number;
+  /** Optional model string the provider should use (e.g. `tripo3d-v2.0`, `meshy-4`). */
+  model?: string;
 }
 
 /** A tiny bounded sleep used by the polling drivers (no Node builtins). */

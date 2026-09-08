@@ -133,6 +133,26 @@ alter table public.global_platform_settings
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 00007_ai3d_model.sql — model selector for the 3D asset / image-to-3D engine.
+// ─────────────────────────────────────────────────────────────────────────────
+export const MIGRATION_00007 = `-- =============================================================================
+-- 00007_ai3d_model.sql — model selector for the 3D asset / image-to-3D engine.
+--
+-- Adds \`ai3d_model\` to \`public.global_platform_settings\`. This is the optional
+-- model string the 3D mesh engine should use (e.g. \`tripo3d-v2.0\`, \`tripo3d-v2.5\`,
+-- \`meshy-4\`) — the mirror of \`ai_model\` for the LLM prompt compiler. NOT a secret
+-- (echoed back for editing).
+--
+-- Idempotent: safe to run on top of an already-migrated schema (fresh installs
+-- get this column straight from 00001_init.sql, so this is a no-op there).
+-- Apply with: \`supabase db push\` or \`psql "$DATABASE_URL" -f 00007_ai3d_model.sql\`
+-- =============================================================================
+
+alter table public.global_platform_settings
+  add column if not exists ai3d_model text;
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 00002_setup_operational.sql
 // ─────────────────────────────────────────────────────────────────────────────
 export const MIGRATION_00002 = `-- =============================================================================
@@ -238,6 +258,7 @@ create table if not exists public.global_platform_settings (
   ai3d_provider text check (ai3d_provider in ('tripo3d', 'meshy', 'stability_3d', 'custom_webhook')),
   ai3d_key text,
   ai3d_endpoint text,
+  ai3d_model text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -562,6 +583,7 @@ const STRIPE_PRICE_ID_FILES: SchemaFixMigration[] = [
 
 const AI3D_MESH_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
+  { file: 'supabase/migrations/00007_ai3d_model.sql', sql: MIGRATION_00007 },
 ];
 
 const FULL_FILES: SchemaFixMigration[] = [
@@ -571,6 +593,7 @@ const FULL_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00004_ai_secondary.sql', sql: MIGRATION_00004 },
   { file: 'supabase/migrations/00005_stripe_price_id.sql', sql: MIGRATION_00005 },
   { file: 'supabase/migrations/00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
+  { file: 'supabase/migrations/00007_ai3d_model.sql', sql: MIGRATION_00007 },
 ];
 
 const OPEN_STEPS = [
@@ -623,14 +646,14 @@ export function buildSchemaFixPlan(errorText: string): SchemaFixPlan {
       cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies this migration automatically.',
     };
   }
-  const isAi3dMesh = /ai3d_provider|ai3d_key|ai3d_endpoint|ai_model/i.test(errorText);
+  const isAi3dMesh = /ai3d_provider|ai3d_key|ai3d_endpoint|ai3d_model|ai_model/i.test(errorText);
   if (isAi3dMesh) {
     return {
       kind: 'ai_3d_mesh',
       title: 'Your Supabase database is missing the 3D mesh engine columns.',
-      summary: 'One migration (00006_ai_3d_mesh.sql) was never applied.',
+      summary: 'Two migrations (00006_ai_3d_mesh.sql + 00007_ai3d_model.sql) were never applied.',
       intro:
-        'The Supabase project is reachable, but it is missing the 3D asset / image-to-3D engine columns (ai_model, ai3d_provider, ai3d_key, ai3d_endpoint). This takes about a minute to fix — nothing else is wrong and no data is touched.',
+        'The Supabase project is reachable, but it is missing the 3D asset / image-to-3D engine columns (ai_model, ai3d_provider, ai3d_key, ai3d_endpoint, ai3d_model). This takes about a minute to fix — nothing else is wrong and no data is touched.',
       steps: [
         ...OPEN_STEPS,
         'Click the green “Copy SQL” button on the file below — it copies the entire migration for you, so you do not need to find the file in the repo.',
@@ -649,15 +672,15 @@ export function buildSchemaFixPlan(errorText: string): SchemaFixPlan {
     title: 'Your Supabase database is missing its schema.',
     summary: 'The platform tables were never created.',
     intro:
-      'The Supabase project could not be reached because its tables were never created. Apply the six migrations below in order to build the schema, then click Continue.',
+      'The Supabase project could not be reached because its tables were never created. Apply the seven migrations below in order to build the schema, then click Continue.',
     steps: [
       ...OPEN_STEPS,
-      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 → 00005 → 00006 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
+      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 → 00005 → 00006 → 00007 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
       'Come back to this page and click “Continue” again.',
     ],
     migrations: FULL_FILES,
     verify: 'What success looks like: a green “Success” result for each file with no red error text.',
-    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all six migrations in order automatically.',
+    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all seven migrations in order automatically.',
   };
 }
 

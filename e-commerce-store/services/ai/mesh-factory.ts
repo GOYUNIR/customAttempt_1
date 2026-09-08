@@ -25,8 +25,9 @@ export class MeshFactory {
     if (settings?.ai3d_provider) {
       const key = settings.ai3d_key || '';
       const endpoint = settings.ai3d_endpoint || '';
+      const model = settings.ai3d_model || '';
       if (key || endpoint) {
-        const driver = createMeshDriver(settings.ai3d_provider, key, options, endpoint);
+        const driver = createMeshDriver(settings.ai3d_provider, key, { ...options, model }, endpoint);
         if (driver?.configured) return driver;
       }
     }

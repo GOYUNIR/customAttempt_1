@@ -10,6 +10,7 @@ import {
   getPlatformSettings,
   savePlatformSettings,
   normalizePlatformSettingsPatch,
+  persistSupabaseAccessToken,
 } from '@/services/config/platform-settings';
 import { toPublicSummary, type PlatformSettingsInput } from '@/services/config/types';
 import { setSupabaseRuntimeAccessToken } from '@/services/config/supabase-client';
@@ -17,6 +18,42 @@ import { isSchemaError, buildSchemaFixPlan } from '@/lib/setup-schema-guide';
 import { autoApplySchema, supabaseAutoMigrateAvailable } from '@/lib/supabase-migrate';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * The Setup Wizard posts camelCase field names (`supabaseAccessToken`, …) while
+ * the admin "API Keys & Integrations" panel posts snake_case (`supabase_access_token`).
+ * Both surfaces share this route, so every known camelCase alias is mapped onto
+ * its canonical snake_case field BEFORE validation — a client can never be 400'd
+ * for using the "wrong" casing. The full alias surface:
+ *
+ *   aiEngine → ai_provider          aiKey → ai_api_key            aiModel → ai_model
+ *   aiFallbackEngine → ai_provider_secondary   aiFallbackKey → ai_api_key_secondary
+ *   ai3dEngine → ai3d_provider      ai3dKey → ai3d_key            ai3dEndpoint → ai3d_endpoint
+ *   ai3dModel → ai3d_model          supabaseToken → supabase_access_token
+ */
+const PROVIDER_ALIASES: Record<string, string> = {
+  aiEngine: 'ai_provider',
+  aiKey: 'ai_api_key',
+  aiModel: 'ai_model',
+  aiFallbackEngine: 'ai_provider_secondary',
+  aiFallbackKey: 'ai_api_key_secondary',
+  ai3dEngine: 'ai3d_provider',
+  ai3dKey: 'ai3d_key',
+  ai3dEndpoint: 'ai3d_endpoint',
+  ai3dModel: 'ai3d_model',
+  supabaseToken: 'supabase_access_token',
+  supabaseAccessToken: 'supabase_access_token',
+};
+
+function normalizeProviderAliases(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body };
+  for (const [alias, canonical] of Object.entries(PROVIDER_ALIASES)) {
+    if (alias in body && !(canonical in body)) {
+      out[canonical] = body[alias];
+    }
+  }
+  return out;
+}
 
 /**
  * /api/admin/provider-keys — the portal's "Provider keys & APIs" surface.
@@ -88,11 +125,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
+  // Normalize any camelCase aliases (Setup Wizard) onto the canonical snake_case
+  // fields BEFORE validation — a client can never be 400'd for casing.
+  body = normalizeProviderAliases(body);
+
   // Optional inline Supabase personal access token — lets the save self-heal a
   // missing schema via the Management API even when the operator hasn't set
-  // SUPABASE_ACCESS_TOKEN as an environment variable. Never echoed back.
-  const supabaseAccessToken = String(body.supabase_access_token || body.supabaseAccessToken || '').trim();
-  if (supabaseAccessToken) setSupabaseRuntimeAccessToken(supabaseAccessToken);
+  // SUPABASE_ACCESS_TOKEN as an environment variable. Never echoed back. It is
+  // ALSO persisted (RLS-protected operational_settings) so the token is not
+  // discarded after this run — background health checks reuse it across restarts.
+  const supabaseAccessToken = String(body.supabase_access_token || '').trim();
+  if (supabaseAccessToken) {
+    setSupabaseRuntimeAccessToken(supabaseAccessToken);
+    await persistSupabaseAccessToken(supabaseAccessToken).catch((err) => {
+      console.warn('[provider-keys] failed to persist supabase access token', String((err as Error)?.message || err));
+    });
+  }
 
   // The currently persisted row is used to PRESERVE write-only keys that the
   // operator leaves blank (they are never echoed back to the UI). A read failure
@@ -118,7 +166,14 @@ export async function POST(request: Request) {
 
   const normalized = normalizePlatformSettingsPatch(body, existing);
   if (!normalized.ok) {
-    return NextResponse.json({ error: normalized.error }, { status: 400 });
+    // Log the field-level failure verbosely (server-side only) and return an
+    // HTTP 200 envelope so the client can render the message instead of the
+    // bare 400 that used to surface as "Save failed (HTTP 400)" with no detail.
+    console.error('[provider-keys] validation failed:', normalized.error);
+    return NextResponse.json(
+      { ok: false, error: normalized.error, validationErrors: [normalized.error] },
+      { status: 200 },
+    );
   }
 
   // Provider keys (payments / email / maps / AI) — exactly what the wizard's

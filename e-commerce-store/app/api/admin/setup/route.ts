@@ -575,6 +575,10 @@ export async function POST(request: Request) {
 
     // ── operational settings (security / site / payments / AI / storage) ─────
     const operational = normalizeOperationalSettingsInput(body);
+    // Persist the Supabase access token into the RLS-protected operational blob
+    // so the schema self-heal can reuse it on later cold starts (it is no longer
+    // discarded after the first wizard run).
+    if (supabaseAccessToken) operational.supabase_access_token = supabaseAccessToken;
 
     // ── data-store probe (legacy — unused) ──────────────────────────────────
     // Kept for reference from the old multi-step wizard; the setup page only

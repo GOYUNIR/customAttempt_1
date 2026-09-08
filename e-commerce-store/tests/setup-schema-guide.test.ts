@@ -20,6 +20,7 @@ import {
   MIGRATION_00004,
   MIGRATION_00005,
   MIGRATION_00006,
+  MIGRATION_00007,
 } from '../lib/setup-schema-guide.ts';
 
 const MIGRATIONS_DIR = join(process.cwd(), 'supabase', 'migrations');
@@ -44,6 +45,7 @@ test('embedded migration SQL is byte-for-byte identical to the real files', () =
   assert.equal(MIGRATION_00004, readMigration('00004_ai_secondary.sql'));
   assert.equal(MIGRATION_00005, readMigration('00005_stripe_price_id.sql'));
   assert.equal(MIGRATION_00006, readMigration('00006_ai_3d_mesh.sql'));
+  assert.equal(MIGRATION_00007, readMigration('00007_ai3d_model.sql'));
 });
 
 test('ai_secondary plan targets only 00004 with the right SQL', () => {
@@ -57,10 +59,10 @@ test('ai_secondary plan targets only 00004 with the right SQL', () => {
   assert.ok(plan.cli.includes('supabase db push'));
 });
 
-test('full plan targets all six migrations in order', () => {
+test('full plan targets all seven migrations in order', () => {
   const plan = buildSchemaFixPlan("Could not find the table 'public.global_platform_settings' in the schema cache");
   assert.equal(plan.kind, 'full');
-  assert.equal(plan.migrations.length, 6);
+  assert.equal(plan.migrations.length, 7);
   assert.deepEqual(
     plan.migrations.map((m) => m.file),
     [
@@ -70,16 +72,19 @@ test('full plan targets all six migrations in order', () => {
       'supabase/migrations/00004_ai_secondary.sql',
       'supabase/migrations/00005_stripe_price_id.sql',
       'supabase/migrations/00006_ai_3d_mesh.sql',
+      'supabase/migrations/00007_ai3d_model.sql',
     ],
   );
 });
 
-test('ai_3d_mesh plan targets only 00006 with the right SQL', () => {
+test('ai_3d_mesh plan targets 00006 + 00007 with the right SQL', () => {
   const plan = buildSchemaFixPlan("Could not find the 'ai3d_provider' column of 'global_platform_settings' in the schema cache");
   assert.equal(plan.kind, 'ai_3d_mesh');
-  assert.equal(plan.migrations.length, 1);
+  assert.equal(plan.migrations.length, 2);
   assert.equal(plan.migrations[0].file, 'supabase/migrations/00006_ai_3d_mesh.sql');
+  assert.equal(plan.migrations[1].file, 'supabase/migrations/00007_ai3d_model.sql');
   assert.ok(plan.migrations[0].sql.includes('add column if not exists ai3d_provider text'));
+  assert.ok(plan.migrations[1].sql.includes('add column if not exists ai3d_model text'));
 });
 
 test('stripe_price_id plan targets only 00005 with the right SQL', () => {

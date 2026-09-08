@@ -3,6 +3,7 @@ import { adminRequestAuthorized } from '@/lib/server-config';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import { MeshFactory } from '@/services/ai';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { uploadHeroModel } from '@/lib/supabase-storage';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+/** A filesystem-safe id for the generated model file in `hero-models/`. */
+function heroModelId(imageUrl: string): string {
+  const base = (imageUrl || '').split('/').pop() || '';
+  const slug = base.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'hero';
+  return `${slug}-${Date.now().toString(36)}`;
+}
+
 /**
  * POST /api/ai/mesh — route an Image-to-3D task to the configured 3D mesh engine
  * (Tripo3D / Meshy / Stability 3D / a custom webhook). Admin-only.
@@ -59,6 +67,8 @@ export async function POST(request: Request) {
 
     const imageUrl = String(body.imageUrl || '').trim();
     const prompt = String(body.prompt || '').trim();
+    const mode = String(body.mode || 'sync').trim().toLowerCase();
+    const taskId = String(body.taskId || '').trim();
 
     const driver = await MeshFactory.getDriver().catch(() => null);
     if (!driver?.configured) {
@@ -69,13 +79,71 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'A product image URL is required.' }, { status: 400 });
     }
 
-    const result = await withTimeout(driver.generate(imageUrl, prompt), 120_000);
-    if (result.ok) {
+    // Two-step ASYNC flow (Tripo3D / Meshy): `submit` returns the task id
+    // immediately so the client can poll progress without hitting an Edge
+    // worker's ~10s timeout; `poll` resolves the task, downloads the GLTF/GLB on
+    // the server and re-hosts it permanently in Supabase Storage.
+    if (mode === 'submit') {
+      if (!driver.submitTask) {
+        return NextResponse.json({ ok: true, configured: true, provider: driver.provider, syncOnly: true });
+      }
+      const submitted = await withTimeout(driver.submitTask(imageUrl, prompt), 30_000);
+      if (submitted.ok) {
+        return NextResponse.json({
+          ok: true,
+          configured: true,
+          provider: submitted.provider,
+          taskId: submitted.taskId,
+          status: 'processing',
+        });
+      }
+      const message = submitted.error instanceof Error ? submitted.error.message : String(submitted.error ?? 'submit failed');
+      return NextResponse.json({
+        ok: true,
+        configured: true,
+        provider: submitted.provider,
+        meshError: `The 3D engine could not start the task (${message.slice(0, 240)}) — falling back to the 2D image shader.`,
+      });
+    }
+
+    if (mode === 'poll') {
+      if (!driver.pollTask || !taskId) {
+        return NextResponse.json({ ok: true, configured: true, provider: driver.provider, status: 'processing', modelUrl: null });
+      }
+      const result = await withTimeout(driver.pollTask(taskId), 120_000);
+      if (result.ok) {
+        const storedUrl = await uploadHeroModel(result.modelUrl || '', heroModelId(imageUrl), result.format);
+        return NextResponse.json({
+          ok: true,
+          configured: true,
+          provider: result.provider,
+          modelUrl: storedUrl || result.modelUrl || null,
+          storedUrl: storedUrl || null,
+          thumbnailUrl: result.thumbnailUrl || null,
+          format: result.format,
+          status: 'complete',
+        });
+      }
+      const message = result.error instanceof Error ? result.error.message : String(result.error ?? 'poll failed');
       return NextResponse.json({
         ok: true,
         configured: true,
         provider: result.provider,
-        modelUrl: result.modelUrl || null,
+        status: 'failed',
+        meshError: `The 3D engine failed (${message.slice(0, 240)}) — falling back to the 2D image shader.`,
+      });
+    }
+
+    // Synchronous (legacy) flow — generate, then re-host permanently.
+    const result = await withTimeout(driver.generate(imageUrl, prompt), 120_000);
+    if (result.ok) {
+      const storedUrl = await uploadHeroModel(result.modelUrl || '', heroModelId(imageUrl), result.format);
+      return NextResponse.json({
+        ok: true,
+        configured: true,
+        provider: result.provider,
+        modelUrl: storedUrl || result.modelUrl || null,
+        storedUrl: storedUrl || null,
         thumbnailUrl: result.thumbnailUrl || null,
         format: result.format,
       });

@@ -29,9 +29,9 @@ export function createMeshDriver(
 ): MeshDriver | null {
   switch (provider) {
     case 'tripo3d':
-      return new Tripo3dDriver({ apiKey, fetchImpl: options.fetchImpl, baseUrl: options.baseUrl, maxPolls: options.maxPolls, pollDelayMs: options.pollDelayMs });
+      return new Tripo3dDriver({ apiKey, fetchImpl: options.fetchImpl, baseUrl: options.baseUrl, maxPolls: options.maxPolls, pollDelayMs: options.pollDelayMs, model: options.model });
     case 'meshy':
-      return new MeshyDriver({ apiKey, fetchImpl: options.fetchImpl, baseUrl: options.baseUrl, maxPolls: options.maxPolls, pollDelayMs: options.pollDelayMs });
+      return new MeshyDriver({ apiKey, fetchImpl: options.fetchImpl, baseUrl: options.baseUrl, maxPolls: options.maxPolls, pollDelayMs: options.pollDelayMs, model: options.model });
     case 'stability_3d':
       return new Stability3dDriver({ apiKey, fetchImpl: options.fetchImpl, baseUrl: options.baseUrl, maxPolls: options.maxPolls, pollDelayMs: options.pollDelayMs });
     case 'custom_webhook':

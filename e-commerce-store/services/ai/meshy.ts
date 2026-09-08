@@ -27,6 +27,7 @@ export class MeshyDriver implements MeshDriver {
   private readonly baseUrl: string;
   private readonly maxPolls: number;
   private readonly pollDelayMs: number;
+  private readonly model: string;
 
   constructor(options: MeshyDriverOptions) {
     this.apiKey = String(options.apiKey || '').trim();
@@ -35,6 +36,7 @@ export class MeshyDriver implements MeshDriver {
     this.baseUrl = (options.baseUrl || MESHY_BASE_URL).replace(/\/+$/, '');
     this.maxPolls = Math.max(1, options.maxPolls ?? 40);
     this.pollDelayMs = Math.max(0, options.pollDelayMs ?? 3000);
+    this.model = String(options.model || '').trim();
   }
 
   private headers(): Record<string, string> {
@@ -46,10 +48,14 @@ export class MeshyDriver implements MeshDriver {
       return { ok: false, error: 'Meshy API key is not configured.', provider: this.provider, skipped: true };
     }
     try {
+      // A configured model string (e.g. `meshy-4`) is forwarded as the optional
+      // model_version so the operator can pin an engine version.
+      const taskBody: Record<string, unknown> = { image_url: imageUrl, object_prompt: prompt, enable_pbr: true };
+      if (this.model) taskBody.model_version = this.model;
       const created = await this.fetchImpl(`${this.baseUrl}/openapi/v1/image-to-3d`, {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify({ image_url: imageUrl, object_prompt: prompt, enable_pbr: true }),
+        body: JSON.stringify(taskBody),
       });
       if (!created.ok) {
         const detail = await created.text().catch(() => '');

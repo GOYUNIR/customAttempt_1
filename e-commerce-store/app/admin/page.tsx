@@ -1745,6 +1745,7 @@ export default function AdminPortal() {
     ai3d_provider: '',
     ai3d_key: '',
     ai3d_endpoint: '',
+    ai3d_model: '',
     supabase_access_token: '',
   });
   const [providerBusy, setProviderBusy] = useState(false);
@@ -4017,6 +4018,7 @@ export default function AdminPortal() {
           ai_model: s.ai_model || '',
           ai3d_provider: s.ai3d_provider || '',
           ai3d_endpoint: s.ai3d_endpoint || '',
+          ai3d_model: s.ai3d_model || '',
         }));
       }
     } catch {
@@ -7619,6 +7621,9 @@ export default function AdminPortal() {
                   )}
                   {providerForm.ai3d_provider !== '' && (
                     <input type="text" value={providerForm.ai3d_endpoint} onChange={(e) => setProviderForm((p) => ({ ...p, ai3d_endpoint: e.target.value }))} placeholder="Base URL / endpoint (e.g. https://api.tripo3d.ai)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  {providerForm.ai3d_provider !== '' && (
+                    <input type="text" value={providerForm.ai3d_model} onChange={(e) => setProviderForm((p) => ({ ...p, ai3d_model: e.target.value }))} placeholder="model (e.g. tripo3d-v2.0, tripo3d-v2.5, meshy-4)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                   <p style={{ fontSize: 10, color: '#888', margin: 0, lineHeight: 1.5 }}>
                     Turns the featured product image into a GLB/GLTF mesh behind the hero. When no 3D provider is configured the hero automatically degrades to the 2D image-texture WebGL shader (no errors).

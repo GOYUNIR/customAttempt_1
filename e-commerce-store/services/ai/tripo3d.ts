@@ -12,7 +12,7 @@
  * `node --test` loads it directly.
  */
 
-import { normalizeMeshFormat, sleep, type MeshDriver, type MeshGenerateResult, type MeshDriverResolutionOptions } from './mesh-driver.ts';
+import { normalizeMeshFormat, sleep, type MeshDriver, type MeshGenerateResult, type MeshSubmitResult, type MeshDriverResolutionOptions } from './mesh-driver.ts';
 import type { Ai3dProvider } from '../config/types.ts';
 
 const TRIPO3D_BASE_URL = 'https://api.tripo3d.ai';
@@ -30,6 +30,7 @@ export class Tripo3dDriver implements MeshDriver {
   private readonly baseUrl: string;
   private readonly maxPolls: number;
   private readonly pollDelayMs: number;
+  private readonly model: string;
 
   constructor(options: Tripo3dDriverOptions) {
     this.apiKey = String(options.apiKey || '').trim();
@@ -38,32 +39,46 @@ export class Tripo3dDriver implements MeshDriver {
     this.baseUrl = (options.baseUrl || TRIPO3D_BASE_URL).replace(/\/+$/, '');
     this.maxPolls = Math.max(1, options.maxPolls ?? 40);
     this.pollDelayMs = Math.max(0, options.pollDelayMs ?? 3000);
+    this.model = String(options.model || '').trim();
   }
 
   private headers(): Record<string, string> {
     return { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' };
   }
 
-  async generate(imageUrl: string, prompt: string): Promise<MeshGenerateResult> {
+  async submitTask(imageUrl: string, prompt: string): Promise<MeshSubmitResult> {
     if (!this.configured) {
       return { ok: false, error: 'Tripo3D API key is not configured.', provider: this.provider, skipped: true };
     }
     try {
-      // 1. Kick off the image_to_model task.
+      // Kick off the image_to_model task. A configured model string (e.g.
+      // `tripo3d-v2.0`) is forwarded so the operator can pin an engine version.
+      const taskBody: Record<string, unknown> = { type: 'image_to_model', image: imageUrl, prompt };
+      if (this.model) taskBody.model = this.model;
       const created = await this.fetchImpl(`${this.baseUrl}/v2/openapi/task`, {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify({ type: 'image_to_model', image: imageUrl, prompt }),
+        body: JSON.stringify(taskBody),
       });
       if (!created.ok) {
         const detail = await created.text().catch(() => '');
         return { ok: false, error: `Tripo3D error ${created.status}: ${detail.slice(0, 300)}`, provider: this.provider };
       }
-      const createdJson = (await created.json().catch(() => null)) as { code?: number; data?: { task_id?: string; status?: string; output?: unknown } } | null;
+      const createdJson = (await created.json().catch(() => null)) as { code?: number; data?: { task_id?: string } } | null;
       const taskId = String(createdJson?.data?.task_id || '');
       if (!taskId) return { ok: false, error: 'Tripo3D returned no task id.', provider: this.provider };
+      return { ok: true, taskId, provider: this.provider };
+    } catch (err) {
+      return { ok: false, error: err, provider: this.provider };
+    }
+  }
 
-      // 2. Poll until success / failed / canceled (bounded).
+  async pollTask(taskId: string): Promise<MeshGenerateResult> {
+    if (!this.configured) {
+      return { ok: false, error: 'Tripo3D API key is not configured.', provider: this.provider, skipped: true };
+    }
+    try {
+      // Poll until success / failed / canceled (bounded).
       for (let poll = 0; poll < this.maxPolls; poll += 1) {
         if (this.pollDelayMs > 0) await sleep(this.pollDelayMs);
         const res = await this.fetchImpl(`${this.baseUrl}/v2/openapi/task/${taskId}`, { method: 'GET', headers: this.headers() });
@@ -90,5 +105,13 @@ export class Tripo3dDriver implements MeshDriver {
     } catch (err) {
       return { ok: false, error: err, provider: this.provider };
     }
+  }
+
+  async generate(imageUrl: string, prompt: string): Promise<MeshGenerateResult> {
+    const submitted = await this.submitTask(imageUrl, prompt);
+    if (!submitted.ok) {
+      return { ok: false, error: submitted.error, provider: this.provider, skipped: submitted.skipped };
+    }
+    return this.pollTask(submitted.taskId);
   }
 }

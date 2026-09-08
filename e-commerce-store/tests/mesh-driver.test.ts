@@ -95,6 +95,49 @@ test('Tripo3D driver returns ok:false when the task fails', async () => {
   if (!result.ok) assert.ok(String(result.error).includes('failed'));
 });
 
+test('Tripo3D driver submitTask returns a task id immediately (two-step async)', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fn = (async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify({ code: 0, data: { task_id: 'task-abc' } }), { status: 200 });
+  }) as typeof fetch;
+
+  const driver = createMeshDriver('tripo3d', 'tsk_xxx', { fetchImpl: fn, pollDelayMs: 0 })!;
+  const submitted = await driver.submitTask!('https://store/media/product', 'a perfume bottle');
+  assert.equal(submitted.ok, true);
+  if (submitted.ok) assert.equal(submitted.taskId, 'task-abc');
+  // Exactly ONE request — no polling happens during submit.
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.ok(calls[0].url.endsWith('/v2/openapi/task'));
+});
+
+test('Tripo3D driver pollTask resolves a submitted task to a model URL', async () => {
+  let polls = 0;
+  const fn = (async (url: string, init: RequestInit) => {
+    if (init.method === 'POST') {
+      return new Response(JSON.stringify({ code: 0, data: { task_id: 'task-abc' } }), { status: 200 });
+    }
+    polls += 1;
+    return new Response(
+      JSON.stringify(
+        polls < 2
+          ? { code: 0, data: { status: 'running' } }
+          : { code: 0, data: { status: 'success', output: { model: { url: 'https://cdn/model.glb', format: 'glb' } } } },
+      ),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const driver = createMeshDriver('tripo3d', 'tsk_xxx', { fetchImpl: fn, pollDelayMs: 0 })!;
+  const result = await driver.pollTask!('task-abc');
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.modelUrl, 'https://cdn/model.glb');
+    assert.equal(result.format, 'glb');
+  }
+});
+
 test('Meshy driver posts image-to-3d and polls until SUCCEEDED', async () => {
   const fn = (async (url: string, init: RequestInit) => {
     if (init.method === 'POST') {

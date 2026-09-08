@@ -20,8 +20,10 @@ import {
   MIGRATION_00004,
   MIGRATION_00005,
   MIGRATION_00006,
+  MIGRATION_00007,
 } from '@/lib/setup-schema-guide';
 import { readSupabaseEnv, readSupabaseAccessToken } from '@/services/config/supabase-client';
+import { resolveSupabaseAccessToken } from '@/services/config/platform-settings';
 
 const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00001_init.sql', sql: MIGRATION_00001 },
@@ -30,6 +32,7 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00004_ai_secondary.sql', sql: MIGRATION_00004 },
   { name: '00005_stripe_price_id.sql', sql: MIGRATION_00005 },
   { name: '00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
+  { name: '00007_ai3d_model.sql', sql: MIGRATION_00007 },
 ];
 
 /** True when a token is present but clearly not a Supabase personal access
@@ -70,7 +73,10 @@ export type AutoMigrateResult = {
  *  `tokenOverride` lets a caller supply the personal access token inline when it
  *  is not present in the environment (the admin provider-keys save path). */
 export async function autoApplySchema(tokenOverride?: string): Promise<AutoMigrateResult> {
-  const token = (tokenOverride ?? readSupabaseAccessToken()).trim();
+  // Resolve the token: explicit override → inline/env → the token PERSISTED in
+  // operational_settings (so a background health check on a cold start can still
+  // self-heal without the operator re-entering it).
+  const token = (tokenOverride ?? (await resolveSupabaseAccessToken())).trim();
   const { url } = readSupabaseEnv();
   const ref = url ? projectRefFromUrl(url) : null;
 

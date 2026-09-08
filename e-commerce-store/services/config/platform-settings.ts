@@ -21,6 +21,7 @@ import {
   fetchPlatformSettingsRow,
   fetchIsPlatformConfigured,
   upsertPlatformSettingsRow,
+  readSupabaseAccessToken,
 } from './supabase-client.ts';
 import {
   GLOBAL_PLATFORM_SETTINGS_ROW_ID,
@@ -166,6 +167,8 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
   const ai3dEndpoint = String(raw.ai3d_endpoint || '').trim();
   // Model selector for the PRIMARY LLM (not a secret — safe to store verbatim).
   const aiModel = String(raw.ai_model || '').trim();
+  // Model selector for the 3D asset / image-to-3D engine (not a secret).
+  const ai3dModel = String(raw.ai3d_model || '').trim();
 
   return {
     ok: true,
@@ -186,6 +189,7 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       ai3d_provider: ai3dProvider,
       ai3d_key: ai3dProvider ? ai3dKey : null,
       ai3d_endpoint: ai3dEndpoint || undefined,
+      ai3d_model: ai3dModel || undefined,
     },
   };
 }
@@ -344,6 +348,8 @@ export function normalizePlatformSettingsPatch(
   const ai3dEndpoint = ai3dProvider && String(raw.ai3d_endpoint ?? '').trim() ? String(raw.ai3d_endpoint ?? '').trim() : undefined;
   // ai_model is NOT a secret → blank clears it.
   const aiModel = String(raw.ai_model ?? '').trim() || undefined;
+  // ai3d_model is NOT a secret → blank clears it.
+  const ai3dModel = String(raw.ai3d_model ?? '').trim() || undefined;
 
   return {
     ok: true,
@@ -364,6 +370,7 @@ export function normalizePlatformSettingsPatch(
       ai3d_provider: ai3dProvider,
       ai3d_key: ai3dKey,
       ai3d_endpoint: ai3dEndpoint,
+      ai3d_model: ai3dModel,
     },
   };
 }
@@ -395,6 +402,7 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     ai3d_provider: input.ai3d_provider || null,
     ai3d_key: input.ai3d_key || null,
     ai3d_endpoint: input.ai3d_endpoint || null,
+    ai3d_model: input.ai3d_model || null,
   });
   clearPlatformSettingsCache();
 }
@@ -415,6 +423,38 @@ export async function saveOperationalSettings(settings: OperationalSettings): Pr
     operational_settings: settings as unknown as Record<string, unknown>,
   });
   clearPlatformSettingsCache();
+}
+
+/**
+ * Resolve the effective Supabase personal access token for one-click schema
+ * builds. Priority: inline runtime override → `SUPABASE_ACCESS_TOKEN` env → the
+ * token PERSISTED in `operational_settings` (so a serverless cold start still
+ * has it after the operator saved it once — the token is no longer discarded
+ * after the first wizard run).
+ */
+export async function resolveSupabaseAccessToken(): Promise<string> {
+  const inline = readSupabaseAccessToken().trim();
+  if (inline) return inline;
+  const settings = await getPlatformSettings().catch(() => null);
+  return String(settings?.operational_settings?.supabase_access_token || '').trim();
+}
+
+/**
+ * Persist the Supabase personal access token into the RLS-protected
+ * `operational_settings` JSONB (service-role-only write; never returned to the
+ * browser). This lets the background schema self-heal reuse the token across
+ * restarts instead of demanding the operator re-enter it. Merges with any
+ * existing operational settings so nothing else is lost.
+ */
+export async function persistSupabaseAccessToken(token: string): Promise<void> {
+  const trimmed = token.trim();
+  if (!trimmed) return;
+  const existing = await getPlatformSettings({ force: true }).catch(() => null);
+  const operational: OperationalSettings = {
+    ...(existing?.operational_settings || {}),
+    supabase_access_token: trimmed,
+  };
+  await saveOperationalSettings(operational);
 }
 
 /** Flip `is_configured = true` after the super-admin exists (Setup Wizard). */
