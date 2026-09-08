@@ -19,6 +19,7 @@ import {
   MIGRATION_00003,
   MIGRATION_00004,
   MIGRATION_00005,
+  MIGRATION_00006,
 } from '@/lib/setup-schema-guide';
 import { readSupabaseEnv, readSupabaseAccessToken } from '@/services/config/supabase-client';
 
@@ -28,6 +29,7 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00003_tenant_routing.sql', sql: MIGRATION_00003 },
   { name: '00004_ai_secondary.sql', sql: MIGRATION_00004 },
   { name: '00005_stripe_price_id.sql', sql: MIGRATION_00005 },
+  { name: '00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
 ];
 
 /** True when a token is present but clearly not a Supabase personal access

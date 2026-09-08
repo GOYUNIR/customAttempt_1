@@ -20,7 +20,7 @@ import { isVideoMedia, pickCrop, coverStyle, aspectRatioLabel, DEFAULT_CROP, spl
 import { checkProductSanity, checkRewardsSanity, sortSanityIssues, type SanityIssue } from '@/lib/product-sanity';
 import { statusFromLegacy, legacyBooleansFromStatus, normalizeProductStatus } from '@/lib/product-status';
 import { validatePrice, isConfiguredPrice } from '@/lib/price-validation';
-import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS } from '@/services/config/types';
+import { MAIL_PROVIDERS, PAYMENT_PROVIDERS, MAP_PROVIDERS, AI_PROVIDERS, AI3D_PROVIDERS } from '@/services/config/types';
 import { API_KEYS_INTEGRATIONS_LABEL, tidyDataStoreActionLabel, dataStoreDisplayName } from '@/lib/admin-action-labels';
 import { findInventorySyncSource, sizeCheckoutModes } from '@/lib/checkout-mode';
 import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
@@ -57,6 +57,10 @@ const PROVIDER_LABELS: Record<string, string> = {
   mistral: 'Mistral',
   google_gemini: 'Google Gemini',
   workers_ai: 'Workers AI (no key)',
+  tripo3d: 'Tripo3D',
+  meshy: 'Meshy',
+  stability_3d: 'Stability 3D',
+  custom_webhook: 'Custom Webhook',
 };
 
 function typeColor(type: string | undefined) {
@@ -1737,6 +1741,10 @@ export default function AdminPortal() {
     ai_api_key: '',
     ai_provider_secondary: '',
     ai_api_key_secondary: '',
+    ai_model: '',
+    ai3d_provider: '',
+    ai3d_key: '',
+    ai3d_endpoint: '',
     supabase_access_token: '',
   });
   const [providerBusy, setProviderBusy] = useState(false);
@@ -4006,6 +4014,9 @@ export default function AdminPortal() {
           map_provider: s.map_provider || '',
           ai_provider: s.ai_provider || '',
           ai_provider_secondary: s.ai_provider_secondary || '',
+          ai_model: s.ai_model || '',
+          ai3d_provider: s.ai3d_provider || '',
+          ai3d_endpoint: s.ai3d_endpoint || '',
         }));
       }
     } catch {
@@ -4050,6 +4061,7 @@ export default function AdminPortal() {
           map_api_key: '',
           ai_api_key: '',
           ai_api_key_secondary: '',
+          ai3d_key: '',
           supabase_access_token: '',
         }));
       } else {
@@ -7576,13 +7588,16 @@ export default function AdminPortal() {
                 </div>
 
                 <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>AI engine — prompt compiler (LLM)</div>
                   <select value={providerForm.ai_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">Skip for now</option>
                     {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
                   </select>
                   {providerForm.ai_provider !== '' && providerForm.ai_provider !== 'workers_ai' && (
                     <input type="password" value={providerForm.ai_api_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key: e.target.value }))} placeholder="sk-..." autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  {providerForm.ai_provider !== '' && (
+                    <input type="text" value={providerForm.ai_model} onChange={(e) => setProviderForm((p) => ({ ...p, ai_model: e.target.value }))} placeholder="model (e.g. deepseek-chat, gpt-4o-mini)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
                   <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
                     <option value="">No fallback AI</option>
@@ -7591,6 +7606,23 @@ export default function AdminPortal() {
                   {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
                     <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
+                </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>3D asset / image-to-3D engine</div>
+                  <select value={providerForm.ai3d_provider} onChange={(e) => setProviderForm((p) => ({ ...p, ai3d_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">No 3D engine (2D shader fallback)</option>
+                    {AI3D_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.ai3d_provider !== '' && (
+                    <input type="password" value={providerForm.ai3d_key} onChange={(e) => setProviderForm((p) => ({ ...p, ai3d_key: e.target.value }))} placeholder="API key" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  {providerForm.ai3d_provider !== '' && (
+                    <input type="text" value={providerForm.ai3d_endpoint} onChange={(e) => setProviderForm((p) => ({ ...p, ai3d_endpoint: e.target.value }))} placeholder="Base URL / endpoint (e.g. https://api.tripo3d.ai)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  <p style={{ fontSize: 10, color: '#888', margin: 0, lineHeight: 1.5 }}>
+                    Turns the featured product image into a GLB/GLTF mesh behind the hero. When no 3D provider is configured the hero automatically degrades to the 2D image-texture WebGL shader (no errors).
+                  </p>
                 </div>
               </div>
 
@@ -7628,7 +7660,7 @@ export default function AdminPortal() {
                 <span>Payments: {providerSummary?.payment_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.payment_provider] || providerSummary.payment_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
                 <span>Email: {providerSummary?.mail_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.mail_provider] || providerSummary.mail_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
                 <span>Maps: {providerSummary?.map_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.map_provider] || providerSummary.map_provider}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
-                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai_provider] || providerSummary.ai_provider}{providerSummary.ai_provider_secondary ? ` + ${PROVIDER_LABELS[providerSummary.ai_provider_secondary] || providerSummary.ai_provider_secondary}` : ''}</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>}</span>
+                <span>AI: {providerSummary?.ai_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai_provider] || providerSummary.ai_provider} (LLM){providerSummary.ai_provider_secondary ? ` + ${PROVIDER_LABELS[providerSummary.ai_provider_secondary] || providerSummary.ai_provider_secondary}` : ''}{providerSummary.ai3d_provider ? ` · ${PROVIDER_LABELS[providerSummary.ai3d_provider] || providerSummary.ai3d_provider} (3D Mesh)` : ''}</strong> : (providerSummary?.ai3d_provider ? <strong style={{ color: '#34d399' }}>✓ {PROVIDER_LABELS[providerSummary.ai3d_provider] || providerSummary.ai3d_provider} (3D Mesh)</strong> : <strong style={{ color: '#f87171' }}>✗ not set</strong>)}</span>
               </div>
             </div>
             <div style={cardStyle}>

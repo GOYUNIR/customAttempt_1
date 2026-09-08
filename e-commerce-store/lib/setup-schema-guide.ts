@@ -24,7 +24,7 @@ export type SchemaFixMigration = {
 };
 
 export type SchemaFixPlan = {
-  kind: 'ai_secondary' | 'stripe_price_id' | 'full';
+  kind: 'ai_secondary' | 'stripe_price_id' | 'ai_3d_mesh' | 'full';
   title: string;
   summary: string;
   intro: string;
@@ -96,6 +96,40 @@ export const MIGRATION_00005 = `-- =============================================
 
 alter table public.global_platform_settings
   add column if not exists stripe_price_id text;
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 00006_ai_3d_mesh.sql — modular 3D mesh / image-to-3D engine columns.
+// ─────────────────────────────────────────────────────────────────────────────
+export const MIGRATION_00006 = `-- =============================================================================
+-- 00006_ai_3d_mesh.sql — modular 3D mesh / image-to-3D engine provider columns.
+--
+-- Adds the optional 3D asset / image-to-3D engine configuration to the settings
+-- row so the storefront can route Image-to-3D tasks to Tripo3D / Meshy /
+-- Stability 3D / a custom webhook, alongside the LLM prompt compiler:
+--
+--   ai_model        — model selector for the PRIMARY LLM (not a secret).
+--   ai3d_provider   — the 3D engine provider (check-constrained enum).
+--   ai3d_key        — the 3D engine API key (secret, never echoed).
+--   ai3d_endpoint   — the 3D engine base URL / endpoint (not a secret).
+--
+-- Idempotent: safe to run on top of an already-migrated schema (fresh installs
+-- get these columns straight from 00001_init.sql, so this is a no-op there).
+-- Apply with: \`supabase db push\` or \`psql "$DATABASE_URL" -f 00006_ai_3d_mesh.sql\`
+-- =============================================================================
+
+alter table public.global_platform_settings
+  add column if not exists ai_model text;
+
+alter table public.global_platform_settings
+  add column if not exists ai3d_provider text
+  check (ai3d_provider in ('tripo3d', 'meshy', 'stability_3d', 'custom_webhook'));
+
+alter table public.global_platform_settings
+  add column if not exists ai3d_key text;
+
+alter table public.global_platform_settings
+  add column if not exists ai3d_endpoint text;
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,6 +234,10 @@ create table if not exists public.global_platform_settings (
   ai_api_key text,
   ai_provider_secondary text check (ai_provider_secondary in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),
   ai_api_key_secondary text,
+  ai_model text,
+  ai3d_provider text check (ai3d_provider in ('tripo3d', 'meshy', 'stability_3d', 'custom_webhook')),
+  ai3d_key text,
+  ai3d_endpoint text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -522,12 +560,17 @@ const STRIPE_PRICE_ID_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00005_stripe_price_id.sql', sql: MIGRATION_00005 },
 ];
 
+const AI3D_MESH_FILES: SchemaFixMigration[] = [
+  { file: 'supabase/migrations/00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
+];
+
 const FULL_FILES: SchemaFixMigration[] = [
   { file: 'supabase/migrations/00001_init.sql', sql: MIGRATION_00001 },
   { file: 'supabase/migrations/00002_setup_operational.sql', sql: MIGRATION_00002 },
   { file: 'supabase/migrations/00003_tenant_routing.sql', sql: MIGRATION_00003 },
   { file: 'supabase/migrations/00004_ai_secondary.sql', sql: MIGRATION_00004 },
   { file: 'supabase/migrations/00005_stripe_price_id.sql', sql: MIGRATION_00005 },
+  { file: 'supabase/migrations/00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
 ];
 
 const OPEN_STEPS = [
@@ -580,20 +623,41 @@ export function buildSchemaFixPlan(errorText: string): SchemaFixPlan {
       cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies this migration automatically.',
     };
   }
+  const isAi3dMesh = /ai3d_provider|ai3d_key|ai3d_endpoint|ai_model/i.test(errorText);
+  if (isAi3dMesh) {
+    return {
+      kind: 'ai_3d_mesh',
+      title: 'Your Supabase database is missing the 3D mesh engine columns.',
+      summary: 'One migration (00006_ai_3d_mesh.sql) was never applied.',
+      intro:
+        'The Supabase project is reachable, but it is missing the 3D asset / image-to-3D engine columns (ai_model, ai3d_provider, ai3d_key, ai3d_endpoint). This takes about a minute to fix — nothing else is wrong and no data is touched.',
+      steps: [
+        ...OPEN_STEPS,
+        'Click the green “Copy SQL” button on the file below — it copies the entire migration for you, so you do not need to find the file in the repo.',
+        'Paste the SQL into the blank query box (Ctrl+V on Windows, Cmd+V on Mac).',
+        'Click the green “Run” button (or press Ctrl+Enter / Cmd+Enter).',
+        'Come back to this page and click “Continue” again — the data store will now verify.',
+      ],
+      migrations: AI3D_MESH_FILES,
+      verify:
+        'What success looks like: a green “Success. No rows returned” result with no red error. If you see “column … already exists” instead, that is fine too — it means the fix is already applied, so just click Continue.',
+      cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies this migration automatically.',
+    };
+  }
   return {
     kind: 'full',
     title: 'Your Supabase database is missing its schema.',
     summary: 'The platform tables were never created.',
     intro:
-      'The Supabase project could not be reached because its tables were never created. Apply the five migrations below in order to build the schema, then click Continue.',
+      'The Supabase project could not be reached because its tables were never created. Apply the six migrations below in order to build the schema, then click Continue.',
     steps: [
       ...OPEN_STEPS,
-      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 → 00005 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
+      'For EACH file below — in order, 00001 → 00002 → 00003 → 00004 → 00005 → 00006 — click its “Copy SQL” button, paste it into the query box, and click “Run”. Wait for “Success” before moving to the next file.',
       'Come back to this page and click “Continue” again.',
     ],
     migrations: FULL_FILES,
     verify: 'What success looks like: a green “Success” result for each file with no red error text.',
-    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all five migrations in order automatically.',
+    cli: 'Shortcut: if you have the Supabase CLI installed, run `supabase db push` in the project folder — it applies all six migrations in order automatically.',
   };
 }
 

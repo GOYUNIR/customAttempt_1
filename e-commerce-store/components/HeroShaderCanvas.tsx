@@ -1,6 +1,6 @@
 'use client';
 
-import { Component, useEffect, useRef, type ReactNode } from 'react';
+import { Component, createElement, useEffect, useRef, type ReactNode } from 'react';
 import { normalizePresetId, isExplodedPreset, LOOP_PERIOD_SECONDS, type AnimationLoopMode } from '@/lib/shaders/presets';
 import { extractAccentPalette, hexToRgb } from '@/lib/shaders/palette';
 import { FRAGMENT_VS, FRAGMENT_FS, IMAGE_VS, IMAGE_FS, DEFAULT_VS, DEFAULT_FS } from '@/lib/shaders/glsl';
@@ -62,6 +62,32 @@ function prefersReducedMotion(): boolean {
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
+}
+
+/**
+ * Lazily inject the `<model-viewer>` web component (once per page). This is the
+ * standard, dependency-free way to render a GLB/GLTF model in the hero. It is
+ * loaded ONLY when a 3D mesh URL is actually available — and a load failure is
+ * swallowed so the 2D WebGL shader (or CSS gradient) keeps rendering behind the
+ * hero with zero errors.
+ */
+const MODEL_VIEWER_SCRIPT_SRC = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js';
+let modelViewerLoadPromise: Promise<void> | null = null;
+
+function loadModelViewer(): Promise<void> {
+  if (typeof document === 'undefined') return Promise.resolve();
+  if (document.querySelector(`script[src="${MODEL_VIEWER_SCRIPT_SRC}"]`)) return Promise.resolve();
+  if (!modelViewerLoadPromise) {
+    modelViewerLoadPromise = new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = MODEL_VIEWER_SCRIPT_SRC;
+      s.onload = () => resolve();
+      s.onerror = () => resolve(); // never throw — graceful degradation
+      document.head.appendChild(s);
+    });
+  }
+  return modelViewerLoadPromise;
 }
 
 /** True when a URL shares the page origin (data:/blob:/root-relative are same-origin). */
@@ -297,6 +323,7 @@ export function HeroShaderCanvas({
   paused = false,
   speed = 1,
   twistIntensity = 0.5,
+  mesh3dUrl,
   onCanvasRef,
   onResetRef,
   respectReducedMotion = true,
@@ -331,6 +358,13 @@ export function HeroShaderCanvas({
   speed?: number;
   /** Radial twist intensity (0..1) — drives `u_twistIntensity` in the 3D mesh. */
   twistIntensity?: number;
+  /**
+   * Optional GLB/GLTF model URL from the image-to-3D mesh engine (Tripo3D /
+   * Meshy / …). When set, a `<model-viewer>` element renders the generated 3D
+   * model behind the hero content. When unset (no 3D provider key), the 2D
+   * image-texture WebGL shader is used — this fallback never throws.
+   */
+  mesh3dUrl?: string;
   /** Expose the live canvas element (admin clip recording). Null on unmount. */
   onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
   /** Register a timeline-reset function so clip recording can sync `u_time = 0`. */
@@ -763,6 +797,13 @@ export function HeroShaderCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, preset, colorA, colorB, colorC, opacity, explosionRadius, twistIntensity, depthBlur, animationLoop, assemblyProgress, interactive, themeColors, productImageUrl, respectReducedMotion]);
 
+  // Load the <model-viewer> web component (once) only when a 3D mesh URL is
+  // actually present. A load failure is swallowed — the 2D shader keeps rendering.
+  useEffect(() => {
+    if (!mesh3dUrl) return;
+    loadModelViewer().catch(() => {});
+  }, [mesh3dUrl]);
+
   if (!enabled) return null;
 
   const gradient = `linear-gradient(135deg, ${colorA || '#bf5af2'}, ${colorB || '#0071e3'}, ${colorC || '#ff375f'}, ${colorA || '#bf5af2'})`;
@@ -776,6 +817,21 @@ export function HeroShaderCanvas({
   return (
     <div style={{ ...positionStyle, overflow: 'hidden', pointerEvents: 'none', ...mixStyle, ...style }} aria-hidden="true">
       <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+      {mesh3dUrl ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+          {createElement(
+            'model-viewer',
+            {
+              src: mesh3dUrl,
+              'auto-rotate': '',
+              'camera-controls': '',
+              'rotation-per-second': '24deg',
+              'shadow-intensity': '0',
+              style: { width: '100%', height: '100%', background: 'transparent' },
+            } as Record<string, unknown>,
+          )}
+        </div>
+      ) : null}
       <div
         style={{
           position: 'absolute',

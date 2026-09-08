@@ -40,10 +40,20 @@ export type AiProvider =
   | 'mistral'
   | 'google_gemini';
 
+/**
+ * Enumerated 3D asset / image-to-3D mesh providers — mirrors the SQL check
+ * constraint. These are a SEPARATE surface from the LLM prompt compiler: they
+ * take a product image + prompt and return a GLB/GLTF mesh (or structured mesh
+ * uniforms) for the hero WebGL / model pipeline. Optional — when none is
+ * configured the storefront degrades to the 2D image-texture shader.
+ */
+export type Ai3dProvider = 'tripo3d' | 'meshy' | 'stability_3d' | 'custom_webhook';
+
 /** Every provider union in one place for validation loops. */
 export const MAIL_PROVIDERS: readonly MailProvider[] = ['resend', 'postmark', 'sendgrid'];
 export const PAYMENT_PROVIDERS: readonly PaymentProvider[] = ['stripe', 'lemon_squeezy', 'paddle'];
 export const MAP_PROVIDERS: readonly MapProvider[] = ['mapbox', 'google_maps', 'open_street_map'];
+export const AI3D_PROVIDERS: readonly Ai3dProvider[] = ['tripo3d', 'meshy', 'stability_3d', 'custom_webhook'];
 export const AI_PROVIDERS: readonly AiProvider[] = [
   'deepseek',
   'deepseek_lite',
@@ -80,6 +90,14 @@ export interface GlobalPlatformSettings {
   /** Optional SECONDARY (fallback) AI provider — tried when the primary fails. */
   ai_provider_secondary: AiProvider | null;
   ai_api_key_secondary: string | null;
+  /** Optional model selector for the PRIMARY LLM prompt compiler (e.g. `deepseek-chat`, `gpt-4o-mini`). NOT a secret — echoed back for editing. */
+  ai_model?: string | null;
+  /** Optional 3D asset / image-to-3D mesh engine provider (Tripo3D / Meshy / …). */
+  ai3d_provider?: Ai3dProvider | null;
+  /** 3D engine API key — secret, never echoed back to the browser. */
+  ai3d_key?: string | null;
+  /** 3D engine base URL / endpoint — NOT a secret (echoed back for editing). */
+  ai3d_endpoint?: string | null;
   /**
    * Operational (env-var-style) settings the unified setup dashboard persists.
    * Stored as a JSONB blob on the settings row — never returned to the browser
@@ -108,6 +126,14 @@ export interface PlatformSettingsInput {
   /** Optional secondary fallback AI provider (tried when the primary fails). */
   ai_provider_secondary: AiProvider | null;
   ai_api_key_secondary?: string;
+  /** Optional model selector for the PRIMARY LLM prompt compiler. */
+  ai_model?: string;
+  /** Optional 3D asset / image-to-3D mesh engine provider. */
+  ai3d_provider?: Ai3dProvider | null;
+  /** 3D engine API key (write-only). */
+  ai3d_key?: string | null;
+  /** 3D engine base URL / endpoint (not a secret). */
+  ai3d_endpoint?: string;
 }
 
 /**
@@ -129,6 +155,12 @@ export interface PlatformSettingsPublicSummary {
   map_provider: MapProvider | null;
   ai_provider: AiProvider | null;
   ai_provider_secondary: AiProvider | null;
+  /** Model selector for the PRIMARY LLM (not a secret). */
+  ai_model: string | null;
+  /** 3D asset / image-to-3D engine provider name (key is never returned). */
+  ai3d_provider: Ai3dProvider | null;
+  /** 3D engine base URL / endpoint (not a secret). */
+  ai3d_endpoint: string | null;
 }
 
 /** Strip every secret from a settings row → safe for client responses. */
@@ -141,6 +173,9 @@ export function toPublicSummary(settings: GlobalPlatformSettings | null | undefi
     map_provider: settings?.map_provider ?? null,
     ai_provider: settings?.ai_provider ?? null,
     ai_provider_secondary: settings?.ai_provider_secondary ?? null,
+    ai_model: settings?.ai_model ?? null,
+    ai3d_provider: settings?.ai3d_provider ?? null,
+    ai3d_endpoint: settings?.ai3d_endpoint ?? null,
   };
 }
 
@@ -250,6 +285,10 @@ export function parseSettingsRow(raw: Record<string, unknown> | null | undefined
     ai_api_key: aiProvider ? String(raw.ai_api_key || '').trim() || null : null,
     ai_provider_secondary: sanitizeAiProvider(raw.ai_provider_secondary),
     ai_api_key_secondary: sanitizeAiProvider(raw.ai_provider_secondary) ? String(raw.ai_api_key_secondary || '').trim() || null : null,
+    ai_model: String(raw.ai_model || '').trim() || null,
+    ai3d_provider: sanitizeAi3dProvider(raw.ai3d_provider),
+    ai3d_key: sanitizeAi3dProvider(raw.ai3d_provider) ? String(raw.ai3d_key || '').trim() || null : null,
+    ai3d_endpoint: String(raw.ai3d_endpoint || '').trim() || null,
     operational_settings: parseOperationalSettings(raw.operational_settings),
     created_at: typeof raw.created_at === 'string' ? raw.created_at : undefined,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
@@ -278,6 +317,14 @@ export function sanitizeMapProvider(value: unknown): MapProvider | null {
 export function sanitizeAiProvider(value: unknown): AiProvider | null {
   const v = String(value || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
   return (AI_PROVIDERS as readonly string[]).includes(v) ? (v as AiProvider) : null;
+}
+
+/** Validate a 3D asset / image-to-3D provider string (returns null when not in the enum). */
+export function sanitizeAi3dProvider(value: unknown): Ai3dProvider | null {
+  // NOTE: unlike `sanitizeAiProvider`, the 3D providers contain DIGITS (`tripo3d`,
+  // `stability_3d`), so the sanitizer allows `0-9` in addition to `a-z` and `_`.
+  const v = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+  return (AI3D_PROVIDERS as readonly string[]).includes(v) ? (v as Ai3dProvider) : null;
 }
 
 /**

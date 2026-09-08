@@ -30,6 +30,7 @@ import {
   sanitizePaymentProvider,
   sanitizeMapProvider,
   sanitizeAiProvider,
+  sanitizeAi3dProvider,
   isDeepSeekProvider,
   type GlobalPlatformSettings,
   type OperationalSettings,
@@ -153,6 +154,19 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
     }
   }
 
+  // The 3D asset / image-to-3D engine is OPTIONAL. A missing / blank / 'none'
+  // provider means "no mesh engine": the hero degrades to the 2D image-texture
+  // WebGL shader. When a provider is selected its API key is required.
+  const ai3dRaw = String(raw.ai3d_provider ?? '').trim();
+  const isAi3dSkip = !ai3dRaw || ai3dRaw.toLowerCase() === 'none';
+  const ai3dProvider = isAi3dSkip ? null : sanitizeAi3dProvider(raw.ai3d_provider);
+  if (!isAi3dSkip && !ai3dProvider) return { ok: false, error: 'Choose a valid 3D asset provider.' };
+  const ai3dKey = String(raw.ai3d_key || '').trim();
+  if (ai3dProvider && !ai3dKey) return { ok: false, error: 'Enter a 3D asset provider API key.' };
+  const ai3dEndpoint = String(raw.ai3d_endpoint || '').trim();
+  // Model selector for the PRIMARY LLM (not a secret — safe to store verbatim).
+  const aiModel = String(raw.ai_model || '').trim();
+
   return {
     ok: true,
     input: {
@@ -168,6 +182,10 @@ export function normalizePlatformSettingsInput(raw: Record<string, unknown>):
       ai_api_key: aiProvider ? aiApiKey : null,
       ai_provider_secondary: aiProviderSecondary,
       ai_api_key_secondary: aiProviderSecondary && aiApiKeySecondary ? aiApiKeySecondary : undefined,
+      ai_model: aiModel || undefined,
+      ai3d_provider: ai3dProvider,
+      ai3d_key: ai3dProvider ? ai3dKey : null,
+      ai3d_endpoint: ai3dEndpoint || undefined,
     },
   };
 }
@@ -306,6 +324,27 @@ export function normalizePlatformSettingsPatch(
     };
   }
 
+  // ── 3D asset / image-to-3D engine (optional) ────────────────────────────────
+  const ai3dRaw = String(raw.ai3d_provider ?? '').trim();
+  const isAi3dSkip = !ai3dRaw || ai3dRaw.toLowerCase() === 'none';
+  const ai3dProvider = isAi3dSkip ? null : sanitizeAi3dProvider(raw.ai3d_provider);
+  if (!isAi3dSkip && !ai3dProvider) return { ok: false, error: 'Choose a valid 3D asset provider.' };
+  const ai3dKeyRaw = String(raw.ai3d_key ?? '').trim();
+  let ai3dKey: string | undefined;
+  if (!ai3dProvider) {
+    ai3dKey = undefined;
+  } else if (ai3dKeyRaw) {
+    ai3dKey = ai3dKeyRaw;
+  } else if (existing?.ai3d_provider === ai3dProvider && existing.ai3d_key) {
+    ai3dKey = existing.ai3d_key;
+  } else {
+    return { ok: false, error: 'Enter a 3D asset provider API key.' };
+  }
+  // ai3d_endpoint is NOT a secret (it is echoed back) → blank clears it.
+  const ai3dEndpoint = ai3dProvider && String(raw.ai3d_endpoint ?? '').trim() ? String(raw.ai3d_endpoint ?? '').trim() : undefined;
+  // ai_model is NOT a secret → blank clears it.
+  const aiModel = String(raw.ai_model ?? '').trim() || undefined;
+
   return {
     ok: true,
     input: {
@@ -321,6 +360,10 @@ export function normalizePlatformSettingsPatch(
       ai_api_key: aiApiKey,
       ai_provider_secondary: aiProviderSecondary,
       ai_api_key_secondary: aiApiKeySecondary,
+      ai_model: aiModel,
+      ai3d_provider: ai3dProvider,
+      ai3d_key: ai3dKey,
+      ai3d_endpoint: ai3dEndpoint,
     },
   };
 }
@@ -348,6 +391,10 @@ export async function savePlatformSettings(input: PlatformSettingsInput): Promis
     ai_api_key: input.ai_api_key || null,
     ai_provider_secondary: input.ai_provider_secondary || null,
     ai_api_key_secondary: input.ai_api_key_secondary || null,
+    ai_model: input.ai_model || null,
+    ai3d_provider: input.ai3d_provider || null,
+    ai3d_key: input.ai3d_key || null,
+    ai3d_endpoint: input.ai3d_endpoint || null,
   });
   clearPlatformSettingsCache();
 }

@@ -22,3 +22,5 @@ export { MapFactory } from './maps/factory';
 export * from './maps/types';
 export { AiFactory, createAiDriver, AI_DRIVER_CATALOG } from './ai';
 export * from './ai/types';
+export { MeshFactory, createMeshDriver, MESH_DRIVER_CATALOG } from './ai';
+export * from './ai/mesh-driver';

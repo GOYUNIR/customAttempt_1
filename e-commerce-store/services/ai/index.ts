@@ -12,3 +12,6 @@ export * from './types';
 export { createAiDriver, AI_DRIVER_CATALOG, type AiDriverResolutionOptions } from './registry';
 export { AiFactory } from './factory';
 export { FallbackAiDriver } from './fallback.driver';
+export * from './mesh-driver';
+export { createMeshDriver, MESH_DRIVER_CATALOG } from './mesh-registry';
+export { MeshFactory } from './mesh-factory';

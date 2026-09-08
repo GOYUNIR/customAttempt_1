@@ -75,6 +75,10 @@ create table if not exists public.global_platform_settings (
   ai_api_key text,
   ai_provider_secondary text check (ai_provider_secondary in ('deepseek', 'deepseek_lite', 'openai', 'anthropic', 'replicate', 'workers_ai', 'openrouter', 'groq', 'mistral', 'google_gemini')),
   ai_api_key_secondary text,
+  ai_model text,
+  ai3d_provider text check (ai3d_provider in ('tripo3d', 'meshy', 'stability_3d', 'custom_webhook')),
+  ai3d_key text,
+  ai3d_endpoint text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
