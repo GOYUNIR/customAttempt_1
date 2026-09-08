@@ -7550,7 +7550,7 @@ export default function AdminPortal() {
                 Paste your third-party keys here — the same surface as the Setup Wizard. Payments, transactional email, address autofill and the AI engine are all optional; the store opens without them. Values are saved to your database and never shown back (only ✓ set / ✗ missing below). <strong>Leave a key field blank to keep the currently saved value</strong> — you can change just one or two keys without re-entering the rest.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
                 <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Payments</div>
                   <select value={providerForm.payment_provider} onChange={(e) => setProviderForm((p) => ({ ...p, payment_provider: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
@@ -7601,13 +7601,6 @@ export default function AdminPortal() {
                   {providerForm.ai_provider !== '' && (
                     <input type="text" value={providerForm.ai_model} onChange={(e) => setProviderForm((p) => ({ ...p, ai_model: e.target.value }))} placeholder="model (e.g. deepseek-chat, gpt-4o-mini)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
                   )}
-                  <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
-                    <option value="">No fallback AI</option>
-                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
-                  </select>
-                  {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
-                    <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
-                  )}
                 </div>
 
                 <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
@@ -7629,6 +7622,20 @@ export default function AdminPortal() {
                     Turns the featured product image into a GLB/GLTF mesh behind the hero. When no 3D provider is configured the hero automatically degrades to the 2D image-texture WebGL shader (no errors).
                   </p>
                 </div>
+
+                <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1' }}>Fallback AI engine</div>
+                  <select value={providerForm.ai_provider_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_provider_secondary: e.target.value }))} style={{ ...inputStyle, width: '100%', height: 40 }}>
+                    <option value="">No fallback</option>
+                    {AI_PROVIDERS.map((p) => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+                  </select>
+                  {providerForm.ai_provider_secondary !== '' && providerForm.ai_provider_secondary !== 'workers_ai' && (
+                    <input type="password" value={providerForm.ai_api_key_secondary} onChange={(e) => setProviderForm((p) => ({ ...p, ai_api_key_secondary: e.target.value }))} placeholder="sk-... (fallback key)" autoComplete="off" style={{ ...inputStyle, width: '100%' }} />
+                  )}
+                  <p style={{ fontSize: 10, color: '#888', margin: 0, lineHeight: 1.5 }}>
+                    An optional second provider that the prompt compiler fails over to when the primary LLM errors or times out.
+                  </p>
+                </div>
               </div>
 
               <div style={{ display: 'grid', gap: 6, marginTop: 14 }}>
@@ -7644,7 +7651,7 @@ export default function AdminPortal() {
                   style={{ ...inputStyle, width: '100%' }}
                 />
                 <p style={{ fontSize: 10, color: '#888', margin: 0, lineHeight: 1.6 }}>
-                  Only needed once (or after a schema wipe) so the store can build its own tables instead of showing a “missing schema” error. Create a NEW personal access token at supabase.com/dashboard/account/tokens — it starts with <code>sbp_</code>. It is never stored in your database or shown back.
+                  Only needed once (or after a schema wipe) so the store can build its own tables instead of showing a “missing schema” error. Create a NEW personal access token at supabase.com/dashboard/account/tokens — it starts with <code>sbp_</code>. It is persisted securely (RLS-protected, never shown back, never in any public payload) and reused by background health checks to auto-apply missing schema migrations — so a wiped schema heals on a cold start without re-entry.
                 </p>
               </div>
 
