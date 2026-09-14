@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient } from '@/lib/server-config';
 import { issueAdminCode, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-/** Resend the admin sign-in code (throttled to once per 60 seconds per inbox). */
+/** Resend the admin sign-in code (throttled to once per 60 seconds per inbox,
+ *  PLUS a per-IP limiter here — this route re-checks the admin password too,
+ *  same as verify-start, and needs the same brute-force protection). */
 export async function POST(request: Request) {
   try {
+    const limited = await rateLimitedResponse('admin_verify_send', request, 10, 60);
+    if (limited) return limited;
+
     const body = await request.json().catch(() => ({}));
     const password = String(body?.password || '');
     if (!(await adminLoginAuthorized(request, password))) {

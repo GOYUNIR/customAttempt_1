@@ -5,7 +5,11 @@ import {
   isSuperAdminSession,
   isAdminDeviceValid,
   adminDeviceTokenFromRequest,
+  isStepUpVerified,
+  resolveAdminActor,
+  actorHasFullAdminAccess,
 } from '@/lib/admin-verify';
+import { isLockedParameter } from '@/lib/lockdown';
 import {
   getPlatformSettings,
   savePlatformSettings,
@@ -133,6 +137,14 @@ export async function POST(request: Request) {
   if (!(await authorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
+  // RBAC: this route rotates live payment credentials — a Staff
+  // Impersonation session (Tier 2 sales/support acting on a tenant) must
+  // never reach it, no matter how it got past `authorized()` above. This is
+  // the actual privilege boundary that makes impersonation safe to hand out.
+  const actor = await resolveAdminActor(request);
+  if (!actorHasFullAdminAccess(actor)) {
+    return NextResponse.json({ error: 'Not permitted for an impersonation session.' }, { status: 403 });
+  }
 
   // Normalize any camelCase aliases (Setup Wizard) onto the canonical snake_case
   // fields BEFORE validation — a client can never be 400'd for casing.
@@ -183,6 +195,32 @@ export async function POST(request: Request) {
       { ok: false, error: normalized.error, validationErrors: [normalized.error] },
       { status: 200 },
     );
+  }
+
+  // Step-up re-auth (lib/lockdown.ts): of everything this route can touch,
+  // the PAYMENT credentials are locked system parameters (real money moves
+  // through them). A verified device cookie is enough for routine saves
+  // (AI/mail/map keys), but rotating the live Stripe secret/webhook needs a
+  // freshly re-confirmed password — a stolen device cookie alone must never
+  // be able to redirect where customer charges go. Only enforced once the
+  // store is actually configured; the initial Setup Wizard run is exempt
+  // (evaluateLock's own 'setup_phase' rule).
+  const touchesLockedPaymentField =
+    (isLockedParameter('payment_api_key') && typeof body.payment_api_key === 'string' && body.payment_api_key.trim()) ||
+    (isLockedParameter('payment_webhook_secret') && typeof body.payment_webhook_secret === 'string' && body.payment_webhook_secret.trim()) ||
+    (isLockedParameter('payment_provider') &&
+      typeof body.payment_provider === 'string' &&
+      body.payment_provider.trim() &&
+      body.payment_provider.trim() !== (existing?.payment_provider || ''));
+  if (existing?.is_configured && touchesLockedPaymentField) {
+    const redis = createRedisClient();
+    const fresh = redis ? await isStepUpVerified(redis, request, password) : false;
+    if (!fresh) {
+      return NextResponse.json(
+        { ok: false, error: 'Re-enter your password to confirm this change.', code: 'STEP_UP_REQUIRED' },
+        { status: 401 },
+      );
+    }
   }
 
   // Provider keys (payments / email / maps / AI) — exactly what the wizard's

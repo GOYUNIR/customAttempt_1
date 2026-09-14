@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient } from '@/lib/server-config';
-import { adminAuthorized } from '@/lib/admin-verify';
+import { adminAuthorized, isStepUpVerified, resolveAdminActor, actorHasFullAdminAccess } from '@/lib/admin-verify';
 import { runSeedDefaults } from '@/app/api/admin/seed/route';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -65,6 +65,13 @@ export async function POST(request: Request) {
     if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
+    // RBAC: a Staff Impersonation session must never reach the single most
+    // destructive route in the app, full stop — checked before the phrase
+    // gate below so it can't be probed for the confirm phrase either.
+    const actor = await resolveAdminActor(request);
+    if (!actorHasFullAdminAccess(actor)) {
+      return NextResponse.json({ error: 'Not permitted for an impersonation session.' }, { status: 403 });
+    }
     // Gate 2 — confirmation phrase.
     if (confirm.toUpperCase() !== CONFIRM_PHRASE) {
       return NextResponse.json(
@@ -72,16 +79,46 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+    // Gate 3 — production hard-block. This deletes EVERY key in the store
+    // (orders, accounts, everything) with no undo. Password + typed phrase
+    // already guard against a fat-fingered click; in production that's not
+    // enough on its own — the operator must ALSO have deliberately opted in
+    // via an env var (set outside the app, so it can't be flipped by
+    // anything that compromises the admin session alone) and re-confirm
+    // their password fresh (step-up), closing the "stolen device cookie is
+    // enough" gap the same way provider-keys does for payment credentials.
+    if (process.env.NODE_ENV === 'production') {
+      if (process.env.ALLOW_PRODUCTION_DESTRUCTIVE_ADMIN !== 'true') {
+        return NextResponse.json(
+          {
+            error:
+              'Destructive admin actions are disabled in production. Set ALLOW_PRODUCTION_DESTRUCTIVE_ADMIN=true in your hosting platform\'s environment to allow this, then retry.',
+          },
+          { status: 403 },
+        );
+      }
+      const fresh = await isStepUpVerified(redis, request, password);
+      if (!fresh) {
+        return NextResponse.json(
+          { error: 'Re-enter your password to confirm this change.', code: 'STEP_UP_REQUIRED' },
+          { status: 401 },
+        );
+      }
+    }
 
     const { deleted, keys } = await deleteAllKeys(redis);
 
     // Persist a record of the wipe for the NEW audit log (the old one was erased).
     try {
-      await appendAudit(redis, {
-        action: 'REDIS_WIPED',
-        detail: `Deleted ${deleted} keys${rebuild ? ' · then re-seeded defaults' : ''}`,
-        actor: 'admin',
-      });
+      await appendAudit(
+        redis,
+        {
+          action: 'REDIS_WIPED',
+          detail: `Deleted ${deleted} keys${rebuild ? ' · then re-seeded defaults' : ''}`,
+          actor: actor?.email || 'admin',
+        },
+        request,
+      );
     } catch {}
 
     let seeded = 0;

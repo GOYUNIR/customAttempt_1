@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { consumeAdminCode, issueAdminDevice, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,9 +10,18 @@ export const dynamic = 'force-dynamic';
  * success an httpOnly device cookie is set (30 days when "remember device" is
  * checked, otherwise 24 hours). proxy.ts validates that cookie on every
  * subsequent /api/admin request.
+ *
+ * The 6-digit code itself is already brute-force-protected per email
+ * (consumeAdminCode: 5 wrong tries → 15-minute lockout), but this route
+ * ALSO re-checks the admin password first — a per-IP limiter here closes
+ * the same "guess the password through this route instead" gap the other
+ * verify-* routes have.
  */
 export async function POST(request: Request) {
   try {
+    const limited = await rateLimitedResponse('admin_verify_confirm', request, 20, 60);
+    if (limited) return limited;
+
     const body = await request.json().catch(() => ({}));
     const password = String(body?.password || '');
     if (!(await adminLoginAuthorized(request, password))) {

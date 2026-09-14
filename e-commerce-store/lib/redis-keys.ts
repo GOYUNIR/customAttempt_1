@@ -241,6 +241,16 @@ export function adminAuthKey(token: string): string {
 /** Name of the httpOnly admin LOGIN-SESSION cookie (proves email+password passed). */
 export const ADMIN_AUTH_COOKIE = 'goyunir_admin_auth';
 
+/** String w/ TTL — a fresh step-up re-authentication stamp for one admin
+ *  browser (`admin:stepup:<identity>`), where `identity` is that browser's
+ *  device or login-session token. Written by POST /api/admin/step-up after
+ *  the operator re-confirms their password; consulted by lib/lockdown.ts
+ *  gated routes (provider-keys, role escalation) before touching a locked
+ *  system parameter. Self-expires — no lazy cleanup required. */
+export function adminStepUpKey(identity: string): string {
+  return `admin:stepup:${identity}`;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Analytics (social proof counters + online visitors)
 // ────────────────────────────────────────────────────────────────────────────

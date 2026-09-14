@@ -27,8 +27,9 @@ import { sanitizeCommerceMode, type CommerceMode } from '@/lib/commerce-modes';
 import { samplerPresentationSeed } from '@/lib/sampler-config';
 import HeroShaderSettings from '@/components/admin/HeroShaderSettings';
 import { defaultAiHeroSettings, type AiHeroSettings } from '@/lib/shaders/presets';
+import EnterprisePanel from '@/components/admin/EnterprisePanel';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup' | 'enterprise';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -1069,6 +1070,29 @@ function adminFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     }
     return res;
   });
+}
+
+/**
+ * Re-confirm the admin password and stamp a fresh step-up verification
+ * (see lib/lockdown.ts / lib/admin-verify.ts). Call this when a save comes
+ * back with `{ code: 'STEP_UP_REQUIRED' }` — a locked, high-stakes field
+ * (payment keys, granting the "admin" role) that needs proof the operator
+ * has the password in hand RIGHT NOW, not just a valid session cookie.
+ * Returns true once stamped so the caller can retry its original request.
+ */
+async function attemptStepUp(currentPassword: string): Promise<boolean> {
+  const entered = window.prompt('Confirm your admin password to continue with this change:', currentPassword || '');
+  if (!entered) return false;
+  try {
+    const res = await adminFetch('/api/admin/step-up', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: entered }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -3605,12 +3629,22 @@ export default function AdminPortal() {
         body.id = editingUser;
       }
 
-      const res = await adminFetch('/api/admin/users', {
+      let res = await adminFetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
+      let data = await res.json();
+      if (!res.ok && data?.code === 'STEP_UP_REQUIRED') {
+        if (await attemptStepUp(password)) {
+          res = await adminFetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          data = await res.json();
+        }
+      }
       if (res.ok) {
         setUserMsg('✅ User saved successfully!');
         showToast('UPDATED · User');
@@ -4032,21 +4066,31 @@ export default function AdminPortal() {
     setProviderMsg('');
     setProviderErr(false);
     try {
-      const res = await adminFetch('/api/admin/provider-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, ...providerForm }),
-      });
-      // Parse defensively: a proxy/edge 500 can return an empty body, which
-      // would otherwise surface as "Unexpected end of JSON input" instead of
-      // the real error message.
-      const rawText = await res.text().catch(() => '');
-      let data: any = {};
-      if (rawText) {
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          /* non-JSON error page / empty body — fall through to the HTTP status */
+      const doSave = async () => {
+        const res = await adminFetch('/api/admin/provider-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, ...providerForm }),
+        });
+        // Parse defensively: a proxy/edge 500 can return an empty body, which
+        // would otherwise surface as "Unexpected end of JSON input" instead of
+        // the real error message.
+        const rawText = await res.text().catch(() => '');
+        let data: any = {};
+        if (rawText) {
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            /* non-JSON error page / empty body — fall through to the HTTP status */
+          }
+        }
+        return { res, data };
+      };
+
+      let { res, data } = await doSave();
+      if (!res.ok && data?.code === 'STEP_UP_REQUIRED') {
+        if (await attemptStepUp(password)) {
+          ({ res, data } = await doSave());
         }
       }
       if (res.ok && data?.ok) {
@@ -4614,6 +4658,7 @@ export default function AdminPortal() {
     { id: 'settings', label: 'Settings', group: 'Configuration' },
     { id: 'system', label: 'System', group: 'Configuration' },
     { id: 'setup', label: 'Setup', group: 'Configuration' },
+    { id: 'enterprise', label: 'Enterprise', group: 'Configuration' },
   ];
 
   // ============================================================
@@ -4928,6 +4973,16 @@ export default function AdminPortal() {
                           {t.badge}
                         </span>
                       ) : null}
+                      {t.id === 'enterprise' && (
+                        <span
+                          title="B2B quotes, custom domains, AI assistant"
+                          style={{
+                            width: 6, height: 6, borderRadius: 999,
+                            background: tab === t.id ? '#000' : '#34d399',
+                            boxShadow: tab === t.id ? 'none' : '0 0 0 2px rgba(52,211,153,0.18)',
+                          }}
+                        />
+                      )}
                     </button>
                   ))}
                 </div>
@@ -5445,6 +5500,9 @@ export default function AdminPortal() {
             )}
           </div>
         )}
+
+        {/* ============ ENTERPRISE (B2B quotes / custom domains / AI assistant) ============ */}
+        {tab === 'enterprise' && <EnterprisePanel password={password} />}
 
         {/* ============ PRODUCTS (UPDATED) ============ */}
         {tab === 'products' && (

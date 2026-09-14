@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey, USERS_KEY } from '@/lib/server-config';
-import { isCronAuthorized } from '@/lib/cron-auth';
+import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
@@ -28,6 +29,15 @@ function authorized(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    // This route SENDS EMAIL to customers, and (by documented historical
+    // design) stays OPEN when no CRON_SECRET/admin password is configured —
+    // without a limiter, an unconfigured store's recovery endpoint could be
+    // hit in a loop to spam every abandoned-cart customer with recovery
+    // emails. Skipped only for a trusted platform-signed invocation.
+    if (!isPlatformScheduledInvocation(request)) {
+      const limited = await rateLimitedResponse('cron_recovery', request, 20, 60);
+      if (limited) return limited;
+    }
     if (!authorized(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

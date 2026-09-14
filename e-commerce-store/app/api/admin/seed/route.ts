@@ -566,6 +566,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
     }
 
+    // Production hard-block: runSeedDefaults() is a no-op whenever the
+    // catalog is non-empty, so this only ever WRITES on a genuinely blank
+    // production store (typically right after a wipe) — still gated the
+    // same way as wipe so seeding placeholder products into a live store
+    // can never happen without a deliberate, out-of-band opt-in.
+    if (
+      process.env.NODE_ENV === 'production' &&
+      process.env.ALLOW_PRODUCTION_DESTRUCTIVE_ADMIN !== 'true'
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Destructive/seeding admin actions are disabled in production. Set ALLOW_PRODUCTION_DESTRUCTIVE_ADMIN=true in your hosting platform\'s environment to allow this, then retry.',
+        },
+        { status: 403 },
+      );
+    }
+
     const redis = createRedisClient();
     if (!redis) {
       return NextResponse.json({ error: 'Redis offline' }, { status: 500 });

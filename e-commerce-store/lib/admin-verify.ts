@@ -19,10 +19,17 @@ import {
   ADMIN_DEVICES_KEY,
   adminVerifyKey,
   adminAuthKey,
+  adminStepUpKey,
   ADMIN_AUTH_COOKIE,
 } from '@/lib/redis-keys';
 import { createRedisClient, safeParseRedisItem, getAdminVerifyEmail, adminRequestAuthorized } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
+import { STEP_UP_TTL_MS } from '@/lib/lockdown';
+import { actorHasFullAdminAccess, IMPERSONATION_TTL_SECONDS as PURE_IMPERSONATION_TTL_SECONDS } from '@/lib/admin-actor';
+import type { AdminActor, AdminActorRole } from '@/lib/admin-actor';
+
+export { actorHasFullAdminAccess };
+export type { AdminActor, AdminActorRole };
 
 const CODE_TTL_SECONDS = 10 * 60; // 10 minutes
 const MAX_ATTEMPTS = 5;
@@ -30,6 +37,7 @@ const ATTEMPT_WINDOW_SECONDS = 15 * 60; // 15 minute lockout window
 const RESEND_THROTTLE_SECONDS = 60;
 const DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days ("remember device")
 const SESSION_DEVICE_TTL_SECONDS = 24 * 60 * 60; // 1 day ("this browser only")
+export const IMPERSONATION_TTL_SECONDS = PURE_IMPERSONATION_TTL_SECONDS;
 
 // The whole 2FA challenge for one email lives in a SINGLE TTL key
 // (`admin:verify:<email>`), whose payload carries the code hash, the resend
@@ -187,9 +195,13 @@ export async function issueAdminDevice(
   email: string,
   remember: boolean,
   meta: Record<string, unknown> = {},
+  /** Overrides the remember/session TTL entirely — used by Staff
+   *  Impersonation, whose sessions must be short-lived ("secure, time-bound
+   *  override") regardless of any "remember device" preference. */
+  maxAgeSecondsOverride?: number,
 ): Promise<{ token: string; maxAgeSeconds: number }> {
   const token = randomBytes(32).toString('hex');
-  const maxAgeSeconds = remember ? DEVICE_TTL_SECONDS : SESSION_DEVICE_TTL_SECONDS;
+  const maxAgeSeconds = maxAgeSecondsOverride ?? (remember ? DEVICE_TTL_SECONDS : SESSION_DEVICE_TTL_SECONDS);
   await redis.hset(ADMIN_DEVICES_KEY, {
     [token]: JSON.stringify({
       email: String(email || '').trim().toLowerCase(),
@@ -236,11 +248,33 @@ export function adminDeviceTokenFromRequest(request: Request): string {
 export async function readAdminDevice(
   redis: any,
   token: string,
-): Promise<{ email?: string; createdAt?: number; expiresAt?: number; superAdmin?: boolean } | null> {
+): Promise<{
+  email?: string;
+  createdAt?: number;
+  expiresAt?: number;
+  superAdmin?: boolean;
+  /** RBAC role (lib/rbac.ts's `PortalRole`) — set by /api/admin/super-login
+   *  for any role, not just super_admin. Devices issued before this field
+   *  existed (or by the plain env-password login) simply have none: callers
+   *  treat a missing role as the legacy "full admin" grant for back-compat. */
+  role?: string;
+  /** True only for a Staff Impersonation session (Tier 2 sales/support
+   *  acting on a tenant they don't own) — see /api/admin/impersonate. */
+  impersonating?: boolean;
+  tenantId?: string | null;
+} | null> {
   if (!token) return null;
   const raw = await redis.hget(ADMIN_DEVICES_KEY, token).catch(() => null);
   if (!raw) return null;
-  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number; expiresAt?: number; superAdmin?: boolean }>(raw);
+  const parsed = safeParseRedisItem<{
+    email?: string;
+    createdAt?: number;
+    expiresAt?: number;
+    superAdmin?: boolean;
+    role?: string;
+    impersonating?: boolean;
+    tenantId?: string | null;
+  }>(raw);
   if (!parsed) return null;
   if (Number(parsed.expiresAt) > 0 && Date.now() > Number(parsed.expiresAt)) {
     try {
@@ -263,6 +297,53 @@ export async function isSuperAdminSession(request: Request): Promise<boolean> {
   const token = adminDeviceTokenFromRequest(request);
   const record = await readAdminDevice(redis, token);
   return record?.superAdmin === true;
+}
+
+/**
+ * Resolve the effective RBAC actor for the current request. This app has
+ * historically had exactly ONE admin tier (the env Basic-Auth password, or
+ * any verified device cookie, grants full access) — that legacy grant
+ * resolves to 'owner' (full access to THIS store's own settings, matching
+ * what lib/rbac.ts's 'owner' capability set actually covers: business
+ * config, items, orders). A device cookie that carries an explicit `role`
+ * (issued by the Staff Impersonation sign-in) resolves to that role instead
+ * and is marked `impersonating` — callers use this to withhold the routes
+ * Staff Impersonation must never reach (provider-keys, wipe, users,
+ * webhooks — see the capability checks at each of those routes).
+ *
+ * Returns null when there is no recognizable admin session at all.
+ */
+export async function resolveAdminActor(request: Request): Promise<AdminActor | null> {
+  const redis = createRedisClient();
+  const token = adminDeviceTokenFromRequest(request);
+  if (redis && token) {
+    const record = await readAdminDevice(redis, token);
+    if (record) {
+      const role = record.role as AdminActorRole | undefined;
+      if (role && ['super_admin', 'sales', 'owner', 'staff'].includes(role)) {
+        return {
+          role,
+          email: String(record.email || ''),
+          impersonating: record.impersonating === true,
+          tenantId: record.tenantId ?? null,
+        };
+      }
+      // No role on the device record (legacy device, or super_admin flag
+      // without the newer role field) — full-access legacy grant.
+      return {
+        role: record.superAdmin === true ? 'super_admin' : 'owner',
+        email: String(record.email || ''),
+        impersonating: false,
+        tenantId: null,
+      };
+    }
+  }
+  // Basic-Auth / body password — the original, un-role-scoped admin
+  // credential. Always full access (it IS the store's own secret).
+  if (adminRequestAuthorized(request)) {
+    return { role: 'owner', email: '', impersonating: false, tenantId: null };
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -378,6 +459,50 @@ export async function adminAuthorized(
   const token = adminDeviceTokenFromRequest(request);
   if (!token) return false;
   return isAdminDeviceValid(redis, token).catch(() => false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step-up re-authentication (lib/lockdown.ts's persistence layer).
+//
+// A verified device cookie or login session is enough for routine admin
+// actions, but it is NOT enough on its own to prove the operator has the
+// admin password/Supabase credentials in hand RIGHT NOW — a stolen device
+// cookie (XSS, synced browser, shared machine) grants the same cookie
+// without ever knowing the secret. For a locked system parameter (Stripe
+// keys, storage backend, the admin password itself, …) that gap matters: a
+// fresh, explicit re-verification is required within the last
+// `STEP_UP_TTL_MS`, stamped by POST /api/admin/step-up and consulted here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The identity a step-up stamp is scoped to — the same token that already
+ *  identifies "this admin browser" for the device/login-session cookies, so
+ *  the stamp naturally can't be replayed from a different browser. */
+function stepUpIdentityFromRequest(request: Request): string {
+  return adminDeviceTokenFromRequest(request) || adminAuthTokenFromRequest(request);
+}
+
+/** Stamp a fresh step-up verification for the calling browser. */
+export async function stampStepUp(redis: any, request: Request): Promise<boolean> {
+  const identity = stepUpIdentityFromRequest(request);
+  if (!identity) return false;
+  await redis.setex(adminStepUpKey(identity), Math.ceil(STEP_UP_TTL_MS / 1000), String(Date.now()));
+  return true;
+}
+
+/** Whether the calling browser has a fresh (within TTL) step-up stamp. Basic
+ *  Auth / API callers that re-supply the real admin password with EVERY
+ *  request (no persistent cookie identity) are treated as always fresh —
+ *  they already re-prove the secret on every call by construction. */
+export async function isStepUpVerified(
+  redis: any,
+  request: Request,
+  suppliedPassword?: string,
+): Promise<boolean> {
+  if (adminRequestAuthorized(request, suppliedPassword)) return true;
+  const identity = stepUpIdentityFromRequest(request);
+  if (!identity) return false;
+  const raw = await redis.get(adminStepUpKey(identity)).catch(() => null);
+  return raw != null;
 }
 
 

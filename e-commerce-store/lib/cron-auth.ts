@@ -28,6 +28,19 @@ export function isPlatformScheduledInvocation(request: Request): boolean {
   return request.headers.get('x-vercel-cron') === '1';
 }
 
+/** Constant-time string comparison (no `node:crypto` import — mirrors
+ *  middleware.ts's `timingSafeStringEq`, kept here dependency-free). A plain
+ *  `===` on the cron secret would leak how many leading characters an
+ *  attacker's guess got right via response timing. */
+function timingSafeStringEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 /**
  * Authorize a scheduled-invocation request against the configured secret
  * (`CRON_SECRET` or the admin password — the same fallback every cron route
@@ -47,8 +60,11 @@ export function isCronAuthorized(
   if (!secret) return opts?.openWhenNoSecret === true;
   if (isPlatformScheduledInvocation(request)) return true;
   const url = new URL(request.url);
-  if (request.headers.get('authorization') === `Bearer ${secret}`) return true;
-  if (url.searchParams.get('key') === secret) return true;
-  if (request.headers.get('x-cron-secret') === secret) return true;
+  const bearer = request.headers.get('authorization') || '';
+  if (bearer.startsWith('Bearer ') && timingSafeStringEq(bearer.slice(7), secret)) return true;
+  const keyParam = url.searchParams.get('key');
+  if (keyParam && timingSafeStringEq(keyParam, secret)) return true;
+  const headerSecret = request.headers.get('x-cron-secret');
+  if (headerSecret && timingSafeStringEq(headerSecret, secret)) return true;
   return false;
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient } from '@/lib/server-config';
 import { issueAdminCode, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,12 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: Request) {
   try {
+    // Re-checks the admin password (same secret /api/admin/login guards) —
+    // without its own limiter this route is an un-throttled way to brute
+    // force it.
+    const limited = await rateLimitedResponse('admin_verify_start', request, 10, 60);
+    if (limited) return limited;
+
     const body = await request.json().catch(() => ({}));
     const password = String(body?.password || '');
     if (!(await adminLoginAuthorized(request, password))) {

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { STORED_CARTS_KEY } from '@/lib/redis-keys';
+import { readCartItemsFromPostgres } from '@/lib/postgres-read-fallback';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +51,25 @@ export async function GET(request: Request) {
   try {
     const user = await getSessionUser(request);
     if (!user?.userId) return NextResponse.json({ items: [] });
+
+    // Postgres-primary read, with fallback (lib/postgres-read-fallback.ts):
+    // returns null (never throws) whenever the flag is off, Supabase isn't
+    // configured, or this customer simply hasn't been backfilled into
+    // Postgres yet — every one of those falls straight through to the
+    // exact Redis read that already ran here before this cutover existed.
+    // The flag check gates even calling ensureDefaultTenant() — with the
+    // flag off (the default) this route makes zero Postgres calls at all,
+    // same as before this cutover existed.
+    if (isPostgresPrimaryEnabled()) {
+      try {
+        const tenantId = await ensureDefaultTenant();
+        const pgItems = await readCartItemsFromPostgres(tenantId, user.email);
+        if (pgItems) return NextResponse.json({ items: pgItems, source: 'postgres' });
+      } catch {
+        /* fall through to Redis */
+      }
+    }
+
     const redis = createRedisClient();
     if (!redis) return NextResponse.json({ items: [] });
     const raw = await redis.hget(STORED_CARTS_KEY, user.userId);

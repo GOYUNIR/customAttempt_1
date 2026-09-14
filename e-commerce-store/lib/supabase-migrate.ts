@@ -21,6 +21,11 @@ import {
   MIGRATION_00005,
   MIGRATION_00006,
   MIGRATION_00007,
+  MIGRATION_00008,
+  MIGRATION_00009,
+  MIGRATION_00010,
+  MIGRATION_00011,
+  MIGRATION_00012,
 } from '@/lib/setup-schema-guide';
 import { readSupabaseEnv, readSupabaseAccessToken } from '@/services/config/supabase-client';
 import { resolveSupabaseAccessToken } from '@/services/config/platform-settings';
@@ -33,6 +38,11 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '00005_stripe_price_id.sql', sql: MIGRATION_00005 },
   { name: '00006_ai_3d_mesh.sql', sql: MIGRATION_00006 },
   { name: '00007_ai3d_model.sql', sql: MIGRATION_00007 },
+  { name: '00008_platform_rbac_hardening.sql', sql: MIGRATION_00008 },
+  { name: '00009_commerce_b2b_core.sql', sql: MIGRATION_00009 },
+  { name: '00010_custom_domains.sql', sql: MIGRATION_00010 },
+  { name: '00011_variant_order_metadata.sql', sql: MIGRATION_00011 },
+  { name: '00012_drop_mode_schema.sql', sql: MIGRATION_00012 },
 ];
 
 /** True when a token is present but clearly not a Supabase personal access

@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   // Defense-in-depth: the middleware already gates /api/admin with Basic Auth +
   // two-step verification, but this endpoint exposes the full customer ledger,
-  // so it also verifies the admin password directly.
+  // so it also verifies the admin password directly — rate-limited so it
+  // can't be used to brute-force that password, and so a compromised
+  // low-privilege session can't scrape the entire ledger in a tight loop.
+  const limited = await rateLimitedResponse('admin_search', request, 30, 60);
+  if (limited) return limited;
+
   const url = new URL(request.url);
   const password = String(url.searchParams.get('password') || '');
   if (!(await adminAuthorized(request, password))) {

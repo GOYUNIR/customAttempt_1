@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getAdminPassword } from '@/lib/server-config';
-import { isCronAuthorized } from '@/lib/cron-auth';
+import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth';
 import { runAutoDraws } from '@/lib/auto-draw';
+import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -31,6 +32,11 @@ async function runAutoDraw(request: Request) {
       ok: true,
       message: 'Draw engine ready. Runs are delegated to lib/auto-draw (Redis-driven).',
     });
+  }
+
+  if (!isPlatformScheduledInvocation(request)) {
+    const limited = await rateLimitedResponse('cron_draw_auth', request, 20, 60);
+    if (limited) return limited;
   }
 
   if (!isCronAuthorized(request, process.env.CRON_SECRET || getAdminPassword(), { openWhenNoSecret: false })) {

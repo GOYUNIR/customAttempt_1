@@ -508,3 +508,55 @@ export async function verifySuperAdminSignIn(
   }
   return null;
 }
+
+/** The platform's RBAC roles (mirrors lib/rbac.ts's `PortalRole` — duplicated
+ *  here rather than imported so this Node-only Supabase client module never
+ *  needs to import a shared type from an edge-safe zero-import module and
+ *  vice versa; both are kept in lock-step by the 00003 migration's CHECK
+ *  constraint being the actual source of truth). */
+export type PortalSignInRole = 'super_admin' | 'sales' | 'owner' | 'staff' | 'customer';
+
+/**
+ * General portal sign-in: verify Supabase Auth credentials AND resolve the
+ * account's RBAC `role` + `tenant_id` from `profiles` (the table this app's
+ * auth flow already reads — see verifySuperAdminSignIn above). Unlike that
+ * function, this accepts ANY valid role, not just super_admin — it's what
+ * the Staff Impersonation flow (Tier 2 sales/support signing into a tenant
+ * store) and any future non-super-admin portal entry point use.
+ *
+ * Falls back to the GoTrue user_metadata `role` (same wizard-stamped
+ * convention verifySuperAdminSignIn falls back to) when the `profiles` read
+ * fails outright — but NEVER upgrades a role: the metadata fallback can only
+ * return 'customer' unless `is_super_admin`/`role: 'super_admin'` was
+ * explicitly stamped by the wizard, so a `profiles` outage can't be used to
+ * self-escalate.
+ */
+export async function verifyPortalSignIn(
+  email: string,
+  password: string,
+): Promise<{ id: string; email: string; role: PortalSignInRole; tenantId: string | null } | null> {
+  const credentials = await verifySuperAdminCredentials(email, password);
+  if (!credentials) return null;
+  try {
+    const { anonKey } = readSupabaseEnv();
+    const rows = (await supabaseRestFetch(
+      `/profiles?id=eq.${encodeURIComponent(credentials.id)}&select=role,is_super_admin,tenant_id&limit=1`,
+      { key: anonKey, bearer: credentials.accessToken },
+    )) as Array<{ role?: string | null; is_super_admin?: boolean; tenant_id?: string | null }> | null;
+    if (Array.isArray(rows) && rows.length > 0) {
+      const row = rows[0];
+      const role: PortalSignInRole = row.is_super_admin === true
+        ? 'super_admin'
+        : (['sales', 'owner', 'staff', 'customer'].includes(String(row.role || '')) ? (row.role as PortalSignInRole) : 'customer');
+      return { id: credentials.id, email: credentials.email, role, tenantId: row.tenant_id ?? null };
+    }
+  } catch {
+    // profiles read failed (schema missing) — fall through to metadata below.
+  }
+  return {
+    id: credentials.id,
+    email: credentials.email,
+    role: credentials.isSuperAdmin ? 'super_admin' : 'customer',
+    tenantId: null,
+  };
+}

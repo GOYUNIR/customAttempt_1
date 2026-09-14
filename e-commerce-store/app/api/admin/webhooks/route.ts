@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient } from '@/lib/server-config';
-import { adminAuthorized } from '@/lib/admin-verify';
+import { adminAuthorized, resolveAdminActor, actorHasFullAdminAccess } from '@/lib/admin-verify';
 import { safeParseRedisItem } from '@/lib/server-config';
 import { WEBHOOK_CONFIG_KEY, WEBHOOK_QUEUE_KEY } from '@/lib/redis-keys';
 import { flushWebhookQueue, WEBHOOK_EVENTS } from '@/lib/webhooks';
@@ -43,6 +43,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!(await authorized(request))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  // RBAC: outbound webhook URLs are an SSRF/data-exfiltration surface if
+  // pointed somewhere unexpected — a Staff Impersonation session can view
+  // config (GET, above) but never change it.
+  const actor = await resolveAdminActor(request);
+  if (!actorHasFullAdminAccess(actor)) {
+    return NextResponse.json({ error: 'Not permitted for an impersonation session.' }, { status: 403 });
   }
   const storage = createRedisClient();
   if (!storage) {

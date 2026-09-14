@@ -26,6 +26,9 @@ import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/pay
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
+import { shadowWriteOrder } from '@/lib/postgres-shadow-write';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export const dynamic = 'force-dynamic';
 
@@ -497,6 +500,23 @@ export async function POST(request: Request) {
             } as any);
           }
           await awardPurchasePoints(redis, email, priceCents * qty);
+
+          if (isPostgresPrimaryEnabled()) {
+            const shadowTenantId = await ensureDefaultTenant().catch(() => null);
+            if (shadowTenantId) {
+              await shadowWriteOrder({
+                tenantId: shadowTenantId,
+                orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
+                email,
+                productName: thisProduct.name,
+                size: thisSize,
+                quantity: qty,
+                amountCents: priceCents * qty,
+                checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
+                promoCode: appliedPromo,
+              });
+            }
+          }
         }
       } else {
         const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
@@ -530,6 +550,23 @@ export async function POST(request: Request) {
             orderRef: orderRef || `DIRECT-${session.id}`,
           } as any);
           await awardPurchasePoints(redis, email, Number(session.amount_total || 0));
+
+          if (isPostgresPrimaryEnabled()) {
+            const shadowTenantId = await ensureDefaultTenant().catch(() => null);
+            if (shadowTenantId) {
+              await shadowWriteOrder({
+                tenantId: shadowTenantId,
+                orderRef: orderRef || `DIRECT-${session.id}`,
+                email,
+                productName: product.name,
+                size,
+                quantity: 1,
+                amountCents: Number(session.amount_total || 0),
+                checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
+                promoCode: appliedPromo,
+              });
+            }
+          }
         }
       }
 

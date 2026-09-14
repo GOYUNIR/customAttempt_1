@@ -4,6 +4,7 @@ import { detectStorageProvider, discoverEnvironment, CLOUDFLARE_VARS_PATH } from
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
+import { validateProductionEnv } from '@/lib/env-schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +105,15 @@ export async function GET(request: Request) {
       platformProviders,
       cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
       environment: process.env.NODE_ENV || 'development',
+      // Format-only validation (never values) — a malformed secret is a
+      // worse failure mode than a missing one, since the app doesn't fall
+      // back gracefully. See lib/env-schema.ts. `errors` block production
+      // writes (middleware.ts's ENV_MISCONFIGURED gate); `warnings` are
+      // informational only.
+      validation: (() => {
+        const { errors, warnings } = validateProductionEnv();
+        return { errors, warnings };
+      })(),
       summary: {
         configured: items.filter((i) => i.set).length,
         total: items.length,
@@ -126,6 +136,15 @@ export async function GET(request: Request) {
       platformProviders: toPublicSummary(null),
       cloudflareVarsPath: CLOUDFLARE_VARS_PATH,
       environment: process.env.NODE_ENV || 'development',
+      // Format-only validation (never values) — a malformed secret is a
+      // worse failure mode than a missing one, since the app doesn't fall
+      // back gracefully. See lib/env-schema.ts. `errors` block production
+      // writes (middleware.ts's ENV_MISCONFIGURED gate); `warnings` are
+      // informational only.
+      validation: (() => {
+        const { errors, warnings } = validateProductionEnv();
+        return { errors, warnings };
+      })(),
       summary: {
         configured: items.filter((i) => i.set).length,
         total: items.length,

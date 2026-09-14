@@ -6,6 +6,8 @@ import { isPlatformConfiguredEdge, supabaseEnvReady } from '@/services/config/ed
 import { computeAdminReady, detectStorageDrivers } from '@/lib/env-discovery';
 import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
+import { isCsrfBlocked } from '@/lib/csrf';
+import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -97,6 +99,41 @@ function verifyBasicAuth(authorization: string | null) {
   // is configured the email comparison is skipped — the password is the secret.
   const emailOk = !ADMIN_EMAIL || timingSafeStringEq(user, ADMIN_EMAIL);
   return emailOk && timingSafeStringEq(pass, ADMIN_PASSWORD);
+}
+
+/** Best-effort client IP from the standard proxy headers. Mirrors
+ *  `clientIp()` in lib/rate-limit.ts — duplicated here (rather than
+ *  imported) for the same reason every other helper in this file is:
+ *  lib/rate-limit.ts pulls in lib/server-config.ts's Node-only imports
+ *  (stripe, crypto) which the Edge runtime can't load. */
+function edgeClientIp(request: NextRequest): string {
+  const fwd = request.headers.get('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0].trim() || 'unknown';
+  return request.headers.get('x-real-ip') || 'unknown';
+}
+
+/**
+ * Rate-limit HTTP Basic-Auth attempts against /admin* (page + every API
+ * route) — the ONE credential check in the whole admin auth chain that had
+ * no throttle at all. Every route-level password re-check (verify-start,
+ * verify-send, verify-confirm, /api/admin/login, …) sits BEHIND this gate,
+ * so an attacker sending `Authorization: Basic <guess>` directly could brute
+ * force the admin password against literally any /api/admin/* path with
+ * zero throttling, bypassing every route-level limiter entirely. Counts
+ * EVERY attempt that carries a Basic-Auth header (mirrors how /api/admin/login
+ * counts every attempt, not just failures) so a compromised/scripted client
+ * can't burn through guesses just by never quite getting it right.
+ */
+async function basicAuthRateLimited(storage: ReturnType<typeof createStorageClient>, request: NextRequest): Promise<boolean> {
+  if (!storage) return false;
+  try {
+    const key = `cache:rate:admin_basicauth:${edgeClientIp(request)}`;
+    const count = await storage.incr(key);
+    if (Number(count) === 1) await storage.expire(key, 60);
+    return Number(count) > 20;
+  } catch {
+    return false; // a limiter hiccup must never lock a legitimate admin out
+  }
 }
 /**
  * Edge-safe minimal JSON parse for Redis values. Mirrors
@@ -202,6 +239,23 @@ function adminAuthRequired(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  // CSRF gate — see lib/csrf.ts for the full rationale (Origin/Referer
+  // verification on cookie-authenticated writes, in place of a synchronized
+  // token that would have to be plumbed through every fetch() call).
+  const csrfBlocked = isCsrfBlocked({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    cookieHeader: request.headers.get('cookie') || '',
+    origin: request.headers.get('origin'),
+    referer: request.headers.get('referer'),
+    requestHost: request.nextUrl.host,
+  });
+  if (csrfBlocked) {
+    return NextResponse.json(
+      { error: 'Cross-site request blocked (Origin did not match this site).' },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 
   const pathname = request.nextUrl.pathname;
   // The Setup Wizard is ALSO the "re-configure providers" page: once the
@@ -217,9 +271,16 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/admin/setup') ||
     pathname === '/api/admin/setup' ||
     pathname.startsWith('/api/admin/setup');
+  // NOTE: despite the name (kept to avoid touching every call site below),
+  // this also covers /api/admin/impersonate — the Staff Impersonation
+  // sign-in. Both are credential-establishing login endpoints that must be
+  // reachable with NO prior admin session at all (a sales rep has never
+  // touched this store's /admin before), same as /admin/login.
   const isSuperLoginPath =
     pathname === '/api/admin/super-login' ||
-    pathname.startsWith('/api/admin/super-login/');
+    pathname.startsWith('/api/admin/super-login/') ||
+    pathname === '/api/admin/impersonate' ||
+    pathname.startsWith('/api/admin/impersonate/');
 
   // Setup paths (page + API) are only reachable WITHOUT credentials while the
   // install is NOT ready — the readiness gate below short-circuits them before
@@ -347,6 +408,18 @@ export async function middleware(request: NextRequest) {
     // no password-in-query bypass anymore: the audit / export / self-test
     // routes used to be reachable with `?password=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦`, which leaks the password
     // into server logs, browser history and Referer headers.
+    // A request that actually PRESENTS a Basic-Auth header is rate-limited
+    // before it's compared — this is the credential check every other
+    // admin-password check sits behind, so it's the one place a single
+    // limiter closes the brute-force gap for the whole portal at once.
+    if (authHeader && !superAdminOk && !authCookieOk && !deviceCookieValid) {
+      if (await basicAuthRateLimited(storage, request)) {
+        return NextResponse.json(
+          { error: 'Too many sign-in attempts. Try again shortly.' },
+          { status: 429, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+    }
     const passwordPassed =
       superAdminOk ||
       isLoginPath ||
@@ -405,6 +478,35 @@ export async function middleware(request: NextRequest) {
       return NextResponse.json(
         { error: 'DEMO_MODE', message: 'Writes are disabled until a valid license key is configured.' },
         { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+  }
+
+  // ── PRODUCTION ENV GUARDRAIL (malformed secrets, not missing ones) ───────
+  // Same shape as the license gate above: a malformed production secret
+  // (truncated key, wrong value pasted into the wrong field, a literal
+  // "your-key-here" placeholder left in .env) blocks WRITES only — reads and
+  // the admin/auth/stripe/cron paths stay reachable so the operator can
+  // still sign in and fix the value. See lib/env-schema.ts for exactly what
+  // counts as malformed (format only — a MISSING value is this template's
+  // normal "not configured yet, use the Setup Wizard" state and is never
+  // flagged here).
+  if (process.env.NODE_ENV === 'production' && productionEnvHasBlockingIssues()) {
+    const method = request.method.toUpperCase();
+    const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+    const isExempt =
+      pathname.startsWith('/api/admin') ||
+      pathname.startsWith('/api/auth') ||
+      pathname.startsWith('/api/stripe') ||
+      pathname.startsWith('/api/cron') ||
+      pathname.startsWith('/api/checkout/cron-draw');
+    if (isWrite && pathname.startsWith('/api/') && !isExempt) {
+      return NextResponse.json(
+        {
+          error: 'ENV_MISCONFIGURED',
+          message: 'A production environment variable is malformed. Check /admin → Environment Status and fix it before writes can resume.',
+        },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
       );
     }
   }
