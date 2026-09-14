@@ -5,6 +5,7 @@ import {
   saveLiveState,
   archiveEntry,
   ArchiveRecord,
+  ARCHIVE_LEDGER_KEY,
   loadProducts, // new helper to fetch product from Redis
   safeParseRedisItem,
   STORE_CONFIG_KEY,
@@ -15,6 +16,28 @@ import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { withRedisLock } from '@/lib/redis-lock';
+
+/** Same anti-scalping check `checkout/route.ts` enforces before creating a
+ * Stripe Checkout Session — this direct-charge path was missing it entirely,
+ * letting a stored payment method buy unlimited units of a "N per customer"
+ * drop. */
+async function countChargedByEmail(redis: any, email: string, variant: string, size: string) {
+  const rows = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
+  let count = 0;
+  for (const row of rows) {
+    try {
+      const parsed = typeof row === 'string' ? JSON.parse(row) : row;
+      if (!parsed) continue;
+      if (String(parsed.type || '') !== 'WINNER_CHARGED') continue;
+      if (String(parsed.email || '').toLowerCase() !== email) continue;
+      if (String(parsed.variant || '') !== variant) continue;
+      if (String(parsed.size || '') !== size) continue;
+      count += 1;
+    } catch {}
+  }
+  return count;
+}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -53,6 +76,7 @@ export async function POST(request: Request) {
     if (!isValidEmail(email)) {
       return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
     }
+    const normalizedEmail = String(email).trim().toLowerCase();
 
     const limited = await rateLimitedResponse('checkout_direct', request, 10, 60);
     if (limited) return limited;
@@ -91,6 +115,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Sold out.' }, { status: 400 });
     }
 
+    // Anti-scalping cap — same rule `checkout/route.ts` enforces.
+    const maxPerEmail = Math.max(1, Number((product as any).maxPerEmail || 1));
+    const chargedCount = await countChargedByEmail(redis, normalizedEmail, product.name, String(size));
+    if (chargedCount >= maxPerEmail) {
+      return NextResponse.json({ error: `Purchase limit reached (${maxPerEmail} per email).` }, { status: 409 });
+    }
+
     // Create or use existing Stripe customer
     let stripeCustomerId = customerId;
     if (!stripeCustomerId) {
@@ -101,26 +132,44 @@ export async function POST(request: Request) {
       stripeCustomerId = customer.id;
     }
 
-    // Create PaymentIntent using the actual Stripe Price ID from the category
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: priceCents,
-      currency: 'usd',
-      customer: stripeCustomerId,
-      payment_method: paymentMethodId,
-      off_session: false,
-      confirm: true,
-      receipt_email: email,
-      description: `${product.name} (${size})`,
-    });
+    // Create PaymentIntent using the actual Stripe Price ID from the category.
+    // An idempotency key means a client retry (double-tap, network blip) of
+    // the SAME attempt reuses this key and Stripe dedupes it into one charge.
+    // Bucketed to a 30s window on the stable inputs so it's deterministic
+    // across retries of one attempt but doesn't block a later, separate
+    // purchase of the same product/size by the same customer.
+    const idempotencyKey = `direct:${normalizedEmail}:${productId}:${size}:${paymentMethodId}:${Math.floor(Date.now() / 30_000)}`;
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: priceCents,
+        currency: 'usd',
+        customer: stripeCustomerId,
+        payment_method: paymentMethodId,
+        off_session: false,
+        confirm: true,
+        receipt_email: email,
+        description: `${product.name} (${size})`,
+      },
+      { idempotencyKey },
+    );
 
     if (paymentIntent.status !== 'succeeded') {
       return NextResponse.json({ error: 'Payment not successful.' }, { status: 400 });
     }
 
-    // Deduct inventory
-    live.inventoryRemaining -= 1;
-    live.salesCompleted = (live.salesCompleted || 0) + 1;
-    await saveLiveState(redis, live);
+    // Deduct inventory. The card is already charged at this point, so a
+    // contended lock still falls back to an unlocked (best-effort) decrement
+    // rather than silently leaving stock counts wrong.
+    const decrementInventory = async () => {
+      const inner = await getLiveProductState(redis, product, size);
+      inner.inventoryRemaining = Math.max(0, Number(inner.inventoryRemaining || 0) - 1);
+      inner.salesCompleted = (inner.salesCompleted || 0) + 1;
+      await saveLiveState(redis, inner);
+      return inner;
+    };
+    const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
+    if (!lockResult.ok) console.warn('[checkout/direct] inventory lock contended, falling back to unlocked decrement', product.id, size);
+    if (!lockResult.ok) await decrementInventory();
 
     // Archive the sale
     const customerIdForArchive = typeof paymentIntent.customer === 'string'

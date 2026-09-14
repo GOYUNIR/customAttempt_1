@@ -537,10 +537,30 @@ export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liv
   return { seeded, liveSeeded, verifyCount };
 }
 
-export async function GET(request: Request) {
+// This performs a write (seeds the default catalog when Redis is empty), so
+// it must never be a GET handler — a GET's side effects are reachable by a
+// same-site top-level navigation (a clicked link) under SameSite=Lax cookies,
+// which is a live CSRF vector for anything state-changing. The admin portal
+// now calls this with POST; GET is kept only to tell an old client to retry.
+export async function GET() {
+  return NextResponse.json(
+    { error: 'Use POST to seed the store.' },
+    { status: 405, headers: { Allow: 'POST' } },
+  );
+}
+
+export async function POST(request: Request) {
   try {
-    const url = new URL(request.url);
-    const password = url.searchParams.get('password') || '';
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch {
+      body = {};
+    }
+    // The password may still arrive in the body (JSON POST), never a query
+    // string — a query-string password leaks into server logs, browser
+    // history and Referer headers.
+    const password = String(body?.password || '');
 
     if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });

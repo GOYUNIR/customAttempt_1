@@ -104,12 +104,48 @@ export async function markDedupeMember(
   }
 }
 
+/**
+ * Atomically claim `member` in a dedupe set: returns true ONLY for the one
+ * caller that wins the race, even when two requests for the same member
+ * (e.g. a Stripe webhook redelivered while the first delivery is still
+ * in-flight) arrive concurrently. `isDedupeMember`+`markDedupeMember` used
+ * to be called as two separate steps with a window in between where both
+ * concurrent callers could see "not yet processed" and both fulfill the
+ * order — this closes that window using a per-member TTL string key, whose
+ * `INCR` is atomic on every storage backend (see lib/storage/types.ts).
+ * The key self-expires after `windowMs`, so it never needs a sweep.
+ */
+export async function claimDedupeMember(
+  redis: StorageClient,
+  key: string,
+  member: string,
+  windowMs: number,
+): Promise<boolean> {
+  try {
+    if (await isDedupeMember(redis, key, member)) return false;
+    const claimKey = `cache:dedupe-claim:${key}:${member}`;
+    const count = await redis.incr(claimKey);
+    if (count !== 1) return false;
+    await redis.expire(claimKey, Math.max(1, Math.ceil(windowMs / 1000)));
+    await markDedupeMember(redis, key, member, windowMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Convenience wrappers for the two named dedupe keys. */
 export function markProcessedSession(redis: StorageClient, sessionId: string): Promise<void> {
   return markDedupeMember(redis, PROCESSED_SESSIONS_KEY, sessionId, DEDUPE_PROCESSED_WINDOW_MS);
 }
 export function isProcessedSession(redis: StorageClient, sessionId: string): Promise<boolean> {
   return isDedupeMember(redis, PROCESSED_SESSIONS_KEY, sessionId);
+}
+/** Atomic version of the isProcessedSession+markProcessedSession pair — use
+ *  this at the top of a webhook/session handler instead of the two-step
+ *  check-then-mark, which is racy under concurrent/redelivered requests. */
+export function claimProcessedSession(redis: StorageClient, sessionId: string): Promise<boolean> {
+  return claimDedupeMember(redis, PROCESSED_SESSIONS_KEY, sessionId, DEDUPE_PROCESSED_WINDOW_MS);
 }
 export function markEntryEmailSent(redis: StorageClient, emailDedupe: string): Promise<void> {
   return markDedupeMember(redis, ENTRY_EMAIL_SENT_KEY, emailDedupe, DEDUPE_EMAIL_WINDOW_MS);

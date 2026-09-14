@@ -411,12 +411,35 @@ export async function middleware(request: NextRequest) {
 
   // ── MAINTENANCE MODE (unauthenticated visitors) ───────────────────────────
   // When MAINTENANCE_MODE is on, page requests redirect to /maintenance unless
-  // the visitor carries valid admin Basic Auth (an authenticated admin can view
-  // the public site normally). API routes + static assets stay reachable.
+  // the visitor is a signed-in admin (an authenticated admin can view the
+  // public site normally). API routes + static assets stay reachable.
+  //
+  // This used to check ONLY raw Basic Auth, which is unreachable by normal
+  // browser navigation for the two other fully-supported sign-in paths: the
+  // in-site /admin/login form + emailed 2FA device cookie, and the Supabase
+  // super-admin session. An operator who set up the store WITHOUT
+  // ADMIN_BASIC_AUTH_PASSWORD (a supported config — see resolveAdminPassword)
+  // had literally no way to preview the live site during maintenance.
   if (maintenanceModeEnabled()) {
     const isApi = pathname.startsWith('/api/');
     if (!isApi && !isMaintenanceExemptPath(pathname)) {
-      const authed = verifyBasicAuth(request.headers.get('authorization'));
+      let authed = verifyBasicAuth(request.headers.get('authorization'));
+      if (!authed) {
+        const deviceToken = adminDeviceTokenFromRequest(request);
+        const authToken = adminAuthTokenFromRequest(request);
+        if (deviceToken || authToken) {
+          const redis = createStorageClient();
+          if (redis) {
+            try {
+              authed =
+                (Boolean(deviceToken) && (await adminDeviceValid(redis, deviceToken))) ||
+                (Boolean(authToken) && Boolean(await adminAuthValid(redis, authToken)));
+            } catch {
+              authed = false;
+            }
+          }
+        }
+      }
       if (!authed) {
         const url = request.nextUrl.clone();
         url.pathname = '/maintenance';

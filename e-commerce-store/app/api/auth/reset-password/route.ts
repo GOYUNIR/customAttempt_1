@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes, scryptSync } from 'crypto';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
+import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey, AUTH_SESSION_PREFIX } from '@/lib/server-config';
 import { isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -58,6 +58,21 @@ export async function POST(request: Request) {
     user.password = `${salt}:${hashPassword(password, salt)}`;
     await redis.hset(USERS_KEY, { [userId]: JSON.stringify(user) });
     await redis.del(resetKeyName);
+
+    // Invalidate every existing session for this user — "forgot password" is
+    // often used specifically to lock out someone who stole a session
+    // cookie, so a fresh reset must kill that cookie too, same as
+    // account/change-password does.
+    try {
+      const keys = await redis.keys(`${AUTH_SESSION_PREFIX}*`);
+      for (const key of keys) {
+        const sessionRaw = await redis.get(key);
+        const session = safeParseRedisItem<any>(sessionRaw);
+        if (session && String(session.userId || '') === userId) {
+          await redis.del(key);
+        }
+      }
+    } catch {}
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

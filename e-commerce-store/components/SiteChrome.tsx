@@ -1308,7 +1308,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                 <div style={{ fontSize: 11, letterSpacing: '3px', textTransform: 'uppercase', color: liveTheme.accentBlue || '#7dd3fc' }}>{actionTitle}</div>
                 <div style={{ fontSize: 22, fontFamily: 'Georgia, Times New Roman, serif', color: drawerText }}>{String(copySettings.cartTitle || '').trim() || 'Review items'}</div>
               </div>
-              <button onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: drawerTextMuted, borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
+              <button type="button" onClick={() => setCartOpen(false)} style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: drawerTextMuted, borderRadius: 999, padding: '8px 10px', cursor: 'pointer' }}>Close</button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1345,6 +1345,7 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: drawerText }}>${Number(item.price || 0).toFixed(2)}</div>
                         <button
+                          type="button"
                           onClick={() => {
                             const next = cart.filter((_, currentIndex) => currentIndex !== index);
                             setCart(next);
@@ -1416,13 +1417,14 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
                         placeholder="Promo code (optional)"
                         style={{ flex: 1, minWidth: 150, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(0,0,0,0.3)', color: drawerText, fontSize: 12 }}
                       />
-                      <button onClick={() => setShowPromoField(false)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
+                      <button type="button" onClick={() => setShowPromoField(false)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer' }}>Close</button>
                     </div>
                   ) : promoCode ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#86efac' }}>✓ {promoCode} applied</span>
-                      <button onClick={() => setShowPromoField(true)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Change</button>
+                      <button type="button" onClick={() => setShowPromoField(true)} style={{ border: 'none', background: 'transparent', color: drawerTextMuted, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>Change</button>
                       <button
+                        type="button"
                         onClick={() => {
                           setPromoCode('');
                           window.localStorage.removeItem('goyunir-promo-code');

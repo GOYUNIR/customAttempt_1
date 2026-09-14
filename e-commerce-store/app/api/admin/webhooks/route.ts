@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, createRedisClient } from '@/lib/server-config';
-import { isSuperAdminSession } from '@/lib/admin-verify';
+import { createRedisClient } from '@/lib/server-config';
+import { adminAuthorized } from '@/lib/admin-verify';
 import { safeParseRedisItem } from '@/lib/server-config';
 import { WEBHOOK_CONFIG_KEY, WEBHOOK_QUEUE_KEY } from '@/lib/redis-keys';
 import { flushWebhookQueue, WEBHOOK_EVENTS } from '@/lib/webhooks';
 
 export const dynamic = 'force-dynamic';
 
-async function authorized(request: Request): Promise<boolean> {
-  if (adminRequestAuthorized(request)) return true;
-  return isSuperAdminSession(request);
-}
+// Was a bespoke check that only accepted the Basic-Auth password or a
+// super-admin session — it silently 401'd an ordinary admin who signed in
+// through the normal in-site login + emailed 2FA flow (a verified device
+// cookie), which every other /api/admin route accepts via adminAuthorized().
+const authorized = adminAuthorized;
 
 /** Parse the stored subscribers map (event → URL). */
 function parseSubscribers(raw: unknown): Record<string, string> {

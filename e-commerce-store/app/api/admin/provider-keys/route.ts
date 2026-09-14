@@ -77,7 +77,16 @@ async function authorized(request: Request, password: string): Promise<boolean> 
   return false;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Defense-in-depth: every other route in this file (and the rest of the
+  // admin API) re-checks auth at the route level instead of relying solely
+  // on middleware.ts's blanket /api/admin gate. This GET was the one
+  // exception — not currently exploitable (the response is already scrubbed
+  // by toPublicSummary), but a future middleware change would have silently
+  // turned it into an unauthenticated settings-provider disclosure.
+  if (!(await authorized(request, ''))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   const settings = await getPlatformSettings({ force: true }).catch(() => null);
   return NextResponse.json({ ok: true, summary: toPublicSummary(settings) });
 }

@@ -12,6 +12,28 @@ const ACCEPTED_VIDEO_EXTS = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm']);
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6MB — photos are auto-compressed
 const MAX_VIDEO_BYTES = 18 * 1024 * 1024; // 18MB — videos are stored as-is
 
+/**
+ * Strip the script-execution surface from an uploaded SVG before it's stored
+ * as a `data:` URL. Unlike raster formats, SVG is XML that can carry
+ * `<script>`, event-handler attributes (`onload`, `onclick`, …) and
+ * `javascript:` URIs — any admin (including a lower-trust "staff" account,
+ * see lib/rbac.ts) could otherwise plant stored XSS that fires in a
+ * higher-privileged admin's session the moment the image renders. This is a
+ * pragmatic allowlist-free strip (no DOMPurify dependency in this project),
+ * not a full XML-aware sanitizer — it removes the known executable surface
+ * rather than parsing/rewriting the tree.
+ */
+function sanitizeSvg(svgText: string): string {
+  return svgText
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script[^>]*\/?>(?![\s\S]*<\/script>)/gi, '')
+    .replace(/\son[a-z]+\s*=\s*"(?:[^"\\]|\\.)*"/gi, '')
+    .replace(/\son[a-z]+\s*=\s*'(?:[^'\\]|\\.)*'/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    .replace(/(href|xlink:href)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi, '');
+}
+
 function mediaKind(file: File): 'image' | 'video' | null {
   const name = String(file.name || '').toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop() || '' : '';
@@ -63,8 +85,11 @@ export async function POST(request: Request) {
     // Read the file as base64 data URL — the same storage format the product
     // page gallery renders (data: URLs for both images and videos).
     const buffer = await file.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
     const mimeType = (file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg')).toLowerCase();
+    const isSvg = mimeType.includes('svg') || String(file.name || '').toLowerCase().endsWith('.svg');
+    const base64 = isSvg
+      ? Buffer.from(sanitizeSvg(Buffer.from(buffer).toString('utf-8')), 'utf-8').toString('base64')
+      : Buffer.from(buffer).toString('base64');
     const dataUrl = `data:${mimeType};base64,${base64}`;
 
     // Get the current product from Redis

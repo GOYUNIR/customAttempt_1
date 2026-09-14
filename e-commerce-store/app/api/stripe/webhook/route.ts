@@ -19,7 +19,8 @@ import {
   promoPendingKey,
   poolKey,
 } from '@/lib/server-config';
-import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { markProcessedSession, claimProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { withRedisLock } from '@/lib/redis-lock';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -181,9 +182,12 @@ export async function POST(request: Request) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const sessionId = session.id;
-    const already = await isProcessedSession(redis, sessionId);
+    // Atomic claim: closes the window where a Stripe redelivery arriving
+    // while the first delivery is still mid-flight could double-fulfill an
+    // order (double inventory decrement, double reward points, etc).
+    const claimed = await claimProcessedSession(redis, sessionId);
 
-    if (already) {
+    if (!claimed) {
       return NextResponse.json({ received: true, skipped: 'already_processed' });
     }
 
@@ -454,10 +458,24 @@ export async function POST(request: Request) {
           const thisSize = String(item.size || 'Standard');
           const qty = Math.max(1, Number(item.quantity || 1));
           const priceCents = Math.max(0, Number(item.priceCents || 0));
-          const live = await getLiveProductState(redis, thisProduct, thisSize);
-          live.inventoryRemaining = Math.max(0, Number(live.inventoryRemaining || 0) - qty);
-          live.salesCompleted = (live.salesCompleted || 0) + qty;
-          await saveLiveState(redis, live);
+          // Atomic-ish: serialize concurrent decrements for this product+size
+          // so two paid orders can never both read the same stock count and
+          // both write back a decrement — that's how you oversell the last
+          // unit (charged customer, no inventory to ship).
+          const decrementInventory = async () => {
+            const inner = await getLiveProductState(redis, thisProduct, thisSize);
+            inner.inventoryRemaining = Math.max(0, Number(inner.inventoryRemaining || 0) - qty);
+            inner.salesCompleted = (inner.salesCompleted || 0) + qty;
+            await saveLiveState(redis, inner);
+            return inner;
+          };
+          const lockResult = await withRedisLock(redis, `inventory:${thisProduct.id}:${thisSize}`, decrementInventory);
+          // The customer is already charged at this point — never skip the
+          // decrement outright just because the lock was contended. Fall
+          // back to an unlocked (best-effort) decrement rather than leaving
+          // inventory silently wrong.
+          if (!lockResult.ok) console.warn('[webhook] inventory lock contended, falling back to unlocked decrement', thisProduct.id, thisSize);
+          const live = lockResult.ok ? lockResult.value : await decrementInventory();
           if (live.inventoryRemaining <= 0) {
             thisProduct.soldOutAt = thisProduct.soldOutAt || new Date().toISOString();
             await redis.hset(PRODUCTS_KEY, { [thisProduct.id]: JSON.stringify(thisProduct) });
@@ -483,12 +501,16 @@ export async function POST(request: Request) {
       } else {
         const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
         if (product && email) {
-          const live = await getLiveProductState(redis, product, size);
-          if (live.inventoryRemaining > 0) {
-            live.inventoryRemaining -= 1;
-          }
-          live.salesCompleted = (live.salesCompleted || 0) + 1;
-          await saveLiveState(redis, live);
+          const decrementInventory = async () => {
+            const inner = await getLiveProductState(redis, product, size);
+            if (inner.inventoryRemaining > 0) inner.inventoryRemaining -= 1;
+            inner.salesCompleted = (inner.salesCompleted || 0) + 1;
+            await saveLiveState(redis, inner);
+            return inner;
+          };
+          const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
+          if (!lockResult.ok) console.warn('[webhook] inventory lock contended, falling back to unlocked decrement', product.id, size);
+          const live = lockResult.ok ? lockResult.value : await decrementInventory();
           if (live.inventoryRemaining <= 0) {
             product.soldOutAt = product.soldOutAt || new Date().toISOString();
             await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });

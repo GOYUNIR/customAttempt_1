@@ -3,6 +3,7 @@ import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, arch
 import { sendAccountUpdateEmail } from '@/lib/email';
 import { getSessionUser } from '@/lib/session-auth';
 import { appendAudit } from '../../admin/audit/route';
+import { withRedisLock } from '@/lib/redis-lock';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,12 +43,14 @@ export async function POST(request: Request) {
     if (promoCode) {
       try {
         await redis.srem(promoUsedKey(promoCode), email);
-        const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
-        const promo = JSON.parse(typeof raw === 'string' ? raw : 'null');
-        if (promo && promo.uses > 0) {
-          promo.uses = Math.max(0, promo.uses - 1);
-          await redis.hset(PROMO_CODES_KEY, { [promoCode]: JSON.stringify(promo) });
-        }
+        await withRedisLock(redis, `promo-uses:${promoCode}`, async () => {
+          const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
+          const promo = JSON.parse(typeof raw === 'string' ? raw : 'null');
+          if (promo && promo.uses > 0) {
+            promo.uses = Math.max(0, promo.uses - 1);
+            await redis.hset(PROMO_CODES_KEY, { [promoCode]: JSON.stringify(promo) });
+          }
+        });
       } catch {}
     }
 

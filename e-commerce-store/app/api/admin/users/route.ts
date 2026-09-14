@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRedisClient, safeParseRedisItem, USERS_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { sanitizeRole } from '@/lib/rbac';
 import { randomBytes, scryptSync } from 'crypto';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -91,7 +92,12 @@ export async function POST(request: Request) {
     if (!email) return NextResponse.json({ error: 'Email is required' }, { status: 400 });
 
     const rewards = Math.max(0, Number(body?.rewards ?? 0) || 0);
-    const role = String(body?.role || 'customer').trim() || 'customer';
+    // The canonical role sanitizer (also used by the RBAC gate) — never trust
+    // a free-text role string from the client verbatim.
+    const role = body?.role === undefined ? 'customer' : sanitizeRole(body?.role);
+    if (role === null) {
+      return NextResponse.json({ error: 'Invalid role.' }, { status: 400 });
+    }
 
     if (action === 'create') {
       const alreadyExists = Object.values(users).some((user) => user.email === email);

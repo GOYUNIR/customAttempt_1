@@ -3568,7 +3568,7 @@ export default function AdminPortal() {
     if (!confirm('This will seed default placeholder products into Redis. Existing products will NOT be overwritten. Continue?')) return;
     setProductActionLoading(true);
     try {
-      const res = await adminFetch('/api/admin/seed');
+      const res = await adminFetch('/api/admin/seed', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setProductMsg('✅ ' + data.message);

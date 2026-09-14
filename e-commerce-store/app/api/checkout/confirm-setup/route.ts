@@ -17,7 +17,7 @@ import {
   waitlistPoolKey,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
-import { markProcessedSession, isProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { markProcessedSession, claimProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -382,8 +382,11 @@ export async function POST(request: Request) {
 
     const refPrefix = await getRefPrefix(redis);
 
-    const already = await isProcessedSession(redis, sessionId);
-    if (already) {
+    // Atomic claim — closes the race where this endpoint (client polling
+    // after payment) and the Stripe webhook both fulfill the same setup
+    // session because they both saw isProcessedSession()===false at once.
+    const claimed = await claimProcessedSession(redis, sessionId);
+    if (!claimed) {
       let existingPromo = null;
       let existingDiscount = 0;
       try {

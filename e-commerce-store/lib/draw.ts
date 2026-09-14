@@ -10,11 +10,14 @@ import {
   resetPoolAndBlocks,
   LAST_DRAW_KEY,
   loadProducts,
+  getLiveProductState,
+  saveLiveState,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
 import { poolKey, intentPoolKey } from '@/lib/redis-keys';
 import { buildOrderRef } from '@/lib/order-ref';
+import { withRedisLock } from '@/lib/redis-lock';
 
 export interface DrawResult {
   email: string;
@@ -62,7 +65,14 @@ export async function runDropDraw(request: Request | NextRequest) {
         .split(',')
         .map((item) => Number(item.trim()))
         .filter((item) => Number.isFinite(item) && item >= 0);
-      const targetLimit = Math.max(0, parsedWinnerTiers[0] ?? getWinnerCount(GOYUNIR_STORE_SUITE, size));
+      const configuredLimit = Math.max(0, parsedWinnerTiers[0] ?? getWinnerCount(GOYUNIR_STORE_SUITE, size));
+      // The draw must never charge more winners than physical stock, even if
+      // `winnerTiers` is misconfigured (e.g. stale after a partial sell-through
+      // on another channel) — every other checkout path treats
+      // `inventoryRemaining` as the source of truth, the draw was the one
+      // path that didn't.
+      const live = await getLiveProductState(redis, product, size);
+      const targetLimit = Math.max(0, Math.min(configuredLimit, Number(live.inventoryRemaining) || 0));
       let successCount = 0;
 
       for (const entry of parsedPool) {
@@ -89,19 +99,35 @@ export async function runDropDraw(request: Request | NextRequest) {
         let directChargeCompleted = false;
         if (stripe && customerId && paymentMethodId) {
           try {
-            const paymentIntent = await stripe.paymentIntents.create({
-              amount: priceCents,
-              currency: 'usd',
-              customer: customerId,
-              payment_method: paymentMethodId,
-              off_session: true,
-              confirm: true,
-              metadata: { product: product.name, size, email },
-              statement_descriptor_suffix: size.slice(0, 10),
-            });
+            // Idempotency key so a re-triggered/overlapping draw run (manual
+            // retrigger racing the cron, or `force=1`) can never charge the
+            // same winner's card twice — Stripe dedupes retries of this key.
+            const idempotencyKey = `draw:${product.id}:${size}:${email}:${customerId}`;
+            const paymentIntent = await stripe.paymentIntents.create(
+              {
+                amount: priceCents,
+                currency: 'usd',
+                customer: customerId,
+                payment_method: paymentMethodId,
+                off_session: true,
+                confirm: true,
+                metadata: { product: product.name, size, email },
+                statement_descriptor_suffix: size.slice(0, 10),
+              },
+              { idempotencyKey },
+            );
             resultsSummary.push({ email, scent: product.name, size, checkout: `charged:${paymentIntent.id}`, status: 'charged', message: 'Auto-charge succeeded.' });
             successCount += 1;
             directChargeCompleted = true;
+            const decrementInventory = async () => {
+              const inner = await getLiveProductState(redis, product, size);
+              inner.inventoryRemaining = Math.max(0, Number(inner.inventoryRemaining || 0) - 1);
+              inner.salesCompleted = (inner.salesCompleted || 0) + 1;
+              await saveLiveState(redis, inner);
+              return inner;
+            };
+            const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
+            if (!lockResult.ok) await decrementInventory();
             const winnerOrderRef = String(entry.orderRef || '') || buildOrderRef(email, product.name, size);
             await archiveEntry(redis, {
               email, variant: product.name, size, shippingAddress,
