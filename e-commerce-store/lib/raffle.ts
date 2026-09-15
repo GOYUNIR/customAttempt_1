@@ -155,6 +155,22 @@ export async function executeDraw(tenantId: string, variantId: string, winnerCou
   };
 }
 
+/** Find a pending entry's id by tenant/variant/email — used by
+ *  lib/auto-draw.ts's Postgres outcome mirror to resolve which
+ *  `raffle_entries` row a Redis-decided winner/decline corresponds to
+ *  (the row itself was dual-written by the checkout webhook, Phase 2).
+ *  Returns null when no matching pending row exists (not dual-written yet,
+ *  or already decided) — the caller skips the mirror, never errors. */
+export async function findPendingEntryId(tenantId: string, variantId: string, email: string): Promise<string | null> {
+  assertSupabase();
+  const { serviceRoleKey } = readSupabaseEnv();
+  const rows = (await supabaseRestFetch(
+    `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}&email=eq.${encodeURIComponent(String(email || '').trim().toLowerCase())}&status=eq.pending&select=id&limit=1`,
+    { key: serviceRoleKey },
+  )) as Array<{ id: string }>;
+  return rows?.[0]?.id || null;
+}
+
 /** Mark a winning entry as charged (after a successful Stripe charge) or
  *  declined (after a failed one) — the caller (webhook/charge route) still
  *  owns the actual Stripe call; this only records the outcome. */

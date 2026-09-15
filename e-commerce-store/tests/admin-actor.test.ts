@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { actorHasFullAdminAccess, actorHasSalesAccess } from '../lib/admin-actor.ts';
+import { actorHasFullAdminAccess, actorHasSalesAccess, actorHasPlatformAdminAccess, actorHasMerchantAccess } from '../lib/admin-actor.ts';
 
 test('super_admin and owner have full admin access', () => {
   assert.equal(actorHasFullAdminAccess({ role: 'super_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
@@ -47,4 +47,30 @@ test('a plain owner or staff admin session is BLOCKED from the Sales Hub (proper
 
 test('no session (null actor) never has Sales Hub access', () => {
   assert.equal(actorHasSalesAccess(null), false);
+});
+
+test('actorHasPlatformAdminAccess (admin.site.com): super_admin only — owner is BLOCKED, unlike actorHasFullAdminAccess', () => {
+  assert.equal(actorHasPlatformAdminAccess({ role: 'super_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+  assert.equal(actorHasPlatformAdminAccess({ role: 'owner', email: 'a@b.com', impersonating: false, tenantId: null }), false);
+  assert.equal(actorHasPlatformAdminAccess({ role: 'staff', email: 'a@b.com', impersonating: false, tenantId: null }), false);
+  assert.equal(actorHasPlatformAdminAccess(null), false);
+});
+
+test('actorHasPlatformAdminAccess: a super_admin in impersonation mode still loses platform-admin access', () => {
+  assert.equal(actorHasPlatformAdminAccess({ role: 'super_admin', email: 'a@b.com', impersonating: true, tenantId: 't1' }), false);
+});
+
+test('actorHasMerchantAccess (app.site.com): owner/staff/super_admin all pass', () => {
+  assert.equal(actorHasMerchantAccess({ role: 'owner', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+  assert.equal(actorHasMerchantAccess({ role: 'staff', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+  assert.equal(actorHasMerchantAccess({ role: 'super_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+});
+
+test('actorHasMerchantAccess: a sales-only role is blocked; impersonation IS allowed (it acts on a merchant store)', () => {
+  assert.equal(actorHasMerchantAccess({ role: 'sales', email: 'a@b.com', impersonating: false, tenantId: null }), false);
+  assert.equal(actorHasMerchantAccess({ role: 'staff', email: 'a@b.com', impersonating: true, tenantId: 't1' }), true);
+});
+
+test('actorHasMerchantAccess: no session never has access', () => {
+  assert.equal(actorHasMerchantAccess(null), false);
 });

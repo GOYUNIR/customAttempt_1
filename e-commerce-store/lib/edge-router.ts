@@ -4,27 +4,29 @@
  *
  * This template runs single-tenant (see lib/tenant-context.ts's header) and
  * deploys as ONE Cloudflare Worker (wrangler.jsonc) — there is no separate
- * merchant-control-center app to route "app.site.com" to yet, so
- * `classifyHost` intentionally maps `admin.` AND `app.` to the same 'admin'
- * portal (both serve app/admin today). Its real, live job this phase is
- * distinguishing the NEW `sales.` subdomain (app/sales, the Sales Hub) from
- * everything else, and giving `middleware.ts` + the admin/sales session
- * cookie-setters a single source of truth for cookie-domain partitioning —
- * NOT inventing routes to apps that don't exist.
+ * merchant-control-center APP to route "app.site.com" to yet, so `admin.`
+ * and `app.` both serve the same `app/admin` route tree today. They DO get
+ * distinct `Portal` values ('admin' vs 'merchant') — not because the tree
+ * differs, but because the ROLE required to use it differs per host (zero-
+ * trust portal RBAC: admin.site.com is super_admin-only, app.site.com is
+ * owner/staff/super_admin) — see `app/admin/layout.tsx`. `isPortalPathAllowed`
+ * below is the coarse, host-level half of that; the role check itself needs
+ * `lib/admin-verify.ts` (Node-only), so it happens at the route/layout level.
  *
  * `PLATFORM_ROOT_DOMAIN` is unset by default (the common single-domain
  * deployment): every function below degrades to today's behavior (host-only
- * cookies, permissive 'storefront' classification) so nothing breaks for a
- * deployment that hasn't configured subdomain DNS. Setting it opts in to
- * real subdomain isolation — see DEPLOYMENT.md's "Edge router / portal DNS
- * setup" section for the exact records to create.
+ * cookies, permissive 'storefront' classification, every portal path
+ * allowed) so nothing breaks for a deployment that hasn't configured
+ * subdomain DNS. Setting it opts in to real subdomain isolation — see
+ * DEPLOYMENT.md's "Edge router / portal DNS setup" section for the exact
+ * records to create.
  *
  * ZERO imports (mirrors lib/csrf.ts / lib/rbac.ts) so this loads in the Edge
  * middleware runtime AND under `node --test` with no adapter needed.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-export type Portal = 'marketing' | 'sales' | 'admin' | 'storefront';
+export type Portal = 'marketing' | 'sales' | 'admin' | 'merchant' | 'storefront';
 
 /** Which portal a Host header belongs to, given the configured root domain.
  *  Falls back to 'storefront' for anything unrecognized (localhost, a
@@ -39,21 +41,50 @@ export function classifyHost(host: string, rootDomain: string | undefined): Port
 
   const subdomain = normalizedHost.slice(0, -(root.length + 1));
   if (subdomain === 'sales') return 'sales';
-  if (subdomain === 'admin' || subdomain === 'app') return 'admin';
+  if (subdomain === 'admin') return 'admin';
+  if (subdomain === 'app') return 'merchant';
   return 'storefront';
 }
 
 /** The `Set-Cookie` `domain` attribute for a portal's session cookies —
  *  `undefined` when no root domain is configured, meaning the cookie stays
  *  host-only (today's behavior, unchanged). A `storefront`/`marketing`
- *  cookie is never domain-scoped here — only the admin/sales session
- *  cookies this phase partitions (see lib/portal-cookies.ts). */
+ *  cookie is never domain-scoped here — only the admin/sales/merchant
+ *  session cookies this phase partitions (see lib/portal-cookies.ts). */
 export function cookieDomainForPortal(portal: Portal, rootDomain: string | undefined): string | undefined {
   const root = String(rootDomain || '').trim().toLowerCase().replace(/\.$/, '');
   if (!root) return undefined;
   if (portal === 'admin') return `admin.${root}`;
+  if (portal === 'merchant') return `app.${root}`;
   if (portal === 'sales') return `sales.${root}`;
   return undefined;
+}
+
+/**
+ * Coarse, Edge-safe "is this Host allowed to reach this path at all" check —
+ * the host-level half of zero-trust portal isolation; the per-role half
+ * (super_admin vs owner/staff vs sales_*) runs at the route/layout level
+ * (`app/admin/layout.tsx`, `app/sales/page.tsx`) since it needs Node's
+ * `crypto` (`lib/admin-verify.ts`), unavailable here.
+ *
+ * `admin` and `merchant` both satisfy `/admin*` — they serve the SAME route
+ * tree today (see this file's header); only `/sales*` is portal-exclusive
+ * (`sales`, plus `admin` for platform oversight). Every other path is
+ * always allowed — this function only ever narrows the two portal trees,
+ * never the storefront or marketing pages.
+ *
+ * No rootDomain configured → always true (today's behavior, unchanged).
+ * This is also what guarantees no cross-host redirect loop is possible:
+ * every caller either gets `true` (proceed) or `false` (the caller returns
+ * a hard 404 — see middleware.ts — never a redirect to a different host).
+ */
+export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain: string | undefined): boolean {
+  if (!rootDomain) return true;
+  const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+  const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
+  if (isAdminPath) return portal === 'admin' || portal === 'merchant';
+  if (isSalesPath) return portal === 'sales' || portal === 'admin';
+  return true;
 }
 
 /** Whether a cross-origin request's `Origin` header may be treated as

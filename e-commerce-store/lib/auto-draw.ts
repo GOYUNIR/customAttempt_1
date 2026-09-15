@@ -69,9 +69,37 @@ import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-r
 import { productNameFromPoolKey } from '@/lib/draw-keys';
 import { dropTimestampToMs, formatStoreWallClock, splitEntriesByCycleEnd } from '@/lib/drop-timestamps';
 import { resolveStripeClient } from '@/services/payment/factory';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { resolveVariantId } from '@/lib/inventory';
+import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
 
 
 export { productNameFromPoolKey };
+
+/**
+ * Best-effort Postgres mirror of a Redis-decided draw outcome — NOT a
+ * decision authority. Redis (above, unchanged) decides who wins and
+ * actually charges the card; this only keeps `raffle_entries` (dual-written
+ * in real time by the checkout webhook, Phase 2) in sync with what really
+ * happened, so it's ready for a future, carefully-tested cutover of the
+ * decision logic itself. Never throws, never blocks a real charge — skips
+ * silently when the flag is off, the variant/entry isn't dual-written yet,
+ * or Postgres is unreachable.
+ */
+async function mirrorDrawOutcomeToPostgres(externalProductId: string, size: string, email: string, outcome: 'charged' | 'declined'): Promise<void> {
+  if (!isPostgresPrimaryEnabled()) return;
+  try {
+    const tenantId = await ensureDefaultTenant();
+    const variantId = await resolveVariantId(tenantId, externalProductId, size);
+    if (!variantId) return;
+    const entryId = await findPendingEntryId(tenantId, variantId, email);
+    if (!entryId) return;
+    await markRaffleEntryOutcome(tenantId, entryId, outcome);
+  } catch (err) {
+    console.error('[auto-draw] Postgres outcome mirror failed (non-fatal, mirror only)', (err as Error)?.message || err);
+  }
+}
 
 /** How recently a pool must have been drawn before a client trigger will re-run
  * it. Stops a stampede of "timer hit zero" pings from re-drawing the same pool
@@ -551,6 +579,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               id: customerId, registeredAt: new Date().toISOString(), type: 'WINNER_CHARGED',
               shippingStatus: 'PENDING_FULFILLMENT', promoCode: promoCode || undefined, amountCents: priceCents, orderRef,
             });
+            await mirrorDrawOutcomeToPostgres(product.id, productSize, winnerEmail, 'charged');
 
             const userRewards = await lookupUserRewards(redis, winnerEmail);
 
@@ -581,6 +610,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
                 email: winnerEmail, variant: productName, size: productSize, shippingAddress,
                 id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
               });
+              await mirrorDrawOutcomeToPostgres(product.id, productSize, winnerEmail, 'declined');
             }
             processedWinners.push({ email: winnerEmail, product: productName, size: productSize, shippingAddress, status: 'MISSING_PAYMENT_METHOD', orderRef });
           }
@@ -592,6 +622,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               email: winnerEmail, variant: productName, size: productSize, shippingAddress,
               id: customerId || 'n/a', registeredAt: new Date().toISOString(), type: 'WINNER_DECLINED', promoCode: promoCode || undefined,
             });
+            await mirrorDrawOutcomeToPostgres(product.id, productSize, winnerEmail, 'declined');
           }
         }
       }

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { resolveAdminActorForPage } from '@/lib/admin-actor-from-headers';
 import { actorHasSalesAccess } from '@/lib/admin-actor';
+import { recordPlatformAudit } from '@/lib/platform-audit';
 import SalesHubView from '@/components/sales/SalesHubView';
 
 /**
@@ -20,6 +21,18 @@ import SalesHubView from '@/components/sales/SalesHubView';
 export default async function SalesHubPage() {
   const actor = await resolveAdminActorForPage();
   if (!actorHasSalesAccess(actor)) {
+    if (actor) {
+      // Authenticated but the wrong role — record it. (No actor at all means
+      // middleware's coarse gate somehow let an unauthenticated request
+      // through, which would itself be a bug worth an audit trail catching,
+      // but there's no actor identity to attach to that case.)
+      await recordPlatformAudit({
+        action: 'unauthorized_portal_access',
+        actor: actor.email || undefined,
+        tenantId: actor.tenantId,
+        detail: { portal: 'sales', role: actor.role, impersonating: actor.impersonating },
+      });
+    }
     redirect('/admin?error=sales_access_required');
   }
   return <SalesHubView />;

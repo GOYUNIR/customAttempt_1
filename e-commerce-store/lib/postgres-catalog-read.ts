@@ -15,16 +15,17 @@
  * `sanitizeProduct`/`mergePublicConfig` run completely unchanged. Only the
  * DATA SOURCE swaps.
  *
- * HONEST LIMITATION: the Postgres schema (`products`/`product_variants`)
- * only captures a subset of what the Redis catalog record carries — name,
- * slug, description, price, checkout mode, stock. It does NOT model images,
- * tagline, notes, per-product copy overrides, custom drop schedules, or
- * sampler configs — those are storefront-authoring fields with no
- * relational home (same reasoning `lib/postgres-read-fallback.ts`'s header
- * already gives for config data). A Postgres-primary storefront therefore
- * renders products with real name/price/stock/checkout-mode but blank
- * images/tagline/notes/schedule until a real authoring flow writes those
- * fields relationally — this is a genuine, stated tradeoff, not a bug.
+ * MARKETING/MEDIA (migration `00016`): `products.tagline`/`marketing_notes`/
+ * `media_gallery` and `product_variants.custom_schedule` give tagline,
+ * notes, the image gallery, and per-size drop-schedule overrides a real
+ * relational home, hydrated below into `sanitizeProduct()`'s expected
+ * `tagline`/`notes`/`images`/`crops`/`sizeConfigs` fields. Per-product copy
+ * overrides (urgency/status line text) and sampler configs still have no
+ * relational home — those stay blank until a future migration, same
+ * "genuine, stated tradeoff, not a bug" as before, just a narrower gap.
+ * `scripts/migrate-redis-to-supabase.ts` does NOT backfill these new
+ * columns this pass — they start empty (same as `tenant_store_config`)
+ * until the backfill script grows them or a real authoring UI writes them.
  *
  * `totalInventory` has no separate "original stock" concept in
  * `inventory_levels` (only `quantity_available`/`quantity_reserved`) — this
@@ -41,6 +42,7 @@
 
 import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { sizeConfigKey } from '@/lib/size-configs';
 import type { LiveStateRecord } from '@/lib/server-config';
 
 export type PostgresCatalogRead = {
@@ -53,8 +55,26 @@ export type PostgresCatalogRead = {
   socialOverride: Record<string, unknown>;
 };
 
-type PgProduct = { id: string; external_id: string | null; name: string; slug: string; description: string | null };
-type PgVariant = { id: string; product_id: string; option_label: string; price_cents: number; checkout_mode: string | null; shared_pool_id: string | null };
+type PgMediaItem = { url: string; crop?: { x: number; y: number; w: number; h: number } };
+type PgProduct = {
+  id: string;
+  external_id: string | null;
+  name: string;
+  slug: string;
+  description: string | null;
+  tagline: string | null;
+  marketing_notes: unknown;
+  media_gallery: PgMediaItem[] | null;
+};
+type PgVariant = {
+  id: string;
+  product_id: string;
+  option_label: string;
+  price_cents: number;
+  checkout_mode: string | null;
+  shared_pool_id: string | null;
+  custom_schedule: Record<string, unknown> | null;
+};
 type PgInventoryRow = { variant_id: string; quantity_available: number };
 type PgPool = { id: string; slug: string; quantity_available: number };
 
@@ -67,14 +87,14 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
     const key = serviceRoleKey;
 
     const products = (await supabaseRestFetch(
-      `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&status=eq.live&select=id,external_id,name,slug,description`,
+      `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&status=eq.live&select=id,external_id,name,slug,description,tagline,marketing_notes,media_gallery`,
       { key },
     )) as PgProduct[];
     if (!Array.isArray(products) || products.length === 0) return null;
 
     const productIds = products.map((p) => p.id);
     const variants = (await supabaseRestFetch(
-      `/product_variants?product_id=in.(${productIds.map(encodeURIComponent).join(',')})&select=id,product_id,option_label,price_cents,checkout_mode,shared_pool_id`,
+      `/product_variants?product_id=in.(${productIds.map(encodeURIComponent).join(',')})&select=id,product_id,option_label,price_cents,checkout_mode,shared_pool_id,custom_schedule`,
       { key },
     )) as PgVariant[];
 
@@ -105,11 +125,23 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
         const inv = inventoryByVariant.get(v.id);
         return sum + (inv ? Math.max(0, Number(inv.quantity_available) || 0) : 0);
       }, 0);
+      const media = Array.isArray(p.media_gallery) ? p.media_gallery : [];
+      const sizeConfigs: Record<string, { customDropSchedule?: Record<string, unknown> }> = {};
+      for (const v of myVariants) {
+        if (v.custom_schedule && typeof v.custom_schedule === 'object' && Object.keys(v.custom_schedule).length > 0) {
+          sizeConfigs[sizeConfigKey(v.option_label)] = { customDropSchedule: v.custom_schedule };
+        }
+      }
       return {
         id: p.external_id || p.id,
         name: p.name,
         slug: p.slug,
         desc: p.description || '',
+        tagline: p.tagline || '',
+        notes: Array.isArray(p.marketing_notes) ? p.marketing_notes : [],
+        images: media.map((m) => m?.url).filter((url): url is string => Boolean(url)),
+        crops: media.some((m) => m?.crop) ? media.map((m) => m?.crop || { x: 0, y: 0, w: 1, h: 1 }) : undefined,
+        sizeConfigs,
         isActive: true, // already filtered to status='live'
         totalInventory,
         priceCategories: myVariants.map((v) => ({

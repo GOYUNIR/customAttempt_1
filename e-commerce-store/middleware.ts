@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed } from '@/lib/edge-router';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -271,16 +271,13 @@ export async function middleware(request: NextRequest) {
   const portal = classifyHost(request.nextUrl.host, platformRootDomain);
   const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
   const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
-  if (platformRootDomain) {
-    if (isAdminPath && portal !== 'admin') {
-      return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-    }
-    // The single admin app also serves /sales today (see lib/edge-router.ts's
-    // header — no separate merchant-control-center app exists yet), so the
-    // admin host may reach it too; only a storefront/marketing host is blocked.
-    if (isSalesPath && portal !== 'sales' && portal !== 'admin') {
-      return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-    }
+  // Coarse, Edge-safe host/path gate — see lib/edge-router.ts's
+  // isPortalPathAllowed for why this can never produce a cross-host
+  // redirect loop (it only ever returns a hard 404 here, never a redirect).
+  // The finer per-ROLE split (super_admin vs owner/staff vs sales_*) runs
+  // at the route/layout level (app/admin/layout.tsx, app/sales/page.tsx).
+  if (!isPortalPathAllowed(pathname, portal, platformRootDomain)) {
+    return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
   }
 
   // The Setup Wizard is ALSO the "re-configure providers" page: once the
@@ -518,23 +515,29 @@ export async function middleware(request: NextRequest) {
   // counts as malformed (format only — a MISSING value is this template's
   // normal "not configured yet, use the Setup Wizard" state and is never
   // flagged here).
-  if (process.env.NODE_ENV === 'production' && productionEnvHasBlockingIssues()) {
+  {
     const method = request.method.toUpperCase();
     const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
-    const isExempt =
-      pathname.startsWith('/api/admin') ||
-      pathname.startsWith('/api/auth') ||
-      pathname.startsWith('/api/stripe') ||
-      pathname.startsWith('/api/cron') ||
-      pathname.startsWith('/api/checkout/cron-draw');
-    if (isWrite && pathname.startsWith('/api/') && !isExempt) {
-      return NextResponse.json(
-        {
-          error: 'ENV_MISCONFIGURED',
-          message: 'A production environment variable is malformed. Check /admin → Environment Status and fix it before writes can resume.',
-        },
-        { status: 503, headers: { 'Cache-Control': 'no-store' } },
-      );
+    // Cheap checks first (method, path) — productionEnvHasBlockingIssues()
+    // runs a Zod parse over process.env and previously ran unconditionally
+    // on EVERY request (including every GET/static-adjacent request) in
+    // production; it only matters for writes, so gate on that first.
+    if (isWrite && pathname.startsWith('/api/') && process.env.NODE_ENV === 'production' && productionEnvHasBlockingIssues()) {
+      const isExempt =
+        pathname.startsWith('/api/admin') ||
+        pathname.startsWith('/api/auth') ||
+        pathname.startsWith('/api/stripe') ||
+        pathname.startsWith('/api/cron') ||
+        pathname.startsWith('/api/checkout/cron-draw');
+      if (!isExempt) {
+        return NextResponse.json(
+          {
+            error: 'ENV_MISCONFIGURED',
+            message: 'A production environment variable is malformed. Check /admin → Environment Status and fix it before writes can resume.',
+          },
+          { status: 503, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
     }
   }
 
@@ -578,12 +581,25 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  // Pass the pathname through to Server Components (app/admin/layout.tsx's
+  // zero-trust portal RBAC needs it to exempt /admin/login and /admin/setup
+  // from the "no session → redirect to /admin/login" check — otherwise that
+  // check would redirect the login page to itself, an infinite loop). A
+  // Server Component layout has no direct access to the request path, so
+  // this is the standard way to thread it through.
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set('x-pathname', pathname);
+  return NextResponse.next({ request: { headers: forwardedHeaders } });
 }
 
 export const config = {
   // The middleware now ALSO enforces the license gate + maintenance mode on
   // public routes, so it must run beyond just /admin. It skips Next.js
-  // internals, media and static assets to stay cheap.
-  matcher: ['/((?!_next/|media/|favicon\\.ico|robots\\.txt|sitemap\\.xml).*)'],
+  // internals, media, and common static-file extensions served straight out
+  // of `public/` (images, fonts, icons, well-known files) to stay cheap —
+  // none of those paths are ever `/admin`/`/sales`/a write API, so running
+  // CSRF/portal/license/env checks against them was pure overhead.
+  matcher: [
+    '/((?!_next/|media/|\\.well-known/|favicon\\.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|gif|webp|avif|svg|ico|css|js|map|woff|woff2|ttf|eot|txt|xml|json)$).*)',
+  ],
 };

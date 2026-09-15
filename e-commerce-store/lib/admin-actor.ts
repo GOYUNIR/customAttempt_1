@@ -75,3 +75,34 @@ export function actorHasSalesAccess(actor: AdminActor | null): boolean {
     actor.role === 'deal_desk'
   );
 }
+
+/**
+ * Whether an actor may reach `admin.site.com` (the Platform Admin portal) —
+ * `super_admin` ONLY, never `owner`. This is deliberately STRICTER than
+ * `actorHasFullAdminAccess()` above, which treats `owner` as equivalent to
+ * `super_admin` for the existing path-based `/admin` gate — the zero-trust
+ * portal split asks for a real separation between platform-operator access
+ * (this) and merchant-operator access (`actorHasMerchantAccess()`, below),
+ * even though both currently render the same route tree. Excluded during
+ * impersonation, same reasoning as `actorHasFullAdminAccess()`.
+ */
+export function actorHasPlatformAdminAccess(actor: AdminActor | null): boolean {
+  if (!actor) return false;
+  if (actor.impersonating) return false;
+  return actor.role === 'super_admin';
+}
+
+/**
+ * Whether an actor may reach `app.site.com` (the Merchant Hub portal) —
+ * `owner`/`staff` (this store's own operators) or `super_admin` (platform
+ * oversight), unlike `actorHasFullAdminAccess()` which excludes `staff` for
+ * the highest-risk routes; the merchant hub's day-to-day actions (catalog,
+ * domains, orders) are not that tier. Impersonation is explicitly ALLOWED
+ * here (unlike `actorHasPlatformAdminAccess()`) — acting on a merchant's
+ * own store IS what Staff Impersonation exists for; app.site.com is exactly
+ * the surface an impersonation session is meant to use.
+ */
+export function actorHasMerchantAccess(actor: AdminActor | null): boolean {
+  if (!actor) return false;
+  return actor.role === 'super_admin' || actor.role === 'owner' || actor.role === 'staff';
+}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed } from '../lib/edge-router.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed } from '../lib/edge-router.ts';
 
 const ROOT = 'site.com';
 
@@ -14,9 +14,9 @@ test('classifyHost: the bare root domain is marketing', () => {
   assert.equal(classifyHost('site.com', ROOT), 'marketing');
 });
 
-test('classifyHost: admin. and app. both map to the admin portal (single-tenant, one admin app today)', () => {
+test('classifyHost: admin. and app. map to DISTINCT portals (same route tree, different required role)', () => {
   assert.equal(classifyHost('admin.site.com', ROOT), 'admin');
-  assert.equal(classifyHost('app.site.com', ROOT), 'admin');
+  assert.equal(classifyHost('app.site.com', ROOT), 'merchant');
 });
 
 test('classifyHost: sales. maps to the sales portal', () => {
@@ -41,8 +41,9 @@ test('cookieDomainForPortal: undefined when no root domain configured (host-only
   assert.equal(cookieDomainForPortal('sales', ''), undefined);
 });
 
-test('cookieDomainForPortal: scopes admin/sales cookies to their own subdomain', () => {
+test('cookieDomainForPortal: scopes admin/merchant/sales cookies to their own subdomain', () => {
   assert.equal(cookieDomainForPortal('admin', ROOT), 'admin.site.com');
+  assert.equal(cookieDomainForPortal('merchant', ROOT), 'app.site.com');
   assert.equal(cookieDomainForPortal('sales', ROOT), 'sales.site.com');
 });
 
@@ -66,4 +67,29 @@ test('corsOriginAllowed: false when the Origin classifies to a different portal'
 test('corsOriginAllowed: false for a null or unparsable Origin', () => {
   assert.equal(corsOriginAllowed(null, 'sales', ROOT), false);
   assert.equal(corsOriginAllowed('not-a-url', 'sales', ROOT), false);
+});
+
+test('isPortalPathAllowed: no root domain configured → always allowed (today\'s behavior, unchanged)', () => {
+  assert.equal(isPortalPathAllowed('/admin', 'storefront', undefined), true);
+  assert.equal(isPortalPathAllowed('/sales', 'storefront', undefined), true);
+});
+
+test('isPortalPathAllowed: /admin* is reachable from the admin and merchant portals, not sales/storefront/marketing', () => {
+  assert.equal(isPortalPathAllowed('/admin', 'admin', ROOT), true);
+  assert.equal(isPortalPathAllowed('/api/admin/users', 'merchant', ROOT), true);
+  assert.equal(isPortalPathAllowed('/admin', 'sales', ROOT), false);
+  assert.equal(isPortalPathAllowed('/admin', 'storefront', ROOT), false);
+  assert.equal(isPortalPathAllowed('/admin', 'marketing', ROOT), false);
+});
+
+test('isPortalPathAllowed: /sales* is reachable from the sales and admin portals, not merchant/storefront', () => {
+  assert.equal(isPortalPathAllowed('/sales', 'sales', ROOT), true);
+  assert.equal(isPortalPathAllowed('/api/sales/quotes', 'admin', ROOT), true);
+  assert.equal(isPortalPathAllowed('/sales', 'merchant', ROOT), false);
+  assert.equal(isPortalPathAllowed('/sales', 'storefront', ROOT), false);
+});
+
+test('isPortalPathAllowed: every other path is always allowed regardless of portal', () => {
+  assert.equal(isPortalPathAllowed('/catalog', 'storefront', ROOT), true);
+  assert.equal(isPortalPathAllowed('/api/checkout/cart', 'merchant', ROOT), true);
 });
