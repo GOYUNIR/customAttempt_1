@@ -458,3 +458,107 @@ wants its own gated change, not a tail-end addition to Phase B.
 (41.8KB raw / 55.8KB encoded) from the payload, so every one of those 8,640
 daily revalidations now moves dramatically less data. The TTL is unchanged; the
 bytes per hit are not.
+
+---
+
+## Deferred work register
+
+Changes consciously deferred, with the condition for picking them up. Deferred
+is not dropped: each entry names what it needs, so it can be scheduled rather
+than rediscovered.
+
+### DEFERRED-1 — Split the `/api/store` payload by volatility
+
+**Status:** deferred out of Phase B (2026-09-15), by agreement. Does not block
+Phase C.
+
+**What.** Split the storefront payload into a stable half (catalog structure,
+theme, config, media refs) served on a long, version-keyed TTL purged on admin
+write, and a volatile half (`inventoryRemaining`, `soldOut`, countdown anchors)
+on a small short-TTL endpoint.
+
+**Why it is not just "raise the TTL".** `/api/store` currently carries live
+inventory, and inventory is written on the hot purchase path
+(`app/api/checkout/direct/route.ts:210`, `app/api/stripe/webhook/route.ts:525`).
+A long TTL therefore forces a choice between a purge on every sale — a purge
+storm during a drop, costing more than it saves — and serving hours-stale stock
+counts. The current `s-maxage=10` is load-bearing, not an oversight: it is the
+largest TTL that keeps inventory honest while both kinds of data share one
+endpoint. Splitting them is what makes a long TTL safe. Full analysis in the
+"Phase B item 5" section above.
+
+**Why it is gated rather than just queued.** It changes the shape of the
+`/api/store` response and how `components/Storefront.tsx` consumes it — client
+behavior. There is no browser or visual verification available in this
+environment, and `Storefront.tsx` is a file this project has repeatedly and
+deliberately ring-fenced from blind rewrites. Typecheck and unit tests would go
+green on a version that renders wrongly.
+
+**Condition to proceed:** done WITH the operator reviewing client-side
+behavior directly — the storefront rendering correct live stock, countdowns,
+and sold-out states after the split — not verified blind from tests alone.
+
+**Already partly mitigated:** Phase B item 4 removed the base64 brand logo
+(41.8KB raw / 55.8KB encoded) from the payload, so each revalidation now moves
+far less data. The TTL is unchanged; the bytes per hit are not.
+
+---
+
+## Phase C finding: portal isolation was classifying the wrong host
+
+**How it surfaced.** Phase C's host-to-tier rewrite was implemented, unit-tested
+and typechecked — and did nothing. Driving a real `next dev` server with
+`Host:` headers showed why:
+
+```
+Host: admin.goyunir.com  ->  nextUrl.host = "localhost:3111", portal = "storefront"
+Host: sales.goyunir.com  ->  nextUrl.host = "localhost:3111", portal = "storefront"
+Host: acme.goyunir.com   ->  nextUrl.host = "localhost:3111", portal = "storefront"
+```
+
+`middleware.ts` classified `request.nextUrl.host`, which is the **server's own
+address**, not the Host header. So `classifyHost` returned `'storefront'` for
+every request and the entire portal-isolation layer — the host/path fence,
+cookie scoping, the per-portal role split — was a no-op locally, regardless of
+`PLATFORM_ROOT_DOMAIN`.
+
+**Scope, stated precisely.** This is verified broken in local dev. Production
+behavior was NOT verified from here — on a platform that reconstructs
+`nextUrl` from the incoming request, it may well resolve correctly, which is
+the likeliest reason this survived three phases of work that touched this file.
+Either way the property that matters is the same: isolation could not be
+verified before deploying, and it depended on deployment-specific behavior
+rather than on the request.
+
+**Fix.** `resolveRequestHost()` in `lib/edge-router.ts` reads
+`x-forwarded-host` → `host` → fallback, lowercased and port-stripped. Now dev
+and production classify identically, and the behavior is testable locally.
+
+**Security note.** `Host` is client-supplied, so this is not an authentication
+input. A spoofed Host can at most make the *path fence* more permissive for
+that request; it still has to pass the session checks, which key off the path.
+That separation is precisely why the path-based auth triggers must not be
+"replaced" by host classification — see the correction below.
+
+### Correction to ADR-001's Phase C plan
+
+ADR-001 said: "Route groups per tier; host-to-group rewrite in middleware;
+**delete path-based access**." The last clause is wrong and was not carried out.
+
+`isAdminPath` / `isSalesPath` are not redundant access control — they are the
+**authentication triggers**, gating the readiness check and the entire admin
+session check. `isPortalPathAllowed` answers a different question:
+
+| Check | Question | If removed |
+|---|---|---|
+| `isPortalPathAllowed(path, portal)` | may this host serve this path? | admin reachable on tenant domains |
+| `isAdminPath` | does this path require a session? | **admin reachable with no auth at all** |
+
+Deleting the second would have left `admin.<root>` serving the admin UI to
+anyone while still looking correct, because the host fence would keep 404ing
+the other hosts. Both are kept; the variables now carry a comment saying so.
+
+Route groups were also skipped deliberately: Next.js `(group)` directories do
+not change URLs, so moving `app/admin/` into `app/(staff)/admin/` is churn with
+real import-breakage risk and no isolation benefit. The isolation comes from
+the rewrite and the fence, both of which are now verified.

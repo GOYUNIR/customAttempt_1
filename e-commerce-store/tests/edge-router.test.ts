@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, portalIsolationStatus } from '../lib/edge-router.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
 
 const ROOT = 'site.com';
 
@@ -144,4 +144,68 @@ test('portalIsolationStatus: an explicit single-domain opt-out is respected in p
 test('portalIsolationStatus: local dev without the var is fine, never misconfigured', () => {
   assert.equal(portalIsolationStatus({ NODE_ENV: 'development' }), 'single-domain');
   assert.equal(portalIsolationStatus({}), 'single-domain');
+});
+
+// ── Host-to-tier home rewrite (Phase C) ───────────────────────────────────
+
+test('portalHomeRewrite: staff hosts map / to their real entry point', () => {
+  assert.equal(portalHomeRewrite('/', 'admin'), '/admin');
+  assert.equal(portalHomeRewrite('/', 'merchant'), '/admin');
+  assert.equal(portalHomeRewrite('/', 'sales'), '/sales');
+});
+
+test('portalHomeRewrite: consumer hosts are never rewritten', () => {
+  assert.equal(portalHomeRewrite('/', 'storefront'), null);
+  assert.equal(portalHomeRewrite('/', 'marketing'), null);
+});
+
+test('portalHomeRewrite: ONLY the exact root path is rewritten', () => {
+  // Anything else must pass through untouched so this can never shadow a
+  // real route or fight with isPortalPathAllowed.
+  for (const p of ['/admin', '/sales', '/catalog', '/api/store', '/some-product', '//', '/?x=1']) {
+    assert.equal(portalHomeRewrite(p, 'admin'), null, `${p} must not be rewritten`);
+  }
+});
+
+test('portalHomeRewrite: the rewrite target is itself an allowed path for that portal', () => {
+  // The rewritten path must survive the host/path fence, or the rewrite would
+  // produce a 404 on the portal's own home page.
+  const ROOT_D = 'site.com';
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    const target = portalHomeRewrite('/', portal);
+    assert.ok(target, `${portal} should rewrite`);
+    assert.equal(
+      isPortalPathAllowed(target as string, portal, ROOT_D),
+      true,
+      `${portal} rewrites to ${target}, which its own fence would reject`,
+    );
+  }
+});
+
+// ── Public host resolution (Phase C) ──────────────────────────────────────
+
+test('resolveRequestHost: prefers x-forwarded-host, then host, then fallback', () => {
+  assert.equal(resolveRequestHost({ xForwardedHost: 'admin.site.com', host: 'internal:3000' }), 'admin.site.com');
+  assert.equal(resolveRequestHost({ host: 'sales.site.com' }), 'sales.site.com');
+  assert.equal(resolveRequestHost({}, 'fallback.site.com'), 'fallback.site.com');
+});
+
+test('resolveRequestHost: takes the FIRST value of a comma-joined forwarded chain', () => {
+  assert.equal(resolveRequestHost({ xForwardedHost: 'app.site.com, proxy.internal' }), 'app.site.com');
+});
+
+test('resolveRequestHost: lowercases and strips the port', () => {
+  assert.equal(resolveRequestHost({ host: 'ADMIN.Site.com:8443' }), 'admin.site.com');
+});
+
+test('resolveRequestHost: empty everywhere yields empty, never throws', () => {
+  assert.equal(resolveRequestHost({ xForwardedHost: null, host: null }), '');
+  assert.equal(resolveRequestHost({ xForwardedHost: '  ', host: '' }), '');
+});
+
+test('resolveRequestHost feeds classifyHost correctly — the dev-server bug', () => {
+  // nextUrl.host would have been 'localhost:3111' here, classifying every
+  // portal as 'storefront'. The Host header is what actually identifies it.
+  const host = resolveRequestHost({ host: 'admin.goyunir.com' }, 'localhost:3111');
+  assert.equal(classifyHost(host, 'goyunir.com'), 'admin');
 });

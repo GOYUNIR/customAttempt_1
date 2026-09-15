@@ -137,3 +137,64 @@ export function portalIsolationStatus(
   if (env.NODE_ENV !== 'production') return 'single-domain';
   return 'misconfigured';
 }
+
+/**
+ * Host-to-tier home rewrite (Phase C).
+ *
+ * `/` serves the consumer storefront on every host today, so a staff host like
+ * admin.<root> lands visitors on a shop homepage and expects them to know to
+ * type /admin. This maps the ROOT PATH ONLY to each tier's real entry point:
+ *
+ *   admin.<root>/   -> /admin     (platform admin)
+ *   app.<root>/     -> /admin     (merchant hub — same tree, role-differentiated
+ *                                  at app/admin/layout.tsx, see Phase 4)
+ *   sales.<root>/   -> /sales     (sales hub)
+ *   <root>/ and *.<root>/         -> unchanged (marketing / tenant storefront)
+ *
+ * Returns the path to rewrite to, or null to leave the request alone.
+ *
+ * SECURITY: the caller MUST fold this into the pathname it uses for its auth
+ * checks BEFORE running them, and only emit the actual rewrite at the end of
+ * the chain. A `NextResponse.rewrite` returned early ends middleware for that
+ * request, so the rewritten path would be served with NO session check — i.e.
+ * the admin UI, unauthenticated, on the one host that is supposed to be the
+ * most protected. middleware.ts does this via `effectivePathname`.
+ *
+ * Only the exact root path is rewritten. Every other path is left as-is so
+ * this can never shadow a real route or interact with the path fence.
+ */
+export function portalHomeRewrite(pathname: string, portal: Portal): string | null {
+  if (pathname !== '/') return null;
+  if (portal === 'admin' || portal === 'merchant') return '/admin';
+  if (portal === 'sales') return '/sales';
+  return null;
+}
+
+/**
+ * Resolve the PUBLIC host of a request, for portal classification.
+ *
+ * `request.nextUrl.host` is NOT reliable for host-based routing: in local dev
+ * it is the server's own address (`localhost:3000`), not the Host header. That
+ * makes `classifyHost` return 'storefront' for every request, so portal
+ * isolation silently does nothing and — worse — cannot be verified locally at
+ * all before deploying. Verified directly against `next dev`: a request with
+ * `Host: admin.goyunir.com` produced `nextUrl.host === 'localhost:3111'`.
+ *
+ * Order: `x-forwarded-host` (set by proxies/CDNs, first value wins) → `host` →
+ * the caller's fallback. The result is lowercased and stripped of any port.
+ *
+ * SECURITY: `Host`/`x-forwarded-host` are client-supplied, so this is NOT an
+ * authentication input and must never be treated as one. A spoofed Host can
+ * at most make the path fence *more* permissive for that request — it still
+ * has to pass the session checks in middleware.ts, which key off the path, not
+ * the host. That separation is exactly why those path-based auth triggers must
+ * not be removed in favor of host classification.
+ */
+export function resolveRequestHost(
+  headers: { xForwardedHost?: string | null; host?: string | null },
+  fallback = '',
+): string {
+  const forwarded = String(headers.xForwardedHost || '').split(',')[0].trim();
+  const direct = String(headers.host || '').trim();
+  return (forwarded || direct || fallback).toLowerCase().replace(/:\d+$/, '');
+}

@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, portalHomeRewrite, resolveRequestHost } from '@/lib/edge-router';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -268,9 +268,28 @@ export async function middleware(request: NextRequest) {
   // from ever being reachable on a tenant's own storefront domain or the
   // bare marketing host — see DEPLOYMENT.md's edge-router setup section.
   const platformRootDomain = process.env.PLATFORM_ROOT_DOMAIN || undefined;
-  const portal = classifyHost(request.nextUrl.host, platformRootDomain);
-  const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
-  const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
+  // The PUBLIC host, from the Host header — not request.nextUrl.host, which is
+  // the server's own address in dev (localhost:PORT) and would classify every
+  // request as 'storefront', making portal isolation a silent no-op that could
+  // not be verified locally. See resolveRequestHost in lib/edge-router.ts.
+  const publicHost = resolveRequestHost(
+    { xForwardedHost: request.headers.get('x-forwarded-host'), host: request.headers.get('host') },
+    request.nextUrl.host,
+  );
+  const portal = classifyHost(publicHost, platformRootDomain);
+  // Host-to-tier home rewrite (Phase C). Computed HERE, ahead of every auth
+  // gate, and folded into `effectivePathname` so the session checks below run
+  // against the path that will ACTUALLY be served. The rewrite response itself
+  // is emitted only at the very END of this chain: returning it early would end
+  // middleware for this request and serve /admin with no session check at all.
+  const portalRewriteTarget = portalHomeRewrite(pathname, portal);
+  const effectivePathname = portalRewriteTarget ?? pathname;
+  // NOTE: these are the AUTHENTICATION triggers ("does this path require a staff
+  // session?"), NOT redundant path-based access control. isPortalPathAllowed below
+  // answers a different question ("may this host serve this path?"). Deleting
+  // these does not tighten isolation — it removes auth from /admin entirely.
+  const isAdminPath = effectivePathname.startsWith('/admin') || effectivePathname.startsWith('/api/admin');
+  const isSalesPath = effectivePathname.startsWith('/sales') || effectivePathname.startsWith('/api/sales');
   // Coarse, Edge-safe host/path gate — see lib/edge-router.ts's
   // isPortalPathAllowed for why this can never produce a cross-host
   // redirect loop (it only ever returns a hard 404 here, never a redirect).
@@ -588,7 +607,12 @@ export async function middleware(request: NextRequest) {
   // Server Component layout has no direct access to the request path, so
   // this is the standard way to thread it through.
   const forwardedHeaders = new Headers(request.headers);
-  forwardedHeaders.set('x-pathname', pathname);
+  forwardedHeaders.set('x-pathname', effectivePathname);
+  if (portalRewriteTarget) {
+    const rewriteUrl = request.nextUrl.clone();
+    rewriteUrl.pathname = portalRewriteTarget;
+    return NextResponse.rewrite(rewriteUrl, { request: { headers: forwardedHeaders } });
+  }
   return NextResponse.next({ request: { headers: forwardedHeaders } });
 }
 
