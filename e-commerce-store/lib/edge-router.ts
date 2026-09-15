@@ -78,8 +78,41 @@ export function cookieDomainForPortal(portal: Portal, rootDomain: string | undef
  * every caller either gets `true` (proceed) or `false` (the caller returns
  * a hard 404 — see middleware.ts — never a redirect to a different host).
  */
+/**
+ * Credential-establishing paths shared by every staff portal. These must stay
+ * reachable from admin./app./sales. alike, because middleware redirects
+ * unauthenticated staff requests to /admin/login regardless of which portal
+ * they came from. Deliberately narrow: the login page and its API, the setup
+ * wizard (bootstrap, before any credential exists) and staff impersonation
+ * sign-in — never /admin itself.
+ */
+function isSharedStaffAuthPath(pathname: string): boolean {
+  return (
+    pathname === '/admin/login' ||
+    pathname.startsWith('/admin/login/') ||
+    pathname === '/api/admin/login' ||
+    pathname.startsWith('/api/admin/login/') ||
+    pathname === '/admin/setup' ||
+    pathname.startsWith('/admin/setup/') ||
+    pathname === '/api/admin/setup' ||
+    pathname.startsWith('/api/admin/setup/') ||
+    pathname === '/api/admin/impersonate' ||
+    pathname === '/api/admin/super-login'
+  );
+}
+
 export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain: string | undefined): boolean {
   if (!rootDomain) return true;
+  // /admin/login is the SHARED staff login for all three staff portals — no
+  // separate /login route exists (Phase 2). Without this exemption the sales
+  // portal is unusable: middleware redirects an unauthenticated /sales request
+  // to /admin/login, which the fence would then 404 on that same host, so a
+  // sales user is bounced into a dead end and can never sign in. Confirmed
+  // live before it was fixed: sales.goyunir.com/admin/login returned 404.
+  // Only the credential-establishing endpoints are exempt, not /admin itself.
+  if (isSharedStaffAuthPath(pathname)) {
+    return portal === 'admin' || portal === 'merchant' || portal === 'sales';
+  }
   const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
   const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
   if (isAdminPath) return portal === 'admin' || portal === 'merchant';

@@ -209,3 +209,42 @@ test('resolveRequestHost feeds classifyHost correctly — the dev-server bug', (
   const host = resolveRequestHost({ host: 'admin.goyunir.com' }, 'localhost:3111');
   assert.equal(classifyHost(host, 'goyunir.com'), 'admin');
 });
+
+// ── Shared staff login must survive the fence (Phase C regression) ─────────
+// Live bug: sales.goyunir.com/sales redirected to /admin/login, which the
+// fence then 404'd on that same host — a sales user could never sign in.
+
+test('isPortalPathAllowed: /admin/login is reachable from EVERY staff portal', () => {
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    assert.equal(isPortalPathAllowed('/admin/login', portal, ROOT), true, `${portal} must reach the login page`);
+    assert.equal(isPortalPathAllowed('/api/admin/login', portal, ROOT), true, `${portal} must reach the login API`);
+  }
+});
+
+test('isPortalPathAllowed: the redirect target of an unauthenticated /sales request is reachable', () => {
+  // Pins the exact live failure: the fence must not 404 the path middleware
+  // redirects to from this very portal.
+  assert.equal(isPortalPathAllowed('/sales', 'sales', ROOT), true);
+  assert.equal(isPortalPathAllowed('/admin/login', 'sales', ROOT), true);
+});
+
+test('isPortalPathAllowed: bootstrap + impersonation stay reachable from every staff portal', () => {
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    assert.equal(isPortalPathAllowed('/admin/setup', portal, ROOT), true);
+    assert.equal(isPortalPathAllowed('/api/admin/setup', portal, ROOT), true);
+    assert.equal(isPortalPathAllowed('/api/admin/impersonate', portal, ROOT), true);
+  }
+});
+
+test('isPortalPathAllowed: the exemption is NARROW — /admin itself is still fenced', () => {
+  assert.equal(isPortalPathAllowed('/admin', 'sales', ROOT), false);
+  assert.equal(isPortalPathAllowed('/api/admin/users', 'sales', ROOT), false);
+  assert.equal(isPortalPathAllowed('/admin/loginsomething', 'sales', ROOT), false);
+});
+
+test('isPortalPathAllowed: consumer hosts get NO staff-auth exemption', () => {
+  for (const portal of ['storefront', 'marketing'] as const) {
+    assert.equal(isPortalPathAllowed('/admin/login', portal, ROOT), false, `${portal} must not reach staff login`);
+    assert.equal(isPortalPathAllowed('/api/admin/setup', portal, ROOT), false);
+  }
+});
