@@ -65,7 +65,7 @@
     // [OPTIONAL] force a data store. One of: "supabase" (default) | "upstash" |
     //   "cloudflare-kv". Leave "supabase" unless you picked a different primary
     //   store in the Setup Wizard. (NECESSARY HERE — only to override)
-    "STORAGE_PROVIDER": "supabase",
+    "STORAGE_PROVIDER": "supabase"
     // [REQUIRED in production] the platform's root domain. Enables host-based
     // portal isolation in middleware.ts: admin./app./sales.<root> resolve to
     // their own portals, the bare root is marketing, and every other subdomain
@@ -73,7 +73,12 @@
     // Leaving this unset in production FAILS the readiness gate on purpose
     // (lib/system-diagnostics-pure.ts's portal_isolation check) rather than
     // silently serving the admin panel from every tenant domain.
-    "PLATFORM_ROOT_DOMAIN": "goyunir.com"
+    // DISABLED pending Worker routes for admin./sales./app.<root>. Enabling
+    // this activates the host/path fence, which makes /admin unreachable on the
+    // bare root — and those subdomains currently return 522 (no Worker route),
+    // so turning it on locks the admin panel out entirely. Re-enable ONLY after
+    // the routes resolve to this Worker. See ARCHITECTURE.md, Phase C.
+    // "PLATFORM_ROOT_DOMAIN": "goyunir.com"
   }
   //
   // ── SECRETS — set in the dashboard ("Secrets" column) or via: ──────────────
