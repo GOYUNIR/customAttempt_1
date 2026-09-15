@@ -562,3 +562,52 @@ Route groups were also skipped deliberately: Next.js `(group)` directories do
 not change URLs, so moving `app/admin/` into `app/(staff)/admin/` is churn with
 real import-breakage risk and no isolation benefit. The isolation comes from
 the rewrite and the fence, both of which are now verified.
+
+---
+
+## Phase C closure — live production topology
+
+`goyunir.com` is served by the Cloudflare Worker **`customattempt-1`**, built
+from this repo on push to `main` (~90s). It is NOT `storefront-app`, the name
+in `wrangler.jsonc`. Verified with `wrangler tail customattempt-1`: a marked
+request to `goyunir.com` appears in that Worker's log and not in the other's.
+A local `wrangler deploy` from this repo therefore does NOT deploy production.
+
+**Routing** is a wildcard route, `*.goyunir.com/*`, declared alongside the apex
+in `wrangler.jsonc`. It covers admin./sales./app. today and every future
+`{tenant}.goyunir.com` with no per-tenant dashboard step. The apex is declared
+with it deliberately: a routes array *replaces* a Worker's route set on deploy,
+so declaring only the wildcard could delete the apex route and take the site
+down. Confirmed live: `admin.goyunir.com` went 522 → 200 when it applied, and
+the apex stayed 200 throughout.
+
+### Two failures worth keeping
+
+**1. Enabling the fence before the subdomains were routed locked admin out.**
+The fence correctly makes `/admin` unreachable on the bare root — but
+`admin./sales./app.` were returning 522 with no route, so the admin panel was
+reachable *nowhere*. The preview test that "passed" drove `x-forwarded-host`
+against a `workers.dev` URL: it proved the code worked and said nothing about
+whether those hostnames existed. **A test that exercises the code path but not
+the deployment path is not a deployment test.** Recovery also failed at first,
+because a local `wrangler deploy` targets the wrong Worker; only a `git push`
+changes production.
+
+**2. The fence made staff login unreachable from the sales portal.**
+`sales.<root>/sales` redirects an unauthenticated user to `/admin/login`, which
+the fence then 404'd on that same host. A sales user was bounced into a dead
+end and could never sign in. The rule: **whenever a gate redirects, the
+redirect target must itself survive the gate, on that same host.**
+`isSharedStaffAuthPath()` now exempts only the credential-establishing paths
+(login page + API, setup/bootstrap, impersonation, super-login) for staff
+portals. `/admin` itself stays fenced; consumer hosts get no exemption.
+
+### Verified live, 17/17 plus the login path
+
+| Host | `/` | `/admin` | `/sales` | `/admin/login` | `/catalog` |
+|---|---|---|---|---|---|
+| `admin.` | 307→login | 307 | 307 | 200 | 200 |
+| `app.` | 307→login | 307 | 404 | 200 | 200 |
+| `sales.` | 307→login | 404 | 307 | 200 | 200 |
+| apex (marketing) | 200 | 404 | 404 | 404 | 200 |
+| `{tenant}.` | 200 | 404 | 404 | 404 | 200 |
