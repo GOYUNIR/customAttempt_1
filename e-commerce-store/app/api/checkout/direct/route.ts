@@ -20,6 +20,7 @@ import { withRedisLock } from '@/lib/redis-lock';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory, restockInventory } from '@/lib/inventory';
+import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 /** Same anti-scalping check `checkout/route.ts` enforces before creating a
  * Stripe Checkout Session — this direct-charge path was missing it entirely,
@@ -173,7 +174,7 @@ export async function POST(request: Request) {
       // Bucketed to a 30s window on the stable inputs so it's deterministic
       // across retries of one attempt but doesn't block a later, separate
       // purchase of the same product/size by the same customer.
-      const idempotencyKey = `direct:${normalizedEmail}:${productId}:${size}:${paymentMethodId}:${Math.floor(Date.now() / 30_000)}`;
+      const idempotencyKey = boundIdempotencyKey(`direct:${normalizedEmail}:${productId}:${size}:${paymentMethodId}:${Math.floor(Date.now() / 30_000)}`);
       paymentIntent = await stripe.paymentIntents.create(
         {
           amount: priceCents,

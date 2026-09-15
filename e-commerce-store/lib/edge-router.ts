@@ -106,3 +106,34 @@ export function corsOriginAllowed(origin: string | null, portal: Portal, rootDom
   const originPortal = classifyHost(originHost, root);
   return originPortal === portal;
 }
+
+export type PortalIsolationStatus = 'active' | 'single-domain' | 'misconfigured';
+
+/**
+ * Whether portal isolation is actually in force — the fail-closed check
+ * (ARCHITECTURE.md, Phase A2).
+ *
+ * Every function above degrades to "no isolation" when `PLATFORM_ROOT_DOMAIN`
+ * is unset. That is correct for local dev and dangerous in production, where
+ * it silently means `/admin` is reachable from any host (including a
+ * merchant's own custom storefront domain) and the per-portal role split is
+ * off.
+ *
+ * This deliberately does NOT block at runtime: hard-404ing `/admin` on a
+ * missing env var would lock an operator out of their own portal, which this
+ * codebase has consistently refused to do. Instead it fails closed at the
+ * DEPLOY GATE — `checkPortalIsolation()` (lib/system-diagnostics-pure.ts)
+ * turns 'misconfigured' into an error-level readiness check, so
+ * `scripts/production-readiness-check.ts` exits non-zero and the admin System
+ * Health panel goes red. You cannot ACCIDENTALLY ship unisolated; you can
+ * still deliberately run single-domain by setting
+ * `PLATFORM_SINGLE_DOMAIN_MODE=true`.
+ */
+export function portalIsolationStatus(
+  env: Record<string, string | undefined> = process.env,
+): PortalIsolationStatus {
+  if (String(env.PLATFORM_ROOT_DOMAIN || '').trim()) return 'active';
+  if (String(env.PLATFORM_SINGLE_DOMAIN_MODE || '').trim().toLowerCase() === 'true') return 'single-domain';
+  if (env.NODE_ENV !== 'production') return 'single-domain';
+  return 'misconfigured';
+}

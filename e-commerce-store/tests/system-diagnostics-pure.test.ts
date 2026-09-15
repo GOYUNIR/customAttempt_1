@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured } from '../lib/system-diagnostics-pure.ts';
+import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation } from '../lib/system-diagnostics-pure.ts';
 
 test('checkCsrf always reports ok — it is unconditionally enforced, not configurable', () => {
   const check = checkCsrf();
@@ -37,4 +37,24 @@ test('checkCloudflareConfigured: not_configured when credentials are missing', (
 test('checkCloudflareConfigured: ok when both credentials are present', () => {
   const check = checkCloudflareConfigured({ CLOUDFLARE_API_TOKEN: 'test-token', CLOUDFLARE_ZONE_ID: 'test-zone' });
   assert.equal(check.status, 'ok');
+});
+
+test('checkPortalIsolation: production + unset PLATFORM_ROOT_DOMAIN is an ERROR, not a warning', () => {
+  // This is the deploy gate — production-readiness-check.ts exits 1 on any
+  // error-level check, so an unisolated production deploy cannot ship quietly.
+  const check = checkPortalIsolation({ NODE_ENV: 'production' });
+  assert.equal(check.status, 'error');
+  assert.match(check.detail, /PLATFORM_ROOT_DOMAIN/);
+});
+
+test('checkPortalIsolation: configured root domain is ok', () => {
+  assert.equal(checkPortalIsolation({ NODE_ENV: 'production', PLATFORM_ROOT_DOMAIN: 'goyunir.com' }).status, 'ok');
+});
+
+test('checkPortalIsolation: deliberate single-domain mode is not_configured, never an error', () => {
+  assert.equal(
+    checkPortalIsolation({ NODE_ENV: 'production', PLATFORM_SINGLE_DOMAIN_MODE: 'true' }).status,
+    'not_configured',
+  );
+  assert.equal(checkPortalIsolation({ NODE_ENV: 'development' }).status, 'not_configured');
 });

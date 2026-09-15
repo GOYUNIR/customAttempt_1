@@ -18,6 +18,7 @@ import { selectWinners } from '@/lib/raffle-draw';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { sendWinnerEmail } from '@/lib/email';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 function assertSupabase(): void {
   if (!supabaseServiceConfigured()) {
@@ -237,16 +238,26 @@ export async function executeDrawWithCharging(
     }
 
     try {
-      await stripe.paymentIntents.create({
-        amount: priceCents,
-        currency: 'usd',
-        customer: customerId,
-        payment_method: paymentMethodId,
-        off_session: true,
-        confirm: true,
-        receipt_email: email || undefined,
-        description: `${productName} (${size})`,
-      });
+      // Deterministic per (draw, entry). `draw.drawId` is the `drop_draws`
+      // row minted by executeDraw() above, so it is unique per draw
+      // execution — replaying this call (route retry, double-submit) returns
+      // the original charge rather than billing the winner twice, while a
+      // genuinely new draw of the same variant gets a new drawId and can
+      // charge again.
+      const idempotencyKey = boundIdempotencyKey(`raffle-draw:${draw.drawId}:${entryId}`);
+      await stripe.paymentIntents.create(
+        {
+          amount: priceCents,
+          currency: 'usd',
+          customer: customerId,
+          payment_method: paymentMethodId,
+          off_session: true,
+          confirm: true,
+          receipt_email: email || undefined,
+          description: `${productName} (${size})`,
+        },
+        { idempotencyKey },
+      );
       await markRaffleEntryOutcome(tenantId, entryId, 'charged');
       charges.push({ entryId, email, status: 'charged' });
 

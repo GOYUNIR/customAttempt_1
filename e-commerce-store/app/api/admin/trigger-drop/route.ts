@@ -11,6 +11,7 @@ import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { executeDrawWithCharging } from '@/lib/raffle';
+import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,16 +153,25 @@ export async function POST(request: Request) {
         }
 
         try {
-          await stripe.paymentIntents.create({
-            amount: priceCents,
-            currency: 'usd',
-            customer: customerId,
-            payment_method: paymentMethodId,
-            off_session: true,
-            confirm: true,
-            receipt_email: entry.email,
-            description: `${product.name} (${size})`,
-          });
+          // Deterministic per (product, size, winner) inside a 60s window.
+          // This is an operator-triggered action with no draw id to key on,
+          // so the window is what protects against the real failure mode: a
+          // double-clicked button or an immediate client retry replaying the
+          // same charge. A deliberate re-draw minutes later gets a new key.
+          const idempotencyKey = boundIdempotencyKey(`trigger-drop:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
+          await stripe.paymentIntents.create(
+            {
+              amount: priceCents,
+              currency: 'usd',
+              customer: customerId,
+              payment_method: paymentMethodId,
+              off_session: true,
+              confirm: true,
+              receipt_email: entry.email,
+              description: `${product.name} (${size})`,
+            },
+            { idempotencyKey },
+          );
 
           live.inventoryRemaining -= 1;
           live.salesCompleted = (live.salesCompleted || 0) + 1;
@@ -217,16 +227,23 @@ export async function POST(request: Request) {
           const paymentMethodId = entry.paymentMethodId;
           if (!customerId || !paymentMethodId) continue;
           try {
-            await stripe.paymentIntents.create({
-              amount: basePriceCents,
-              currency: 'usd',
-              customer: customerId,
-              payment_method: paymentMethodId,
-              off_session: true,
-              confirm: true,
-              receipt_email: entry.email,
-                            description: `${product.name} (${size})`,
-            });
+            // Same 60s-window reasoning as the winner charge above, namespaced
+            // separately so a waitlist conversion and a draw win for the same
+            // email+variant can never collide onto one key.
+            const idempotencyKey = boundIdempotencyKey(`trigger-drop-waitlist:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
+            await stripe.paymentIntents.create(
+              {
+                amount: basePriceCents,
+                currency: 'usd',
+                customer: customerId,
+                payment_method: paymentMethodId,
+                off_session: true,
+                confirm: true,
+                receipt_email: entry.email,
+                description: `${product.name} (${size})`,
+              },
+              { idempotencyKey },
+            );
             live.inventoryRemaining -= 1;
             live.salesCompleted = (live.salesCompleted || 0) + 1;
             totalCharged++;

@@ -18,6 +18,7 @@ import { getWinnerCount, isConfiguredPrice } from '@/lib/storefront-config';
 import { poolKey, intentPoolKey } from '@/lib/redis-keys';
 import { buildOrderRef } from '@/lib/order-ref';
 import { withRedisLock } from '@/lib/redis-lock';
+import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 export interface DrawResult {
   email: string;
@@ -102,7 +103,7 @@ export async function runDropDraw(request: Request | NextRequest) {
             // Idempotency key so a re-triggered/overlapping draw run (manual
             // retrigger racing the cron, or `force=1`) can never charge the
             // same winner's card twice — Stripe dedupes retries of this key.
-            const idempotencyKey = `draw:${product.id}:${size}:${email}:${customerId}`;
+            const idempotencyKey = boundIdempotencyKey(`draw:${product.id}:${size}:${email}:${customerId}`);
             const paymentIntent = await stripe.paymentIntents.create(
               {
                 amount: priceCents,

@@ -41,6 +41,7 @@ loadDotEnvLocal();
 import {
   checkEnvSchema,
   checkCsrf,
+  checkPortalIsolation,
   checkRlsCoverage,
   checkSupabaseConnection,
   checkRedisLocks,
@@ -65,6 +66,7 @@ async function main() {
     checkEnvSchema(),
     checkCsrf(),
     checkNoDestructiveActionsAllowed(),
+    checkPortalIsolation(),
     await checkSupabaseConnection(),
     await checkRlsCoverage(),
     await checkRedisLocks(),

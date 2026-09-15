@@ -13,7 +13,8 @@
     "deploy:cf": "npm run build:cloudflare && npx wrangler deploy",
     "migrate:backfill": "tsx scripts/migrate-redis-to-supabase.ts",
     "check:production-readiness": "tsx scripts/production-readiness-check.ts",
-    "simulate:concurrency": "tsx scripts/simulate-concurrency.ts"
+    "simulate:concurrency": "tsx scripts/simulate-concurrency.ts",
+    "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",

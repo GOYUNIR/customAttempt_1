@@ -2,6 +2,55 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+/**
+ * Vendor SDK import fence (ARCHITECTURE.md, Phase A3).
+ *
+ * Business logic must never import a vendor SDK directly — it goes through
+ * the driver + factory ports in services/ (the lib/storage/* pattern). This
+ * fence is what stops the abstraction decaying again: lib/adapters/ was built
+ * once and ended up with zero business-logic importers precisely because
+ * nothing enforced it.
+ *
+ * Type-only imports are allowed everywhere: they create no runtime coupling
+ * and disappear at compile time.
+ */
+const VENDOR_SDK_FENCE = [
+  {
+    name: "stripe",
+    allowTypeImports: true,
+    message:
+      "Import the PaymentDriver port (services/payment) instead of the Stripe SDK. Only services/payment/*.driver.ts may touch `stripe` directly.",
+  },
+  {
+    name: "resend",
+    allowTypeImports: true,
+    message:
+      "Import the EmailDriver port (services/email) instead of the Resend SDK. Only services/email/*.driver.ts may touch `resend` directly.",
+  },
+  {
+    name: "mapbox-gl",
+    allowTypeImports: true,
+    message:
+      "Import the MapDriver port (services/maps) instead of the Mapbox SDK. Only services/maps/*.driver.ts may touch `mapbox-gl` directly.",
+  },
+];
+
+const VENDOR_SDK_FENCE_PATTERNS = [
+  {
+    group: ["@supabase/*"],
+    allowTypeImports: true,
+    message:
+      "Go through the database port (services/config/supabase-client, and the DbClient port once Phase D lands) instead of the Supabase SDK.",
+  },
+];
+
+const fenceRule = (severity) => ({
+  "@typescript-eslint/no-restricted-imports": [
+    severity,
+    { paths: VENDOR_SDK_FENCE, patterns: VENDOR_SDK_FENCE_PATTERNS },
+  ],
+});
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -29,7 +78,25 @@ const eslintConfig = defineConfig([
       // URLs that the Next.js optimizer can't safely process. This is a perf
       // advisory rule, not a correctness one, so it is disabled repo-wide.
       "@next/next/no-img-element": "off",
+      ...fenceRule("error"),
     },
+  },
+  {
+    // The ONE layer allowed to touch a vendor SDK at runtime.
+    files: ["services/**/*.driver.ts"],
+    rules: { "@typescript-eslint/no-restricted-imports": "off" },
+  },
+  {
+    // KNOWN DEBT (ARCHITECTURE.md Phase D, item 12): lib/server-config.ts's
+    // createStripeClient() constructs a second Stripe client straight from
+    // STRIPE_SECRET_KEY, bypassing PaymentFactory — which also means it
+    // ignores a Setup-Wizard-configured key. Downgraded to a warning so it
+    // stays visible in lint output instead of being silently exempted. Flip
+    // back to "error" (delete this block) once its one caller,
+    // app/api/admin/status/route.ts, reads configured-ness from the
+    // PaymentDriver port.
+    files: ["lib/server-config.ts"],
+    rules: { ...fenceRule("warn") },
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([

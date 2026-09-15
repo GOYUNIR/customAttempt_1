@@ -14,6 +14,7 @@
  */
 
 import { CSRF_AUTH_COOKIES, CSRF_EXEMPT_PREFIXES } from './csrf.ts';
+import { portalIsolationStatus } from './edge-router.ts';
 
 export type CheckStatus = 'ok' | 'warning' | 'error' | 'not_configured';
 export type Check = { id: string; label: string; status: CheckStatus; detail: string };
@@ -56,4 +57,34 @@ export function checkCloudflareConfigured(env: Record<string, string | undefined
     return { id: 'cloudflare', label: 'Cloudflare for SaaS', status: 'not_configured', detail: 'CLOUDFLARE_API_TOKEN / CLOUDFLARE_ZONE_ID not set — custom domains disabled.' };
   }
   return { id: 'cloudflare', label: 'Cloudflare for SaaS', status: 'ok', detail: 'API token and zone configured.' };
+}
+
+/** Portal isolation must never be OFF by accident in production — see
+ *  `portalIsolationStatus()` in lib/edge-router.ts for why this fails closed
+ *  at the deploy gate rather than at runtime. */
+export function checkPortalIsolation(env: Record<string, string | undefined> = process.env): Check {
+  const status = portalIsolationStatus(env);
+  if (status === 'active') {
+    return {
+      id: 'portal_isolation',
+      label: 'Portal Isolation (subdomain tiers)',
+      status: 'ok',
+      detail: `Enforced against PLATFORM_ROOT_DOMAIN=${env.PLATFORM_ROOT_DOMAIN} — /admin and /sales are reachable only from their own hosts.`,
+    };
+  }
+  if (status === 'single-domain') {
+    return {
+      id: 'portal_isolation',
+      label: 'Portal Isolation (subdomain tiers)',
+      status: 'not_configured',
+      detail: 'Single-domain mode — every portal shares one host. Set PLATFORM_ROOT_DOMAIN to enable per-subdomain isolation.',
+    };
+  }
+  return {
+    id: 'portal_isolation',
+    label: 'Portal Isolation (subdomain tiers)',
+    status: 'error',
+    detail:
+      'PLATFORM_ROOT_DOMAIN is unset in production, so /admin and /sales are reachable from ANY host (including merchant custom domains) and the per-portal role split is off. Set PLATFORM_ROOT_DOMAIN, or set PLATFORM_SINGLE_DOMAIN_MODE=true to declare single-domain operation deliberately.',
+  };
 }

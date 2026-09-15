@@ -73,6 +73,7 @@ import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { resolveVariantId } from '@/lib/inventory';
 import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
+import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 
 export { productNameFromPoolKey };
@@ -537,11 +538,22 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               continue;
             }
 
-            await stripe.paymentIntents.create({
-              amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
-              off_session: true, confirm: true, receipt_email: winnerEmail,
-              description: `${productName} (${productSize})`,
-            });
+            // Deterministic per (product, size, draw cycle, winner). A cron
+            // re-invocation, an overlapping run, or a client "timer hit zero"
+            // re-trigger replays the SAME key, so Stripe returns the original
+            // charge instead of billing the winner a second time.
+            // `live.drawsCompleted` is stable for this whole loop (it is only
+            // incremented after it), so the NEXT cycle of a recurring raffle
+            // legitimately produces a new key and can charge again.
+            const idempotencyKey = boundIdempotencyKey(`autodraw:${product.id}:${productSize}:${live.drawsCompleted || 0}:${winnerEmail}`);
+            await stripe.paymentIntents.create(
+              {
+                amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
+                off_session: true, confirm: true, receipt_email: winnerEmail,
+                description: `${productName} (${productSize})`,
+              },
+              { idempotencyKey },
+            );
 
             grandRevenueChargesCount++;
             successfulPoolCaptures++;

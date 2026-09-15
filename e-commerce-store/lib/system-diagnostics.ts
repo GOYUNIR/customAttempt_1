@@ -21,12 +21,13 @@ import {
   checkCsrf,
   checkNoDestructiveActionsAllowed,
   checkCloudflareConfigured,
+  checkPortalIsolation,
   type Check,
   type CheckStatus,
 } from '@/lib/system-diagnostics-pure';
 
 export type { Check, CheckStatus };
-export { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured };
+export { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation };
 
 export function checkEnvSchema(): Check {
   const { errors, warnings } = validateProductionEnv();
@@ -161,7 +162,7 @@ export async function runAllHealthChecks(): Promise<Check[]> {
     checkWebhookIdempotency(),
     checkSupabaseConnection(),
   ]);
-  return [checkEnvSchema(), checkCsrf(), rls, redisLocks, webhookIdempotency, checkCloudflareConfigured(), supabaseConnection];
+  return [checkEnvSchema(), checkCsrf(), checkPortalIsolation(), rls, redisLocks, webhookIdempotency, checkCloudflareConfigured(), supabaseConnection];
 }
 
 export function summarizeChecks(checks: Check[]) {

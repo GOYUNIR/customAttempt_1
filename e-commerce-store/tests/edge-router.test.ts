@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed } from '../lib/edge-router.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, portalIsolationStatus } from '../lib/edge-router.ts';
 
 const ROOT = 'site.com';
 
@@ -120,4 +120,28 @@ test('isPortalPathAllowed (goyunir.com): a wildcard tenant subdomain can never r
   assert.equal(isPortalPathAllowed('/admin', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), false);
   assert.equal(isPortalPathAllowed('/sales', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), false);
   assert.equal(isPortalPathAllowed('/[slug]', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), true);
+});
+
+// ── Fail-closed portal isolation (Phase A2) ───────────────────────────────
+// The whole point is that production can never SILENTLY run unisolated.
+
+test('portalIsolationStatus: a configured root domain is active', () => {
+  assert.equal(portalIsolationStatus({ PLATFORM_ROOT_DOMAIN: 'goyunir.com', NODE_ENV: 'production' }), 'active');
+});
+
+test('portalIsolationStatus: unset in production with no opt-out is MISCONFIGURED (fails closed)', () => {
+  assert.equal(portalIsolationStatus({ NODE_ENV: 'production' }), 'misconfigured');
+  assert.equal(portalIsolationStatus({ NODE_ENV: 'production', PLATFORM_ROOT_DOMAIN: '   ' }), 'misconfigured');
+});
+
+test('portalIsolationStatus: an explicit single-domain opt-out is respected in production', () => {
+  assert.equal(
+    portalIsolationStatus({ NODE_ENV: 'production', PLATFORM_SINGLE_DOMAIN_MODE: 'true' }),
+    'single-domain',
+  );
+});
+
+test('portalIsolationStatus: local dev without the var is fine, never misconfigured', () => {
+  assert.equal(portalIsolationStatus({ NODE_ENV: 'development' }), 'single-domain');
+  assert.equal(portalIsolationStatus({}), 'single-domain');
 });
