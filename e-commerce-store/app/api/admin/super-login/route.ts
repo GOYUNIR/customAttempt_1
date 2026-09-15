@@ -5,6 +5,7 @@ import { verifySuperAdminSignIn, supabaseAuthMissingReason, supabaseServiceConfi
 import { isPlatformConfigured } from '@/services/config/platform-settings';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { portalCookieAttrs } from '@/lib/portal-cookies';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,13 +79,7 @@ export async function POST(request: Request) {
   });
 
   const response = NextResponse.json({ ok: true, email: account.email, remember, noticed: !supabaseServiceConfigured() });
-  response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: maxAgeSeconds,
-    path: '/',
-  });
+  response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
   return response;
 }
 

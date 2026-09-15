@@ -8,6 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
+import { classifyHost } from '@/lib/edge-router';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -226,7 +227,7 @@ async function adminAuthValid(redis: any, token: string): Promise<string | null>
 
 /** The in-site /admin/login form + its API replace the native Basic-Auth dialog. */
 function adminAuthRequired(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith('/api/admin')) {
+  if (request.nextUrl.pathname.startsWith('/api/admin') || request.nextUrl.pathname.startsWith('/api/sales')) {
     return NextResponse.json(
       { error: 'AUTH_REQUIRED', redirect: '/admin/login' },
       { status: 401, headers: { 'Cache-Control': 'no-store' } },
@@ -258,6 +259,30 @@ export async function middleware(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.pathname;
+
+  // ── EDGE ROUTER — portal isolation (opt-in via PLATFORM_ROOT_DOMAIN) ─────
+  // lib/edge-router.ts classifies the Host header into a portal. Unset (the
+  // common single-domain deployment today), this is a no-op — classifyHost
+  // always returns 'storefront' and nothing below fires, so behavior is
+  // byte-for-byte unchanged. Configured, it stops the admin/sales portals
+  // from ever being reachable on a tenant's own storefront domain or the
+  // bare marketing host — see DEPLOYMENT.md's edge-router setup section.
+  const platformRootDomain = process.env.PLATFORM_ROOT_DOMAIN || undefined;
+  const portal = classifyHost(request.nextUrl.host, platformRootDomain);
+  const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+  const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
+  if (platformRootDomain) {
+    if (isAdminPath && portal !== 'admin') {
+      return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
+    // The single admin app also serves /sales today (see lib/edge-router.ts's
+    // header — no separate merchant-control-center app exists yet), so the
+    // admin host may reach it too; only a storefront/marketing host is blocked.
+    if (isSalesPath && portal !== 'sales' && portal !== 'admin') {
+      return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
+  }
+
   // The Setup Wizard is ALSO the "re-configure providers" page: once the
   // platform is configured, visiting /admin/setup?reconfigure=1 lets the
   // master super-admin sign back in (Supabase) to update providers.
@@ -298,7 +323,7 @@ export async function middleware(request: NextRequest) {
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login');
 
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+  if (isAdminPath || isSalesPath) {
     // Deprecated: /admin/setup-status was folded into the unified /admin/setup
     // dashboard. Redirect direct traffic (page or API) so old bookmarks and any
     // stale SETUP_REQUIRED deep-links still land somewhere useful.
@@ -366,7 +391,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+  if (isAdminPath || isSalesPath) {
     // A valid SUPER-ADMIN session — issued by /api/admin/super-login after a
     // Supabase master-account sign-in — authorizes the portal WITHOUT the env
     // Basic-Auth password or the email 2FA step (the master account IS the
@@ -436,7 +461,9 @@ export async function middleware(request: NextRequest) {
     // everything else requires a valid device cookie from a verified browser.
     const isPage =
       pathname === '/admin' ||
-      pathname === '/admin/';
+      pathname === '/admin/' ||
+      pathname === '/sales' ||
+      pathname === '/sales/';
     const isVerifyEndpoint = TWO_FA_EXEMPT.some((p) => pathname === p);
     if (!isPage && !isVerifyEndpoint && !isLoginPath && !superAdminOk && !isSuperLoginPath) {
       const token = adminDeviceTokenFromRequest(request);

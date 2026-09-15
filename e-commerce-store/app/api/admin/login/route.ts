@@ -5,6 +5,7 @@ import { verifySuperAdminSignIn, supabaseConfigured, supabaseAuthMissingReason }
 import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { portalCookieAttrs } from '@/lib/portal-cookies';
 
 /**
  * Whether the legacy Basic-Auth fallback can actually accept a login. It needs
@@ -124,25 +125,14 @@ export async function POST(request: Request) {
     // fully signed in.
     const { token, maxAgeSeconds } = await issueAdminDevice(redis, email, true, { superAdmin: true });
     const response = NextResponse.json({ ok: true, needs2fa: false, twoStepEnabled: false, email });
-    response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: maxAgeSeconds,
-      path: '/',
-    });
+    response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
     return response;
   }
 
   const token = await issueAdminAuthSession(redis, email);
 
   const response = NextResponse.json({ ok: true, needs2fa: true, twoStepEnabled: true, email });
-  response.cookies.set(ADMIN_AUTH_COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 15 * 60, // 15 minutes — long enough to read the emailed 2FA code
-    path: '/',
-  });
+  // 15 minutes — long enough to read the emailed 2FA code.
+  response.cookies.set(ADMIN_AUTH_COOKIE, token, portalCookieAttrs(request, 'admin', 15 * 60));
   return response;
 }

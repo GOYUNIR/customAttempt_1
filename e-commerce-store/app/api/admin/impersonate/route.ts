@@ -6,6 +6,7 @@ import { supabaseRestFetch, readSupabaseEnv, supabaseServiceConfigured } from '@
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
+import { portalCookieAttrs } from '@/lib/portal-cookies';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,13 +123,7 @@ export async function POST(request: Request) {
       tenant: { id: tenant.id, name: tenant.name },
       expiresInSeconds: maxAgeSeconds,
     });
-    response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: maxAgeSeconds,
-      path: '/',
-    });
+    response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
     return response;
   } catch (err: any) {
     console.error('[admin/impersonate] failed', err?.message || err);

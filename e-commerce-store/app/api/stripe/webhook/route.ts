@@ -29,6 +29,35 @@ import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
 import { shadowWriteOrder } from '@/lib/postgres-shadow-write';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { resolveVariantId, decrementInventory as decrementPostgresInventory } from '@/lib/inventory';
+import { createRaffleEntry } from '@/lib/raffle';
+import { recordPlatformAudit } from '@/lib/platform-audit';
+
+/**
+ * Best-effort Postgres inventory mirror for a webhook-driven charge. Stripe
+ * has ALREADY charged the customer by the time this runs, so — unlike
+ * checkout/direct/route.ts, which can gate the sale before charging — this
+ * can only record the authoritative count and flag a discrepancy; it never
+ * blocks or fails the webhook response (see lib/postgres-shadow-write.ts's
+ * identical "never blocks the real transaction" contract).
+ */
+async function shadowDecrementInventory(tenantId: string, externalProductId: string, size: string, qty: number): Promise<void> {
+  try {
+    const variantId = await resolveVariantId(tenantId, externalProductId, size);
+    if (!variantId) return; // not backfilled into Postgres yet — nothing to mirror
+    const result = await decrementPostgresInventory(tenantId, variantId, qty);
+    if (!result.ok) {
+      console.error('[webhook] Postgres inventory oversold — manual reconciliation needed', { externalProductId, size, qty, reason: result.reason });
+      await recordPlatformAudit({
+        action: 'postgres_inventory_oversold',
+        tenantId,
+        detail: { externalProductId, size, qty, reason: result.reason },
+      });
+    }
+  } catch (e) {
+    console.error('[webhook] Postgres inventory shadow-decrement failed', e);
+  }
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -347,6 +376,30 @@ export async function POST(request: Request) {
           if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
           await cleanupMatchingIntent(redis, variant, size, email);
 
+          // Dual-write into Postgres raffle_entries — Redis (above) stays the
+          // live system of record (the actual draw engine, lib/auto-draw.ts,
+          // still reads from it); this only populates the relational table in
+          // real time so it's ready for a future draw-engine cutover. Its own
+          // partial-unique-index duplicate check makes this safe to attempt
+          // even when the Redis dedupe above already ran.
+          if (isPostgresPrimaryEnabled()) {
+            const raffleTenantId = await ensureDefaultTenant().catch(() => null);
+            if (raffleTenantId && productId) {
+              const raffleVariantId = await resolveVariantId(raffleTenantId, productId, size).catch(() => null);
+              if (raffleVariantId) {
+                await createRaffleEntry({
+                  tenantId: raffleTenantId,
+                  variantId: raffleVariantId,
+                  email,
+                  paymentMethodRef: paymentMethodId || null,
+                  promoCode: appliedPromo || null,
+                  discountPercent: discountPercent || null,
+                  shippingAddress: shippingAddress || null,
+                }).catch((e) => console.error('[webhook] Postgres raffle_entries dual-write failed', e));
+              }
+            }
+          }
+
           await archiveEntry(redis, {
             email,
             variant,
@@ -515,6 +568,7 @@ export async function POST(request: Request) {
                 checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
                 promoCode: appliedPromo,
               });
+              await shadowDecrementInventory(shadowTenantId, String(thisProduct.id), thisSize, qty);
             }
           }
         }
@@ -565,6 +619,7 @@ export async function POST(request: Request) {
                 checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
                 promoCode: appliedPromo,
               });
+              await shadowDecrementInventory(shadowTenantId, String(product.id), size, 1);
             }
           }
         }

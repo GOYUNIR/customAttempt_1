@@ -17,6 +17,9 @@ import { isConfiguredPrice } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { withRedisLock } from '@/lib/redis-lock';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { resolveVariantId, decrementInventory as decrementPostgresInventory, restockInventory } from '@/lib/inventory';
 
 /** Same anti-scalping check `checkout/route.ts` enforces before creating a
  * Stripe Checkout Session — this direct-charge path was missing it entirely,
@@ -122,38 +125,77 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Purchase limit reached (${maxPerEmail} per email).` }, { status: 409 });
     }
 
-    // Create or use existing Stripe customer
-    let stripeCustomerId = customerId;
-    if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email,
-        metadata: { initialShippingAddress: shippingAddress },
-      });
-      stripeCustomerId = customer.id;
+    // ── Postgres primary gate (USE_POSTGRES_PRIMARY) ──────────────────────
+    // Unlike the webhook-driven flow (checkout/cart), this route charges the
+    // customer directly, so it's the one checkout path that CAN gate the
+    // sale on Postgres inventory before money moves — the real "primary"
+    // cutover for this route. Fails closed: a variant that hasn't been
+    // backfilled into Postgres yet (scripts/migrate-redis-to-supabase.ts)
+    // blocks the sale rather than risk an unprotected oversell.
+    let pgTenantId: string | null = null;
+    let pgVariantId: string | null = null;
+    if (isPostgresPrimaryEnabled()) {
+      pgTenantId = await ensureDefaultTenant().catch(() => null);
+      if (!pgTenantId) {
+        return NextResponse.json({ error: 'Postgres is not reachable. Try again shortly.' }, { status: 503 });
+      }
+      pgVariantId = await resolveVariantId(pgTenantId, String(productId), String(size)).catch(() => null);
+      if (!pgVariantId) {
+        return NextResponse.json(
+          { error: 'This product has not been migrated to Postgres yet (run scripts/migrate-redis-to-supabase.ts).' },
+          { status: 503 },
+        );
+      }
+      const decrementResult = await decrementPostgresInventory(pgTenantId, pgVariantId, 1);
+      if (!decrementResult.ok) {
+        const status = decrementResult.reason === 'insufficient_stock' ? 400 : 409;
+        return NextResponse.json({ error: decrementResult.reason === 'insufficient_stock' ? 'Sold out.' : 'Please retry — inventory is busy.' }, { status });
+      }
     }
 
-    // Create PaymentIntent using the actual Stripe Price ID from the category.
-    // An idempotency key means a client retry (double-tap, network blip) of
-    // the SAME attempt reuses this key and Stripe dedupes it into one charge.
-    // Bucketed to a 30s window on the stable inputs so it's deterministic
-    // across retries of one attempt but doesn't block a later, separate
-    // purchase of the same product/size by the same customer.
-    const idempotencyKey = `direct:${normalizedEmail}:${productId}:${size}:${paymentMethodId}:${Math.floor(Date.now() / 30_000)}`;
-    const paymentIntent = await stripe.paymentIntents.create(
-      {
-        amount: priceCents,
-        currency: 'usd',
-        customer: stripeCustomerId,
-        payment_method: paymentMethodId,
-        off_session: false,
-        confirm: true,
-        receipt_email: email,
-        description: `${product.name} (${size})`,
-      },
-      { idempotencyKey },
-    );
+    // Create or use existing Stripe customer + charge. Any thrown error (not
+    // just a non-'succeeded' status) rolls back the Postgres reservation
+    // above — the unit was never actually charged, so it must not stay
+    // decremented.
+    let stripeCustomerId = customerId;
+    let paymentIntent;
+    try {
+      if (!stripeCustomerId) {
+        const customer = await stripe.customers.create({
+          email,
+          metadata: { initialShippingAddress: shippingAddress },
+        });
+        stripeCustomerId = customer.id;
+      }
+
+      // An idempotency key means a client retry (double-tap, network blip) of
+      // the SAME attempt reuses this key and Stripe dedupes it into one charge.
+      // Bucketed to a 30s window on the stable inputs so it's deterministic
+      // across retries of one attempt but doesn't block a later, separate
+      // purchase of the same product/size by the same customer.
+      const idempotencyKey = `direct:${normalizedEmail}:${productId}:${size}:${paymentMethodId}:${Math.floor(Date.now() / 30_000)}`;
+      paymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: priceCents,
+          currency: 'usd',
+          customer: stripeCustomerId,
+          payment_method: paymentMethodId,
+          off_session: false,
+          confirm: true,
+          receipt_email: email,
+          description: `${product.name} (${size})`,
+        },
+        { idempotencyKey },
+      );
+    } catch (chargeErr) {
+      if (pgTenantId && pgVariantId) await restockInventory(pgTenantId, pgVariantId, 1).catch(() => {});
+      throw chargeErr;
+    }
 
     if (paymentIntent.status !== 'succeeded') {
+      // Roll back the Postgres reservation — the charge never went through,
+      // so the unit is still available.
+      if (pgTenantId && pgVariantId) await restockInventory(pgTenantId, pgVariantId, 1).catch(() => {});
       return NextResponse.json({ error: 'Payment not successful.' }, { status: 400 });
     }
 

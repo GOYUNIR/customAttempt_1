@@ -33,6 +33,31 @@ function assertSupabase(): void {
   }
 }
 
+/**
+ * Resolve the Postgres `product_variants.id` for a Redis product+size pair,
+ * via the same `products.external_id` / `product_variants.option_label`
+ * mapping `scripts/migrate-redis-to-supabase.ts` writes on backfill. Returns
+ * null when no matching row exists — the caller (a checkout route gated by
+ * `USE_POSTGRES_PRIMARY`) must fail closed in that case rather than guess,
+ * since a null result usually means the backfill hasn't run for this
+ * product yet (see DEPLOYMENT.md's rollout sequence).
+ */
+export async function resolveVariantId(tenantId: string, externalProductId: string, size: string): Promise<string | null> {
+  assertSupabase();
+  const { serviceRoleKey } = readSupabaseEnv();
+  const products = (await supabaseRestFetch(
+    `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&external_id=eq.${encodeURIComponent(externalProductId)}&select=id&limit=1`,
+    { key: serviceRoleKey },
+  )) as Array<{ id: string }>;
+  const productId = products?.[0]?.id;
+  if (!productId) return null;
+  const variants = (await supabaseRestFetch(
+    `/product_variants?product_id=eq.${encodeURIComponent(productId)}&option_label=eq.${encodeURIComponent(size)}&select=id&limit=1`,
+    { key: serviceRoleKey },
+  )) as Array<{ id: string }>;
+  return variants?.[0]?.id || null;
+}
+
 /** Read the current inventory row for one variant. Returns null when no row
  *  exists yet (a variant with no inventory_levels row is treated as 0/0 by
  *  callers, not an error — most catalogs backfill this lazily on first

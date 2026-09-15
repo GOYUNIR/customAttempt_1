@@ -12,6 +12,7 @@ import {
   normalizePlatformSettingsInput,
 } from '@/services/config/platform-settings';
 import { toPublicSummary, hasOperationalSettings } from '@/services/config/types';
+import { portalCookieAttrs } from '@/lib/portal-cookies';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { createSuperAdmin, readSupabaseEnv, supabaseServiceConfiguredFromEnv, setSupabaseRuntimeCredentials, setSupabaseRuntimeAccessToken, verifyServiceRoleAccess, verifySuperAdminSignIn, probePlatformSettingsSchema } from '@/services/config/supabase-client';
 import {
@@ -740,13 +741,7 @@ export async function POST(request: Request) {
       if (redis) {
         try {
           const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, true, { superAdmin: true });
-          response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            maxAge: maxAgeSeconds,
-            path: '/',
-          });
+          response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
         } catch {
           // Non-fatal — the operator can still reach /admin/setup?reconfigure=1 and sign in.
         }

@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import QuoteDeskPanel from '@/components/sales/QuoteDeskPanel';
+import { panelStyle, inputStyle, buttonPrimary, buttonGhost, labelStyle, statusPill, adminApiFetch } from '@/components/admin/portalStyles';
 
 /**
  * ENTERPRISE PANEL — the admin UI for this session's three new capabilities:
@@ -17,72 +19,7 @@ import { useState, useEffect, useCallback, type CSSProperties } from 'react';
  * pattern lib/cloudflare-saas.ts uses for missing Cloudflare credentials.
  */
 
-const panelStyle: CSSProperties = {
-  padding: 22,
-  borderRadius: 18,
-  background: '#141417',
-  border: '1px solid #2a2a30',
-  boxShadow: '0 1px 2px rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.14)',
-};
-
-const inputStyle: CSSProperties = {
-  padding: 10,
-  borderRadius: 10,
-  background: '#0d0d10',
-  border: '1px solid #303036',
-  color: '#fff',
-  fontSize: 13,
-  boxSizing: 'border-box',
-};
-
-const buttonPrimary: CSSProperties = {
-  padding: '9px 16px',
-  borderRadius: 10,
-  background: '#3b82f6',
-  color: '#fff',
-  border: 'none',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const buttonGhost: CSSProperties = {
-  padding: '9px 16px',
-  borderRadius: 10,
-  background: 'transparent',
-  color: '#ccc',
-  border: '1px solid #303036',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: 9,
-  fontWeight: 700,
-  letterSpacing: '0.6px',
-  textTransform: 'uppercase',
-  color: '#8b95a7',
-};
-
-const statusPill = (color: string): CSSProperties => ({
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '3px 10px',
-  borderRadius: 999,
-  fontSize: 10.5,
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  color,
-  background: `${color}22`,
-  border: `1px solid ${color}55`,
-});
-
 type EnterpriseSubTab = 'quotes' | 'domains' | 'assistant' | 'health';
-
-async function adminApiFetch(input: string, init: RequestInit = {}) {
-  return fetch(input, { ...init, credentials: 'include' });
-}
 
 export default function EnterprisePanel({ password }: { password: string }) {
   const [subTab, setSubTab] = useState<EnterpriseSubTab>('quotes');
@@ -107,7 +44,7 @@ export default function EnterprisePanel({ password }: { password: string }) {
           ))}
         </div>
       </div>
-      {subTab === 'quotes' && <QuotesPanel password={password} />}
+      {subTab === 'quotes' && <QuoteDeskPanel password={password} />}
       {subTab === 'domains' && <DomainsPanel password={password} />}
       {subTab === 'assistant' && <AssistantPanel />}
       {subTab === 'health' && <HealthPanel />}

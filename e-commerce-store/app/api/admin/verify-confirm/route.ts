@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { consumeAdminCode, issueAdminDevice, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { portalCookieAttrs } from '@/lib/portal-cookies';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,13 +51,7 @@ export async function POST(request: Request) {
     const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, remember);
 
     const response = NextResponse.json({ ok: true, verified: true, remember });
-    response.cookies.set(ADMIN_DEVICE_COOKIE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: maxAgeSeconds,
-      path: '/',
-    });
+    response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
     return response;
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Verification failed' }, { status: 500 });

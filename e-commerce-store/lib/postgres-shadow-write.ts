@@ -81,6 +81,14 @@ export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
     const { serviceRoleKey } = readSupabaseEnv();
     const customerId = await findOrCreateShadowCustomer(input.tenantId, input.email, serviceRoleKey);
 
+    // 00013's check constraint only accepts these four lowercase values —
+    // anything else (an empty string, an unrecognized future mode) stays
+    // out of the real column and is still preserved verbatim in metadata.
+    const normalizedCheckoutMode = String(input.checkoutMode || '').trim().toLowerCase();
+    const realCheckoutMode = ['fcfs', 'raffle', 'waitlist', 'rfq_quote'].includes(normalizedCheckoutMode)
+      ? normalizedCheckoutMode
+      : null;
+
     const orderRows = (await supabaseRestFetch('/orders?on_conflict=tenant_id,order_ref', {
       key: serviceRoleKey,
       method: 'POST',
@@ -93,6 +101,7 @@ export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
         subtotal_cents: input.amountCents,
         total_cents: input.amountCents,
         currency: 'usd',
+        checkout_mode: realCheckoutMode,
         metadata: {
           shadow: true,
           checkoutMode: input.checkoutMode || null,
