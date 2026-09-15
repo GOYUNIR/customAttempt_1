@@ -165,6 +165,20 @@ export function supabaseServiceConfiguredFromEnv(): boolean {
   return Boolean(url && serviceRoleKey);
 }
 
+import {
+  MAX_DB_ATTEMPTS,
+  resolveTimeoutMs,
+  retryDelayMs,
+  shouldRetry,
+  type DbTier,
+} from '../../lib/db-timeout-policy.ts';
+
+/** Backoff with +/-25% jitter so concurrent callers do not retry in lockstep. */
+function sleepWithJitter(ms: number): Promise<void> {
+  const jittered = ms * (0.75 + Math.random() * 0.5);
+  return new Promise((resolve) => setTimeout(resolve, jittered));
+}
+
 function headers(key: string, extra?: Record<string, string>, bearer?: string): Record<string, string> {
   return { apikey: key, Authorization: `Bearer ${bearer || key}`, 'Content-Type': 'application/json', ...(extra || {}) };
 }
@@ -181,19 +195,52 @@ export async function supabaseRestFetch(
      *  Authorization header must carry the signed-in user's JWT instead of the
      *  anon/service key. The `apikey` header still carries `options.key`. */
     bearer?: string;
+    /** 'interactive' (default) fails fast for user-facing reads; 'background'
+     *  is patient — cron jobs, backfills, admin batch work. */
+    tier?: DbTier;
   },
 ): Promise<unknown> {
   const { url } = readSupabaseEnv();
   if (!url || !options.key) throw new Error('Supabase is not configured (SUPABASE_URL / key missing).');
   const prefer = options.prefer || (options.method === 'POST' ? 'return=representation' : undefined);
-  const res = await fetch(`${url}/rest/v1${path}`, {
-    method: options.method || 'GET',
-    headers: headers(options.key, prefer ? { Prefer: prefer } : undefined, options.bearer),
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  });
+  const method = options.method || 'GET';
+  const tier: DbTier = options.tier || 'interactive';
+  const timeoutMs = resolveTimeoutMs(tier, process.env as Record<string, string | undefined>);
+
+  // Bounded, retry-aware request. Without a timeout a hung Supabase response
+  // occupies this invocation until the platform kills it. Only GETs are ever
+  // retried — see lib/db-timeout-policy.ts: a retried write can duplicate a row,
+  // and a timeout never tells you whether the server applied it.
+  let res: Response | null = null;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= MAX_DB_ATTEMPTS; attempt++) {
+    try {
+      res = await fetch(`${url}/rest/v1${path}`, {
+        method,
+        headers: headers(options.key, prefer ? { Prefer: prefer } : undefined, options.bearer),
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      lastError = err;
+      res = null;
+      if (!shouldRetry({ method, attempt, networkError: true })) break;
+      await sleepWithJitter(retryDelayMs(attempt));
+      continue;
+    }
+    if (res.ok || !shouldRetry({ method, attempt, status: res.status })) break;
+    await sleepWithJitter(retryDelayMs(attempt));
+  }
+
+  if (!res) {
+    const reason = lastError instanceof Error ? lastError.message : String(lastError);
+    const timedOut = /timeout|abort/i.test(reason);
+    const what = timedOut ? `timed out after ${timeoutMs}ms` : 'failed';
+    throw new Error(`Supabase ${method} ${path} ${what} (${tier} tier): ${reason.slice(0, 200)}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Supabase ${options.method || 'GET'} ${path} failed (${res.status}): ${text.slice(0, 300)}`);
+    throw new Error(`Supabase ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`);
   }
   if (res.status === 204) return null;
   const text = await res.text();

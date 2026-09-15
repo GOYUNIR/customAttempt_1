@@ -402,3 +402,59 @@ exit 0. The harness refuses to run against anything but an `sk_test_` key.
 **Standing lesson.** "Correct by construction" is not verification for a money
 path. The vendor's own limits are part of the contract, and only the vendor can
 confirm them.
+
+---
+
+## Phase B item 5 — storefront cache: the audit's own recommendation was wrong
+
+**What SEV-2 said.** "`s-maxage=10` → roughly 8,600 origin hits per day per PoP.
+Catalogs change rarely. Move to a long TTL (hours) with explicit purge on write."
+
+**The arithmetic holds.** 86,400s ÷ 10s = 8,640 revalidations/day/PoP under
+continuous traffic. `app/api/store/route.ts:417` is still `s-maxage=10,
+stale-while-revalidate=30`.
+
+**The recommendation does not.** "Catalogs change rarely" is true of catalog
+*structure* and false of what this payload actually carries. `/api/store`
+embeds `inventoryRemaining` and `soldOut` per product, and inventory is written
+on the **hot purchase path** — `app/api/checkout/direct/route.ts:210` and
+`app/api/stripe/webhook/route.ts:525` both `saveLiveState` on every sale.
+
+So a long TTL forces a choice between two bad outcomes:
+
+- **Purge on every write.** During a drop that is a purge per purchase — a
+  purge storm that defeats the cache and costs more than it saves.
+- **Don't purge on inventory.** Then the storefront serves stale stock counts
+  for hours: items shown available after selling out, countdowns wrong.
+
+There is no third option while one endpoint serves both stable and volatile
+data. **The 10-second TTL is not naive — it is load-bearing.** It is the
+largest TTL that keeps inventory honest, and raising it without splitting the
+payload would trade a cost problem for a correctness problem.
+
+Checked and ruled out: `/api/checkout/stock` is a Stripe price-activity map,
+not inventory, and nothing calls it. `/api/catalog/status` is a second full
+catalog builder, not a cheap version oracle. Neither can absorb the volatile
+half as it stands.
+
+**The actual fix — split by volatility, then cache each half correctly:**
+
+1. **Stable half** (catalog structure, theme, config, media refs) — long TTL,
+   keyed by a catalog version token bumped only by admin catalog/config writes
+   (`/api/admin/products`, `/api/admin/catalog-settings`, `/api/admin/seed`,
+   never by an inventory decrement). Version-keyed URLs make purge-on-write
+   exact and instant, with no purge API call that can fail or lag.
+2. **Volatile half** (`inventoryRemaining`, `soldOut`, countdown anchors) — a
+   small dedicated endpoint on a short TTL. Small enough that 8,640 hits/day of
+   *it* is a rounding error next to 8,640 hits of the full payload.
+
+**Not implemented in this phase, deliberately.** This changes the shape of the
+`/api/store` response and how `components/Storefront.tsx` fetches — client
+behavior that cannot be visually verified in this environment, against the file
+this project has repeatedly and correctly ring-fenced from blind rewrites. It
+wants its own gated change, not a tail-end addition to Phase B.
+
+**Partly mitigated already:** Phase B item 4 removes the base64 brand logo
+(41.8KB raw / 55.8KB encoded) from the payload, so every one of those 8,640
+daily revalidations now moves dramatically less data. The TTL is unchanged; the
+bytes per hit are not.

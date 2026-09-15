@@ -14,7 +14,8 @@
     "migrate:backfill": "tsx scripts/migrate-redis-to-supabase.ts",
     "check:production-readiness": "tsx scripts/production-readiness-check.ts",
     "simulate:concurrency": "tsx scripts/simulate-concurrency.ts",
-    "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts"
+    "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts",
+    "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",
