@@ -83,6 +83,14 @@ test('a short CRON_SECRET is a WARNING, not a blocking error', () => {
   assert.ok(warnings.some((w) => w.field === 'CRON_SECRET'));
 });
 
+test('USE_POSTGRES_PRIMARY accepts true/false (any case), rejects other values', () => {
+  assert.equal(validateProductionEnv({ USE_POSTGRES_PRIMARY: 'true' }).ok, true);
+  assert.equal(validateProductionEnv({ USE_POSTGRES_PRIMARY: 'FALSE' }).ok, true);
+  const { ok, errors } = validateProductionEnv({ USE_POSTGRES_PRIMARY: 'yes' });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.field === 'USE_POSTGRES_PRIMARY'));
+});
+
 test('productionEnvHasBlockingIssues mirrors validateProductionEnv().ok', () => {
   assert.equal(productionEnvHasBlockingIssues({}), false);
   assert.equal(productionEnvHasBlockingIssues({ STRIPE_SECRET_KEY: 'nope' }), true);

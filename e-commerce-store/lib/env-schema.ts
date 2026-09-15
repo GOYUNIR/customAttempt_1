@@ -59,6 +59,12 @@ const ProductionEnvSchema = z.object({
   KV_REST_API_TOKEN: optionalFormat(/^\S+$/, 'must not contain whitespace'),
   NEXT_PUBLIC_MAPBOX_TOKEN: optionalFormat(/^pk\.[A-Za-z0-9._-]+$/, 'must be a Mapbox PUBLIC token (pk.…) — never paste a secret (sk.…) token here, it is exposed to every browser'),
   CRON_SECRET: z.string().optional(),
+  // Parsed by lib/feature-flags.ts's isPostgresPrimaryEnabled() as exactly
+  // the string 'true' (case-insensitive) or anything else (falsy) — so a
+  // typo like 'TRUE ' or 'yes'/'1' would silently evaluate to off/on in a
+  // way that doesn't match what was typed. Catch that here rather than let
+  // it fail silently in a way the operator won't notice until cutover.
+  USE_POSTGRES_PRIMARY: optionalFormat(/^(true|false)$/i, 'must be exactly "true" or "false" (case-insensitive) — see lib/feature-flags.ts'),
 });
 
 export type ProductionEnvIssue = { field: string; message: string; severity: 'error' | 'warning' };
