@@ -81,10 +81,10 @@ test('readSupabaseEnv: inline runtime override wins over process.env', () => {
 
 test('readSupabaseAccessToken: inline runtime override wins over process.env', () => {
   withEnv(
-    { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ACCESS_TOKEN: 'sbp_envtoken123456' },
+    { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ACCESS_TOKEN: 'sbp_mockA' },
     () => {
-      setSupabaseRuntimeAccessToken('sbp_inlinetoken123456');
-      assert.equal(readSupabaseAccessToken(), 'sbp_inlinetoken123456');
+      setSupabaseRuntimeAccessToken('sbp_mockB');
+      assert.equal(readSupabaseAccessToken(), 'sbp_mockB');
     },
   );
 });
@@ -94,11 +94,11 @@ test('setSupabaseRuntimeAccessToken: merges without disturbing URL/service-role'
     { SUPABASE_URL: 'https://env.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'svc-env' },
     () => {
       setSupabaseRuntimeCredentials({ url: 'https://wizard.supabase.co', serviceRoleKey: 'svc-wizard' });
-      setSupabaseRuntimeAccessToken('sbp_inlinetoken123456');
+      setSupabaseRuntimeAccessToken('sbp_mockB');
       const env = readSupabaseEnv();
       assert.equal(env.url, 'https://wizard.supabase.co');
       assert.equal(env.serviceRoleKey, 'svc-wizard');
-      assert.equal(readSupabaseAccessToken(), 'sbp_inlinetoken123456');
+      assert.equal(readSupabaseAccessToken(), 'sbp_mockB');
     },
   );
 });
