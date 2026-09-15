@@ -28,8 +28,13 @@ import { samplerPresentationSeed } from '@/lib/sampler-config';
 import HeroShaderSettings from '@/components/admin/HeroShaderSettings';
 import { defaultAiHeroSettings, type AiHeroSettings } from '@/lib/shaders/presets';
 import EnterprisePanel from '@/components/admin/EnterprisePanel';
+import PortalShell from '@/components/admin/PortalShell';
+import TelemetryDashboard from '@/components/admin/TelemetryDashboard';
+import InventoryAllocationMatrix from '@/components/admin/InventoryAllocationMatrix';
+import TenantOnboardingWizard from '@/components/admin/TenantOnboardingWizard';
+import ThemeEditor from '@/components/admin/ThemeEditor';
 
-type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup' | 'enterprise';
+type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup' | 'enterprise' | 'telemetry' | 'inventory' | 'tenants' | 'theme';
 
 const SHIP_STATUSES = ['PENDING_FULFILLMENT', 'LABEL_CREATED', 'SHIPPED', 'DELIVERED'] as const;
 
@@ -4648,6 +4653,10 @@ export default function AdminPortal() {
   const dataStoreName = dataStoreDisplayName(activeStorageProvider);
 
   const tabs: { id: Tab; label: string; group: string; badge?: number }[] = [
+    { id: 'telemetry', label: 'Telemetry', group: 'Dashboard' },
+    { id: 'inventory', label: 'Inventory Matrix', group: 'Dashboard' },
+    { id: 'tenants', label: 'Tenant Onboarding', group: 'Dashboard' },
+    { id: 'theme', label: 'Theme Editor', group: 'Dashboard' },
     { id: 'overview', label: 'Overview', group: 'Store' },
     { id: 'drops', label: 'Drops', group: 'Store' },
     { id: 'products', label: 'Products', group: 'Store', badge: allProducts.filter(p => !p.isArchived && !p.isUpcoming).length || undefined },
@@ -4660,6 +4669,31 @@ export default function AdminPortal() {
     { id: 'setup', label: 'Setup', group: 'Configuration' },
     { id: 'enterprise', label: 'Enterprise', group: 'Configuration' },
   ];
+
+  // Switches the active tab AND runs the same per-tab data-fetch side
+  // effects the old inline pill-tab-bar's onClick used to — extracted here
+  // (Phase 5's outer-shell rewrite) so the new PortalShell sidebar can
+  // trigger the identical behavior. The fetch logic itself is untouched.
+  const selectTab = (id: Tab) => {
+    setTab(id);
+    if (id === 'growth') { fetchPromos(); fetchAudit(); fetchAlerts(); }
+    if (id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
+    if (id === 'drops') fetchConfig();
+    if (id === 'drops' && drawsSub === 'run') fetchDrawHistory();
+    if (id === 'settings') { fetchSettings(); }
+    if (id === 'setup') { fetchEnvStatus(); loadProviderKeys(); }
+    if (id === 'products') { fetchProducts(); fetchSettings(); }
+    if (id === 'users') fetchUsers();
+  };
+
+  const navGroups = ['Dashboard', 'Store', 'Customers', 'Configuration']
+    .map((groupName) => ({
+      label: groupName,
+      items: tabs
+        .filter((t) => t.group === groupName)
+        .map((t) => ({ label: t.label, href: '#', active: tab === t.id, badge: t.badge, onClick: () => selectTab(t.id) })),
+    }))
+    .filter((group) => group.items.length > 0);
 
   // ============================================================
   // TWO-STEP VERIFICATION GATE — shown until the operator confirms an emailed code.
@@ -4773,7 +4807,7 @@ export default function AdminPortal() {
   // RENDER (UPDATED product form with dynamic categories, explanations, file upload)
   // ============================================================
   return (
-    <main style={{ minHeight: '100vh', padding: '32px 20px 72px', background: '#060608', color: '#f7f7f7', fontFamily: 'system-ui, sans-serif' }}>
+    <PortalShell title="Store Admin" portalBadge="ADMIN" navGroups={navGroups}>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
           <div>
@@ -4935,60 +4969,6 @@ export default function AdminPortal() {
               ? 'Locked while Streamer Mode is ON — type it with Streamer Mode OFF, then toggle back on. A password already typed stays active.'
               : 'Required to save settings and trigger destructive actions'}
             style={{ ...inputStyle, flex: 1, minWidth: 160, padding: '10px 12px', opacity: streamerMode ? 0.55 : 1 }} />
-        </div>
-
-        {/* Apple-style grouped tab bar: Store / Customers / Configuration */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-          {['Store', 'Customers', 'Configuration'].map((groupName) => {
-            const groupTabs = tabs.filter((t) => t.group === groupName);
-            if (groupTabs.length === 0) return null;
-            return (
-              <div key={groupName}>
-                <div style={{ fontSize: 9, letterSpacing: '2px', textTransform: 'uppercase', color: '#6b6b74', margin: '2px 4px 4px', fontWeight: 700 }}>{groupName}</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {groupTabs.map((t) => (
-                    <button key={t.id}
-                      onClick={() => {
-                        setTab(t.id);
-                        if (t.id === 'growth') { fetchPromos(); fetchAudit(); fetchAlerts(); }
-                        if (t.id === 'system') { if (password) fetchAudit(); fetchDrawHistory(); }
-                        if (t.id === 'drops') fetchConfig();
-                        if (t.id === 'drops' && drawsSub === 'run') fetchDrawHistory();
-                        if (t.id === 'settings') { fetchSettings(); }
-                        if (t.id === 'setup') { fetchEnvStatus(); loadProviderKeys(); }
-                        if (t.id === 'products') fetchProducts();
-                        if (t.id === 'products') fetchSettings();
-                        if (t.id === 'users') fetchUsers();
-                      }}
-                      style={{
-                        padding: '8px 14px', borderRadius: 20, border: tab === t.id ? '1px solid #fff' : '1px solid #27272a',
-                        background: tab === t.id ? '#fff' : 'transparent', color: tab === t.id ? '#000' : '#aaa',
-                        fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-                        transition: 'background 140ms ease, color 140ms ease, border-color 140ms ease',
-                      }}
-                    >
-                      {t.label}
-                      {t.badge ? (
-                        <span style={{ background: tab === t.id ? '#000' : '#edb210', color: tab === t.id ? '#fff' : '#000', fontSize: 9, padding: '1px 5px', borderRadius: 8, fontWeight: 700 }}>
-                          {t.badge}
-                        </span>
-                      ) : null}
-                      {t.id === 'enterprise' && (
-                        <span
-                          title="B2B quotes, custom domains, AI assistant"
-                          style={{
-                            width: 6, height: 6, borderRadius: 999,
-                            background: tab === t.id ? '#000' : '#34d399',
-                            boxShadow: tab === t.id ? 'none' : '0 0 0 2px rgba(52,211,153,0.18)',
-                          }}
-                        />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
         </div>
 
         {/* ============ OVERVIEW (unchanged) ============ */}
@@ -5503,6 +5483,10 @@ export default function AdminPortal() {
 
         {/* ============ ENTERPRISE (B2B quotes / custom domains / AI assistant) ============ */}
         {tab === 'enterprise' && <EnterprisePanel password={password} />}
+        {tab === 'telemetry' && <div style={cardStyle}><TelemetryDashboard /></div>}
+        {tab === 'inventory' && <div style={cardStyle}><InventoryAllocationMatrix /></div>}
+        {tab === 'tenants' && <div style={cardStyle}><TenantOnboardingWizard /></div>}
+        {tab === 'theme' && <div style={cardStyle}><ThemeEditor /></div>}
 
         {/* ============ PRODUCTS (UPDATED) ============ */}
         {tab === 'products' && (
@@ -9112,6 +9096,6 @@ export default function AdminPortal() {
           </div>
         )}
       </div>
-    </main>
+    </PortalShell>
   );
 }

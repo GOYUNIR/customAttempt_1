@@ -70,8 +70,14 @@ export async function POST(request: Request) {
 
     if (!account) return deny();
     // Impersonation is a PLATFORM capability (Tier 1/2), never something a
-    // tenant's own owner/staff/customer grants themselves.
-    if (account.role !== 'sales' && account.role !== 'super_admin') return deny();
+    // tenant's own owner/staff/customer grants themselves. Includes the
+    // granular sales sub-roles (migration 00015) alongside the legacy
+    // 'sales' role — same set lib/admin-actor.ts's actorHasSalesAccess()
+    // treats as sales-scoped, so a sales_rep/sales_admin/deal_desk account
+    // isn't silently locked out of the one capability their portal exists
+    // to surface (components/sales/ImpersonationLauncher.tsx).
+    const SALES_SCOPED_ROLES = new Set(['sales', 'sales_rep', 'sales_admin', 'deal_desk']);
+    if (!SALES_SCOPED_ROLES.has(account.role) && account.role !== 'super_admin') return deny();
 
     const { serviceRoleKey } = readSupabaseEnv();
     const tenantRows = (await supabaseRestFetch(
@@ -81,7 +87,7 @@ export async function POST(request: Request) {
     const tenant = Array.isArray(tenantRows) ? tenantRows[0] : null;
     if (!tenant) return deny();
 
-    if (account.role === 'sales') {
+    if (SALES_SCOPED_ROLES.has(account.role)) {
       const assignmentRows = (await supabaseRestFetch(
         `/sales_tenant_assignments?sales_user_id=eq.${encodeURIComponent(account.id)}&tenant_id=eq.${encodeURIComponent(targetTenantId)}&select=tenant_id`,
         { key: serviceRoleKey },

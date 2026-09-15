@@ -93,3 +93,31 @@ test('isPortalPathAllowed: every other path is always allowed regardless of port
   assert.equal(isPortalPathAllowed('/catalog', 'storefront', ROOT), true);
   assert.equal(isPortalPathAllowed('/api/checkout/cart', 'merchant', ROOT), true);
 });
+
+// ── goyunir.com production-domain shape (not just the generic "site.com"
+// example above) — pins the exact mapping this session's live deployment
+// asks for: app./sales./admin. → their portals, the bare root and every
+// wildcard tenant subdomain → storefront/marketing, never a portal. ────────
+const PROD_ROOT = 'goyunir.com';
+
+test('classifyHost (goyunir.com): app./sales./admin. map to their portals', () => {
+  assert.equal(classifyHost('app.goyunir.com', PROD_ROOT), 'merchant');
+  assert.equal(classifyHost('sales.goyunir.com', PROD_ROOT), 'sales');
+  assert.equal(classifyHost('admin.goyunir.com', PROD_ROOT), 'admin');
+});
+
+test('classifyHost (goyunir.com): the bare root is marketing, any other subdomain is a tenant storefront', () => {
+  assert.equal(classifyHost('goyunir.com', PROD_ROOT), 'marketing');
+  assert.equal(classifyHost('acme-drops.goyunir.com', PROD_ROOT), 'storefront');
+  assert.equal(classifyHost('my-raffle-store.goyunir.com', PROD_ROOT), 'storefront');
+});
+
+test('classifyHost (goyunir.com): a merchant custom domain (not *.goyunir.com at all) is also a storefront', () => {
+  assert.equal(classifyHost('shop.some-merchant-brand.com', PROD_ROOT), 'storefront');
+});
+
+test('isPortalPathAllowed (goyunir.com): a wildcard tenant subdomain can never reach /admin or /sales', () => {
+  assert.equal(isPortalPathAllowed('/admin', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), false);
+  assert.equal(isPortalPathAllowed('/sales', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), false);
+  assert.equal(isPortalPathAllowed('/[slug]', classifyHost('acme-drops.goyunir.com', PROD_ROOT), PROD_ROOT), true);
+});
