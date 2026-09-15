@@ -19,6 +19,9 @@ import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { brandLogoRef, publicMediaRef } from '@/lib/media';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { readCatalogFromPostgres } from '@/lib/postgres-catalog-read';
 
 export const dynamic = 'force-dynamic';
 
@@ -419,12 +422,74 @@ export async function GET(request: Request) {
   }
 }
 
-async function buildStorePayload(requestedSlug: string) {
-  const redis = createRedisClient();
+type StorePayload = {
+  config: ReturnType<typeof mergePublicConfig>;
+  allProducts: PublicStoreProduct[];
+  product: PublicStoreProduct | null;
+  scheduleOverride: Record<string, unknown>;
+  socialOverride: Record<string, unknown>;
+  timestamp: number;
+  fromFallback?: boolean;
+};
+
+/**
+ * Postgres-primary catalog read (USE_POSTGRES_PRIMARY=true). Returns null
+ * on anything short of a full, valid payload — the caller falls back to the
+ * existing Redis path unchanged. See lib/postgres-catalog-read.ts's header
+ * for exactly what this covers (and doesn't).
+ */
+async function tryBuildStorePayloadFromPostgres(
+  requestedSlug: string,
+  sortProducts: (items: PublicStoreProduct[]) => PublicStoreProduct[],
+): Promise<StorePayload | null> {
+  try {
+    const tenantId = await ensureDefaultTenant();
+    const pg = await readCatalogFromPostgres(tenantId);
+    if (!pg) return null;
+
+    const config = mergePublicConfig(pg.config);
+    const globalSchedule = {
+      ...GOYUNIR_STORE_SUITE.dropSchedule,
+      ...(config?.dropSchedule || {}),
+      ...pg.scheduleOverride,
+    };
+
+    let allProducts = pg.productsRaw.map((raw) => sanitizeProduct(raw));
+    allProducts = sortProducts(allProducts);
+    const storeTimezone = String(config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+    const lifecycleProducts = applyLifecycle(allProducts, pg.liveStates, storeTimezone, globalSchedule);
+
+    const product = requestedSlug ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null : null;
+
+    return {
+      config,
+      allProducts: lifecycleProducts,
+      product,
+      scheduleOverride: pg.scheduleOverride,
+      socialOverride: pg.socialOverride,
+      timestamp: Date.now(),
+    };
+  } catch (err) {
+    console.error('[store] Postgres catalog read failed, falling back to Redis', (err as Error)?.message || err);
+    return null;
+  }
+}
+
+async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {
   const sortProducts = (items: PublicStoreProduct[]) =>
     [...items].sort(
       (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
     );
+
+  if (isPostgresPrimaryEnabled()) {
+    const fromPostgres = await tryBuildStorePayloadFromPostgres(requestedSlug, sortProducts);
+    if (fromPostgres) return fromPostgres;
+    // Falls through to the Redis path below, unchanged — no data (not
+    // backfilled yet), not configured, or a read error all degrade the
+    // same way: the flag never removes the working fallback.
+  }
+
+  const redis = createRedisClient();
 
   if (!redis) {
     // No Redis configured and nothing has been seeded yet → start with zero

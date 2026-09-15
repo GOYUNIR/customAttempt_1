@@ -320,7 +320,7 @@ export async function resolveAdminActor(request: Request): Promise<AdminActor | 
     const record = await readAdminDevice(redis, token);
     if (record) {
       const role = record.role as AdminActorRole | undefined;
-      if (role && ['super_admin', 'sales', 'owner', 'staff'].includes(role)) {
+      if (role && ['super_admin', 'sales', 'sales_rep', 'sales_admin', 'deal_desk', 'owner', 'staff'].includes(role)) {
         return {
           role,
           email: String(record.email || ''),

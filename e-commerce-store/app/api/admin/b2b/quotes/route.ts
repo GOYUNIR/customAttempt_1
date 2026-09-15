@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
+import { actorHasSalesAccess } from '@/lib/admin-actor';
 import { resolveActingTenantId } from '@/lib/tenant-context';
 import { resolveUnitPriceCents, quoteSubtotalCents, type PriceListEntry, type QuoteLineInput } from '@/lib/b2b/pricing';
 import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
@@ -65,6 +66,9 @@ export async function POST(request: Request) {
     }
 
     const actor = await resolveAdminActor(request);
+    if (!actorHasSalesAccess(actor)) {
+      return NextResponse.json({ error: 'Sales Hub access required.' }, { status: 403 });
+    }
     const tenantId = await resolveActingTenantId(actor);
     const { serviceRoleKey } = readSupabaseEnv();
 
@@ -191,6 +195,9 @@ export async function GET(request: Request) {
     }
 
     const actor = await resolveAdminActor(request);
+    if (!actorHasSalesAccess(actor)) {
+      return NextResponse.json({ error: 'Sales Hub access required.' }, { status: 403 });
+    }
     const tenantId = await resolveActingTenantId(actor);
     const { serviceRoleKey } = readSupabaseEnv();
 

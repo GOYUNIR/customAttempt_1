@@ -12,8 +12,12 @@
  */
 
 /** The RBAC role this app's admin routes gate on (lib/rbac.ts's
- *  `PortalRole`, minus 'customer' which never reaches /api/admin). */
-export type AdminActorRole = 'super_admin' | 'sales' | 'owner' | 'staff';
+ *  `PortalRole`, minus 'customer' which never reaches /api/admin).
+ *  `sales_rep` / `sales_admin` / `deal_desk` (migration 00015) are the
+ *  granular Sales Hub sub-roles — `sales` is kept as a legacy alias so an
+ *  existing session isn't locked out by the migration; see
+ *  `actorHasSalesAccess()` below. */
+export type AdminActorRole = 'super_admin' | 'sales' | 'sales_rep' | 'sales_admin' | 'deal_desk' | 'owner' | 'staff';
 
 export interface AdminActor {
   role: AdminActorRole;
@@ -50,4 +54,24 @@ export function actorHasFullAdminAccess(actor: AdminActor | null): boolean {
   if (!actor) return false;
   if (actor.impersonating) return false;
   return actor.role === 'super_admin' || actor.role === 'owner';
+}
+
+/**
+ * Whether an actor may reach the Sales Hub (`/sales`, `/api/admin/b2b/*`) —
+ * the "proper enterprise role separation" the Sales Hub RBAC pass asked for:
+ * a plain `owner` or `staff` admin session is blocked (this app's generic
+ * admin access does NOT imply sales-deal-desk access), while `super_admin`
+ * keeps its system-wide oversight, same as `actorHasFullAdminAccess()`
+ * above. `sales` is the pre-00015 role, kept working as a legacy alias
+ * alongside the three granular sub-roles that migration adds.
+ */
+export function actorHasSalesAccess(actor: AdminActor | null): boolean {
+  if (!actor) return false;
+  return (
+    actor.role === 'super_admin' ||
+    actor.role === 'sales' ||
+    actor.role === 'sales_rep' ||
+    actor.role === 'sales_admin' ||
+    actor.role === 'deal_desk'
+  );
 }

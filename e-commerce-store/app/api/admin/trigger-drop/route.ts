@@ -8,6 +8,9 @@ import { isConfiguredPrice } from '@/lib/storefront-config';
 import { sendWinnerEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { executeDrawWithCharging } from '@/lib/raffle';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +65,30 @@ export async function POST(request: Request) {
     const password = body.verificationKey || body.password || '';
     if (!(await adminAuthorized(request, password))) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
+    }
+
+    // ── Postgres-primary manual draw (opt-in: caller passes a Postgres
+    // variant UUID directly) ─────────────────────────────────────────────
+    // Deliberately separate from the Redis ALL_POOLS/targetPool loop below
+    // — the live Redis engine (lib/auto-draw.ts) and today's admin UI (which
+    // never sends `variantId`) are completely unaffected by this branch.
+    const postgresVariantId = String(body.variantId || '').trim();
+    if (postgresVariantId && isPostgresPrimaryEnabled()) {
+      const tenantId = await ensureDefaultTenant().catch(() => null);
+      if (!tenantId) {
+        return NextResponse.json({ error: 'Postgres is not reachable.' }, { status: 503 });
+      }
+      const winnerCount = Math.max(1, Math.floor(Number(body.winnerCount) || 1));
+      const { draw, charges } = await executeDrawWithCharging(tenantId, postgresVariantId, winnerCount);
+      const chargedCount = charges.filter((c) => c.status === 'charged').length;
+      try {
+        await appendAudit(redis, {
+          action: 'DRAW_TRIGGERED_POSTGRES',
+          detail: `variant ${postgresVariantId} · ${chargedCount}/${charges.length} charged · draw ${draw.drawId}`,
+          actor: 'admin',
+        });
+      } catch {}
+      return NextResponse.json({ success: true, draw, charges });
     }
 
     let poolKeys = await redis.keys(`${POOL_KEY_PREFIX}*`);

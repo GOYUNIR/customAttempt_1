@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { actorHasFullAdminAccess } from '../lib/admin-actor.ts';
+import { actorHasFullAdminAccess, actorHasSalesAccess } from '../lib/admin-actor.ts';
 
 test('super_admin and owner have full admin access', () => {
   assert.equal(actorHasFullAdminAccess({ role: 'super_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
@@ -24,4 +24,27 @@ test('a super_admin explicitly in impersonation mode STILL loses full admin acce
 
 test('no session (null actor) never has full admin access', () => {
   assert.equal(actorHasFullAdminAccess(null), false);
+});
+
+test('the three granular sales sub-roles (00015) have Sales Hub access', () => {
+  assert.equal(actorHasSalesAccess({ role: 'sales_rep', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+  assert.equal(actorHasSalesAccess({ role: 'sales_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+  assert.equal(actorHasSalesAccess({ role: 'deal_desk', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+});
+
+test('the legacy sales role still has Sales Hub access (not locked out by the 00015 migration)', () => {
+  assert.equal(actorHasSalesAccess({ role: 'sales', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+});
+
+test('super_admin has Sales Hub access (system-wide oversight, same as actorHasFullAdminAccess)', () => {
+  assert.equal(actorHasSalesAccess({ role: 'super_admin', email: 'a@b.com', impersonating: false, tenantId: null }), true);
+});
+
+test('a plain owner or staff admin session is BLOCKED from the Sales Hub (proper role separation)', () => {
+  assert.equal(actorHasSalesAccess({ role: 'owner', email: 'a@b.com', impersonating: false, tenantId: null }), false);
+  assert.equal(actorHasSalesAccess({ role: 'staff', email: 'a@b.com', impersonating: false, tenantId: null }), false);
+});
+
+test('no session (null actor) never has Sales Hub access', () => {
+  assert.equal(actorHasSalesAccess(null), false);
 });

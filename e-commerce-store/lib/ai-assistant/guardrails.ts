@@ -24,7 +24,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-export type AssistantActorRole = 'super_admin' | 'sales' | 'owner' | 'staff';
+export type AssistantActorRole = 'super_admin' | 'sales' | 'sales_rep' | 'sales_admin' | 'deal_desk' | 'owner' | 'staff';
 
 export interface AssistantToolSpec {
   name: string;

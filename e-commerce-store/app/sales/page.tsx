@@ -1,39 +1,26 @@
-'use client';
-
-import PortalShell from '@/components/admin/PortalShell';
-import QuoteDeskPanel from '@/components/sales/QuoteDeskPanel';
+import { redirect } from 'next/navigation';
+import { resolveAdminActorForPage } from '@/lib/admin-actor-from-headers';
+import { actorHasSalesAccess } from '@/lib/admin-actor';
+import SalesHubView from '@/components/sales/SalesHubView';
 
 /**
- * SALES HUB — standalone deal-desk portal (app/sales), distinct from the
- * admin panel's Enterprise → B2B Quotes sub-tab (same underlying
- * QuoteDeskPanel component, two mount points — see that component's header).
+ * SALES HUB — standalone deal-desk portal (app/sales).
  *
- * No client-side login form here: middleware.ts already gates every /sales
- * request through the same session-validity checks as /admin (readiness,
- * Basic Auth / login-session / device cookie, 2FA) before this page ever
- * renders — see middleware.ts's `isSalesPath` handling. A `sales`, `owner`,
- * or `super_admin` actor role is what SHOULD additionally gate this page
- * (lib/admin-actor.ts's AdminActorRole) once app/api/admin/b2b/quotes grows
- * a role check of its own; today it only requires ANY valid admin session
- * (adminAuthorized), same as every other /api/admin/b2b route.
+ * `middleware.ts`'s `isSalesPath` gate already confirms this is a valid
+ * admin session of SOME kind before this Server Component ever renders
+ * (readiness, Basic Auth / login-session / device cookie, 2FA — the coarse
+ * check, Edge-safe). The finer check — is this actor SPECIFICALLY
+ * sales-scoped (`sales_rep`/`sales_admin`/`deal_desk`/`sales`/`super_admin`,
+ * not a generic `owner`/`staff` admin session) — can't run in middleware
+ * (`resolveAdminActor` needs Node's `crypto`, unavailable on the Edge
+ * runtime), so it runs here, same as every other role-sensitive decision in
+ * this codebase (route-level via `actorHasFullAdminAccess`/
+ * `actorHasSalesAccess`, never middleware-level).
  */
-export default function SalesHubPage() {
-  return (
-    <PortalShell
-      title="Sales Hub"
-      nav={[
-        { label: 'Deal Desk', href: '/sales', active: true },
-        { label: 'Admin Panel', href: '/admin' },
-      ]}
-    >
-      <div style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 18 }}>Deal Desk</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#888' }}>
-          Build B2B draft quotes for wholesale/enterprise buyers — Net-30/60 terms and volume tiers are resolved
-          from each company&apos;s price list automatically.
-        </p>
-      </div>
-      <QuoteDeskPanel />
-    </PortalShell>
-  );
+export default async function SalesHubPage() {
+  const actor = await resolveAdminActorForPage();
+  if (!actorHasSalesAccess(actor)) {
+    redirect('/admin?error=sales_access_required');
+  }
+  return <SalesHubView />;
 }

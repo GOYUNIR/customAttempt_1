@@ -22,11 +22,11 @@ Grouped by provider, the fields it validates:
 
 `PLATFORM_ROOT_DOMAIN` (edge router / portal DNS, §3.1) is **not** in this schema — it's a plain hostname (e.g. `site.com`), not a secret, and every consumer (`lib/edge-router.ts`, `lib/portal-cookies.ts`, `middleware.ts`) already treats it as optional/unset-safe.
 
-Run `npx tsc --noEmit && node --test tests/*.test.ts` after touching this file — `tests/env-schema.test.ts` exercises every field's accept/reject boundary.
+Run `npm run typecheck && npm test` after touching this file — `tests/env-schema.test.ts` exercises every field's accept/reject boundary.
 
 ## 2. Supabase migration sequence
 
-Apply `supabase/migrations/00001` → `00013` in order (Supabase CLI: `supabase db push`, or paste each file into the SQL editor in order). One-line purpose of each:
+Apply `supabase/migrations/00001` → `00015` in order (Supabase CLI: `supabase db push`, or paste each file into the SQL editor in order). One-line purpose of each:
 
 | Migration | Purpose |
 |---|---|
@@ -43,6 +43,8 @@ Apply `supabase/migrations/00001` → `00013` in order (Supabase CLI: `supabase 
 | `00011` | Opaque variant/order metadata (raffle/FCFS/tier fields, jsonb) |
 | `00012` | Native raffle/FCFS/waitlist/shared-pool schema: `raffle_entries`, `drop_draws`, `waitlist_entries`, `shared_inventory_pools`, `product_variants.checkout_mode` |
 | `00013` | A real `orders.checkout_mode` column (`fcfs`/`raffle`/`waitlist`/`rfq_quote`), backfilled from `00011`'s jsonb — the one gap `00012` left in `orders` itself |
+| `00014` | `tenant_store_config` — jsonb home for tenant config/schedule/social-proof, the relational source `lib/postgres-catalog-read.ts` reads (§3.2) |
+| `00015` | Three real sales sub-roles (`sales_rep`/`sales_admin`/`deal_desk`) added to the `users.role`/`profiles.role` check constraint, alongside the existing 5 (legacy `sales` kept working) |
 
 **RLS validation**: after applying migrations, run `npx tsx scripts/production-readiness-check.ts` (§6) — its `checkRlsCoverage` check (`lib/system-diagnostics.ts`) probes every sensitive table (`audit_logs`, `orders`, `customers`, `companies`, `quotes`, `raffle_entries`) with the **anon** key and fails loud if RLS doesn't block it. This is a real network probe, not a static "RLS is enabled" check.
 
@@ -67,6 +69,12 @@ To activate it:
 
 **What this does NOT do**: `admin.site.com` and `app.site.com` both serve the existing single `app/admin` tree — this template runs single-tenant (`lib/tenant-context.ts`'s fixed `DEFAULT_TENANT_ID`), so there is no separate merchant-control-center app to route `app.` to yet. The only genuinely new, separately-routed portal this phase adds is `app/sales` (the Sales Hub, §4.1). Building a real multi-merchant `app.site.com` is future work, tracked in Known Gaps below.
 
+### 3.2 Sales Hub RBAC (`/sales`, `/api/admin/b2b/quotes`)
+
+Access to the Sales Hub is gated in two layers: `middleware.ts`'s `isSalesPath` check confirms the request carries *some* valid admin session (readiness/Basic-Auth/device-cookie/2FA — Edge-safe, coarse); `app/sales/page.tsx` (a Server Component) and `app/api/admin/b2b/quotes/route.ts` then call `lib/admin-actor.ts`'s `actorHasSalesAccess()` — true for `sales_rep`/`sales_admin`/`deal_desk` (migration `00015`), the legacy `sales` role, and `super_admin`; **false for a plain `owner` or `staff` session**, which is the actual "generic admin access does not imply Sales Hub access" separation. The finer check can't run in `middleware.ts` itself — `resolveAdminActor` needs Node's `crypto`, unavailable on the Edge runtime — so it runs at the route/page level via `lib/admin-actor-from-headers.ts`'s `resolveAdminActorForPage()`, the same pattern `actorHasFullAdminAccess` already uses elsewhere in this codebase.
+
+**The one real remaining gap here**: nothing in the admin UI assigns a user the new `sales_rep`/`sales_admin`/`deal_desk` roles yet — that's a `users.role` UPDATE an operator runs directly (Supabase SQL editor or a future admin screen) until one is built.
+
 ## 4. Stripe webhook registration, idempotency, and the Postgres cutover
 
 1. Register a webhook endpoint at `https://<your-domain>/api/stripe/webhook` in the Stripe dashboard (or via CLI for a staging environment), subscribed to at least `checkout.session.completed` and whatever charge/payment events your raffle-charging flow needs. Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
@@ -74,9 +82,11 @@ To activate it:
 3. **Postgres wiring, gated by `USE_POSTGRES_PRIMARY`** — off by default; every behavior below is a no-op until you set it:
    - **`app/api/checkout/direct/route.ts`** (the one checkout path that charges before any webhook fires): calls `decrementInventory()` (`lib/inventory.ts`) **before** charging Stripe — a real pre-charge Postgres gate. `insufficient_stock`/lock contention refuses the sale with a clean error; a variant with no matching `inventory_levels` row (not yet backfilled, §5) also fails closed with a 503 telling the operator to run the backfill. If the Stripe charge itself then fails or throws, the Postgres reservation is rolled back (`restockInventory`).
    - **`app/api/stripe/webhook/route.ts`** (`checkout.session.completed`, payment-mode): Stripe has *already* charged the customer by the time this fires, so a Postgres decrement here cannot gate the sale — it mirrors the authoritative count and, on `insufficient_stock`, writes a loud console error **and** an immutable `platform_audit` entry (`lib/platform-audit.ts`, action `postgres_inventory_oversold`) for manual reconciliation. It never fails the webhook response — the charge already happened, so a 5xx here would only cause a pointless Stripe retry (same "never blocks the real transaction" contract `lib/postgres-shadow-write.ts` already used).
-   - **`app/api/stripe/webhook/route.ts`** (setup-mode, raffle entries): dual-writes into `raffle_entries` (`lib/raffle.ts`'s `createRaffleEntry`) alongside the existing Redis `rpush` — Redis stays the live system of record (the actual draw engine, `lib/auto-draw.ts`, still reads from it); this only keeps the relational table populated in real time. **The live draw engine itself was not cut over** — see Known Gaps.
+   - **`app/api/stripe/webhook/route.ts`** (setup-mode, raffle entries): dual-writes into `raffle_entries` (`lib/raffle.ts`'s `createRaffleEntry`) alongside the existing Redis `rpush` — Redis stays the live system of record for the *recurring, scheduled* draw (the cron engine, `lib/auto-draw.ts`, still reads from it); this keeps the relational table populated in real time, ready for the manual-draw path below.
    - **`lib/postgres-shadow-write.ts`**: every confirmed sale is still mirrored into `orders`/`order_line_items`, now also setting the real `orders.checkout_mode` column (§2's `00013`) alongside the existing `metadata` jsonb.
 4. **Resolving a Redis product+size to its Postgres `variant_id`**: `lib/inventory.ts`'s new `resolveVariantId(tenantId, externalProductId, size)` looks it up via `products.external_id` → `product_variants.option_label`, the exact mapping `scripts/migrate-redis-to-supabase.ts` writes on backfill. **This is why the backfill must run before the flag is ever set in production** — a variant with no matching row fails closed rather than risk an unprotected oversell (see §5).
+5. **Postgres-primary manual draw execution** (`app/api/admin/trigger-drop`, opt-in per-call): passing a Postgres `variantId` in the request body (instead of the existing Redis `targetPool`) runs `lib/raffle.ts`'s `executeDrawWithCharging` — it selects winners via `executeDraw` (writing `status='winner'`/`decided_at` into `raffle_entries` **first**, atomically, before any charge is attempted), then charges each winner's card (`payment_method_ref`, already a `raffle_entries` column) via the same `resolveStripeClient()` chokepoint every checkout route uses, marks each outcome (`markRaffleEntryOutcome`: `charged`/`declined`), and emails the winner (`sendWinnerEmail`). Omitting `variantId` (today's admin UI) is unaffected. **This is deliberately narrower than the live recurring cron engine** — `lib/auto-draw.ts`'s cadence rollover, promoter payouts, and auto-activation stay Redis-only; see Known Gaps.
+6. **Storefront catalog Postgres read** (§6 lists verification): `app/api/store/route.ts`'s `buildStorePayload` calls `lib/postgres-catalog-read.ts`'s `readCatalogFromPostgres(tenantId)` first when the flag is on — on a hit, the product/variant/inventory data it returns feeds the SAME `sanitizeProduct`/`applyLifecycle`/`mergePublicConfig` pipeline the Redis path already uses (so the go-live/archive/countdown/shared-pool logic is exactly the tested, working code, just fed a different data source); on a miss (not configured, no live products, any error) it falls through to the existing Redis path unchanged. **Read `lib/postgres-catalog-read.ts`'s file header before relying on this** — the Postgres schema doesn't model images/tagline/notes/custom schedules/sampler configs, so a Postgres-sourced product renders with real name/price/stock/checkout-mode but blank marketing fields until those get a relational home; this is a stated, deliberate tradeoff, not a bug.
 
 ## 5. Zero-downtime rollout sequence
 
@@ -88,7 +98,7 @@ npx tsx scripts/migrate-redis-to-supabase.ts             # idempotent upsert bac
 npx tsx scripts/simulate-concurrency.ts --confirm         # chaos-test the locking against real Supabase+Redis before trusting the flag in production
 ```
 
-**Read this before setting the flag**: `USE_POSTGRES_PRIMARY=true` now gates real behavior on the checkout/webhook path (§4), not just shadow-writes — but it still does **not** make Postgres the primary source for the storefront's *catalog reads*. `app/api/store/route.ts` (the live storefront's product/inventory feed) is a separate, more elaborate Redis-merge reader than anything rebuilt this phase — display-layer inventory counts can lag the authoritative Postgres count briefly under the new gating, which is a display-staleness issue, not an oversell risk (the sale itself is what's gated). See Known Gaps for the full storefront-read cutover this doesn't attempt.
+**Read this before setting the flag**: `USE_POSTGRES_PRIMARY=true` now gates real behavior across checkout, webhook, manual draw execution, AND the storefront catalog read (§4). It does **not** cut over the *recurring, scheduled* raffle draw — `lib/auto-draw.ts`'s cron engine (cadence rollover, promoter payouts, auto-activation) keeps running on Redis exactly as before; only the manual "draw this variant now" admin action gained a Postgres-primary option. It also doesn't retroactively backfill `tenant_store_config` (§2's `00014`) — until something populates it, the Postgres-sourced catalog payload's theme/schedule/social-proof sections are empty defaults, same as an unconfigured Redis store.
 
 **Ordering matters**: the backfill (`migrate-redis-to-supabase.ts`) must run — and every catalog edit made after cutover must keep Postgres in sync — *before* the flag is set, or `decrementInventory`'s fail-closed behavior will block sales for any un-migrated variant.
 
@@ -97,19 +107,21 @@ npx tsx scripts/simulate-concurrency.ts --confirm         # chaos-test the locki
 ## 6. Verification commands
 
 ```
-npx tsc --noEmit                                  # 0 errors
-node --test tests/*.test.ts                       # all tests pass
-npx tsx scripts/production-readiness-check.ts     # 0 error-level checks → "Production-ready"
-npx tsx scripts/simulate-concurrency.ts --confirm  # chaos-tests the Postgres inventory/raffle locking directly (requires live Supabase + Redis creds; see its header)
+npx tsc --noEmit                                              # 0 errors
+node --test tests/*.test.ts tests/integration/*.test.ts       # all tests pass (npm test runs this)
+npx tsx scripts/production-readiness-check.ts                 # 0 error-level checks → "Production-ready"
+npx tsx scripts/simulate-concurrency.ts --confirm              # chaos-tests the Postgres inventory/raffle locking directly (requires live Supabase + Redis creds; see its header)
 ```
+
+`tests/integration/checkout-draw-flow.test.ts` chains catalog load → checkout decrement (optimistic-concurrency CAS) → raffle dual-write → draw selection → the Sales Hub notify-gate as one scenario. Its header explains a real constraint worth knowing before extending it: `lib/inventory.ts`/`lib/raffle.ts`/`lib/postgres-catalog-read.ts` all import `@/`-aliased modules that only resolve through Next.js's bundler, so `node --test` cannot load those files directly (confirmed by trying — a custom ESM resolve hook gets past the first hop, then hits `lib/server-config.ts`'s own large Stripe/Node-dependent import graph). The test instead runs the real, loadable pieces — `lib/adapters/db.ts` (mocked `fetch`, issuing the identical PostgREST request shapes those files build internally), `lib/raffle-draw.ts`'s real `selectWinners`, and `lib/admin-actor.ts`'s real `actorHasSalesAccess` — rather than faking a pass on code that didn't actually run. The checkout/webhook/draw route wiring itself is verified by typecheck + the full suite staying green, the same standard set in Phase 2.
 
 ## Known Gaps / Roadmap
 
-Scoped out of this pass deliberately — each is either a money-path decision (the live draw engine) or large, separate work (a from-scratch relational catalog reader, real multi-tenant support) that deserves its own reviewed plan:
+What's left, stated precisely — each is either genuinely out of scope for what was asked, or something only you can do from here (your own domain, your own staging environment):
 
-- **Live draw-engine cutover.** `lib/raffle.ts`'s `executeDraw` (Postgres-native winner selection) exists and is independently tested, but the actual scheduled draw that selects real winners and triggers real charges is still `lib/auto-draw.ts`/`lib/draw.ts` (Redis). §4's dual-write keeps `raffle_entries` populated in real time so this cutover is ready to attempt, but swapping the engine that decides who gets charged real money needs its own dedicated, carefully-tested pass.
-- **Storefront catalog-read cutover.** `app/api/store/route.ts` (live inventory + overrides + store config merge) has no Postgres equivalent — rebuilding it is large, separate work. Today's cutover only affects the *write*/decrement side (§4), not what the storefront displays.
+- **The recurring, scheduled raffle draw stays on Redis.** `lib/auto-draw.ts`'s cron engine — cadence rollover, promoter payouts, auto-activation — has no Postgres equivalent and was not touched. §4.5's Postgres-primary execution only covers the *manual* "draw this variant now" admin action (`app/api/admin/trigger-drop` with a `variantId`). Porting the cron engine's full feature set is real, separate, carefully-tested work given it decides who gets charged real money on a schedule.
+- **Storefront marketing fields have no Postgres home.** §4.6 / `lib/postgres-catalog-read.ts`'s header: a Postgres-sourced product has real name/price/stock/checkout-mode but blank images/tagline/notes/custom-schedule/sampler-config until those fields get a relational model (or `tenant_store_config`/product `metadata` grows to carry them).
 - **Real DNS/Cloudflare zone provisioning for the edge router.** §3.1 documents the exact records; actually creating them in your Cloudflare account is your own domain's setup step, not something this repo can do for you.
 - **A real multi-tenant workspace switcher.** `components/admin/PortalShell.tsx`'s workspace label is honestly static (`lib/tenant-context.ts` runs one fixed tenant) — a functional switcher needs real multi-merchant onboarding first.
-- **Role-scoped `/sales` access.** `app/sales` and `/api/admin/b2b/quotes` currently require any valid admin session (`adminAuthorized`), the same as every other `/api/admin` route — not yet narrowed to the `sales`/`owner`/`super_admin` roles `lib/admin-actor.ts` already models. Middleware-level session validity is wired (`isSalesPath` in `middleware.ts`); the finer role check is a small follow-up in the route handler(s), consistent with how role gating already works elsewhere in this codebase (route-level via `actorHasFullAdminAccess`, not middleware-level).
-- **Direct `node --test` coverage for the new checkout-path wiring.** `lib/inventory.ts`/`lib/orders.ts`/`lib/raffle.ts` import `@/`-aliased modules (`lib/server-config`, `services/config/supabase-client` via the `@/` form), which only resolve through Next.js's bundler — the same limitation noted in `lib/system-diagnostics.ts`'s header. The new wiring in `app/api/checkout/direct/route.ts` and `app/api/stripe/webhook/route.ts` was verified by typecheck + the full existing suite staying green, not by new isolated unit tests; a future "-pure" split (mirroring `lib/system-diagnostics-pure.ts`) would make direct coverage possible.
+- **No admin UI assigns the new sales sub-roles.** §3.2: `sales_rep`/`sales_admin`/`deal_desk` (migration `00015`) exist in the schema and are enforced by `actorHasSalesAccess()`, but nothing in `/admin` lets an operator set a user's role to one of them yet — a direct `users.role` update is the only way today.
+- **Nothing in this phase (or Phase 2) was integration-tested against live Stripe/Supabase.** This dev environment has neither. Every flag-gated code path here was built and unit/mock-tested; validate in a staging environment with real test-mode credentials before trusting any of it — the catalog read, the checkout/webhook wiring, and especially `executeDrawWithCharging` (real cards, real charges) — with production traffic.

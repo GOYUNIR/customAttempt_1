@@ -15,6 +15,9 @@ import { createRedisClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
 import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
 import { selectWinners } from '@/lib/raffle-draw';
+import { resolveStripeClient } from '@/services/payment/factory';
+import { sendWinnerEmail } from '@/lib/email';
+import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 
 function assertSupabase(): void {
   if (!supabaseServiceConfigured()) {
@@ -90,6 +93,11 @@ export type DrawExecutionResult = {
   entriesCount: number;
   winnerEntryIds: string[];
   notSelectedEntryIds: string[];
+  /** The full winner entry rows (email, payment_method_ref, promo_code,
+   *  discount_percent, shipping_address, …) — added so a caller charging
+   *  winners (executeDrawWithCharging, below) doesn't need a second fetch
+   *  to re-look-up what selectWinners already had in hand. */
+  winners: Array<Record<string, unknown>>;
 };
 
 /**
@@ -143,6 +151,7 @@ export async function executeDraw(tenantId: string, variantId: string, winnerCou
     entriesCount: entries.length,
     winnerEntryIds: winnerIds,
     notSelectedEntryIds: notSelectedIds,
+    winners,
   };
 }
 
@@ -156,6 +165,96 @@ export async function markRaffleEntryOutcome(tenantId: string, entryId: string, 
     `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(entryId)}`,
     { key: serviceRoleKey, method: 'PATCH', body: { status: outcome } },
   );
+}
+
+export type ChargeOutcome = { entryId: string; email: string; status: 'charged' | 'declined'; error?: string };
+
+/**
+ * Postgres-primary execution for `app/api/admin/trigger-drop`'s manual
+ * "draw this variant now" action: select winners (`executeDraw`, above —
+ * this writes `status='winner'`/`decided_at` into `raffle_entries` FIRST,
+ * before any charge is attempted, matching the ask that Postgres holds the
+ * winner status before notification), then charge each winner's card via
+ * Stripe and email them.
+ *
+ * Deliberately narrower than the live Redis cron engine
+ * (lib/auto-draw.ts) — no recurring-cadence rollover, no promoter payouts,
+ * no auto-activation. Those stay on the Redis engine; see DEPLOYMENT.md.
+ * A winner with no payment method, or whose charge is declined, is marked
+ * `declined` and skipped — never blocks the rest of the batch.
+ */
+export async function executeDrawWithCharging(
+  tenantId: string,
+  variantId: string,
+  winnerCount: number,
+): Promise<{ draw: DrawExecutionResult; charges: ChargeOutcome[] }> {
+  assertSupabase();
+  const draw = await executeDraw(tenantId, variantId, winnerCount);
+  if (draw.winners.length === 0) return { draw, charges: [] };
+
+  const { serviceRoleKey } = readSupabaseEnv();
+  const stripe = await resolveStripeClient();
+
+  const variantRows = (await supabaseRestFetch(
+    `/product_variants?id=eq.${encodeURIComponent(variantId)}&select=option_label,price_cents,products(name)`,
+    { key: serviceRoleKey },
+  ).catch(() => [])) as Array<{ option_label: string; price_cents: number; products: { name: string } | null }>;
+  const variant = variantRows?.[0];
+  const productName = variant?.products?.name || 'Item';
+  const size = variant?.option_label || 'Standard';
+  const basePriceCents = Math.max(0, Number(variant?.price_cents) || 0);
+  const siteUrl = getSiteUrl() || fallbackSiteUrl();
+
+  const charges: ChargeOutcome[] = [];
+  for (const entry of draw.winners) {
+    const entryId = String(entry.id);
+    const email = String(entry.email || '');
+    const customerId = String(entry.customer_id || '');
+    const paymentMethodId = String(entry.payment_method_ref || '');
+    const discountPercent = Math.min(50, Math.max(0, Number(entry.discount_percent) || 0));
+    const priceCents = discountPercent > 0 ? Math.max(50, Math.round(basePriceCents * (1 - discountPercent / 100))) : basePriceCents;
+
+    if (!stripe || !customerId || !paymentMethodId) {
+      await markRaffleEntryOutcome(tenantId, entryId, 'declined');
+      charges.push({ entryId, email, status: 'declined', error: 'no_payment_method' });
+      continue;
+    }
+
+    try {
+      await stripe.paymentIntents.create({
+        amount: priceCents,
+        currency: 'usd',
+        customer: customerId,
+        payment_method: paymentMethodId,
+        off_session: true,
+        confirm: true,
+        receipt_email: email || undefined,
+        description: `${productName} (${size})`,
+      });
+      await markRaffleEntryOutcome(tenantId, entryId, 'charged');
+      charges.push({ entryId, email, status: 'charged' });
+
+      try {
+        await sendWinnerEmail({
+          to: email,
+          product: productName,
+          size,
+          amountLabel: `$${(priceCents / 100).toFixed(2)}`,
+          originalPrice: `$${(basePriceCents / 100).toFixed(2)}`,
+          discountPercent: discountPercent > 0 ? discountPercent : undefined,
+          shippingAddress: (entry.shipping_address as string) || undefined,
+          siteUrl,
+        });
+      } catch (emailErr) {
+        console.error('[raffle] winner email failed', emailErr);
+      }
+    } catch (err) {
+      await markRaffleEntryOutcome(tenantId, entryId, 'declined');
+      charges.push({ entryId, email, status: 'declined', error: (err as Error)?.message || String(err) });
+    }
+  }
+
+  return { draw, charges };
 }
 
 // ── Shared inventory pools ───────────────────────────────────────────────────
