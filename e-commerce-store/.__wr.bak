@@ -48,31 +48,6 @@
   // ═══════════════════════════════════════════════════════════════════════════
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "storefront-app",
-
-  // ── ROUTES ────────────────────────────────────────────────────────────────
-  // NOTE: production (goyunir.com) is served by the Worker "customattempt-1",
-  // which Cloudflare builds from this repo on push to main — NOT by
-  // "storefront-app" above. Verified with `wrangler tail customattempt-1`:
-  // a marked request to goyunir.com appears in that Worker's log, and does not
-  // appear in storefront-app's. The name field here is therefore stale for
-  // production purposes; a LOCAL `wrangler deploy` from this repo targets
-  // storefront-app and, with these routes declared, would claim goyunir.com
-  // for it. Deploy production via git push, not locally.
-  //
-  // The wildcard is the point: it covers admin./sales./app. today AND every
-  // future {tenant}.goyunir.com with no per-tenant dashboard step. Portal
-  // isolation (PLATFORM_ROOT_DOMAIN) decides what each host may serve; this
-  // only decides that the Worker sees them at all.
-  //
-  // The apex is declared ALONGSIDE the wildcard deliberately. A routes array
-  // REPLACES a Worker's route set on deploy, so declaring only the wildcard
-  // would delete an existing apex route and take the live site down. If the
-  // apex is instead configured as a Custom Domain, Cloudflare rejects this
-  // overlapping route and the deploy fails — visibly, and with no outage.
-  "routes": [
-    { "pattern": "goyunir.com/*", "zone_name": "goyunir.com" },
-    { "pattern": "*.goyunir.com/*", "zone_name": "goyunir.com" }
-  ],
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
