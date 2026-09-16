@@ -10,7 +10,8 @@
  * app/api/admin/b2b/quotes) has a real way to create and query them.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 /** The store's real selling modes — first-class since migration 00012
  *  (previously only captured as opaque `metadata`). */
@@ -41,7 +42,7 @@ export type Product = {
 };
 
 function assertSupabase(): void {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Postgres products require Supabase (SUPABASE_SERVICE_ROLE_KEY).');
   }
 }
@@ -74,20 +75,23 @@ function toVariant(row: Record<string, unknown>): ProductVariant {
 
 export async function listProducts(tenantId: string, opts: { status?: Product['status'] } = {}): Promise<Product[]> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  let path = `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&select=*&order=created_at.desc`;
-  if (opts.status) path += `&status=eq.${encodeURIComponent(opts.status)}`;
-  const rows = (await supabaseRestFetch(path, { key: serviceRoleKey })) as Array<Record<string, unknown>>;
+  const where: Record<string, ReturnType<typeof eq>> = { tenant_id: eq(tenantId) };
+  if (opts.status) where.status = eq(opts.status);
+  const rows = await getDb().select<Record<string, unknown>>('products', {
+    where,
+    select: ['*'],
+    order: { column: 'created_at', ascending: false },
+  });
   return (rows || []).map(toProduct);
 }
 
 export async function getProductBySlug(tenantId: string, slug: string): Promise<Product | null> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&slug=eq.${encodeURIComponent(slug)}&select=*&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<Record<string, unknown>>;
+  const rows = await getDb().select<Record<string, unknown>>('products', {
+    where: { tenant_id: eq(tenantId), slug: eq(slug) },
+    select: ['*'],
+    limit: 1,
+  });
   return rows?.[0] ? toProduct(rows[0]) : null;
 }
 
@@ -96,30 +100,23 @@ export async function createProduct(
   input: { name: string; slug: string; description?: string; externalId?: string; status?: Product['status'] },
 ): Promise<Product> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch('/products', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
-      tenant_id: tenantId,
-      name: input.name,
-      slug: input.slug,
-      description: input.description ?? null,
-      external_id: input.externalId ?? null,
-      status: input.status || 'draft',
-    },
-    prefer: 'return=representation',
-  })) as Array<Record<string, unknown>>;
+  const rows = await getDb().insert<Record<string, unknown>>('products', {
+    tenant_id: tenantId,
+    name: input.name,
+    slug: input.slug,
+    description: input.description ?? null,
+    external_id: input.externalId ?? null,
+    status: input.status || 'draft',
+  });
   return toProduct(rows[0]);
 }
 
 export async function listVariants(tenantId: string, productId: string): Promise<ProductVariant[]> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/product_variants?tenant_id=eq.${encodeURIComponent(tenantId)}&product_id=eq.${encodeURIComponent(productId)}&select=*`,
-    { key: serviceRoleKey },
-  )) as Array<Record<string, unknown>>;
+  const rows = await getDb().select<Record<string, unknown>>('product_variants', {
+    where: { tenant_id: eq(tenantId), product_id: eq(productId) },
+    select: ['*'],
+  });
   return (rows || []).map(toVariant);
 }
 
@@ -139,30 +136,21 @@ export async function createVariant(
   if (!Number.isFinite(input.priceCents) || input.priceCents < 0) {
     throw new Error('priceCents must be a non-negative number.');
   }
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch('/product_variants', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
-      tenant_id: tenantId,
-      product_id: productId,
-      sku: input.sku ?? null,
-      option_label: input.optionLabel || 'Standard',
-      price_cents: Math.round(input.priceCents),
-      currency: input.currency || 'usd',
-      checkout_mode: input.checkoutMode || 'fcfs',
-      shared_pool_id: input.sharedPoolId ?? null,
-    },
-    prefer: 'return=representation',
-  })) as Array<Record<string, unknown>>;
+  const rows = await getDb().insert<Record<string, unknown>>('product_variants', {
+    tenant_id: tenantId,
+    product_id: productId,
+    sku: input.sku ?? null,
+    option_label: input.optionLabel || 'Standard',
+    price_cents: Math.round(input.priceCents),
+    currency: input.currency || 'usd',
+    checkout_mode: input.checkoutMode || 'fcfs',
+    shared_pool_id: input.sharedPoolId ?? null,
+  });
   return toVariant(rows[0]);
 }
 
 export async function updateProductStatus(tenantId: string, productId: string, status: Product['status']): Promise<void> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(
-    `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(productId)}`,
-    { key: serviceRoleKey, method: 'PATCH', body: { status } },
-  );
+  // returning: 'default' — the legacy PATCH sent no Prefer header.
+  await getDb().update('products', { where: { tenant_id: eq(tenantId), id: eq(productId) } }, { status }, { returning: 'default' });
 }
