@@ -10,7 +10,7 @@
  * per command AND per byte of egress.
  *
  *   npx tsx scripts/backfill-media-to-r2.ts            # DRY RUN (default)
- *   npx tsx scripts/backfill-media-to-r2.ts --commit   # upload + rewrite Redis
+ *   npx tsx scripts/backfill-media-to-r2.ts --commit   # upload + rewrite Postgres
  *   npx tsx scripts/backfill-media-to-r2.ts --limit 5  # cap items processed
  *
  * Safety properties:
@@ -20,7 +20,7 @@
  *    already URLs are skipped (parseDataUrl returns null for them).
  *  - PER-ITEM ISOLATION. One bad image logs and is skipped; it never aborts
  *    the run or corrupts the product it belongs to.
- *  - WRITE-AFTER-UPLOAD. Redis is only rewritten once every image in that
+ *  - WRITE-AFTER-UPLOAD. Postgres is only rewritten once every image in that
  *    product uploaded successfully, so a product is never left pointing at an
  *    object that does not exist.
  */
@@ -47,7 +47,10 @@ function loadDotEnvLocal(): void {
 }
 loadDotEnvLocal();
 
-import { createKvClient, loadStoreConfig, safeParseKvItem, PRODUCTS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createKvClient, loadStoreConfig, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { buildMediaObjectKey, parseDataUrl } from '@/lib/media-s3-keys';
 import { mimeToMediaExtension } from '@/lib/media';
 import { putMediaObject, readMediaS3Config, type MediaS3Config } from '@/lib/media-s3';
@@ -129,7 +132,7 @@ async function migrateOne(
 }
 
 async function main() {
-  console.log(`\nMedia backfill — ${COMMIT ? 'COMMIT (will upload and rewrite Redis)' : 'DRY RUN (no writes)'}`);
+  console.log(`\nMedia backfill — ${COMMIT ? 'COMMIT (will upload and rewrite Postgres)' : 'DRY RUN (no writes)'}`);
   console.log('='.repeat(64));
 
   const config = readMediaS3Config();
@@ -146,45 +149,70 @@ async function main() {
     process.exit(2);
   }
 
-  // ── Products ─────────────────────────────────────────────────────────────
-  const all = (await redis.hgetall(PRODUCTS_KEY)) || {};
-  const ids = Object.keys(all);
-  console.log(`\n${ids.length} product(s) in ${PRODUCTS_KEY}\n`);
+  // ── Products (POSTGRES is authoritative) ─────────────────────────────────
+  // This block used to rewrite the KV blob. That is now the WRONG target and
+  // running it would have BROKEN every image: the storefront reads
+  // products.media_gallery from Postgres, and publicMediaRef turns a base64
+  // data: URL into a /media/<productId>/<index> ref whose bytes the /media
+  // route then looks up in the KV blob. Rewriting KV to R2 URLs while
+  // Postgres still held base64 would leave the ref pointing at a KV entry
+  // that is no longer a data: URL -> decodeDataUrl returns null -> 404.
+  //
+  // Writing the R2 URL into Postgres instead is what actually works:
+  // publicMediaRef passes a non-data: URL through untouched, so the browser
+  // requests https://media.goyunir.com/media/r2/<key> directly and the Worker
+  // serves it from the binding. The KV blob is left alone on purpose -- the
+  // admin panel still reads it, and H3 deletes it wholesale.
+  const db = getDb();
+  if (!db.configured) {
+    console.error('Supabase is not configured - cannot read the authoritative catalog.');
+    process.exit(2);
+  }
+  const products = (await db.select<{ id: string; slug: string; external_id: string; media_gallery: unknown }>(
+    'products',
+    { where: { tenant_id: eq(await ensureDefaultTenant()) }, select: ['id', 'slug', 'external_id', 'media_gallery'] },
+  )) as Array<{ id: string; slug: string; external_id: string; media_gallery: unknown }>;
+  console.log(`
+${products.length} product(s) in Postgres
+`);
 
-  for (const id of ids) {
+  for (const row of products) {
     if (processed >= LIMIT) break;
-    const product = safeParseKvItem<any>(all[id]);
-    if (!product || !Array.isArray(product.images) || product.images.length === 0) continue;
+    const gallery = Array.isArray(row.media_gallery) ? [...(row.media_gallery as Array<Record<string, unknown>>)] : [];
+    if (gallery.length === 0) continue;
 
-    const pending = product.images.filter((img: unknown) => parseDataUrl(img) !== null).length;
+    const pending = gallery.filter((m) => parseDataUrl(m?.url) !== null).length;
     if (pending === 0) continue;
 
-    console.log(`${id} (${pending} base64 image(s))`);
-    const slug = String(product.slug || product.handle || id);
-    const nextImages = [...product.images];
+    const label = row.slug || row.external_id || row.id;
+    console.log(`${label} (${pending} base64 image(s))`);
+    const slug = String(row.slug || row.external_id || row.id);
     let changed = 0;
     let anyFailed = false;
 
-    for (let i = 0; i < nextImages.length; i++) {
+    for (let i = 0; i < gallery.length; i++) {
       if (processed >= LIMIT) break;
-      const before = nextImages[i];
+      const before = gallery[i]?.url;
       if (parseDataUrl(before) === null) continue;
-      const url = await migrateOne(config, slug, String(before), `${id}[${i}]`);
+      const url = await migrateOne(config, slug, String(before), `${label}[${i}]`);
       if (url) {
-        nextImages[i] = url;
+        gallery[i] = { ...gallery[i], url };
         changed++;
       } else if (COMMIT) {
         anyFailed = true;
       }
     }
 
+    // WRITE-AFTER-UPLOAD, per product: a product is never left half-rewritten
+    // pointing at an object that does not exist.
     if (COMMIT && changed > 0 && !anyFailed) {
-      await redis.hset(PRODUCTS_KEY, { [id]: JSON.stringify({ ...product, images: nextImages }) });
-      console.log(`  = ${id}: rewrote ${changed} image ref(s)`);
+      await db.update('products', { where: { id: eq(row.id) } }, { media_gallery: gallery }, { returning: 'minimal' });
+      console.log(`  = ${label}: rewrote ${changed} image ref(s) in products.media_gallery`);
     } else if (COMMIT && anyFailed) {
-      console.log(`  = ${id}: NOT rewritten — an upload failed, leaving this product untouched`);
+      console.log(`  = ${label}: NOT rewritten — an upload failed, leaving this product untouched`);
     }
   }
+
 
   // ── Brand logo (store config) ────────────────────────────────────────────
   const config_ = await loadStoreConfig(redis);
