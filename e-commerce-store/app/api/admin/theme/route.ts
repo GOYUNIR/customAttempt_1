@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasMerchantAccess } from '@/lib/admin-actor';
 import { resolveActingTenantId } from '@/lib/tenant-context';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { validateThemeSections, DEFAULT_THEME_SECTIONS } from '@/lib/theme-schema';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 
@@ -26,16 +27,18 @@ export async function GET(request: Request) {
     if (!actorHasMerchantAccess(actor)) {
       return NextResponse.json({ error: 'Merchant Hub access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ ok: true, theme: { id: null, name: 'Default Theme', sections: DEFAULT_THEME_SECTIONS }, isDefault: true });
     }
 
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
-    const rows = (await supabaseRestFetch(
-      `/tenant_themes?tenant_id=eq.${encodeURIComponent(tenantId)}&is_active=eq.true&select=id,name,sections&limit=1`,
-      { key: serviceRoleKey },
-    ).catch(() => [])) as Array<{ id: string; name: string; sections: unknown }>;
+    const rows = (await getDb()
+      .select<{ id: string; name: string; sections: unknown }>('tenant_themes', {
+        where: { tenant_id: eq(tenantId), is_active: eq(true) },
+        select: ['id', 'name', 'sections'],
+        limit: 1,
+      })
+      .catch(() => [])) as Array<{ id: string; name: string; sections: unknown }>;
     const row = rows?.[0];
     if (!row) {
       return NextResponse.json({ ok: true, theme: { id: null, name: 'Default Theme', sections: DEFAULT_THEME_SECTIONS }, isDefault: true });
@@ -56,7 +59,7 @@ export async function PUT(request: Request) {
     if (!actorHasMerchantAccess(actor)) {
       return NextResponse.json({ error: 'Merchant Hub access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'The theme customizer requires Supabase.' }, { status: 503 });
     }
 
@@ -73,39 +76,42 @@ export async function PUT(request: Request) {
     }
 
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
 
     // Deactivate any existing active theme, then upsert this one as active.
     // Two statements (not a transaction — PostgREST has none over plain
     // fetch) is an acceptable tradeoff here: worst case a brief moment with
     // zero active themes, which readActiveTheme already treats as "fall
     // back to the legacy homepage", never a crash.
-    await supabaseRestFetch(`/tenant_themes?tenant_id=eq.${encodeURIComponent(tenantId)}&is_active=eq.true`, {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: { is_active: false },
-    });
+    // returning: 'default' — the legacy PATCH sent no Prefer header.
+    await getDb().update(
+      'tenant_themes',
+      { where: { tenant_id: eq(tenantId), is_active: eq(true) } },
+      { is_active: false },
+      { returning: 'default' },
+    );
 
-    const existing = (await supabaseRestFetch(
-      `/tenant_themes?tenant_id=eq.${encodeURIComponent(tenantId)}&name=eq.${encodeURIComponent(name)}&select=id&limit=1`,
-      { key: serviceRoleKey },
-    ).catch(() => [])) as Array<{ id: string }>;
+    const existing = (await getDb()
+      .select<{ id: string }>('tenant_themes', {
+        where: { tenant_id: eq(tenantId), name: eq(name) },
+        select: ['id'],
+        limit: 1,
+      })
+      .catch(() => [])) as Array<{ id: string }>;
 
     let saved: Array<{ id: string; name: string; sections: unknown }>;
     if (existing?.[0]?.id) {
-      saved = (await supabaseRestFetch(`/tenant_themes?id=eq.${encodeURIComponent(existing[0].id)}`, {
-        key: serviceRoleKey,
-        method: 'PATCH',
-        body: { sections: body.sections, is_active: true, updated_at: new Date().toISOString() },
-        prefer: 'return=representation',
-      })) as Array<{ id: string; name: string; sections: unknown }>;
+      saved = await getDb().update<{ id: string; name: string; sections: unknown }>(
+        'tenant_themes',
+        { where: { id: eq(existing[0].id) } },
+        { sections: body.sections, is_active: true, updated_at: new Date().toISOString() },
+      );
     } else {
-      saved = (await supabaseRestFetch('/tenant_themes', {
-        key: serviceRoleKey,
-        method: 'POST',
-        body: { tenant_id: tenantId, name, sections: body.sections, is_active: true },
-        prefer: 'return=representation',
-      })) as Array<{ id: string; name: string; sections: unknown }>;
+      saved = await getDb().insert<{ id: string; name: string; sections: unknown }>('tenant_themes', {
+        tenant_id: tenantId,
+        name,
+        sections: body.sections,
+        is_active: true,
+      });
     }
     if (!saved?.[0]) {
       return NextResponse.json({ error: 'Could not save theme.' }, { status: 500 });

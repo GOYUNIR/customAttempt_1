@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasPlatformAdminAccess } from '@/lib/admin-actor';
 import { getDb } from '@/lib/db/client';
-import { eq } from '@/lib/db/query';
+
 import { recordPlatformAudit } from '@/lib/platform-audit';
 
 export const dynamic = 'force-dynamic';

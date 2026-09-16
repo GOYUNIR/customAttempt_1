@@ -3,7 +3,8 @@ import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasSalesAccess } from '@/lib/admin-actor';
 import { resolveActingTenantId } from '@/lib/tenant-context';
 import { resolveUnitPriceCents, quoteSubtotalCents, type PriceListEntry, type QuoteLineInput } from '@/lib/b2b/pricing';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq, inList, isNull } from '@/lib/db/query';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { createRedisClient } from '@/lib/server-config';
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     if (!(await adminAuthorized(request))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'The B2B engine requires Supabase.' }, { status: 503 });
     }
 
@@ -70,22 +71,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Sales Hub access required.' }, { status: 403 });
     }
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
 
-    const companies = (await supabaseRestFetch(
-      `/companies?id=eq.${encodeURIComponent(companyId)}&tenant_id=eq.${encodeURIComponent(tenantId)}&select=id`,
-      { key: serviceRoleKey },
-    ).catch(() => null)) as Array<{ id: string }> | null;
+    const companies = (await getDb()
+      .select<{ id: string }>('companies', {
+        where: { id: eq(companyId), tenant_id: eq(tenantId) },
+        select: ['id'],
+      })
+      .catch(() => null)) as Array<{ id: string }> | null;
     if (!Array.isArray(companies) || companies.length === 0) {
       return NextResponse.json({ error: 'Company not found for this tenant.' }, { status: 404 });
     }
 
     const variantIds = requestedLines.map((l) => l.variantId);
-    const variantFilter = variantIds.map((id) => encodeURIComponent(id)).join(',');
-    const variants = (await supabaseRestFetch(
-      `/product_variants?id=in.(${variantFilter})&tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,price_cents`,
-      { key: serviceRoleKey },
-    ).catch(() => null)) as Array<{ id: string; price_cents: number }> | null;
+    const variants = (await getDb()
+      .select<{ id: string; price_cents: number }>('product_variants', {
+        where: { id: inList(variantIds), tenant_id: eq(tenantId) },
+        select: ['id', 'price_cents'],
+      })
+      .catch(() => null)) as Array<{ id: string; price_cents: number }> | null;
     const basePriceByVariant = new Map((variants || []).map((v) => [v.id, Number(v.price_cents) || 0]));
     const missingVariant = requestedLines.find((l) => !basePriceByVariant.has(l.variantId));
     if (missingVariant) {
@@ -94,24 +97,32 @@ export async function POST(request: Request) {
 
     // Resolve the applicable price list: company-specific first, else the
     // tenant's default list, else none (base price for every line).
-    const companyLists = (await supabaseRestFetch(
-      `/price_lists?company_id=eq.${encodeURIComponent(companyId)}&tenant_id=eq.${encodeURIComponent(tenantId)}&select=id&limit=1`,
-      { key: serviceRoleKey },
-    ).catch(() => null)) as Array<{ id: string }> | null;
+    const companyLists = (await getDb()
+      .select<{ id: string }>('price_lists', {
+        where: { company_id: eq(companyId), tenant_id: eq(tenantId) },
+        select: ['id'],
+        limit: 1,
+      })
+      .catch(() => null)) as Array<{ id: string }> | null;
     let priceListId = Array.isArray(companyLists) && companyLists.length > 0 ? companyLists[0].id : null;
     if (!priceListId) {
-      const defaultLists = (await supabaseRestFetch(
-        `/price_lists?tenant_id=eq.${encodeURIComponent(tenantId)}&company_id=is.null&is_default=eq.true&select=id&limit=1`,
-        { key: serviceRoleKey },
-      ).catch(() => null)) as Array<{ id: string }> | null;
+      const defaultLists = (await getDb()
+        .select<{ id: string }>('price_lists', {
+          where: { tenant_id: eq(tenantId), company_id: isNull(), is_default: eq(true) },
+          select: ['id'],
+          limit: 1,
+        })
+        .catch(() => null)) as Array<{ id: string }> | null;
       priceListId = Array.isArray(defaultLists) && defaultLists.length > 0 ? defaultLists[0].id : null;
     }
     let entries: PriceListEntry[] = [];
     if (priceListId) {
-      const rows = (await supabaseRestFetch(
-        `/price_list_entries?price_list_id=eq.${encodeURIComponent(priceListId)}&variant_id=in.(${variantFilter})&select=variant_id,unit_price_cents,min_quantity`,
-        { key: serviceRoleKey },
-      ).catch(() => null)) as Array<{ variant_id: string; unit_price_cents: number; min_quantity: number }> | null;
+      const rows = (await getDb()
+        .select<{ variant_id: string; unit_price_cents: number; min_quantity: number }>('price_list_entries', {
+          where: { price_list_id: eq(priceListId), variant_id: inList(variantIds) },
+          select: ['variant_id', 'unit_price_cents', 'min_quantity'],
+        })
+        .catch(() => null)) as Array<{ variant_id: string; unit_price_cents: number; min_quantity: number }> | null;
       entries = (rows || []).map((r) => ({
         variantId: r.variant_id,
         unitPriceCents: Number(r.unit_price_cents) || 0,
@@ -126,34 +137,26 @@ export async function POST(request: Request) {
     });
     const subtotalCents = quoteSubtotalCents(quoteLines);
 
-    const quoteRows = (await supabaseRestFetch('/quotes', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: {
+    const quoteRows = await getDb().insert('quotes', {
         tenant_id: tenantId,
         company_id: companyId,
         status: 'draft',
         currency: 'usd',
         subtotal_cents: subtotalCents,
         notes,
-      },
-    })) as Array<{ id: string }>;
+    }) as Array<{ id: string }>;
     const quoteId = quoteRows?.[0]?.id;
     if (!quoteId) {
       return NextResponse.json({ error: 'Could not create quote.' }, { status: 500 });
     }
 
-    await supabaseRestFetch('/quote_line_items', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: quoteLines.map((l) => ({
+    await getDb().insert('quote_line_items', quoteLines.map((l) => ({
         tenant_id: tenantId,
         quote_id: quoteId,
         variant_id: l.variantId,
         quantity: l.quantity,
         original_price_cents: l.originalPriceCents,
-      })),
-    });
+    })));
 
     const redis = createRedisClient();
     if (redis) {
@@ -184,7 +187,7 @@ export async function GET(request: Request) {
     if (!(await adminAuthorized(request))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'The B2B engine requires Supabase.' }, { status: 503 });
     }
 
@@ -199,12 +202,14 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Sales Hub access required.' }, { status: 403 });
     }
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
 
-    const quotes = await supabaseRestFetch(
-      `/quotes?company_id=eq.${encodeURIComponent(companyId)}&tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,status,currency,subtotal_cents,notes,created_at,expires_at&order=created_at.desc`,
-      { key: serviceRoleKey },
-    ).catch(() => []);
+    const quotes = await getDb()
+      .select('quotes', {
+        where: { company_id: eq(companyId), tenant_id: eq(tenantId) },
+        select: ['id', 'status', 'currency', 'subtotal_cents', 'notes', 'created_at', 'expires_at'],
+        order: { column: 'created_at', ascending: false },
+      })
+      .catch(() => []);
 
     return NextResponse.json({ ok: true, quotes: quotes ?? [] });
   } catch (err: any) {

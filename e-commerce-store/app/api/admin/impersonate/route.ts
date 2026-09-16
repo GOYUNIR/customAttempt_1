@@ -4,7 +4,6 @@ import { issueAdminDevice, IMPERSONATION_TTL_SECONDS } from '@/lib/admin-verify'
 import { verifyPortalSignIn } from '@/services/config/supabase-client';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
-import { supabaseRestFetch, readSupabaseEnv, supabaseServiceConfigured } from '@/services/config/supabase-client';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';

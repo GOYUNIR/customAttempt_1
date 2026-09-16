@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasMerchantAccess } from '@/lib/admin-actor';
 import { resolveActingTenantId } from '@/lib/tenant-context';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq, inList } from '@/lib/db/query';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,33 +24,38 @@ export async function GET(request: Request) {
     if (!actorHasMerchantAccess(actor)) {
       return NextResponse.json({ error: 'Merchant Hub access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ ok: true, rows: [], notConfigured: true });
     }
 
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
 
-    const variants = (await supabaseRestFetch(
-      `/product_variants?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,option_label,shared_pool_id,products(name)`,
-      { key: serviceRoleKey },
-    ).catch(() => [])) as Array<{ id: string; option_label: string; shared_pool_id: string | null; products: { name: string } | null }>;
+    const variants = (await getDb()
+      .select<{ id: string; option_label: string; shared_pool_id: string | null; products: { name: string } | null }>('product_variants', {
+        where: { tenant_id: eq(tenantId) },
+        select: ['id', 'option_label', 'shared_pool_id', { relation: 'products', columns: ['name'] }],
+      })
+      .catch(() => [])) as Array<{ id: string; option_label: string; shared_pool_id: string | null; products: { name: string } | null }>;
 
     const variantIds = variants.map((v) => v.id);
     const inventoryRows = variantIds.length
-      ? ((await supabaseRestFetch(
-          `/inventory_levels?variant_id=in.(${variantIds.map(encodeURIComponent).join(',')})&select=variant_id,quantity_available,quantity_reserved`,
-          { key: serviceRoleKey },
-        ).catch(() => [])) as Array<{ variant_id: string; quantity_available: number; quantity_reserved: number }>)
+      ? ((await getDb()
+          .select<{ variant_id: string; quantity_available: number; quantity_reserved: number }>('inventory_levels', {
+            where: { variant_id: inList(variantIds) },
+            select: ['variant_id', 'quantity_available', 'quantity_reserved'],
+          })
+          .catch(() => [])) as Array<{ variant_id: string; quantity_available: number; quantity_reserved: number }>)
       : [];
     const inventoryByVariant = new Map(inventoryRows.map((r) => [r.variant_id, r]));
 
     const poolIds = [...new Set(variants.map((v) => v.shared_pool_id).filter((id): id is string => Boolean(id)))];
     const pools = poolIds.length
-      ? ((await supabaseRestFetch(
-          `/shared_inventory_pools?id=in.(${poolIds.map(encodeURIComponent).join(',')})&select=id,slug,quantity_available,quantity_reserved`,
-          { key: serviceRoleKey },
-        ).catch(() => [])) as Array<{ id: string; slug: string; quantity_available: number; quantity_reserved: number }>)
+      ? ((await getDb()
+          .select<{ id: string; slug: string; quantity_available: number; quantity_reserved: number }>('shared_inventory_pools', {
+            where: { id: inList(poolIds) },
+            select: ['id', 'slug', 'quantity_available', 'quantity_reserved'],
+          })
+          .catch(() => [])) as Array<{ id: string; slug: string; quantity_available: number; quantity_reserved: number }>)
       : [];
     const poolById = new Map(pools.map((p) => [p.id, p]));
 
