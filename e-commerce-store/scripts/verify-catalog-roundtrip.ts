@@ -254,6 +254,51 @@ async function main() {
   const live = bySlug.get('round-trip-hoodie');
   check(live?.isActive === true && live?.isUpcoming === false && live?.isArchived === false, 'live product still reads as live', JSON.stringify({ a: live?.isActive, u: live?.isUpcoming, r: live?.isArchived }));
 
+  // ---------------------------------------------------------------------
+  // DUPLICATE OPTION LABELS (difference 2).
+  //
+  // product_variants is unique on (product_id, option_label), so two price
+  // categories sharing a size upsert onto each other and the last one wins.
+  // The write path used to count loop iterations, so it reported a
+  // variantCount that did not match the rows that existed -- the merge was
+  // invisible to every caller. It now counts distinct labels and names the
+  // collisions.
+  // ---------------------------------------------------------------------
+  console.log(String.fromCharCode(10) + "Duplicate option labels are reported, not merged in silence" + String.fromCharCode(10) + '='.repeat(56));
+
+  const dupeProduct = {
+    id: 'prod-dupe',
+    name: 'Duplicate Label Drop',
+    slug: 'duplicate-label-drop',
+    desc: 'Two categories share one option label.',
+    priceCategories: [
+      { size: 'Standard', price: 149, stripeId: 'price_hi', checkoutMode: 'RAFFLE' },
+      { size: 'Standard', price: 19, stripeId: 'price_lo', checkoutMode: 'FCFS' },
+      { size: 'Large', price: 60, stripeId: 'price_lg', checkoutMode: 'FCFS' },
+    ],
+    isActive: true,
+    isUpcoming: false,
+    isArchived: false,
+    checkoutMode: 'RAFFLE',
+    totalInventory: 5,
+  };
+  const wDupe = await writeProductToPostgres(tenantId, dupeProduct);
+  check(wDupe.ok === true, 'duplicate-label product written', wDupe.error || '');
+  check(wDupe.variantCount === 2, 'variantCount reports DISTINCT rows (2), not categories submitted (3)', String(wDupe.variantCount));
+  const dupes = wDupe.duplicateLabels || [];
+  check(dupes.length === 1, 'the collision is reported', JSON.stringify(dupes));
+  check(dupes[0]?.label === 'Standard' && dupes[0]?.count === 2, "the collision names 'Standard' x2", JSON.stringify(dupes[0]));
+
+  // The reported count must match reality, not just sound plausible.
+  const dupeRow = (db.tables['products'] || []).find((r) => r.slug === 'duplicate-label-drop');
+  const dupeVariants = (db.tables['product_variants'] || []).filter((v) => v.product_id === dupeRow?.id);
+  check(dupeVariants.length === 2, 'the database really holds 2 rows, matching variantCount', String(dupeVariants.length));
+  const survivor = dupeVariants.find((v) => v.option_label === 'Standard');
+  check(survivor?.price_cents === 1900, 'the LAST category won (19.00), confirming the merge direction reported to the operator', String(survivor?.price_cents));
+
+  // A product with no duplicates must not be flagged.
+  check((written.duplicateLabels || []).length === 0, 'a clean product reports no collisions', JSON.stringify(written.duplicateLabels));
+
   db.close();
   console.log('='.repeat(56));
   console.log(fail === 0 ? 'CATALOG ROUND TRIP VERIFIED - full field set\n' : fail + ' FAILURE(S)\n');

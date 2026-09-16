@@ -32,7 +32,15 @@ const VARIANT_COLUMN_FIELDS = new Set(['size', 'price', 'checkoutMode', 'invento
 export interface CatalogWriteResult {
   ok: boolean;
   productId?: string;
+  /** DISTINCT variant rows that exist after the write, not price categories
+   *  submitted. Two categories sharing an option_label produce ONE row. */
   variantCount?: number;
+  /** Price categories that collided on option_label, with how many shared it.
+   *  product_variants has unique (product_id, option_label), so an upsert
+   *  silently merges them and the last one wins. That is data loss, and a
+   *  caller has to be able to see it rather than infer it from a count that
+   *  looks right. Empty (absent) when nothing collided. */
+  duplicateLabels?: Array<{ label: string; count: number }>;
   error?: string;
 }
 
@@ -133,7 +141,18 @@ export async function writeProductToPostgres(
       ? product.sizeConfigs
       : {}) as Record<string, { customDropSchedule?: unknown }>;
 
-    let variantCount = 0;
+    // unique (product_id, option_label) means same-label categories upsert
+    // onto each other. Count DISTINCT labels, and report the collisions --
+    // counting loop iterations would over-report the rows that survive.
+    const labelCounts = new Map<string, number>();
+    for (const raw of cats) {
+      const size = String(((raw || {}) as Record<string, unknown>).size || '').trim();
+      if (size) labelCounts.set(size, (labelCounts.get(size) || 0) + 1);
+    }
+    const duplicateLabels = [...labelCounts.entries()]
+      .filter(([, n]) => n > 1)
+      .map(([label, count]) => ({ label, count }));
+
     for (const raw of cats) {
       const cat = (raw || {}) as Record<string, unknown>;
       const size = String(cat.size || '').trim();
@@ -151,10 +170,14 @@ export async function writeProductToPostgres(
         },
         { onConflict: 'product_id,option_label' },
       );
-      variantCount++;
     }
 
-    return { ok: true, productId, variantCount };
+    return {
+      ok: true,
+      productId,
+      variantCount: labelCounts.size,
+      ...(duplicateLabels.length > 0 ? { duplicateLabels } : {}),
+    };
   } catch (err) {
     return { ok: false, error: (err as Error)?.message || String(err) };
   }

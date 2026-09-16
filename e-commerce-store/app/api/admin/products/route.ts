@@ -135,6 +135,18 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
     if (!result.ok && result.error !== 'not_configured') {
       console.error('[admin/products] Postgres catalog write failed', result.error);
     }
+    // Two price categories sharing a size collapse into one variant row
+    // (unique product_id, option_label) and the last one silently wins.
+    // The merchant sees a successful save and one of their tiers is gone.
+    // Surfacing this in the product editor is panel work; until then it is at
+    // least not invisible.
+    if (result.duplicateLabels?.length) {
+      console.error(
+        '[admin/products] DUPLICATE SIZE LABELS merged on save — tiers were lost:',
+        product.slug,
+        result.duplicateLabels.map((d) => d.label + ' x' + d.count).join(', '),
+      );
+    }
   } catch (err) {
     console.error('[admin/products] Postgres catalog write threw', (err as Error)?.message || err);
   }
