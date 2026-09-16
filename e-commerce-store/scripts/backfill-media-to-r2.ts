@@ -131,6 +131,17 @@ async function migrateOne(
   }
 }
 
+/**
+ * Set a value at a path like `a.b[0].c`. Only ever walks structure that the
+ * finder already traversed, so every segment is known to exist.
+ */
+function setByPath(root: Record<string, unknown>, path: string, value: string): void {
+  const segs = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let node: any = root;
+  for (let i = 0; i < segs.length - 1; i++) node = node?.[segs[i]];
+  if (node && typeof node === 'object') node[segs[segs.length - 1]] = value;
+}
+
 async function main() {
   console.log(`\nMedia backfill — ${COMMIT ? 'COMMIT (will upload and rewrite Postgres)' : 'DRY RUN (no writes)'}`);
   console.log('='.repeat(64));
@@ -214,18 +225,59 @@ ${products.length} product(s) in Postgres
   }
 
 
-  // ── Brand logo (store config) ────────────────────────────────────────────
+  // ── Store config assets (RECURSIVE) ──────────────────────────────────────
+  // Was: the brand logo only, by hardcoded path. That missed the two biggest
+  // assets in the whole system, because they are nested deeper:
+  //
+  //   catalogPreview.upcomingDrops[].image   119KB + 144KB  jpeg
+  //   aiHero.clips[].url                     681KB          webm
+  //
+  // 945KB of base64 sitting in the config blob that /api/store returns. A
+  // hardcoded path list would have missed them and will miss the next one, so
+  // this walks the whole config and migrates EVERY data: URL it finds,
+  // wherever it lives. Already-migrated values are plain URLs and are skipped
+  // by parseDataUrl, so re-running is a no-op.
   const config_ = await loadStoreConfig(redis);
-  const logo = config_?.branding?.logoUrl;
-  if (parseDataUrl(logo) !== null && processed < LIMIT) {
-    console.log('\nbrand logo');
-    const url = await migrateOne(config, '_brand', String(logo), 'branding.logoUrl');
-    if (COMMIT && url) {
-      const next = { ...config_, branding: { ...(config_.branding || {}), logoUrl: url } };
-      await redis.set(STORE_CONFIG_KEY, JSON.stringify(next));
-      console.log('  = store config: logo ref rewritten');
+  if (config_ && typeof config_ === 'object') {
+    const found: Array<{ path: string; value: string }> = [];
+    const find = (node: unknown, path: string) => {
+      if (typeof node === 'string') {
+        if (parseDataUrl(node) !== null) found.push({ path, value: node });
+        return;
+      }
+      if (Array.isArray(node)) { node.forEach((v, i) => find(v, path + '[' + i + ']')); return; }
+      if (node && typeof node === 'object') {
+        for (const [k, v] of Object.entries(node as Record<string, unknown>)) find(v, path ? path + '.' + k : k);
+      }
+    };
+    find(config_, '');
+
+    if (found.length > 0) {
+      console.log(`
+store config — ${found.length} base64 asset(s)`);
+      const replacements = new Map<string, string>();
+      let anyFailed = false;
+      for (const hit of found) {
+        if (processed >= LIMIT) break;
+        const url = await migrateOne(config, '_config', hit.value, hit.path);
+        if (url) replacements.set(hit.path, url);
+        else if (COMMIT) anyFailed = true;
+      }
+
+      // Apply by path, then WRITE ONCE. Same write-after-upload contract as
+      // products: a partial failure leaves the config completely untouched
+      // rather than half-pointing at objects that may not exist.
+      if (COMMIT && replacements.size > 0 && !anyFailed) {
+        const next = JSON.parse(JSON.stringify(config_)) as Record<string, unknown>;
+        for (const [path, url] of replacements) setByPath(next, path, url);
+        await redis.set(STORE_CONFIG_KEY, JSON.stringify(next));
+        console.log(`  = store config: rewrote ${replacements.size} asset ref(s)`);
+      } else if (COMMIT && anyFailed) {
+        console.log('  = store config: NOT rewritten — an upload failed, leaving it untouched');
+      }
     }
   }
+
 
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log(`\n${'='.repeat(64)}`);
