@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasPlatformAdminAccess } from '@/lib/admin-actor';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 
 export const dynamic = 'force-dynamic';
@@ -24,11 +25,16 @@ export async function GET(request: Request) {
     if (!actorHasPlatformAdminAccess(actor)) {
       return NextResponse.json({ error: 'Platform admin access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ ok: true, tenants: [], notConfigured: true });
     }
-    const { serviceRoleKey } = readSupabaseEnv();
-    const tenants = await supabaseRestFetch('/tenants?select=id,name,slug,business_type,created_at&order=created_at.desc&limit=200', { key: serviceRoleKey }).catch(() => []);
+    const tenants = await getDb()
+      .select('tenants', {
+        select: ['id', 'name', 'slug', 'business_type', 'created_at'],
+        order: { column: 'created_at', ascending: false },
+        limit: 200,
+      })
+      .catch(() => []);
     return NextResponse.json({ ok: true, tenants: tenants ?? [], notConfigured: false });
   } catch (err: any) {
     console.error('[admin/tenants] list failed', err?.message || err);
@@ -45,7 +51,7 @@ export async function POST(request: Request) {
     if (!actorHasPlatformAdminAccess(actor)) {
       return NextResponse.json({ error: 'Platform admin access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'Tenant onboarding requires Supabase.' }, { status: 503 });
     }
 
@@ -67,12 +73,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'name and slug are required.' }, { status: 400 });
     }
 
-    const { serviceRoleKey } = readSupabaseEnv();
-    const created = (await supabaseRestFetch('/tenants', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: { name, slug, business_type: businessType, license_status: 'active' },
-      prefer: 'return=representation',
+    const created = (await getDb().insert('tenants', {
+      name,
+      slug,
+      business_type: businessType,
+      license_status: 'active',
     }).catch((err) => {
       throw err;
     })) as Array<{ id: string; name: string; slug: string }>;

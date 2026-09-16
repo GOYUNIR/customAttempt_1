@@ -138,7 +138,7 @@ const eslintConfig = defineConfig([
     rules: { ...fenceRule("error", { includeDbPort: false }) },
   },
   {
-    // GRANDFATHERED — the 10 callers that predate the DbClient port.
+    // GRANDFATHERED — the 4 callers that predate the DbClient port.
     //
     // The fence lands green by exempting exactly these, so it cannot be
     // weakened later without this list shrinking. Each migration batch deletes
@@ -149,15 +149,9 @@ const eslintConfig = defineConfig([
     // Note these still get the full vendor SDK fence: only the DB port entry
     // is relaxed, so migrating one cannot quietly lose the other protection.
     files: [
-      "app/api/admin/b2b/price-list/route.ts",
       "app/api/admin/b2b/quotes/route.ts",
-      "app/api/admin/domains/route.ts",
-      "app/api/admin/impersonate/route.ts",
       "app/api/admin/inventory-matrix/route.ts",
-      "app/api/admin/telemetry/route.ts",
-      "app/api/admin/tenants/route.ts",
       "app/api/admin/theme/route.ts",
-      "app/api/admin/users/route.ts",
       "scripts/migrate-redis-to-supabase.ts",
     ],
     rules: { ...fenceRule("error", { includeDbPort: false }) },

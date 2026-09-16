@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminDevice, IMPERSONATION_TTL_SECONDS } from '@/lib/admin-verify';
 import { verifyPortalSignIn } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { supabaseRestFetch, readSupabaseEnv, supabaseServiceConfigured } from '@/services/config/supabase-client';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -38,7 +40,7 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('admin_impersonate', request, 10, 60);
     if (limited) return limited;
 
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json(
         { error: 'Staff Impersonation requires Supabase (tenants/sales_tenant_assignments tables).' },
         { status: 503 },
@@ -79,19 +81,26 @@ export async function POST(request: Request) {
     const SALES_SCOPED_ROLES = new Set(['sales', 'sales_rep', 'sales_admin', 'deal_desk']);
     if (!SALES_SCOPED_ROLES.has(account.role) && account.role !== 'super_admin') return deny();
 
-    const { serviceRoleKey } = readSupabaseEnv();
-    const tenantRows = (await supabaseRestFetch(
-      `/tenants?id=eq.${encodeURIComponent(targetTenantId)}&select=id,name`,
-      { key: serviceRoleKey },
-    ).catch(() => null)) as Array<{ id: string; name: string }> | null;
+    const tenantRows = (await getDb()
+      .select<{ id: string; name: string }>('tenants', {
+        where: { id: eq(targetTenantId) },
+        select: ['id', 'name'],
+      })
+      .catch(() => null)) as Array<{ id: string; name: string }> | null;
     const tenant = Array.isArray(tenantRows) ? tenantRows[0] : null;
     if (!tenant) return deny();
 
     if (SALES_SCOPED_ROLES.has(account.role)) {
-      const assignmentRows = (await supabaseRestFetch(
-        `/sales_tenant_assignments?sales_user_id=eq.${encodeURIComponent(account.id)}&tenant_id=eq.${encodeURIComponent(targetTenantId)}&select=tenant_id`,
-        { key: serviceRoleKey },
-      ).catch(() => null)) as Array<{ tenant_id: string }> | null;
+      // AUTHORIZATION lookup: a sales user may only impersonate a tenant they
+      // are assigned to. The decision is made in code from this result, and the
+      // port uses the same service-role key, so its meaning is unchanged — but
+      // the query is verified byte-identical for exactly that reason.
+      const assignmentRows = (await getDb()
+        .select<{ tenant_id: string }>('sales_tenant_assignments', {
+          where: { sales_user_id: eq(account.id), tenant_id: eq(targetTenantId) },
+          select: ['tenant_id'],
+        })
+        .catch(() => null)) as Array<{ tenant_id: string }> | null;
       if (!Array.isArray(assignmentRows) || assignmentRows.length === 0) return deny();
     }
     // super_admin bypasses the assignment check (unrestricted, same as every

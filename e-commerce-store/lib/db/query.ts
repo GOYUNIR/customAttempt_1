@@ -49,10 +49,16 @@ export const isNull = (): FilterOp => ({ op: 'is', value: null });
  */
 export type SelectItem = string | { relation: string; columns: SelectItem[] };
 
+export interface OrderSpec {
+  column: string;
+  ascending?: boolean;
+}
+
 export interface QuerySpec {
   where?: Record<string, FilterOp>;
   select?: SelectItem[];
-  order?: { column: string; ascending?: boolean };
+  /** One column, or several applied in order (PostgREST: order=a.asc,b.desc). */
+  order?: OrderSpec | OrderSpec[];
   limit?: number;
   offset?: number;
 }
@@ -144,8 +150,14 @@ export function buildPostgrestQuery(spec: QuerySpec = {}): string {
     parts.push(`select=${spec.select.map(renderSelectItem).join(',')}`);
   }
   if (spec.order) {
-    const dir = spec.order.ascending === false ? '.desc' : '.asc';
-    parts.push(`order=${assertIdentifier(spec.order.column, 'order column')}${dir}`);
+    const cols = Array.isArray(spec.order) ? spec.order : [spec.order];
+    if (cols.length > 0) {
+      parts.push(
+        `order=${cols
+          .map((o) => `${assertIdentifier(o.column, 'order column')}${o.ascending === false ? '.desc' : '.asc'}`)
+          .join(',')}`,
+      );
+    }
   }
   if (typeof spec.limit === 'number') {
     if (!Number.isInteger(spec.limit) || spec.limit < 0) throw new Error(`Invalid limit: ${spec.limit}`);

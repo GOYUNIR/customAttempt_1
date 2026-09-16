@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasMerchantAccess, actorHasPlatformAdminAccess } from '@/lib/admin-actor';
 import { resolveActingTenantId } from '@/lib/tenant-context';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq, gte } from '@/lib/db/query';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,23 +22,26 @@ export async function GET(request: Request) {
     if (!actorHasMerchantAccess(actor) && !actorHasPlatformAdminAccess(actor)) {
       return NextResponse.json({ error: 'Access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ ok: true, ordersToday: 0, pendingRaffleEntries: 0, notConfigured: true });
     }
 
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
     const midnightIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
     const [orders, entries] = await Promise.all([
-      supabaseRestFetch(
-        `/orders?tenant_id=eq.${encodeURIComponent(tenantId)}&created_at=gte.${encodeURIComponent(midnightIso)}&select=id`,
-        { key: serviceRoleKey },
-      ).catch(() => []),
-      supabaseRestFetch(
-        `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&status=eq.pending&select=id`,
-        { key: serviceRoleKey },
-      ).catch(() => []),
+      getDb()
+        .select('orders', {
+          where: { tenant_id: eq(tenantId), created_at: gte(midnightIso) },
+          select: ['id'],
+        })
+        .catch(() => []),
+      getDb()
+        .select('raffle_entries', {
+          where: { tenant_id: eq(tenantId), status: eq('pending') },
+          select: ['id'],
+        })
+        .catch(() => []),
     ]);
 
     return NextResponse.json({

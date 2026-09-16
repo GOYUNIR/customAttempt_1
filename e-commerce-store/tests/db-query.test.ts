@@ -183,3 +183,22 @@ test("select: '*' is allowed as the select-everything wildcard", () => {
   // ...but it is the ONLY non-identifier permitted.
   assert.throws(() => buildPostgrestQuery({ select: ['*,secret'] }), /Invalid select column/);
 });
+
+test('order: multiple columns render in sequence', () => {
+  assert.equal(
+    buildPostgrestQuery({ order: [{ column: 'variant_id' }, { column: 'min_quantity' }] }),
+    'order=variant_id.asc,min_quantity.asc',
+  );
+  assert.equal(
+    buildPostgrestQuery({ order: [{ column: 'a', ascending: false }, { column: 'b' }] }),
+    'order=a.desc,b.asc',
+  );
+});
+
+test('order: a single column still works unchanged', () => {
+  assert.equal(buildPostgrestQuery({ order: { column: 'created_at', ascending: false } }), 'order=created_at.desc');
+});
+
+test('order: every column in a multi-column order is validated', () => {
+  assert.throws(() => buildPostgrestQuery({ order: [{ column: 'ok' }, { column: 'bad,col' }] }), /Invalid order column/);
+});

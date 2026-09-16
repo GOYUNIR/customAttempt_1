@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor, actorHasFullAdminAccess } from '@/lib/admin-verify';
 import { resolveActingTenantId } from '@/lib/tenant-context';
 import { cloudflareConfigured, syncTenantDomainStatus, deleteCustomHostname } from '@/lib/cloudflare-saas';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { createRedisClient } from '@/lib/server-config';
@@ -23,17 +24,19 @@ export async function GET(request: Request) {
   if (!cloudflareConfigured()) {
     return NextResponse.json({ ok: true, configured: false });
   }
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     return NextResponse.json({ ok: true, configured: true, error: 'Supabase is not configured.' });
   }
 
   const actor = await resolveAdminActor(request);
   const tenantId = await resolveActingTenantId(actor);
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/tenants?id=eq.${encodeURIComponent(tenantId)}&select=custom_domain,domain_status,ssl_status,domain_verification,domain_checked_at&limit=1`,
-    { key: serviceRoleKey },
-  ).catch(() => [])) as Array<Record<string, unknown>>;
+  const rows = (await getDb()
+    .select<Record<string, unknown>>('tenants', {
+      where: { id: eq(tenantId) },
+      select: ['custom_domain', 'domain_status', 'ssl_status', 'domain_verification', 'domain_checked_at'],
+      limit: 1,
+    })
+    .catch(() => [])) as Array<Record<string, unknown>>;
 
   return NextResponse.json({ ok: true, configured: true, tenantId, domain: rows?.[0] || null });
 }
@@ -102,33 +105,34 @@ export async function DELETE(request: Request) {
     if (!actorHasFullAdminAccess(actor)) {
       return NextResponse.json({ error: 'Not permitted for an impersonation session.' }, { status: 403 });
     }
-    if (!cloudflareConfigured() || !supabaseServiceConfigured()) {
+    if (!cloudflareConfigured() || !getDb().configured) {
       return NextResponse.json({ error: 'Cloudflare/Supabase not configured.' }, { status: 503 });
     }
 
     const tenantId = await resolveActingTenantId(actor);
-    const { serviceRoleKey } = readSupabaseEnv();
-    const rows = (await supabaseRestFetch(
-      `/tenants?id=eq.${encodeURIComponent(tenantId)}&select=cloudflare_hostname_id&limit=1`,
-      { key: serviceRoleKey },
-    ).catch(() => [])) as Array<{ cloudflare_hostname_id: string | null }>;
+    const rows = (await getDb()
+      .select<{ cloudflare_hostname_id: string | null }>('tenants', {
+        where: { id: eq(tenantId) },
+        select: ['cloudflare_hostname_id'],
+        limit: 1,
+      })
+      .catch(() => [])) as Array<{ cloudflare_hostname_id: string | null }>;
     const hostnameId = rows?.[0]?.cloudflare_hostname_id;
     if (hostnameId) {
       const deleted = await deleteCustomHostname(hostnameId);
       if (!deleted.ok) return NextResponse.json({ error: deleted.error }, { status: 502 });
     }
 
-    await supabaseRestFetch(`/tenants?id=eq.${encodeURIComponent(tenantId)}`, {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: {
+    // returning: 'default' — the legacy PATCH sent no Prefer header.
+    await getDb().update('tenants', { where: { id: eq(tenantId) } }, {
         custom_domain: null,
         cloudflare_hostname_id: null,
         domain_status: 'unconfigured',
         ssl_status: 'unconfigured',
         domain_verification: {},
       },
-    });
+      { returning: 'default' },
+    );
 
     const redis = createRedisClient();
     if (redis) {

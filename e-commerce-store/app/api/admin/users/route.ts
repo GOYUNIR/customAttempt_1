@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { adminAuthorized, resolveAdminActor } from '@/lib/admin-verify';
 import { actorHasPlatformAdminAccess, type AdminActorRole } from '@/lib/admin-actor';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -32,14 +33,19 @@ export async function GET(request: Request) {
     if (!actorHasPlatformAdminAccess(actor)) {
       return NextResponse.json({ error: 'Platform admin access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'Role management requires Supabase.' }, { status: 503 });
     }
-    const { serviceRoleKey } = readSupabaseEnv();
 
     const [users, auditLogs] = await Promise.all([
-      supabaseRestFetch('/users?select=id,email,role&order=email.asc&limit=500', { key: serviceRoleKey }).catch(() => []),
-      supabaseRestFetch('/audit_logs?select=id,actor,action,detail,created_at&order=created_at.desc&limit=50', { key: serviceRoleKey }).catch(() => []),
+      getDb().select('users', { select: ['id', 'email', 'role'], order: { column: 'email' }, limit: 500 }).catch(() => []),
+      getDb()
+        .select('audit_logs', {
+          select: ['id', 'actor', 'action', 'detail', 'created_at'],
+          order: { column: 'created_at', ascending: false },
+          limit: 50,
+        })
+        .catch(() => []),
     ]);
 
     return NextResponse.json({ ok: true, users: users ?? [], auditLogs: auditLogs ?? [], allowedRoles: ALLOWED_ROLES });
@@ -61,7 +67,7 @@ export async function PATCH(request: Request) {
     if (!actorHasPlatformAdminAccess(actor)) {
       return NextResponse.json({ error: 'Platform admin access required.' }, { status: 403 });
     }
-    if (!supabaseServiceConfigured()) {
+    if (!getDb().configured) {
       return NextResponse.json({ error: 'Role management requires Supabase.' }, { status: 503 });
     }
 
@@ -76,14 +82,11 @@ export async function PATCH(request: Request) {
     if (!userId || !ALLOWED_ROLES.includes(role)) {
       return NextResponse.json({ error: `userId and a valid role are required (one of: ${ALLOWED_ROLES.join(', ')}).` }, { status: 400 });
     }
-
-    const { serviceRoleKey } = readSupabaseEnv();
-    const updated = (await supabaseRestFetch(`/users?id=eq.${encodeURIComponent(userId)}`, {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: { role },
-      prefer: 'return=representation',
-    })) as Array<{ id: string; email: string; role: string }>;
+    const updated = await getDb().update<{ id: string; email: string; role: string }>(
+      'users',
+      { where: { id: eq(userId) } },
+      { role },
+    );
     if (!Array.isArray(updated) || updated.length === 0) {
       return NextResponse.json({ error: 'User not found.' }, { status: 404 });
     }
