@@ -7,7 +7,8 @@
  * NOT wired into any live route yet — see the session's summary.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 export type CartItem = {
   id: string;
@@ -24,7 +25,7 @@ export type Cart = {
 };
 
 function assertSupabase(): void {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Postgres carts require Supabase (SUPABASE_SERVICE_ROLE_KEY).');
   }
 }
@@ -34,32 +35,31 @@ function assertSupabase(): void {
  *  abandoned carts are left as history, not reused). */
 export async function getOrCreateActiveCart(tenantId: string, customerId: string): Promise<Cart> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const existing = (await supabaseRestFetch(
-    `/carts?tenant_id=eq.${encodeURIComponent(tenantId)}&customer_id=eq.${encodeURIComponent(customerId)}&status=eq.active&select=id,tenant_id,customer_id,status&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string; tenant_id: string; customer_id: string | null; status: Cart['status'] }>;
+  const db = getDb();
+  const existing = await db.select<{ id: string; tenant_id: string; customer_id: string | null; status: Cart['status'] }>('carts', {
+    where: { tenant_id: eq(tenantId), customer_id: eq(customerId), status: eq('active') },
+    select: ['id', 'tenant_id', 'customer_id', 'status'],
+    limit: 1,
+  });
   if (Array.isArray(existing) && existing.length > 0) {
     const row = existing[0];
     return { id: row.id, tenantId: row.tenant_id, customerId: row.customer_id, status: row.status };
   }
-  const created = (await supabaseRestFetch('/carts', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: { tenant_id: tenantId, customer_id: customerId, status: 'active' },
-    prefer: 'return=representation',
-  })) as Array<{ id: string; tenant_id: string; customer_id: string | null; status: Cart['status'] }>;
+  const created = await db.insert<{ id: string; tenant_id: string; customer_id: string | null; status: Cart['status'] }>('carts', {
+    tenant_id: tenantId,
+    customer_id: customerId,
+    status: 'active',
+  });
   const row = created[0];
   return { id: row.id, tenantId: row.tenant_id, customerId: row.customer_id, status: row.status };
 }
 
 export async function listCartItems(tenantId: string, cartId: string): Promise<CartItem[]> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/cart_items?tenant_id=eq.${encodeURIComponent(tenantId)}&cart_id=eq.${encodeURIComponent(cartId)}&select=id,variant_id,quantity,unit_price_cents`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string; variant_id: string; quantity: number; unit_price_cents: number }>;
+  const rows = await getDb().select<{ id: string; variant_id: string; quantity: number; unit_price_cents: number }>('cart_items', {
+    where: { tenant_id: eq(tenantId), cart_id: eq(cartId) },
+    select: ['id', 'variant_id', 'quantity', 'unit_price_cents'],
+  });
   return (rows || []).map((r) => ({
     id: r.id,
     variantId: r.variant_id,
@@ -81,32 +81,30 @@ export async function addCartItem(
   unitPriceCents: number,
 ): Promise<CartItem> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const created = (await supabaseRestFetch('/cart_items', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: { tenant_id: tenantId, cart_id: cartId, variant_id: variantId, quantity: qty, unit_price_cents: Math.max(0, Math.round(unitPriceCents) || 0) },
-    prefer: 'return=representation',
-  })) as Array<{ id: string; variant_id: string; quantity: number; unit_price_cents: number }>;
+  const created = await getDb().insert<{ id: string; variant_id: string; quantity: number; unit_price_cents: number }>('cart_items', {
+    tenant_id: tenantId,
+    cart_id: cartId,
+    variant_id: variantId,
+    quantity: qty,
+    unit_price_cents: Math.max(0, Math.round(unitPriceCents) || 0),
+  });
   const row = created[0];
   return { id: row.id, variantId: row.variant_id, quantity: Number(row.quantity) || 0, unitPriceCents: Number(row.unit_price_cents) || 0 };
 }
 
 export async function removeCartItem(tenantId: string, cartItemId: string): Promise<void> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(
-    `/cart_items?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(cartItemId)}`,
-    { key: serviceRoleKey, method: 'DELETE' },
-  );
+  await getDb().remove('cart_items', { where: { tenant_id: eq(tenantId), id: eq(cartItemId) } });
 }
 
 export async function markCartConverted(tenantId: string, cartId: string): Promise<void> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(
-    `/carts?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(cartId)}`,
-    { key: serviceRoleKey, method: 'PATCH', body: { status: 'converted' } },
+  // returning: 'default' — the legacy PATCH sent no Prefer header.
+  await getDb().update(
+    'carts',
+    { where: { tenant_id: eq(tenantId), id: eq(cartId) } },
+    { status: 'converted' },
+    { returning: 'default' },
   );
 }
