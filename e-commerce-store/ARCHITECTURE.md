@@ -634,3 +634,34 @@ obligation. Not audit momentum.
 **What already reduces the risk it was meant to address:** the DbClient port
 (Phase D4) means queries no longer hard-code Supabase's dialect, which was the
 deeper half of the lock-in this phase was guarding against.
+
+### DEFERRED-3 — Reconcile the two parallel commerce-mode systems
+
+**Status:** must be resolved BEFORE any new commerce-engine work (appointments,
+lead capture, pre-orders, waitlists, auctions, subscriptions), not after.
+
+**What.** There are two independent attempts at "one schema for many selling
+modes":
+
+1. `lib/commerce-modes.ts` (318 lines) — declares 10 modes (INSTANT_BUY,
+   ALLOCATION_DRAW, TIME_SLOT, PREORDER, SUBSCRIPTION, GATED_ACCESS,
+   GROUP_BUY, DUTCH_AUCTION, PAY_WHAT_YOU_WANT, RFQ_QUOTE), a capability
+   vocabulary, typed AccessRule/BillingRule/ScheduleConfig blocks, and
+   per-mode metadata. Consumed by exactly three files — app/admin/page.tsx,
+   app/api/admin/products/route.ts, lib/server-config.ts — and only to
+   NORMALIZE AND PERSIST the blocks. No checkout, draw or fulfilment path
+   branches on commerceMode.
+2. `lib/item-engine/registry.ts` — a separate registry with its own
+   SUBSCRIPTION_SCHEMA and JSON-schema approach to the same problem.
+
+**Why it matters now.** Building engines on top of two competing vocabularies
+is how you get a third. Pick one (commerce-modes.ts is the more developed and
+already has a storage shape in the product record) and fold the other in.
+
+**Related inconsistency to settle in the same pass:** `waitlist` is modelled
+as a `waitlist_entries` table (00012) and a `checkout_mode` enum value, but is
+NOT a CommerceMode. Either promote it to a mode or explain why it is not one.
+
+**Honest current state:** the vocabulary and storage shape exist and are
+reasonable; the behaviour does not. That phase extends a schema and a type
+system, and builds engines fresh.
