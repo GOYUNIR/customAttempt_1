@@ -73,6 +73,17 @@
     { "pattern": "goyunir.com/*", "zone_name": "goyunir.com" },
     { "pattern": "*.goyunir.com/*", "zone_name": "goyunir.com" }
   ],
+  // ── R2 ─────────────────────────────────────────────────────────────────────
+  // Product media. The bucket is PRIVATE and is read through this binding by
+  // lib/media-r2.ts, then served by app/media/[...parts] at /media/r2/<key>.
+  //
+  // It is NOT served from R2's own custom domain: the "*.goyunir.com/*" route
+  // below shadows any R2 custom domain on this zone, so an upload succeeds and
+  // the public fetch 404s. That was found by an actual end-to-end fetch, not
+  // by reading config -- presign and upload both pass against it.
+  "r2_buckets": [
+    { "binding": "MEDIA_BUCKET_R2", "bucket_name": "goyunir-media" }
+  ],
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -91,6 +102,20 @@
     //   "cloudflare-kv". Leave "supabase" unless you picked a different primary
     //   store in the Setup Wizard. (NECESSARY HERE — only to override)
     "STORAGE_PROVIDER": "supabase",
+    // ── R2 object storage for product media (Phase H1) ──────────────────────
+    // Non-secret. The two credentials (MEDIA_S3_ACCESS_KEY_ID,
+    // MEDIA_S3_SECRET_ACCESS_KEY) are Worker SECRETS — never put them here.
+    // Account-level endpoint WITHOUT the bucket appended: the SigV4 signer
+    // builds the bucket path itself, and an endpoint that already contains it
+    // produces a signature/URL mismatch (the Phase B bug).
+    "MEDIA_S3_ENDPOINT": "https://decf23df6d279eea4797df71d3324fa2.r2.cloudflarestorage.com",
+    "MEDIA_BUCKET": "goyunir-media",
+    // Where a stored object key becomes a public URL. This points at THIS
+    // Worker's media route, not at the bucket: the bucket is private and R2's
+    // custom domain is shadowed by the "*.goyunir.com/*" route. Serving through
+    // the Worker is what makes the private bucket workable, and it puts the
+    // cache headers under this app's control (immutable, 1 year).
+    "MEDIA_S3_PUBLIC_BASE_URL": "https://media.goyunir.com/media/r2",
     // [REQUIRED in production] the platform's root domain. Enables host-based
     // portal isolation in middleware.ts: admin./app./sales.<root> resolve to
     // their own portals, the bare root is marketing, and every other subdomain

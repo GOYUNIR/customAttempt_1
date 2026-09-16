@@ -5,6 +5,7 @@ import {
   PRODUCTS_KEY,
 } from '@/lib/server-config';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
+import { readMediaObject } from '@/lib/media-r2';
 
 /**
  * Serves product gallery media + the brand logo as REAL files.
@@ -82,6 +83,21 @@ export async function GET(
   try {
     const { parts } = await ctx.params;
     if (!Array.isArray(parts) || parts.length === 0) return notFound();
+
+    // /media/r2/<object key…> → a PRIVATE R2 object, streamed through this
+    // Worker. The bucket has no public access and R2's own custom domain is
+    // unreachable anyway: this Worker's `*.goyunir.com/*` route shadows it
+    // (see lib/media-r2.ts). Keys are opaque and content-addressed, so the
+    // same year-long immutable caching applies as for the base64 path.
+    if (parts[0] === 'r2') {
+      const key = parts.slice(1).join('/');
+      // Path traversal can never escape the bucket via the S3 API, but a '..'
+      // segment still produces confusing keys — reject rather than normalize.
+      if (!key || key.includes('..')) return notFound();
+      const object = await readMediaObject(key);
+      if (!object) return notFound();
+      return serve({ mime: object.contentType, bytes: new Uint8Array(object.body) });
+    }
 
     const redis = createKvClient();
 

@@ -701,3 +701,23 @@ confirmed migrated does the Redis write come out.
 currently correct — both stores are written on every save. The failure mode it
 guards against (one store going stale) is exactly what premature removal would
 cause.
+
+## Credential expiry calendar
+
+Time-bombed credentials, recorded here because an expiry surfaces as a
+confusing mystery failure ("uploads suddenly 403") weeks after anyone
+remembers provisioning it.
+
+| Credential | Where it lives | Expires | Failure mode when it lapses |
+|---|---|---|---|
+| R2 API token (`MEDIA_S3_ACCESS_KEY_ID` / `MEDIA_S3_SECRET_ACCESS_KEY`) | Worker secrets on `customattempt-1`, plus `.env.local` for local runs and the backfill script | **2026-10-16** (30-day TTL from 2026-09-16) | `/api/admin/media/presign` starts returning SignatureDoesNotMatch / 403. Existing images keep serving — they come from `media.goyunir.com`, which does not use this token — so the symptom is "new uploads fail, old ones fine", NOT a visibly broken storefront. That asymmetry is what makes it hard to recognize. |
+
+To rotate: Cloudflare dashboard → R2 → Manage R2 API Tokens → create a new
+Object Read & Write token scoped to `goyunir-media`, then
+`npx wrangler secret put MEDIA_S3_ACCESS_KEY_ID --name customattempt-1`
+(and the secret key), and update `.env.local`. No code change, no redeploy of
+the non-secret vars in `wrangler.jsonc`.
+
+Note the bucket's custom domain (`media.goyunir.com`) serves objects publicly
+and is independent of this token — rotating or losing the token never takes
+already-uploaded media offline.

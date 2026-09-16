@@ -95,8 +95,13 @@ export function presignPut(opts: {
   key: string;
   expiresSeconds: number;
   now?: Date;
+  /** HTTP verb to sign. Defaults to PUT so every existing caller is
+   *  unchanged; 'GET' is used by the media route to read a private object
+   *  when no R2 binding is available (local dev / non-Workers hosts). */
+  method?: 'PUT' | 'GET' | 'DELETE';
 }): PresignResult {
   const { config, key, expiresSeconds } = opts;
+  const method = opts.method || 'PUT';
   const now = opts.now || new Date();
   const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const dateStamp = amzDate.slice(0, 8);
@@ -118,7 +123,7 @@ export function presignPut(opts: {
   ].join('&');
 
   const canonicalHeaders = `host:${host}\n`;
-  const canonicalRequest = ['PUT', `/${canonicalUri}`, canonicalQuery, canonicalHeaders, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
+  const canonicalRequest = [method, `/${canonicalUri}`, canonicalQuery, canonicalHeaders, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
 
   const kDate = hmac(`AWS4${config.secretAccessKey}`, dateStamp);
@@ -137,6 +142,20 @@ export function presignPut(opts: {
   const origin = pathStyle ? new URL(endpoint).origin : `https://${host}`;
   const objectUrl = `${origin}${path}`;
   return { uploadUrl: `${objectUrl}?${canonicalQuery}&X-Amz-Signature=${signature}`, objectUrl };
+}
+
+/**
+ * Presign a GET for a PRIVATE object. The bucket is never public: objects are
+ * served through the Worker (app/media/[...parts]), which prefers the R2
+ * binding and falls back to this when no binding exists.
+ */
+export function presignGet(config: MediaS3Config, key: string, expiresSeconds = 300): string {
+  return presignPut({ config, key, expiresSeconds, method: 'GET' }).uploadUrl;
+}
+
+/** Presign a DELETE. Used by verification/cleanup, never by request paths. */
+export function presignDelete(config: MediaS3Config, key: string, expiresSeconds = 300): string {
+  return presignPut({ config, key, expiresSeconds, method: 'DELETE' }).uploadUrl;
 }
 
 /**
