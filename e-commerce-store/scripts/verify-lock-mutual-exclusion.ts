@@ -41,7 +41,7 @@ function loadEnv() {
 loadEnv();
 
 const REAL = process.argv.includes('--real');
-const CONTENDERS = 10;
+const CONTENDERS = Number(process.env.LOCK_CONTENDERS || 10);
 
 async function main() {
   let close = () => {};
@@ -76,7 +76,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 60));
         inside -= 1;
         return true;
-      }, { retries: 0 }),
+      }, { retries: Number(process.env.LOCK_RETRIES ?? 0) }),
     ),
   );
   for (const r of results) { if (r.ok) acquired += 1; else contended += 1; }

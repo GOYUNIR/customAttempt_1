@@ -309,26 +309,45 @@ async function getPoolLevelById(tenantId: string, poolId: string): Promise<{ id:
   return row ? { id: row.id, quantityAvailable: Number(row.quantity_available) || 0 } : null;
 }
 
+/**
+ * CAS decrement with bounded retry, mirroring lib/inventory.ts.
+ *
+ * A LOST compare-and-swap means a concurrent draw moved the row between our
+ * read and our write. It does NOT mean the pool is out of stock, and reporting
+ * insufficient_stock for it refused entrants while stock remained -- the same
+ * lost-sales bug measured on decrementInventory (12 buyers, 5 units, 1 sold).
+ * `reread` re-reads the row so a race costs a round trip, not a sale.
+ */
 async function decrementPoolRow(
   tenantId: string,
   pool: { id: string; quantityAvailable: number },
   qty: number,
+  reread?: () => Promise<{ id: string; quantityAvailable: number } | null>,
 ): Promise<PoolDecrementResult> {
-  if (pool.quantityAvailable < qty) {
-    return { ok: false, reason: 'insufficient_stock', remaining: pool.quantityAvailable };
+  const ATTEMPTS = 5;
+  let current: { id: string; quantityAvailable: number } | null = pool;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    if (!current) return { ok: false, reason: 'no_pool' };
+    if (current.quantityAvailable < qty) {
+      return { ok: false, reason: 'insufficient_stock', remaining: current.quantityAvailable };
+    }
+    const nextAvailable = current.quantityAvailable - qty;
+    const updated = await getDb().update<{ quantity_available: number }>(
+      'shared_inventory_pools',
+      { where: { id: eq(current.id), quantity_available: eq(current.quantityAvailable) } },
+      { quantity_available: nextAvailable },
+    );
+    if (Array.isArray(updated) && updated.length > 0) {
+      return { ok: true, remaining: nextAvailable };
+    }
+    if (!reread) {
+      // No way to re-read (legacy caller) — report contention honestly rather
+      // than claiming the pool is empty.
+      return { ok: false, reason: 'lock_contended' };
+    }
+    current = await reread();
   }
-  const nextAvailable = pool.quantityAvailable - qty;
-  // Compare-and-swap: quantity_available must STILL be what we read, or a
-  // concurrent draw already took the stock.
-  const updated = await getDb().update<{ quantity_available: number }>(
-    'shared_inventory_pools',
-    { where: { id: eq(pool.id), quantity_available: eq(pool.quantityAvailable) } },
-    { quantity_available: nextAvailable },
-  );
-  if (!Array.isArray(updated) || updated.length === 0) {
-    return { ok: false, reason: 'insufficient_stock', remaining: pool.quantityAvailable };
-  }
-  return { ok: true, remaining: nextAvailable };
+  return { ok: false, reason: 'lock_contended' };
 }
 
 /** Atomic decrement of a shared pool by slug — identical lock + optimistic-
@@ -344,7 +363,7 @@ export async function decrementSharedPool(tenantId: string, slug: string, quanti
   const lockResult = await withRedisLock(redis, `shared-pool:pg:${tenantId}:${slug}`, async (): Promise<PoolDecrementResult> => {
     const current = await getPoolLevel(tenantId, slug);
     if (!current) return { ok: false, reason: 'no_pool' };
-    return decrementPoolRow(tenantId, current, qty);
+    return decrementPoolRow(tenantId, current, qty, () => getPoolLevel(tenantId, slug));
   });
 
   if (!lockResult.ok) return { ok: false, reason: 'lock_contended' };
@@ -364,7 +383,7 @@ export async function decrementSharedPoolById(tenantId: string, poolId: string, 
   const lockResult = await withRedisLock(redis, `shared-pool:pg:id:${tenantId}:${poolId}`, async (): Promise<PoolDecrementResult> => {
     const current = await getPoolLevelById(tenantId, poolId);
     if (!current) return { ok: false, reason: 'no_pool' };
-    return decrementPoolRow(tenantId, current, qty);
+    return decrementPoolRow(tenantId, current, qty, () => getPoolLevelById(tenantId, poolId));
   });
 
   if (!lockResult.ok) return { ok: false, reason: 'lock_contended' };

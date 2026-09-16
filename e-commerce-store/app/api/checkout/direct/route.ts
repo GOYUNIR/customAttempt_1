@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { decrementForSale } from '@/lib/inventory';
 import {
   createKvClient,
   getLiveProductState,
@@ -210,9 +211,21 @@ export async function POST(request: Request) {
       await saveLiveState(redis, inner);
       return inner;
     };
+    // AUTHORITATIVE: atomic decrement against inventory_levels (lock + CAS).
+    await decrementForSale({
+      tenantId: await ensureDefaultTenant(),
+      externalProductId: String(product.id),
+      size: String(size),
+      context: 'checkout/direct',
+    });
+
     const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
-    if (!lockResult.ok) console.warn('[checkout/direct] inventory lock contended, falling back to unlocked decrement', product.id, size);
-    if (!lockResult.ok) await decrementInventory();
+    // KV live-state mirror ONLY. The old "if (!lockResult.ok) await
+    // decrementInventory()" unlocked fallback is GONE -- with a lock that
+    // genuinely excludes, that branch would have become a live oversell path.
+    if (!lockResult.ok) {
+      console.error('[checkout/direct] KV live-state mirror skipped (lock contended) — Postgres already decremented', product.id, size);
+    }
 
     // Archive the sale
     const customerIdForArchive = typeof paymentIntent.customer === 'string'

@@ -25,15 +25,46 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Try once to acquire `lockKey`. Returns true if this call won the lock. */
+/**
+ * Acquire, atomically or not at all.
+ *
+ * THIS USED TO BE `hincrby(lockKey, 'lock', 1) === 1`, which is atomic on real
+ * Redis and NOT atomic on what production actually runs. STORAGE_PROVIDER is
+ * "supabase", so hincrby went through CloudflareKvStorageClient.mutate --
+ * read, compute, write -- and two callers could both read 0, both compute 1,
+ * and both believe they held the lock. Measured against production store_kv:
+ * 10 contenders, 4 "acquired", 2 inside the critical section simultaneously.
+ * (scripts/verify-lock-mutual-exclusion.ts)
+ *
+ * Every inventory decrement, draw, promo-count and points redemption in this
+ * codebase was relying on that.
+ *
+ * Now it uses setIfAbsent, which is a single atomic operation on the backing
+ * store (a plain INSERT against store_kv's primary key for Supabase, SET NX
+ * for Upstash). A store with no atomic primitive gets NO EMULATION: acquire
+ * fails, withRedisLock returns { ok: false }, and callers take their existing
+ * "could not lock" path. A lock that silently does not lock is strictly worse
+ * than one that admits it cannot.
+ */
 async function tryAcquire(redis: StorageClient, lockKey: string, ttlSeconds: number): Promise<boolean> {
-  const value = await redis.hincrby(lockKey, 'lock', 1);
-  if (value === 1) {
-    // We're the first to touch this key since it last expired/was deleted —
-    // set the TTL so a crash between acquire and release can't wedge it.
-    await redis.expire(lockKey, ttlSeconds).catch(() => {});
-    return true;
+  const client = redis as StorageClient & {
+    setIfAbsent?: (key: string, value: string, ttlSeconds: number) => Promise<boolean>;
+  };
+  if (typeof client.setIfAbsent !== 'function') {
+    console.error(
+      '[redis-lock] storage backend exposes no atomic setIfAbsent — refusing to emulate a lock. ' +
+        'Every guarded section will report contention until this is fixed.',
+    );
+    return false;
   }
-  return false;
+  try {
+    return await client.setIfAbsent(lockKey, String(Date.now()), ttlSeconds);
+  } catch (err) {
+    // An unsupported store, or a genuine backend failure. Either way we do not
+    // hold the lock, and pretending otherwise is the bug this replaced.
+    console.error('[redis-lock] atomic acquire failed', lockKey, (err as Error)?.message || err);
+    return false;
+  }
 }
 
 async function release(redis: StorageClient, lockKey: string): Promise<void> {

@@ -29,6 +29,14 @@ import type { StorageClient } from './types';
 export interface KvStore {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number; expiration?: number }): Promise<void>;
+  /**
+   * ATOMIC test-and-set: create the key only if it does not already exist,
+   * returning whether THIS caller created it. Optional — a store that cannot
+   * do it atomically must not implement it, because lib/redis-lock.ts fails
+   * CLOSED rather than fall back to a non-atomic emulation. That fallback is
+   * exactly how the lock came to provide no mutual exclusion in production.
+   */
+  putIfAbsent?(key: string, value: string, ttlSeconds: number): Promise<boolean>;
   delete(key: string): Promise<void>;
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
     keys: { name: string }[];
@@ -252,6 +260,25 @@ export class CloudflareKvStorageClient implements StorageClient {
       return { v: hash, e: current.e, t: 'hash' as const };
     });
     return removed;
+  }
+
+  /**
+   * Atomic acquire, delegating to the backing store. Returns false when the
+   * key already exists, and throws `unsupported` when the store has no atomic
+   * primitive — never a silent non-atomic emulation.
+   */
+  async setIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    if (typeof this.kv.putIfAbsent !== 'function') {
+      throw new Error('setIfAbsent unsupported by this store');
+    }
+    // MUST write a proper envelope, like every other write in this class.
+    // Writing the bare string left a row that read() could not parse, so
+    // del()'s existence check saw nothing and SKIPPED the delete -- the lock
+    // was acquired once and then never released until its TTL, which looked
+    // exactly like correct mutual exclusion in a single-shot test and starved
+    // every subsequent caller.
+    const env: Envelope = { v: value, e: Date.now() + Math.max(1, ttlSeconds) * 1000, t: 'string' };
+    return this.kv.putIfAbsent(key, encode(env), ttlSeconds);
   }
 
   async hincrby(key: string, field: string, by: number): Promise<number> {

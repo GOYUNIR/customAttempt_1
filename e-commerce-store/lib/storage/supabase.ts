@@ -96,6 +96,58 @@ class SupabaseKvStore implements KvStore {
     }
   }
 
+  /**
+   * ATOMIC test-and-set via a plain INSERT. `store_kv.key` is the primary
+   * key, so Postgres itself decides the race: exactly one concurrent INSERT
+   * succeeds and the rest get 23505 (unique violation). No read-then-write, so
+   * there is no window for two callers to both believe they won.
+   *
+   * NOTE the deliberate absence of `resolution=merge-duplicates`. That header
+   * turns the INSERT into an upsert, which always succeeds and would make this
+   * useless as a lock.
+   *
+   * An EXPIRED row still occupies the key (expiry here is a column, not an
+   * engine-level TTL), so a conflict is re-checked: if the occupant is past
+   * its expires_at it is deleted and the insert retried ONCE. Bounded, so a
+   * genuinely contended lock cannot loop.
+   */
+  async putIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    const attempt = async (): Promise<number> => {
+      const res = await fetch(this.base(), {
+        method: 'POST',
+        headers: { ...this.headers(), Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          key,
+          value,
+          expires_at: new Date(Date.now() + Math.max(1, ttlSeconds) * 1000).toISOString(),
+        }),
+      });
+      if (!res.ok) await res.text().catch(() => '');
+      return res.status;
+    };
+
+    const status = await attempt();
+    if (status >= 200 && status < 300) return true;
+    if (status !== 409) {
+      // A real failure (RLS, schema, network) is not "someone else holds it".
+      throw new Error(`Supabase store_kv putIfAbsent failed (${status})`);
+    }
+
+    // Conflict: is the occupant simply stale?
+    const check = await fetch(
+      `${this.base()}?key=eq.${encodeURIComponent(key)}&select=expires_at`,
+      { headers: this.headers() },
+    );
+    if (!check.ok) return false;
+    const rows = (await check.json().catch(() => [])) as Array<{ expires_at: string | null }>;
+    const expiresAt = rows?.[0]?.expires_at;
+    if (!expiresAt || new Date(expiresAt).getTime() > Date.now()) return false;
+
+    await this.delete(key).catch(() => {});
+    const retry = await attempt();
+    return retry >= 200 && retry < 300;
+  }
+
   async delete(key: string): Promise<void> {
     const res = await fetch(`${this.base()}?key=eq.${encodeURIComponent(key)}`, {
       method: 'DELETE',

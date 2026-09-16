@@ -32,6 +32,18 @@ export interface FakeDb {
  *
  * Mirrors migrations 00009 (status), 00012 + 00020 (checkout_mode).
  */
+/**
+ * UNIQUE / primary-key constraints, mirroring the migrations. A plain INSERT
+ * that collides returns 23505 + HTTP 409, exactly as PostgREST does -- which
+ * is what makes an atomic insert-if-absent lock testable here.
+ */
+const UNIQUE_KEYS: Record<string, string[]> = {
+  store_kv: ['key'],                                  // 00013 primary key
+  inventory_levels: ['variant_id'],                   // 00009 unique (variant_id)
+  product_variants: ['product_id', 'option_label'],   // 00012
+  tenant_store_config: ['tenant_id'],                 // 00014 primary key
+};
+
 const CHECK_CONSTRAINTS: Record<string, Record<string, readonly string[]>> = {
   products: {
     status: ['draft', 'live', 'archived'],
@@ -154,6 +166,23 @@ export async function startFakePostgrest(preferredPort = 0): Promise<FakeDb> {
           const violation = checkViolation(table, row);
           if (violation) {
             return respond({ code: '23514', message: violation, details: JSON.stringify(row).slice(0, 200) }, 400);
+          }
+          // UNIQUE CONSTRAINTS. Without these the fixture accepted what
+          // production rejects -- and specifically, a plain INSERT against
+          // store_kv's primary key ALWAYS succeeded here, which is what let a
+          // broken distributed lock look mutually exclusive in tests while
+          // providing no exclusion in production. Same failure as the CHECK
+          // constraints: a fixture more permissive than the database is worse
+          // than no fixture, because it manufactures confidence.
+          const unique = UNIQUE_KEYS[table];
+          if (unique && onConflict.length === 0) {
+            const clash = tables[table].find((r) => unique.every((c) => String(r[c]) === String(row[c])));
+            if (clash) {
+              return respond(
+                { code: '23505', message: 'duplicate key value violates unique constraint on ' + table + ' (' + unique.join(', ') + ')' },
+                409,
+              );
+            }
           }
           let existing: Row | undefined;
           if (onConflict.length > 0) {

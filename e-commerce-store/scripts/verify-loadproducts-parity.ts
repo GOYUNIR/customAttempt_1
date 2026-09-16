@@ -97,10 +97,29 @@ async function main() {
   // Fields that are REQUIRED to match, because money or lifecycle depends on
   // them. Presentation drift is reported but not failed.
   const CRITICAL = ['id', 'slug', 'name', 'isActive', 'isArchived', 'isUpcoming', 'checkoutMode',
-    'isRaffle', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit', 'totalInventory',
+    'isRaffle', 'maxPerEmail', 'maxPerCart', 'maxRaffleAllocationLimit',
     'goLiveAt', 'releaseEndsAt', 'priceCategories'];
 
+  // EXPECTED DIVERGENCES: differences where Postgres is deliberately NOT a
+  // copy of the KV blob. Enumerated with a justification each, so an
+  // unexplained difference still fails rather than being lumped in as
+  // 'cosmetic'.
+  //
+  //   images          KV holds base64, Postgres holds R2 URLs after the H1
+  //                   backfill. Postgres is the correct one.
+  //   crops           KV stores [] where Postgres stores undefined; both read
+  //                   as 'no crops' through sanitizeProduct.
+  //   totalInventory  The KV product record carries a STALE product-level
+  //                   number (black-solstice says 35) while the operational
+  //                   truth lived in ops:live_state (15 + 1 = 16). Postgres
+  //                   derives it from inventory_levels after the H4 backfill,
+  //                   which is why the live storefront now shows 16 and 2.
+  //                   Equality on this field would mean the backfill had NOT
+  //                   taken effect.
+  const EXPECTED_DIVERGENCE = new Set(['images', 'crops', 'totalInventory']);
+
   let criticalMismatches = 0;
+  const expected: string[] = [];
   const cosmetic: string[] = [];
   for (const id of kvIds) {
     if (!fromPg[id]) continue;
@@ -108,14 +127,15 @@ async function main() {
     for (const d of paths) {
       const field = d.split(':')[0].split('.')[0].replace(/\[.*/, '');
       if (CRITICAL.includes(field)) { criticalMismatches++; console.log('  CRITICAL ' + id + '.' + d); }
-      else cosmetic.push(id + '.' + d);
+      else if (EXPECTED_DIVERGENCE.has(field)) expected.push(id + '.' + d);
+      else { criticalMismatches++; console.log('  UNEXPLAINED ' + id + '.' + d); }
     }
   }
   check(criticalMismatches === 0, 'no CRITICAL field differs (money + lifecycle fields)', criticalMismatches + ' mismatch(es)');
 
-  console.log('\n     cosmetic/non-critical differences: ' + cosmetic.length);
-  for (const c of cosmetic.slice(0, 25)) console.log('       ' + c);
-  if (cosmetic.length > 25) console.log('       … and ' + (cosmetic.length - 25) + ' more');
+  console.log(String.fromCharCode(10) + '     expected divergences (each justified above): ' + expected.length);
+  for (const c of expected) console.log('       ' + c);
+  if (cosmetic.length) { console.log('     UNCLASSIFIED: ' + cosmetic.length); for (const c of cosmetic.slice(0, 20)) console.log('       ' + c); }
 
   console.log('='.repeat(64));
   console.log(fail === 0 ? 'PARITY OK on critical fields\n' : fail + ' FAILURE(S)\n');

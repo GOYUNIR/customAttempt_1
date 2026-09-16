@@ -1,4 +1,6 @@
 import type { NextRequest } from 'next/server';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { decrementForSale } from '@/lib/inventory';
 
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
@@ -127,8 +129,21 @@ export async function runDropDraw(request: Request | NextRequest) {
               await saveLiveState(redis, inner);
               return inner;
             };
+            await decrementForSale({
+              tenantId: await ensureDefaultTenant(),
+              externalProductId: String(product.id),
+              size: String(size),
+              context: 'draw',
+            });
             const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
-            if (!lockResult.ok) await decrementInventory();
+            // KV live-state mirror ONLY. Postgres inventory_levels is
+            // authoritative (decrementForSale above). The old
+            // "if (!lockResult.ok) await decrementInventory()" unlocked
+            // fallback is GONE -- with a lock that genuinely excludes, that
+            // branch would have become a live oversell path.
+            if (!lockResult.ok) {
+              console.error('[draw] KV live-state mirror skipped (lock contended) — Postgres already decremented', product.id, size);
+            }
             const winnerOrderRef = String(entry.orderRef || '') || buildOrderRef(email, product.name, size);
             await archiveEntry(redis, {
               email, variant: product.name, size, shippingAddress,

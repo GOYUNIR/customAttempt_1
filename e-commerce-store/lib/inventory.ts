@@ -107,7 +107,18 @@ export async function decrementInventory(
     // the safe default the caller should retry.
     return { ok: false, reason: 'lock_contended' };
   }
+  // CAS RETRY. A lost compare-and-swap means "someone else decremented between
+  // my read and my write", which is NOT the same as "there is not enough
+  // stock" -- and reporting it as insufficient_stock was a lie that refused
+  // paying customers while stock remained. Measured before this fix: 12
+  // concurrent buyers on 5 units sold 1 and refused 11, leaving 4 unsold.
+  //
+  // Retrying re-reads the current level and tries again, so a race costs a
+  // round trip instead of a sale. Bounded, so genuine contention still ends in
+  // a clean refusal rather than spinning.
+  const CAS_ATTEMPTS = 5;
   const lockResult = await withRedisLock(redis, `inventory:pg:${tenantId}:${variantId}`, async (): Promise<DecrementResult> => {
+   for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
     const current = await getInventoryLevel(tenantId, variantId);
     if (!current) return { ok: false, reason: 'no_inventory_row' };
     if (current.quantityAvailable < qty) {
@@ -128,9 +139,15 @@ export async function decrementInventory(
       { quantity_available: nextAvailable },
     );
     if (!Array.isArray(updated) || updated.length === 0) {
-      return { ok: false, reason: 'insufficient_stock', remaining: current.quantityAvailable };
+      // Lost the race, not out of stock. Re-read and try again; the loop's
+      // stock check above is what decides a genuine refusal.
+      continue;
     }
     return { ok: true, remaining: nextAvailable };
+   }
+   // Exhausted the retries under sustained contention. Report contention
+   // honestly so the caller can retry, rather than claiming no stock.
+   return { ok: false, reason: 'lock_contended' };
   });
 
   if (!lockResult.ok) return { ok: false, reason: 'lock_contended' };
@@ -161,4 +178,62 @@ export async function restockInventory(tenantId: string, variantId: string, quan
   );
   const row = updated[0];
   return { variantId: row.variant_id, quantityAvailable: Number(row.quantity_available) || 0, quantityReserved: Number(row.quantity_reserved) || 0 };
+}
+
+/**
+ * Decrement stock for a COMPLETED sale, by the KV-style product id + size the
+ * checkout/draw paths carry.
+ *
+ * WHY THIS EXISTS. Four sites (checkout/direct, both stripe/webhook inventory
+ * writes, lib/draw.ts) decremented the KV live-state blob under withRedisLock
+ * and, on contention, did this:
+ *
+ *     if (!lockResult.ok) await decrementInventory();   // UNLOCKED
+ *
+ * A deliberate unlocked read-modify-write. That branch was effectively dead
+ * while the lock was broken, because acquisition always "succeeded" -- so
+ * fixing the lock to genuinely exclude would have started routing real
+ * contention into an unlocked decrement, i.e. made oversell MORE likely. The
+ * lock fix and this had to land together.
+ *
+ * All four callers run AFTER the customer is charged, so refusing is not an
+ * option and skipping the decrement oversells. The only correct answer is an
+ * atomic decrement, which is what decrementInventory now provides: an atomic
+ * lock plus a compare-and-swap with bounded retry against inventory_levels.
+ *
+ * Never throws. A post-charge failure is logged for reconciliation, because
+ * throwing here would fail a Stripe webhook that already succeeded (Stripe
+ * would retry a completed charge) or abort a draw mid-payout.
+ */
+export async function decrementForSale(opts: {
+  tenantId: string;
+  externalProductId: string;
+  size: string;
+  quantity?: number;
+  context: string;
+}): Promise<{ ok: boolean; remaining: number | null; reason?: string }> {
+  const qty = Math.max(1, Math.floor(opts.quantity ?? 1));
+  try {
+    const variantId = await resolveVariantId(opts.tenantId, opts.externalProductId, opts.size);
+    if (!variantId) {
+      console.error(
+        `[${opts.context}] INVENTORY NOT DECREMENTED — no variant for ${opts.externalProductId}/${opts.size}. ` +
+          'A sale completed and stock was not reduced; reconcile manually.',
+      );
+      return { ok: false, remaining: null, reason: 'no_variant' };
+    }
+    const result = await decrementInventory(opts.tenantId, variantId, qty);
+    if (!result.ok) {
+      console.error(
+        `[${opts.context}] INVENTORY NOT DECREMENTED — ${result.reason} for ` +
+          `${opts.externalProductId}/${opts.size} (variant ${variantId}). ` +
+          'The customer is already charged; reconcile manually.',
+      );
+      return { ok: false, remaining: null, reason: result.reason };
+    }
+    return { ok: true, remaining: result.remaining ?? null };
+  } catch (err) {
+    console.error(`[${opts.context}] inventory decrement threw`, (err as Error)?.message || err);
+    return { ok: false, remaining: null, reason: 'threw' };
+  }
 }
