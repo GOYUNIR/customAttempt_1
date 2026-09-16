@@ -67,7 +67,7 @@ test('insert: POSTs rows and asks for the representation back', async () => {
 test('insert: onConflict produces an upsert with merge-duplicates', async () => {
   await withFakePostgrest(async (cap) => {
     await getDb().insert('inventory_levels', { variant_id: 'v1' }, { onConflict: 'tenant_id,variant_id' });
-    assert.match(pathOf(cap[0]), /on_conflict=tenant_id%2Cvariant_id/);
+    assert.match(pathOf(cap[0]), /on_conflict=tenant_id,variant_id/);
     assert.match(cap[0].prefer, /resolution=merge-duplicates/);
   });
 });
@@ -121,5 +121,15 @@ test('a value containing PostgREST syntax cannot alter the query shape', async (
     // One filter clause, with the comma encoded inside the value.
     assert.equal(url.split('&').length, 1, url);
     assert.match(url, /email=eq\./);
+  });
+});
+
+test('insert: on_conflict separators stay literal, columns are encoded', async () => {
+  await withFakePostgrest(async (cap) => {
+    await getDb().insert('customers', { email: 'a@b.com' }, { onConflict: 'tenant_id,email' });
+    // Byte-identical to the pre-port request; %2C here would be a needless diff.
+    assert.equal(cap[0].url.split('?')[1], 'on_conflict=tenant_id,email');
+    assert.match(cap[0].prefer, /return=representation/);
+    assert.match(cap[0].prefer, /resolution=merge-duplicates/);
   });
 });

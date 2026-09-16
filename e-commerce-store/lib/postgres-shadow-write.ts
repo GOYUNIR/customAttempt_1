@@ -36,7 +36,8 @@
  * useful signal).
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export type ShadowOrderInput = {
@@ -51,20 +52,21 @@ export type ShadowOrderInput = {
   promoCode?: string;
 };
 
-async function findOrCreateShadowCustomer(tenantId: string, email: string, serviceRoleKey: string): Promise<string | null> {
+async function findOrCreateShadowCustomer(tenantId: string, email: string): Promise<string | null> {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
-  const existing = (await supabaseRestFetch(
-    `/customers?tenant_id=eq.${encodeURIComponent(tenantId)}&email=eq.${encodeURIComponent(normalized)}&select=id&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string }>;
+  const db = getDb();
+  const existing = await db.select<{ id: string }>('customers', {
+    where: { tenant_id: eq(tenantId), email: eq(normalized) },
+    select: ['id'],
+    limit: 1,
+  });
   if (Array.isArray(existing) && existing.length > 0) return existing[0].id;
-  const created = (await supabaseRestFetch('/customers?on_conflict=tenant_id,email', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: { tenant_id: tenantId, email: normalized },
-    prefer: 'return=representation,resolution=merge-duplicates',
-  })) as Array<{ id: string }>;
+  const created = await db.insert<{ id: string }>(
+    'customers',
+    { tenant_id: tenantId, email: normalized },
+    { onConflict: 'tenant_id,email' },
+  );
   return created?.[0]?.id ?? null;
 }
 
@@ -76,10 +78,9 @@ async function findOrCreateShadowCustomer(tenantId: string, email: string, servi
  */
 export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
   if (!isPostgresPrimaryEnabled()) return;
-  if (!supabaseServiceConfigured()) return;
+  if (!getDb().configured) return;
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    const customerId = await findOrCreateShadowCustomer(input.tenantId, input.email, serviceRoleKey);
+    const customerId = await findOrCreateShadowCustomer(input.tenantId, input.email);
 
     // 00013's check constraint only accepts these four lowercase values —
     // anything else (an empty string, an unrecognized future mode) stays
@@ -89,10 +90,9 @@ export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
       ? normalizedCheckoutMode
       : null;
 
-    const orderRows = (await supabaseRestFetch('/orders?on_conflict=tenant_id,order_ref', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: {
+    const orderRows = await getDb().insert<{ id: string }>(
+      'orders',
+      {
         tenant_id: input.tenantId,
         customer_id: customerId,
         order_ref: input.orderRef,
@@ -111,15 +111,12 @@ export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
       // A retried webhook delivery reuses the same order_ref (unique per
       // tenant) — merge against THAT constraint (on_conflict), not the
       // primary key, or PostgREST's default upsert target would miss it.
-      prefer: 'return=representation,resolution=merge-duplicates',
-    })) as Array<{ id: string }>;
+      { onConflict: 'tenant_id,order_ref' },
+    );
     const orderId = orderRows?.[0]?.id;
     if (!orderId) return;
 
-    await supabaseRestFetch('/order_line_items', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: [
+    await getDb().insert('order_line_items', [
         {
           tenant_id: input.tenantId,
           order_id: orderId,
@@ -127,8 +124,7 @@ export async function shadowWriteOrder(input: ShadowOrderInput): Promise<void> {
           unit_price_cents: Math.max(0, Math.round(input.amountCents / Math.max(1, input.quantity))),
           line_total_cents: Math.max(0, Math.round(input.amountCents)),
         },
-      ],
-    });
+    ]);
   } catch (err) {
     console.warn('[postgres-shadow-write] failed (non-fatal, shadow only)', (err as Error)?.message || err);
   }

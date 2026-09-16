@@ -107,7 +107,13 @@ class SupabaseDbClient implements DbClient {
   }
 
   async insert<T = Record<string, unknown>>(table: string, rows: object | object[], opts: InsertOptions = {}): Promise<T[]> {
-    const conflict = opts.onConflict ? `?on_conflict=${encodeURIComponent(opts.onConflict)}` : '';
+    // Encode each COLUMN, not the whole list: the commas in
+    // "tenant_id,email" are PostgREST's separators. Running the list through
+    // encodeURIComponent turned them into %2C — which PostgREST still decodes,
+    // but it needlessly differs from the pre-port request.
+    const conflict = opts.onConflict
+      ? `?on_conflict=${opts.onConflict.split(',').map((c) => encodeURIComponent(c.trim())).join(',')}`
+      : '';
     const prefer = preferHeader(
       opts.returning ?? 'representation',
       Boolean(opts.onConflict || opts.mergeDuplicates),

@@ -138,7 +138,7 @@ const eslintConfig = defineConfig([
     rules: { ...fenceRule("error", { includeDbPort: false }) },
   },
   {
-    // GRANDFATHERED — the 14 callers that predate the DbClient port.
+    // GRANDFATHERED — the 13 callers that predate the DbClient port.
     //
     // The fence lands green by exempting exactly these, so it cannot be
     // weakened later without this list shrinking. Each migration batch deletes
@@ -159,7 +159,6 @@ const eslintConfig = defineConfig([
       "app/api/admin/theme/route.ts",
       "app/api/admin/users/route.ts",
       "lib/postgres-catalog-read.ts",
-      "lib/postgres-shadow-write.ts",
       "lib/products.ts",
       "lib/raffle.ts",
       "scripts/migrate-redis-to-supabase.ts",
