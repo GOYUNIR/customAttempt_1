@@ -28,6 +28,11 @@ import { readMediaS3Config, presignGet } from './media-s3.ts';
 export interface MediaObject {
   body: ArrayBuffer;
   contentType: string;
+  /** Which read path produced these bytes. Surfaced as the X-Media-Source
+   *  response header so "is the binding actually being used in production?"
+   *  is an observable fact rather than an assumption -- the signed-GET
+   *  fallback works too, so a silent demotion would otherwise look healthy. */
+  source: 'binding' | 'signed-get';
 }
 
 /** The R2 binding, when running on Workers. Null anywhere else. */
@@ -69,6 +74,7 @@ export async function readMediaObject(key: string): Promise<MediaObject | null> 
       return {
         body: await obj.arrayBuffer(),
         contentType: obj.httpMetadata?.contentType || 'application/octet-stream',
+        source: 'binding',
       };
     } catch {
       return null;
@@ -83,6 +89,7 @@ export async function readMediaObject(key: string): Promise<MediaObject | null> 
     return {
       body: await res.arrayBuffer(),
       contentType: res.headers.get('content-type') || 'application/octet-stream',
+      source: 'signed-get',
     };
   } catch {
     return null;

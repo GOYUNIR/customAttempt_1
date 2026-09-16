@@ -102,6 +102,15 @@ async function main() {
   if (res.ok) {
     const cc = res.headers.get('cache-control') || '';
     check(/immutable/.test(cc) && /max-age=31536000/.test(cc), 'served with immutable 1-year cache headers', cc);
+    const src = res.headers.get('x-media-source') || '(absent)';
+    console.log('     read path = ' + src);
+    if (serveBase) {
+      check(src === 'signed-get', 'local dev has no binding, so it uses the signed-GET fallback', src);
+    } else {
+      // Production MUST use the binding. The signed-GET fallback also works,
+      // so a silent demotion would pass every other assertion here.
+      check(src === 'binding', 'production served from the R2 BINDING, not the signed-GET fallback', src);
+    }
   }
   if (res.ok) {
     const got = Buffer.from(await res.arrayBuffer());

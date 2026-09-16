@@ -96,7 +96,9 @@ export async function GET(
       if (!key || key.includes('..')) return notFound();
       const object = await readMediaObject(key);
       if (!object) return notFound();
-      return serve({ mime: object.contentType, bytes: new Uint8Array(object.body) });
+      const res = serve({ mime: object.contentType, bytes: new Uint8Array(object.body) });
+      res.headers.set('X-Media-Source', object.source);
+      return res;
     }
 
     const redis = createKvClient();
