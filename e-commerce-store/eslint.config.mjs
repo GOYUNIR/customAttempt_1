@@ -130,11 +130,15 @@ const eslintConfig = defineConfig([
     //   services/config/supabase-client.ts   the PostgREST transport it calls
     //   scripts/verify-db-timeouts.ts        exercises that transport directly,
     //                                        which is the whole point of it
-    files: ["lib/db/**/*.ts", "services/config/supabase-client.ts", "scripts/verify-db-timeouts.ts"],
+    //   lib/system-diagnostics.ts            probes RLS with the ANON key; the
+    //                                        port uses service-role, which
+    //                                        bypasses RLS and would make the
+    //                                        check pass unconditionally
+    files: ["lib/db/**/*.ts", "services/config/supabase-client.ts", "scripts/verify-db-timeouts.ts", "lib/system-diagnostics.ts"],
     rules: { ...fenceRule("error", { includeDbPort: false }) },
   },
   {
-    // GRANDFATHERED — the 20 callers that predate the DbClient port.
+    // GRANDFATHERED — the 19 callers that predate the DbClient port.
     //
     // The fence lands green by exempting exactly these, so it cannot be
     // weakened later without this list shrinking. Each migration batch deletes
@@ -163,7 +167,6 @@ const eslintConfig = defineConfig([
       "lib/postgres-shadow-write.ts",
       "lib/products.ts",
       "lib/raffle.ts",
-      "lib/system-diagnostics.ts",
       "scripts/migrate-redis-to-supabase.ts",
     ],
     rules: { ...fenceRule("error", { includeDbPort: false }) },

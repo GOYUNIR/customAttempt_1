@@ -15,7 +15,8 @@ import { withRedisLock } from '@/lib/redis-lock';
 import { validateProductionEnv } from '@/lib/env-schema';
 import { PROCESSED_SESSIONS_KEY } from '@/lib/redis-keys';
 import { DEDUPE_PROCESSED_WINDOW_MS } from '@/lib/redis-maintenance';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { supabaseServiceConfigured, supabaseRestFetch, readSupabaseEnv } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
 import { cloudflareConfigured } from '@/lib/cloudflare-saas';
 import {
   checkCsrf,
@@ -54,6 +55,11 @@ export async function checkRlsCoverage(): Promise<Check> {
   const leaks: string[] = [];
   for (const table of sensitiveTables) {
     try {
+      // DELIBERATELY NOT via the DbClient port: the port authenticates with the
+      // SERVICE-ROLE key, which bypasses RLS by design. This probe's whole
+      // purpose is to attempt the read as an UNPRIVILEGED anon client, so
+      // routing it through the port would make it pass unconditionally and
+      // silently stop testing anything. See the permanent fence exemption.
       const rows = (await supabaseRestFetch(`/${table}?select=id&limit=1`, { key: anonKey })) as unknown[];
       if (Array.isArray(rows) && rows.length > 0) leaks.push(table);
     } catch {
@@ -74,8 +80,7 @@ export async function checkSupabaseConnection(): Promise<Check> {
     return { id: 'supabase_connection', label: 'Supabase Connection', status: 'not_configured', detail: 'SUPABASE_SERVICE_ROLE_KEY not set.' };
   }
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    await supabaseRestFetch('/tenants?select=id&limit=1', { key: serviceRoleKey });
+    await getDb().select('tenants', { select: ['id'], limit: 1 });
     return { id: 'supabase_connection', label: 'Supabase Connection', status: 'ok', detail: 'Service-role REST request succeeded.' };
   } catch (err) {
     return { id: 'supabase_connection', label: 'Supabase Connection', status: 'error', detail: (err as Error)?.message || 'Request failed.' };
