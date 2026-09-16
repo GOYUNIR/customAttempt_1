@@ -1,5 +1,4 @@
 import { createStorageClient, type StorageClient } from '@/lib/storage';
-import Stripe from 'stripe';
 import { timingSafeEqual } from 'crypto';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
@@ -822,17 +821,6 @@ export function getAdminVerifyEmail(): string {
   // code as `devCode` so the portal stays usable on a fresh clone.
   if (process.env.NODE_ENV !== 'production') return 'admin@localhost.dev';
   return '';
-}
-
-export function createStripeClient(): Stripe | null {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) return null;
-  try {
-    // Let the installed Stripe SDK pick its supported latest API version.
-    return new Stripe(secretKey);
-  } catch {
-    return null;
-  }
 }
 
 // ============================================================

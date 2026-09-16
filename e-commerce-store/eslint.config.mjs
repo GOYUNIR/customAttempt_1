@@ -86,18 +86,6 @@ const eslintConfig = defineConfig([
     files: ["services/**/*.driver.ts"],
     rules: { "@typescript-eslint/no-restricted-imports": "off" },
   },
-  {
-    // KNOWN DEBT (ARCHITECTURE.md Phase D, item 12): lib/server-config.ts's
-    // createStripeClient() constructs a second Stripe client straight from
-    // STRIPE_SECRET_KEY, bypassing PaymentFactory — which also means it
-    // ignores a Setup-Wizard-configured key. Downgraded to a warning so it
-    // stays visible in lint output instead of being silently exempted. Flip
-    // back to "error" (delete this block) once its one caller,
-    // app/api/admin/status/route.ts, reads configured-ness from the
-    // PaymentDriver port.
-    files: ["lib/server-config.ts"],
-    rules: { ...fenceRule("warn") },
-  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

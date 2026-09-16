@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
+import { resolveStripeClient } from '@/services/payment/factory';
 import {
   createRedisClient,
-  createStripeClient,
   safeParseRedisItem,
   getOrSeedLiveState,
   getOnlineVisitors,
@@ -118,12 +118,15 @@ export async function GET(request: Request) {
     ];
 
     let redis = null as ReturnType<typeof createRedisClient>;
-    let stripe = null as ReturnType<typeof createStripeClient>;
+    let stripe: Awaited<ReturnType<typeof resolveStripeClient>> = null;
     let redisError: string | null = null;
     let stripeError: string | null = null;
 
     try { redis = createRedisClient(); } catch (e: any) { redisError = e?.message; }
-    try { stripe = createStripeClient(); } catch (e: any) { stripeError = e?.message; }
+    // Through the PaymentDriver port, so a Setup-Wizard-configured key is
+    // honoured instead of only STRIPE_SECRET_KEY, which the removed direct
+    // client ignored.
+    try { stripe = await resolveStripeClient(); } catch (e: any) { stripeError = e?.message; }
 
     let redisOk = false;
     let stripeOk = false;
