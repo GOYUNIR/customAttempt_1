@@ -177,3 +177,9 @@ test('a STRING that reads as a PostgREST literal is quoted, a real one is not', 
   assert.equal(buildPostgrestQuery({ where: { v: eq(null) } }), 'v=eq.null');
   assert.equal(buildPostgrestQuery({ where: { v: eq(true) } }), 'v=eq.true');
 });
+
+test("select: '*' is allowed as the select-everything wildcard", () => {
+  assert.equal(buildPostgrestQuery({ select: ['*'], limit: 1 }), 'select=*&limit=1');
+  // ...but it is the ONLY non-identifier permitted.
+  assert.throws(() => buildPostgrestQuery({ select: ['*,secret'] }), /Invalid select column/);
+});

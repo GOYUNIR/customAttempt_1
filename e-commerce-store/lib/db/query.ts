@@ -119,6 +119,9 @@ function renderFilter(filter: FilterOp): string {
 
 /** Render one select item, recursing into embedded relations. */
 function renderSelectItem(item: SelectItem): string {
+  // '*' is PostgREST's select-everything wildcard and the one non-identifier
+  // a select list may legitimately contain.
+  if (item === '*') return '*';
   if (typeof item === 'string') return assertIdentifier(item, 'select column');
   const relation = assertIdentifier(item.relation, 'embedded relation');
   if (!Array.isArray(item.columns) || item.columns.length === 0) {

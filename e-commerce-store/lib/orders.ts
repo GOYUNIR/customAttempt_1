@@ -12,7 +12,8 @@
  * integration this session deliberately isn't doing blind.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { decrementInventory, restockInventory, type DecrementResult } from '@/lib/inventory';
 import { decrementSharedPoolById, restockSharedPoolById, type PoolDecrementResult } from '@/lib/raffle';
 
@@ -43,7 +44,7 @@ export type CreateOrderResult =
   | { ok: false; reason: 'no_lines' };
 
 function assertSupabase(): void {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Postgres orders require Supabase (SUPABASE_SERVICE_ROLE_KEY).');
   }
 }
@@ -58,14 +59,15 @@ type ReservationTarget =
  *  charged (see lib/postgres-shadow-write.ts). A variant with a
  *  `shared_pool_id` draws from that pool instead of its own row (migration
  *  00012's precedence rule). */
-async function reserveLine(tenantId: string, line: OrderLineInput, serviceRoleKey: string): Promise<
+async function reserveLine(tenantId: string, line: OrderLineInput): Promise<
   | { ok: true; target: ReservationTarget }
   | { ok: false; reason: 'insufficient_stock' | 'raffle_requires_entry' }
 > {
-  const variantRows = (await supabaseRestFetch(
-    `/product_variants?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(line.variantId)}&select=id,checkout_mode,shared_pool_id&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string; checkout_mode: string; shared_pool_id: string | null }>;
+  const variantRows = await getDb().select<{ id: string; checkout_mode: string; shared_pool_id: string | null }>('product_variants', {
+    where: { tenant_id: eq(tenantId), id: eq(line.variantId) },
+    select: ['id', 'checkout_mode', 'shared_pool_id'],
+    limit: 1,
+  });
   const variant = variantRows?.[0];
   if (variant?.checkout_mode === 'raffle') {
     return { ok: false, reason: 'raffle_requires_entry' };
@@ -101,11 +103,10 @@ async function rollbackReservation(tenantId: string, target: ReservationTarget):
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
   assertSupabase();
   if (!input.lines || input.lines.length === 0) return { ok: false, reason: 'no_lines' };
-  const { serviceRoleKey } = readSupabaseEnv();
 
   const reserved: ReservationTarget[] = [];
   for (const line of input.lines) {
-    const result = await reserveLine(input.tenantId, line, serviceRoleKey);
+    const result = await reserveLine(input.tenantId, line);
     if (!result.ok) {
       // Roll back everything reserved so far for this order attempt.
       await Promise.all(reserved.map((t) => rollbackReservation(input.tenantId, t)));
@@ -121,11 +122,8 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   const netTermsDays = input.netTermsDays || 0;
   const netTermsDueAt = netTermsDays > 0 ? new Date(Date.now() + netTermsDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
-  const orderRows = (await supabaseRestFetch('/orders', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
-      tenant_id: input.tenantId,
+  const orderRows = await getDb().insert<{ id: string; order_ref: string }>('orders', {
+    tenant_id: input.tenantId,
       company_id: input.companyId ?? null,
       customer_id: input.customerId ?? null,
       order_ref: input.orderRef,
@@ -137,9 +135,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       total_cents: totalCents,
       currency: input.currency || 'usd',
       net_terms_due_at: netTermsDueAt,
-    },
-    prefer: 'return=representation',
-  })) as Array<{ id: string; order_ref: string }>;
+  });
   const order = orderRows?.[0];
   if (!order) {
     // Order row failed to write after inventory was already reserved —
@@ -148,46 +144,42 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw new Error('Failed to create order row after reserving inventory.');
   }
 
-  await supabaseRestFetch('/order_line_items', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: input.lines.map((l) => ({
+  await getDb().insert('order_line_items', input.lines.map((l) => ({
       tenant_id: input.tenantId,
       order_id: order.id,
       variant_id: l.variantId,
       quantity: Math.max(1, Math.floor(l.quantity)),
       unit_price_cents: Math.max(0, Math.round(l.unitPriceCents)),
       line_total_cents: Math.max(0, Math.round(l.unitPriceCents)) * Math.max(1, Math.floor(l.quantity)),
-    })),
-  });
+  })));
 
   return { ok: true, orderId: order.id, orderRef: order.order_ref, totalCents };
 }
 
 export async function getOrder(tenantId: string, orderId: string) {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/orders?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(orderId)}&select=*&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<Record<string, unknown>>;
+  const rows = await getDb().select<Record<string, unknown>>('orders', {
+    where: { tenant_id: eq(tenantId), id: eq(orderId) },
+    select: ['*'],
+    limit: 1,
+  });
   return rows?.[0] ?? null;
 }
 
 export async function listOrders(tenantId: string, opts: { companyId?: string; status?: string } = {}) {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  let path = `/orders?tenant_id=eq.${encodeURIComponent(tenantId)}&select=id,order_ref,status,payment_status,total_cents,currency,created_at&order=created_at.desc`;
-  if (opts.companyId) path += `&company_id=eq.${encodeURIComponent(opts.companyId)}`;
-  if (opts.status) path += `&status=eq.${encodeURIComponent(opts.status)}`;
-  return (await supabaseRestFetch(path, { key: serviceRoleKey })) as Array<Record<string, unknown>>;
+  const where: Record<string, ReturnType<typeof eq>> = { tenant_id: eq(tenantId) };
+  if (opts.companyId) where.company_id = eq(opts.companyId);
+  if (opts.status) where.status = eq(opts.status);
+  return getDb().select<Record<string, unknown>>('orders', {
+    where,
+    select: ['id', 'order_ref', 'status', 'payment_status', 'total_cents', 'currency', 'created_at'],
+    order: { column: 'created_at', ascending: false },
+  });
 }
 
 export async function updateOrderStatus(tenantId: string, orderId: string, status: string): Promise<void> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(
-    `/orders?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(orderId)}`,
-    { key: serviceRoleKey, method: 'PATCH', body: { status } },
-  );
+  // returning: 'default' — the legacy PATCH sent no Prefer header.
+  await getDb().update('orders', { where: { tenant_id: eq(tenantId), id: eq(orderId) } }, { status }, { returning: 'default' });
 }
