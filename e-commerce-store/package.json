@@ -17,7 +17,8 @@
     "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts",
     "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts",
     "verify:cloudflare-sync": "tsx scripts/verify-cloudflare-domain-sync.ts",
-    "dryrun:raffle": "tsx scripts/dry-run-raffle-draw.ts"
+    "dryrun:raffle": "tsx scripts/dry-run-raffle-draw.ts",
+    "verify:notifications": "tsx scripts/verify-notification-recovery.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",

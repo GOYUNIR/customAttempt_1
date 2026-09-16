@@ -315,3 +315,9 @@ export function autoDrawRateLimitKey(ip: string): string {
   return rateLimitKey('auto_draw', ip);
 }
 
+
+/** Transactional-notification retry queue and its dead-letter list.
+ *  A dead-lettered job means a customer was charged and never told — see
+ *  lib/notification-queue.ts. */
+export const NOTIFICATION_QUEUE_KEY = 'notify:queue';
+export const NOTIFICATION_DEAD_LETTER_KEY = 'notify:dead';

@@ -611,3 +611,26 @@ portals. `/admin` itself stays fenced; consumer hosts get no exemption.
 | `sales.` | 307→login | 404 | 307 | 200 | 200 |
 | apex (marketing) | 200 | 404 | 404 | 404 | 200 |
 | `{tenant}.` | 200 | 404 | 404 | 404 | 200 |
+
+### DEFERRED-2 — Phase E: data export / import
+
+**Status:** deferred (2026-09-16), by agreement. Not forgotten, not scheduled.
+
+**What.** The vendor-portability deliverable from the original audit: export a
+tenant's data (catalog, orders, entries, customers, config) in a form another
+platform could ingest, and import it back.
+
+**Why it is deferred rather than queued.** It is product work wearing hardening
+clothes. Its scope depends entirely on questions nobody has answered: which
+entities, what format, full vs incremental, and whether import must round-trip
+an export losslessly. Those answers change the size from days to weeks. Unlike
+the rest of the audit it fixes no defect — it is insurance against a migration
+nobody is currently planning.
+
+**Condition to pick it up:** a real requirement drives it — a customer asking
+for their data, a concrete plan to move off Supabase, or a compliance
+obligation. Not audit momentum.
+
+**What already reduces the risk it was meant to address:** the DbClient port
+(Phase D4) means queries no longer hard-code Supabase's dialect, which was the
+deeper half of the lock-in this phase was guarding against.

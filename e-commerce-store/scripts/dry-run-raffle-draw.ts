@@ -39,6 +39,10 @@ loadDotEnvLocal();
 const TENANT = 'dryrun-tenant';
 const VARIANT = 'dryrun-variant';
 const PRICE_CENTS = 1234;
+// Unique per RUN so a previous run's idempotency key cannot collide with this
+// one's (Stripe rejects a reused key carrying different parameters). Constant
+// WITHIN a run, so the replay below still reuses the same key on purpose.
+const RUN_ID = 'dryrun-draw-' + Date.now().toString(36);
 
 interface Recorded { method: string; url: string; body: unknown }
 const recorded: Recorded[] = [];
@@ -75,7 +79,7 @@ function fakeDb(customerId: string, pmId: string, record: boolean): Server {
       } else if (req.method === 'GET' && table === 'product_variants') {
         payload = JSON.stringify([{ option_label: 'Standard', price_cents: PRICE_CENTS, products: { name: 'Dry Run Item' } }]);
       } else if (req.method === 'POST' && table === 'drop_draws') {
-        payload = JSON.stringify([{ id: 'dryrun-draw-1' }]);
+        payload = JSON.stringify([{ id: RUN_ID }]);
       }
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(payload);
     });

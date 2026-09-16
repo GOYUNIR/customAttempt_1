@@ -5,7 +5,7 @@ import { resolveStripeClient } from '@/services/payment/factory';
 import { resolveStripePriceIdWithSettings } from '@/services/config/platform-settings';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
-import { sendWinnerEmail } from '@/lib/email';
+import { deliverWinnerEmail } from '@/lib/notifications';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
           // customers they won — without it, an admin-triggered draw is silent.
           try {
             const userRewards = await lookupUserRewards(redis, entry.email);
-            await sendWinnerEmail({
+            await deliverWinnerEmail({
               to: entry.email,
               product: product.name,
               size,

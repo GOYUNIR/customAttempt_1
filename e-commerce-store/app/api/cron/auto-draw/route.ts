@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { flushWinnerNotifications } from '@/lib/notifications';
 import { getAdminPassword } from '@/lib/server-config';
 import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth';
 import { runAutoDraws } from '@/lib/auto-draw';
@@ -55,7 +56,18 @@ async function runAutoDraw(request: Request) {
     onlyProductName: url.searchParams.get('productName') || undefined,
   });
 
-  return NextResponse.json(result);
+  // Retry any transactional notification that failed earlier. A winner who
+  // was charged but whose email bounced is recovered here, or dead-lettered
+  // for the health check once attempts are exhausted (ARCHITECTURE.md SEV-3).
+  // Never allowed to fail the cron run: the draw is the important part.
+  let notifications = null;
+  try {
+    notifications = await flushWinnerNotifications();
+  } catch (err) {
+    console.error('[cron/auto-draw] notification flush failed', (err as Error)?.message || err);
+  }
+
+  return NextResponse.json({ ...result, notifications });
 }
 
 export async function GET(request: Request) {

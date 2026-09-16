@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation } from '../lib/system-diagnostics-pure.ts';
+import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation, checkNotificationDeadLetter } from '../lib/system-diagnostics-pure.ts';
 
 test('checkCsrf always reports ok — it is unconditionally enforced, not configurable', () => {
   const check = checkCsrf();
@@ -57,4 +57,21 @@ test('checkPortalIsolation: deliberate single-domain mode is not_configured, nev
     'not_configured',
   );
   assert.equal(checkPortalIsolation({ NODE_ENV: 'development' }).status, 'not_configured');
+});
+
+test('checkNotificationDeadLetter: zero undelivered is ok', () => {
+  assert.equal(checkNotificationDeadLetter(0).status, 'ok');
+});
+
+test('checkNotificationDeadLetter: ANY dead-lettered notification is an ERROR', () => {
+  // Not a warning. Someone was charged and never told; a warning gets ignored.
+  const c = checkNotificationDeadLetter(3);
+  assert.equal(c.status, 'error');
+  assert.match(c.detail, /charged and never told/);
+  assert.match(c.detail, /^3 notification/);
+});
+
+test('checkNotificationDeadLetter: negative or junk counts do not crash', () => {
+  assert.equal(checkNotificationDeadLetter(-5).status, 'ok');
+  assert.equal(checkNotificationDeadLetter(NaN).status, 'ok');
 });

@@ -11,6 +11,7 @@
  */
 
 import { createRedisClient } from '@/lib/server-config';
+import { readDeadLetteredNotifications } from '@/lib/notifications';
 import { withRedisLock } from '@/lib/redis-lock';
 import { validateProductionEnv } from '@/lib/env-schema';
 import { PROCESSED_SESSIONS_KEY } from '@/lib/redis-keys';
@@ -25,6 +26,7 @@ import {
   checkPortalIsolation,
   type Check,
   type CheckStatus,
+  checkNotificationDeadLetter,
 } from '@/lib/system-diagnostics-pure';
 
 export type { Check, CheckStatus };
@@ -161,13 +163,26 @@ export async function checkCloudflareLive(): Promise<Check> {
 }
 
 export async function runAllHealthChecks(): Promise<Check[]> {
-  const [rls, redisLocks, webhookIdempotency, supabaseConnection] = await Promise.all([
+  const [rls, redisLocks, webhookIdempotency, supabaseConnection, deadLettered] = await Promise.all([
     checkRlsCoverage(),
     checkRedisLocks(),
     checkWebhookIdempotency(),
     checkSupabaseConnection(),
+    // Customers charged but never told. Read here so the pure check stays
+    // directly testable (ARCHITECTURE.md SEV-3).
+    readDeadLetteredNotifications(50).then((jobs) => jobs.length).catch(() => 0),
   ]);
-  return [checkEnvSchema(), checkCsrf(), checkPortalIsolation(), rls, redisLocks, webhookIdempotency, checkCloudflareConfigured(), supabaseConnection];
+  return [
+    checkEnvSchema(),
+    checkCsrf(),
+    checkPortalIsolation(),
+    rls,
+    redisLocks,
+    webhookIdempotency,
+    checkCloudflareConfigured(),
+    supabaseConnection,
+    checkNotificationDeadLetter(deadLettered),
+  ];
 }
 
 export function summarizeChecks(checks: Check[]) {

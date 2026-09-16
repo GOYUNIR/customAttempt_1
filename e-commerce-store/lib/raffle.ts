@@ -17,7 +17,7 @@ import { getDb } from '@/lib/db/client';
 import { eq, inList } from '@/lib/db/query';
 import { selectWinners } from '@/lib/raffle-draw';
 import { resolveStripeClient } from '@/services/payment/factory';
-import { sendWinnerEmail } from '@/lib/email';
+import { deliverWinnerEmail } from '@/lib/notifications';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
@@ -261,7 +261,7 @@ export async function executeDrawWithCharging(
       charges.push({ entryId, email, status: 'charged' });
 
       try {
-        await sendWinnerEmail({
+        await deliverWinnerEmail({
           to: email,
           product: productName,
           size,

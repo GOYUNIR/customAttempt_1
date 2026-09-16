@@ -63,7 +63,8 @@ import {
   sizeConfigKey,
   sizeConfigsOf,
 } from '@/lib/storefront-config';
-import { sendPromoterPayoutEmail, sendWinnerEmail } from '@/lib/email';
+import { sendPromoterPayoutEmail } from '@/lib/email';
+import { deliverWinnerEmail } from '@/lib/notifications';
 import { fallbackSiteUrl, getSiteUrl } from '@/lib/env';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { productNameFromPoolKey } from '@/lib/draw-keys';
@@ -595,7 +596,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
 
             const userRewards = await lookupUserRewards(redis, winnerEmail);
 
-            await sendWinnerEmail({
+            await deliverWinnerEmail({
               to: winnerEmail,
               product: productName,
               size: productSize,

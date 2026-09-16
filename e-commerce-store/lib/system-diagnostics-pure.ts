@@ -88,3 +88,31 @@ export function checkPortalIsolation(env: Record<string, string | undefined> = p
       'PLATFORM_ROOT_DOMAIN is unset in production, so /admin and /sales are reachable from ANY host (including merchant custom domains) and the per-portal role split is off. Set PLATFORM_ROOT_DOMAIN, or set PLATFORM_SINGLE_DOMAIN_MODE=true to declare single-domain operation deliberately.',
   };
 }
+
+/**
+ * Dead-lettered notifications = customers charged but never told.
+ *
+ * Pure so it is directly testable: the caller reads the dead-letter list and
+ * passes its size. Anything above zero is an ERROR, not a warning — someone
+ * paid and received no confirmation, and the only way that gets noticed is if
+ * something says so out loud.
+ */
+export function checkNotificationDeadLetter(deadLetterCount: number): Check {
+  const n = Math.max(0, Math.floor(deadLetterCount) || 0);
+  if (n === 0) {
+    return {
+      id: 'notification_dead_letter',
+      label: 'Notification Delivery',
+      status: 'ok',
+      detail: 'No undelivered transactional notifications.',
+    };
+  }
+  return {
+    id: 'notification_dead_letter',
+    label: 'Notification Delivery',
+    status: 'error',
+    detail:
+      `${n} notification(s) exhausted every retry — these customers were charged and never told. ` +
+      'Inspect the dead-letter list and contact them manually.',
+  };
+}
