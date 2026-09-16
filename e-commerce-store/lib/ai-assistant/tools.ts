@@ -10,7 +10,11 @@
  */
 
 import { listProducts, createProduct } from '@/lib/products';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
+
+/** The price list the assistant writes its discounts into. */
+const AI_PRICE_LIST_NAME = 'AI Assistant Discounts';
 import type { AssistantToolSpec, AssistantActorRole } from '@/lib/ai-assistant/guardrails';
 
 export interface ToolContext {
@@ -44,7 +48,7 @@ const createVolumeDiscount: AssistantTool = {
     discountPercent: { type: 'number', description: 'Discount percentage off the base price, 1-90', required: true },
   },
   async execute(args, ctx) {
-    if (!supabaseServiceConfigured()) return { ok: false, error: 'Supabase is not configured.' };
+    if (!getDb().configured) return { ok: false, error: 'Supabase is not configured.' };
     const variantId = String(args.variantId || '').trim();
     const minQuantity = Math.max(1, Math.floor(Number(args.minQuantity) || 0));
     const discountPercent = Number(args.discountPercent);
@@ -53,37 +57,39 @@ const createVolumeDiscount: AssistantTool = {
       return { ok: false, error: 'discountPercent must be between 1 and 90.' };
     }
 
-    const { serviceRoleKey } = readSupabaseEnv();
-    const variantRows = (await supabaseRestFetch(
-      `/product_variants?id=eq.${encodeURIComponent(variantId)}&tenant_id=eq.${encodeURIComponent(ctx.tenantId)}&select=id,price_cents`,
-      { key: serviceRoleKey },
-    )) as Array<{ id: string; price_cents: number }>;
+    const db = getDb();
+    const variantRows = await db.select<{ id: string; price_cents: number }>('product_variants', {
+      where: { id: eq(variantId), tenant_id: eq(ctx.tenantId) },
+      select: ['id', 'price_cents'],
+    });
     const variant = variantRows?.[0];
     if (!variant) return { ok: false, error: 'Variant not found for this store.' };
 
     const unitPriceCents = Math.round(Number(variant.price_cents) * (1 - discountPercent / 100));
 
-    const listRows = (await supabaseRestFetch(
-      `/price_lists?tenant_id=eq.${encodeURIComponent(ctx.tenantId)}&name=eq.AI Assistant Discounts&select=id&limit=1`,
-      { key: serviceRoleKey },
-    )) as Array<{ id: string }>;
+    const listRows = await db.select<{ id: string }>('price_lists', {
+      where: { tenant_id: eq(ctx.tenantId), name: eq(AI_PRICE_LIST_NAME) },
+      select: ['id'],
+      limit: 1,
+    });
     let priceListId = listRows?.[0]?.id;
     if (!priceListId) {
-      const created = (await supabaseRestFetch('/price_lists', {
-        key: serviceRoleKey,
-        method: 'POST',
-        body: { tenant_id: ctx.tenantId, name: 'AI Assistant Discounts', currency: 'usd', is_default: false },
-        prefer: 'return=representation',
-      })) as Array<{ id: string }>;
+      const created = await db.insert<{ id: string }>('price_lists', {
+        tenant_id: ctx.tenantId,
+        name: AI_PRICE_LIST_NAME,
+        currency: 'usd',
+        is_default: false,
+      });
       priceListId = created[0].id;
     }
 
-    const entry = (await supabaseRestFetch('/price_list_entries', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: { tenant_id: ctx.tenantId, price_list_id: priceListId, variant_id: variantId, unit_price_cents: unitPriceCents, min_quantity: minQuantity },
-      prefer: 'return=representation',
-    })) as Array<{ id: string }>;
+    const entry = await db.insert<{ id: string }>('price_list_entries', {
+      tenant_id: ctx.tenantId,
+      price_list_id: priceListId,
+      variant_id: variantId,
+      unit_price_cents: unitPriceCents,
+      min_quantity: minQuantity,
+    });
 
     return {
       ok: true,
@@ -110,7 +116,7 @@ const auditStorefrontSeo: AssistantTool = {
   allowDuringImpersonation: true,
   parameters: {},
   async execute(_args, ctx) {
-    if (!supabaseServiceConfigured()) return { ok: false, error: 'Supabase is not configured.' };
+    if (!getDb().configured) return { ok: false, error: 'Supabase is not configured.' };
     const products = await listProducts(ctx.tenantId);
     const issues: Array<{ productId: string; name: string; issue: string }> = [];
     const slugCounts = new Map<string, number>();
@@ -146,7 +152,7 @@ const importProductsCsv: AssistantTool = {
     rows: { type: 'array', description: 'Array of {name, slug, description?} objects', required: true },
   },
   async execute(args, ctx) {
-    if (!supabaseServiceConfigured()) return { ok: false, error: 'Supabase is not configured.' };
+    if (!getDb().configured) return { ok: false, error: 'Supabase is not configured.' };
     const rows = Array.isArray(args.rows) ? args.rows : [];
     if (rows.length === 0) return { ok: false, error: 'No rows supplied.' };
     if (rows.length > 200) return { ok: false, error: 'Import capped at 200 rows per call — split into batches.' };
