@@ -21,6 +21,7 @@
  * fires for admin-created products.
  */
 
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   archiveEntry,
   archiveProductToCatalog,
@@ -322,9 +323,15 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       const goMs = toMs(product.goLiveAt, storeTimezone);
       if (goMs !== null && now >= goMs) {
         try {
-          await redis.hset(PRODUCTS_KEY, {
-            [product.id]: JSON.stringify({ ...product, isUpcoming: false, isActive: true, goLiveAt: product.goLiveAt || '' }),
+          // H3: Postgres. Logged, never thrown -- this runs inside the cron
+          // draw engine, and aborting a run can leave winners charged but
+          // unprocessed. A failed activation self-heals on the next tick, and
+          // applyLifecycle already flips an overdue product live at READ time,
+          // so the storefront is correct meanwhile.
+          const activated = await writeProductToPostgres(await ensureDefaultTenant(), {
+            ...product, isUpcoming: false, isActive: true, goLiveAt: product.goLiveAt || '',
           });
+          if (!activated.ok) console.error('[auto-draw] auto-activation write FAILED', product.id, activated.error);
           product.isUpcoming = false;
           product.isActive = true;
         } catch {
@@ -763,7 +770,8 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
                   ...sizeConfigsOf(product),
                   [sizeConfigKey(size)]: { ...existingCfg, releaseEndsAt: nextRelease },
                 };
-                await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+                const rolled = await writeProductToPostgres(await ensureDefaultTenant(), product);
+                if (!rolled.ok) console.error('[auto-draw] per-size cadence rollover write FAILED', product.id, rolled.error);
               }
             }
           }
@@ -784,7 +792,8 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             const nextRelease = formatStoreWallClock(nextAnchorMs, productTz);
             if (nextRelease && nextRelease !== product.releaseEndsAt) {
               product.releaseEndsAt = nextRelease;
-              await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+              const advanced = await writeProductToPostgres(await ensureDefaultTenant(), product);
+              if (!advanced.ok) console.error('[auto-draw] cadence rollover write FAILED', product.id, advanced.error);
             }
           }
         }

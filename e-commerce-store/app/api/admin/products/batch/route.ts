@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   createKvClient,
   loadProducts,
@@ -36,7 +38,10 @@ function csvCell(value: unknown): string {
 }
 
 async function saveProductRecord(redis: any, product: any) {
-  await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+    // H3: the catalog lives in Postgres. This write is load-bearing, so a
+    // failure must not read as success -- see admin/products for the full note.
+  const r = await writeProductToPostgres(await ensureDefaultTenant(), product);
+  if (!r.ok) throw new Error('Could not save product ' + (product.slug || product.id) + ': ' + (r.error || 'unknown error'));
 }
 
 export async function POST(request: Request) {

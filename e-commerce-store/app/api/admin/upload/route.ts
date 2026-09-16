@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import { createKvClient, PRODUCTS_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
@@ -126,7 +128,10 @@ export async function POST(request: Request) {
 
     // Save back to Redis. Images live inside the product object ONLY — there
     // is no separate `store:product_images:*` key to keep in sync.
-    await redis.hset(PRODUCTS_KEY, { [productId]: JSON.stringify(product) });
+    // H3: the catalog lives in Postgres. This write is load-bearing, so a
+    // failure must not read as success -- see admin/products for the full note.
+    const r = await writeProductToPostgres(await ensureDefaultTenant(), product);
+    if (!r.ok) throw new Error('Could not save the uploaded media: ' + (r.error || 'unknown error'));
 
     return NextResponse.json({
       success: true,

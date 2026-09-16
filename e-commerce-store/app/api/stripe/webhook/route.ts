@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   createKvClient,
   archiveEntry,
@@ -534,7 +535,19 @@ export async function POST(request: Request) {
           const live = lockResult.ok ? lockResult.value : await decrementInventory();
           if (live.inventoryRemaining <= 0) {
             thisProduct.soldOutAt = thisProduct.soldOutAt || new Date().toISOString();
-            await redis.hset(PRODUCTS_KEY, { [thisProduct.id]: JSON.stringify(thisProduct) });
+            // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
+            // the way the admin routes are: the customer is already charged
+            // by the time this runs, and throwing would return non-2xx, which
+            // makes Stripe RETRY an event that already succeeded. A stale
+            // soldOutAt is a display problem; a retried webhook is a money
+            // problem. So it logs loudly and returns, matching this handler's
+            // existing "never fail the webhook response" contract.
+            try {
+              const r = await writeProductToPostgres(await ensureDefaultTenant(), thisProduct);
+              if (!r.ok) console.error('[webhook] soldOutAt write failed (cart) — catalog may show this as in stock', thisProduct.id, r.error);
+            } catch (err) {
+              console.error('[webhook] soldOutAt write threw (cart)', thisProduct.id, (err as Error)?.message || err);
+            }
           }
 
           for (let i = 0; i < qty; i += 1) {
@@ -587,7 +600,19 @@ export async function POST(request: Request) {
           const live = lockResult.ok ? lockResult.value : await decrementInventory();
           if (live.inventoryRemaining <= 0) {
             product.soldOutAt = product.soldOutAt || new Date().toISOString();
-            await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+            // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
+            // the way the admin routes are: the customer is already charged
+            // by the time this runs, and throwing would return non-2xx, which
+            // makes Stripe RETRY an event that already succeeded. A stale
+            // soldOutAt is a display problem; a retried webhook is a money
+            // problem. So it logs loudly and returns, matching this handler's
+            // existing "never fail the webhook response" contract.
+            try {
+              const r = await writeProductToPostgres(await ensureDefaultTenant(), product);
+              if (!r.ok) console.error('[webhook] soldOutAt write failed (direct) — catalog may show this as in stock', product.id, r.error);
+            } catch (err) {
+              console.error('[webhook] soldOutAt write threw (direct)', product.id, (err as Error)?.message || err);
+            }
           }
 
           await archiveEntry(redis, {

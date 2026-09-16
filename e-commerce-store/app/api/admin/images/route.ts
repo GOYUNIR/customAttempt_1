@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import { createKvClient, safeParseKvItem, PRODUCTS_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
@@ -120,7 +122,10 @@ async function updateProductImages(redis: any, productId: string, images: string
       product.crops = nextImages.map((_, i) => product.crops[i] ?? { x: 0.5, y: 0.5, w: 1, h: 1 });
     }
     product.updatedAt = new Date().toISOString();
-    await redis.hset(PRODUCTS_KEY, { [productId]: JSON.stringify(product) });
+    // H3: the catalog lives in Postgres. This write is load-bearing, so a
+    // failure must not read as success -- see admin/products for the full note.
+    const r = await writeProductToPostgres(await ensureDefaultTenant(), product);
+    if (!r.ok) throw new Error('Could not save product media: ' + (r.error || 'unknown error'));
   }
 }
 

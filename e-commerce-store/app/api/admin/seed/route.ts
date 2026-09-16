@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { writeProductToPostgres } from '@/lib/catalog-write';
 import { createKvClient, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { appendAudit } from '@/app/api/admin/audit/route';
@@ -485,9 +487,14 @@ export async function runSeedDefaults(redis: any): Promise<{ seeded: number; liv
     return { seeded: 0, liveSeeded: 0, verifyCount: Object.keys(existing).length };
   }
 
+  // H3: seed into Postgres, the catalog store. Seeding is all-or-nothing by
+  // intent -- a half-seeded store is worse than an unseeded one, since the
+  // "already seeded" guard above would then refuse to complete it.
   let seeded = 0;
+  const seedTenantId = await ensureDefaultTenant();
   for (const product of DEFAULT_PRODUCTS) {
-    await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
+    const r = await writeProductToPostgres(seedTenantId, product);
+    if (!r.ok) throw new Error('Seed failed on ' + (product.slug || product.id) + ': ' + (r.error || 'unknown error'));
     seeded++;
   }
 
