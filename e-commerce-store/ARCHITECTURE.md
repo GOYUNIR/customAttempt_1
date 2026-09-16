@@ -721,3 +721,48 @@ the non-secret vars in `wrangler.jsonc`.
 Note the bucket's custom domain (`media.goyunir.com`) serves objects publicly
 and is independent of this token — rotating or losing the token never takes
 already-uploaded media offline.
+
+## SEV-2: the Phase G flip silently dropped all merchant store config
+
+**Found** tracing an unexplained payload-size difference (local `/api/store`
+960KB vs production 16.5KB), not by any test or alarm.
+
+`USE_POSTGRES_PRIMARY=true` (Phase G) routes `/api/store` through
+`tryBuildStorePayloadFromPostgres`, whose config comes from
+`readCatalogFromPostgres` -> the `tenant_store_config` table.
+
+**`tenant_store_config` has zero rows.** It always has: migration 00014
+created it, and nothing ever populated it. `readCatalogFromPostgres` returns
+`config: {}` (a deliberate `.catch(() => [])`, so a missing row "just means no
+overrides"), `mergePublicConfig({})` returns pure defaults, and the storefront
+renders the built-in theme.
+
+So from the moment Phase G wrote the catalog into Postgres, the live
+storefront stopped seeing anything the merchant had configured. Measured
+against production:
+
+    merchant config keys: 25
+    reaching the storefront: 8   (only the ones left at their defaults)
+    NOT reaching it: 17 — branding (813B -> 14B), copy, legal, rewards,
+    gallery, brandFooterData, aiHero, catalogPreview, ...
+
+The brand logo is the clearest symptom: `branding.logoUrl` is set in
+`store:config` and empty in the live payload.
+
+**Why nothing caught it.** The fallback is the bug. Every layer treats a
+missing config as a legitimate "no overrides" state rather than an error, so
+the system reports itself healthy while serving defaults. The catalog read
+NEXT TO IT returns null on missing data and falls back to KV — config does
+not, and the asymmetry is invisible at a glance. The products kept working
+throughout, so the storefront looked fine.
+
+**Lesson, consistent with the rest of this session:** a silent fallback to a
+plausible default is indistinguishable from success. `store_kv` holding the
+real config while a parallel empty table was authoritative is the same failure
+shape as the fake PostgREST accepting what production rejected, and as the
+duplicate option labels merging without a word.
+
+**Fix** belongs to H2: populate `tenant_store_config` from `store:config`
+BEFORE any config restructuring, then split `aiHero.clips` (682KB) and
+`catalogPreview` (264KB) out of the hot read path. A config read that finds no
+row for a tenant that has products should be loud, not empty.
