@@ -809,5 +809,6 @@ Known instances, to audit as each phase reaches them:
 |---|---|
 | `readCatalogFromPostgres` config `.catch(() => [])` | **THE SEV-2 CULPRIT.** Fix in H2 step 2. |
 | `app/api/admin/theme` `.catch(() => [])` on `tenant_themes` | Unaudited. Same shape: 0 rows today. |
-| `b2b/quotes` `.catch(() => null)` on companies / price_lists | Unaudited. A missing price list silently prices at base. |
+| `b2b/quotes` contract-pricing reads | **AUDITED + FIXED.** Was fail-OPEN: a failed price_lists / price_list_entries read yielded `entries = []`, indistinguishable from "no negotiated pricing", so resolveUnitPriceCents correctly returned BASE price and a draft quote was saved at list price. NOT live-active — companies, price_lists, price_list_entries, quotes are all 0 rows, so nothing has ever been mispriced. Now returns 503 and logs. The quotes LIST read had the same shape (failed read rendered as "no quotes") and also fails closed now. |
+| `b2b/quotes` companies / variants `.catch(() => null)` | Audited, acceptable: both fail CLOSED (404 / 400), no quote is created. Caveat: a DB error is reported to the user as "Company not found", which is misleading to diagnose but safe in outcome. |
 | `lib/media-r2.ts` null-on-miss | Mitigated, not removed: `X-Media-Source` makes the read path observable, so a demotion to the signed-GET fallback is visible rather than inferred. |

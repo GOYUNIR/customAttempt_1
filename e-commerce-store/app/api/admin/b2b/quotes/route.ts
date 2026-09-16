@@ -97,37 +97,57 @@ export async function POST(request: Request) {
 
     // Resolve the applicable price list: company-specific first, else the
     // tenant's default list, else none (base price for every line).
-    const companyLists = (await getDb()
-      .select<{ id: string }>('price_lists', {
+    //
+    // THESE READS FAIL CLOSED. They used to end in `.catch(() => null)`, which
+    // made a FAILED read indistinguishable from "this company has no
+    // negotiated pricing" -- both produced `entries = []`, and
+    // resolveUnitPriceCents correctly falls back to base price for an empty
+    // list. So a transient database error quoted a contract customer at LIST
+    // PRICE and saved it as a real draft quote, with nothing to indicate the
+    // discount had been skipped rather than never existing.
+    //
+    // Same shape as SEV-2 (ARCHITECTURE.md), on the money path. An ABSENT
+    // price list is still a legitimate "use base price"; a FAILED read is not,
+    // and now refuses the quote instead of guessing at someone's pricing.
+    let priceListId: string | null = null;
+    let entries: PriceListEntry[] = [];
+    try {
+      const companyLists = (await getDb().select<{ id: string }>('price_lists', {
         where: { company_id: eq(companyId), tenant_id: eq(tenantId) },
         select: ['id'],
         limit: 1,
-      })
-      .catch(() => null)) as Array<{ id: string }> | null;
-    let priceListId = Array.isArray(companyLists) && companyLists.length > 0 ? companyLists[0].id : null;
-    if (!priceListId) {
-      const defaultLists = (await getDb()
-        .select<{ id: string }>('price_lists', {
+      })) as Array<{ id: string }>;
+      priceListId = Array.isArray(companyLists) && companyLists.length > 0 ? companyLists[0].id : null;
+
+      if (!priceListId) {
+        const defaultLists = (await getDb().select<{ id: string }>('price_lists', {
           where: { tenant_id: eq(tenantId), company_id: isNull(), is_default: eq(true) },
           select: ['id'],
           limit: 1,
-        })
-        .catch(() => null)) as Array<{ id: string }> | null;
-      priceListId = Array.isArray(defaultLists) && defaultLists.length > 0 ? defaultLists[0].id : null;
-    }
-    let entries: PriceListEntry[] = [];
-    if (priceListId) {
-      const rows = (await getDb()
-        .select<{ variant_id: string; unit_price_cents: number; min_quantity: number }>('price_list_entries', {
-          where: { price_list_id: eq(priceListId), variant_id: inList(variantIds) },
-          select: ['variant_id', 'unit_price_cents', 'min_quantity'],
-        })
-        .catch(() => null)) as Array<{ variant_id: string; unit_price_cents: number; min_quantity: number }> | null;
-      entries = (rows || []).map((r) => ({
-        variantId: r.variant_id,
-        unitPriceCents: Number(r.unit_price_cents) || 0,
-        minQuantity: Number(r.min_quantity) || 1,
-      }));
+        })) as Array<{ id: string }>;
+        priceListId = Array.isArray(defaultLists) && defaultLists.length > 0 ? defaultLists[0].id : null;
+      }
+
+      if (priceListId) {
+        const rows = (await getDb().select<{ variant_id: string; unit_price_cents: number; min_quantity: number }>(
+          'price_list_entries',
+          {
+            where: { price_list_id: eq(priceListId), variant_id: inList(variantIds) },
+            select: ['variant_id', 'unit_price_cents', 'min_quantity'],
+          },
+        )) as Array<{ variant_id: string; unit_price_cents: number; min_quantity: number }>;
+        entries = (rows || []).map((r) => ({
+          variantId: r.variant_id,
+          unitPriceCents: Number(r.unit_price_cents) || 0,
+          minQuantity: Number(r.min_quantity) || 1,
+        }));
+      }
+    } catch (err) {
+      console.error('[b2b/quotes] contract pricing lookup FAILED — refusing to quote at base price', err);
+      return NextResponse.json(
+        { error: 'Could not load contract pricing for this company. No quote was created - retry rather than sending list prices.' },
+        { status: 503 },
+      );
     }
 
     const quoteLines: QuoteLineInput[] = requestedLines.map((l) => {
@@ -203,13 +223,16 @@ export async function GET(request: Request) {
     }
     const tenantId = await resolveActingTenantId(actor);
 
-    const quotes = await getDb()
-      .select('quotes', {
-        where: { company_id: eq(companyId), tenant_id: eq(tenantId) },
-        select: ['id', 'status', 'currency', 'subtotal_cents', 'notes', 'created_at', 'expires_at'],
-        order: { column: 'created_at', ascending: false },
-      })
-      .catch(() => []);
+    // Fails closed, for the same reason as the pricing reads above: a failed
+    // read used to return [], which renders as "this company has no quotes" --
+    // indistinguishable from the truth, and exactly wrong for a rep about to
+    // tell a customer nothing is outstanding. The outer catch already answers
+    // 500, so simply not swallowing it here is the whole fix.
+    const quotes = await getDb().select('quotes', {
+      where: { company_id: eq(companyId), tenant_id: eq(tenantId) },
+      select: ['id', 'status', 'currency', 'subtotal_cents', 'notes', 'created_at', 'expires_at'],
+      order: { column: 'created_at', ascending: false },
+    });
 
     return NextResponse.json({ ok: true, quotes: quotes ?? [] });
   } catch (err: any) {
