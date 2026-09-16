@@ -40,7 +40,8 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq, inList } from '@/lib/db/query';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { sizeConfigKey } from '@/lib/size-configs';
 import type { LiveStateRecord } from '@/lib/server-config';
@@ -80,38 +81,37 @@ type PgPool = { id: string; slug: string; quantity_available: number };
 
 export async function readCatalogFromPostgres(tenantId: string): Promise<PostgresCatalogRead | null> {
   if (!isPostgresPrimaryEnabled()) return null;
-  if (!supabaseServiceConfigured()) return null;
+  if (!getDb().configured) return null;
 
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    const key = serviceRoleKey;
+    const db = getDb();
 
-    const products = (await supabaseRestFetch(
-      `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&status=eq.live&select=id,external_id,name,slug,description,tagline,marketing_notes,media_gallery`,
-      { key },
-    )) as PgProduct[];
+    const products = await db.select<PgProduct>('products', {
+      where: { tenant_id: eq(tenantId), status: eq('live') },
+      select: ['id', 'external_id', 'name', 'slug', 'description', 'tagline', 'marketing_notes', 'media_gallery'],
+    });
     if (!Array.isArray(products) || products.length === 0) return null;
 
     const productIds = products.map((p) => p.id);
-    const variants = (await supabaseRestFetch(
-      `/product_variants?product_id=in.(${productIds.map(encodeURIComponent).join(',')})&select=id,product_id,option_label,price_cents,checkout_mode,shared_pool_id,custom_schedule`,
-      { key },
-    )) as PgVariant[];
+    const variants = await db.select<PgVariant>('product_variants', {
+      where: { product_id: inList(productIds) },
+      select: ['id', 'product_id', 'option_label', 'price_cents', 'checkout_mode', 'shared_pool_id', 'custom_schedule'],
+    });
 
     const variantIds = variants.map((v) => v.id);
     const inventoryRows = variantIds.length
-      ? ((await supabaseRestFetch(
-          `/inventory_levels?variant_id=in.(${variantIds.map(encodeURIComponent).join(',')})&select=variant_id,quantity_available`,
-          { key },
-        )) as PgInventoryRow[])
+      ? await db.select<PgInventoryRow>('inventory_levels', {
+          where: { variant_id: inList(variantIds) },
+          select: ['variant_id', 'quantity_available'],
+        })
       : [];
 
     const poolIds = [...new Set(variants.map((v) => v.shared_pool_id).filter((id): id is string => Boolean(id)))];
     const pools = poolIds.length
-      ? ((await supabaseRestFetch(
-          `/shared_inventory_pools?id=in.(${poolIds.map(encodeURIComponent).join(',')})&select=id,slug,quantity_available`,
-          { key },
-        )) as PgPool[])
+      ? await db.select<PgPool>('shared_inventory_pools', {
+          where: { id: inList(poolIds) },
+          select: ['id', 'slug', 'quantity_available'],
+        })
       : [];
 
     const productById = new Map(products.map((p) => [p.id, p]));
@@ -191,10 +191,18 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
       });
     }
 
-    const configRows = (await supabaseRestFetch(
-      `/tenant_store_config?tenant_id=eq.${encodeURIComponent(tenantId)}&select=config,schedule_override,social_override&limit=1`,
-      { key },
-    ).catch(() => [])) as Array<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>;
+    // .catch(() => []) preserved: a missing tenant_store_config row must not
+    // fail the whole catalog read, it just means no overrides.
+    const configRows = await db
+      .select<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>(
+        'tenant_store_config',
+        {
+          where: { tenant_id: eq(tenantId) },
+          select: ['config', 'schedule_override', 'social_override'],
+          limit: 1,
+        },
+      )
+      .catch(() => []);
     const configRow = configRows?.[0];
 
     return {
