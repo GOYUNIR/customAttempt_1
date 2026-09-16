@@ -20,7 +20,8 @@
     "dryrun:raffle": "tsx scripts/dry-run-raffle-draw.ts",
     "verify:notifications": "tsx scripts/verify-notification-recovery.ts",
     "verify:catalog": "tsx scripts/verify-catalog-roundtrip.ts",
-    "verify:storage": "tsx scripts/verify-storage-failclosed.ts"
+    "verify:storage": "tsx scripts/verify-storage-failclosed.ts",
+    "verify:r2": "tsx scripts/verify-r2-roundtrip.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",
