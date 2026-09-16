@@ -32,6 +32,22 @@ function loadEnv() {
 loadEnv();
 
 const COMMIT = process.argv.includes('--commit');
+
+/**
+ * Config keys deliberately NOT copied.
+ *
+ * `legal`: the merchant saved EMPTY strings for companyName / terms /
+ * privacy / shipping. mergePublicConfig spreads defaults then stored, so an
+ * empty string WINS -- copying it verbatim would blank the live Terms,
+ * Privacy and Shipping pages. Obviously-placeholder default copy is a less
+ * bad live state than a blank legal page, so the defaults stay until real
+ * legal text is written. Owner's call, recorded here rather than in a commit
+ * message so the next reader sees why a key is missing from the row.
+ *
+ * This is a symptom of the wider issue tracked as ISSUE-1 in ARCHITECTURE.md:
+ * the merge cannot distinguish "saved as empty" from "never set".
+ */
+const SKIP_KEYS = new Set(['legal']);
 const afterIdx = process.argv.indexOf('--after');
 const AFTER_BASE = afterIdx > -1 ? process.argv[afterIdx + 1] : '';
 const LIVE_BASE = 'https://goyunir.com';
@@ -81,7 +97,12 @@ async function main() {
   const liveCfg = ((await (await fetch(`${LIVE_BASE}/api/store`, { headers: { 'Accept-Encoding': 'identity' } })).json())?.config || {}) as Record<string, unknown>;
   const afterCfg = ((await (await fetch(`${AFTER_BASE.replace(/\/+$/, '')}/api/store`)).json())?.config || {}) as Record<string, unknown>;
 
-  const keys = [...new Set([...Object.keys(liveCfg), ...Object.keys(afterCfg)])].sort();
+  for (const k of SKIP_KEYS) {
+    console.log(`SKIPPING key "${k}" — not copied (see SKIP_KEYS); the live default stays.`);
+  }
+  const keys = [...new Set([...Object.keys(liveCfg), ...Object.keys(afterCfg)])]
+    .filter((k) => !SKIP_KEYS.has(k))
+    .sort();
   const changed: string[] = [];
   console.log('FIELD-BY-FIELD — what the live storefront serves now vs after this write');
   console.log('-'.repeat(78));
@@ -104,7 +125,9 @@ async function main() {
     return;
   }
 
-  const body = JSON.stringify([{ tenant_id: tenantId, config: stored, schedule_override: {}, social_override: {} }]);
+  const toWrite: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(stored)) if (!SKIP_KEYS.has(k)) toWrite[k] = v;
+  const body = JSON.stringify([{ tenant_id: tenantId, config: toWrite, schedule_override: {}, social_override: {} }]);
   const res = await fetch(`${url}/rest/v1/tenant_store_config?on_conflict=tenant_id`, {
     method: 'POST',
     headers: { ...H, Prefer: 'resolution=merge-duplicates,return=representation' },

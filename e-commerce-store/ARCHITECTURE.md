@@ -766,3 +766,48 @@ duplicate option labels merging without a word.
 BEFORE any config restructuring, then split `aiHero.clips` (682KB) and
 `catalogPreview` (264KB) out of the hot read path. A config read that finds no
 row for a tenant that has products should be loud, not empty.
+
+## ISSUE-1: an empty saved value is indistinguishable from an unset one
+
+`mergePublicConfig` spreads defaults, then the stored config over them. A
+merchant who saves `legal.terms = ""` therefore OVERRIDES the default rather
+than falling back to it, and the storefront renders a blank page.
+
+Found while diffing the SEV-2 fix: copying `store:config` verbatim would have
+blanked the live Terms, Privacy and Shipping pages, because those fields were
+saved empty and the defaults had been silently covering for them.
+
+Deliberately NOT fixed inside the SEV-2 restore — changing merge semantics
+under a production incident fix is how one bug becomes two. `legal` is
+excluded from that write (`SKIP_KEYS` in scripts/restore-store-config.ts) and
+the defaults stay live until real legal text exists.
+
+The real fix needs a decision this codebase has never made: does empty mean
+"explicitly blank" or "not set"? Probably per-field — an empty `heroTitle` is
+a legitimate choice, an empty `terms` almost never is. Pick up when config
+authoring moves into the merchant panel, where the UI can distinguish "cleared
+this field" from "never touched it".
+
+## Standing pattern: silent fallbacks are SEV candidates
+
+SEV-2 was not caused by a crash, a bad query or a race. It was caused by a
+`.catch(() => [])` that turned "this table is empty" into "no overrides
+configured", which is a plausible, non-alarming state. **Absence and success
+produced identical output, so nothing could tell them apart.**
+
+Treat every `.catch(() => <default>)` and every empty-default standing in for
+a real read as a potential SEV until proven otherwise. The tell is not the
+catch itself — it is whether a caller could distinguish the fallback from a
+real answer. `readCatalogFromPostgres` returning `null` on failure is fine:
+the caller falls back to KV and the two paths are distinguishable. The same
+function returning `config: {}` was not fine, because `{}` is a legitimate
+config.
+
+Known instances, to audit as each phase reaches them:
+
+| Site | Status |
+|---|---|
+| `readCatalogFromPostgres` config `.catch(() => [])` | **THE SEV-2 CULPRIT.** Fix in H2 step 2. |
+| `app/api/admin/theme` `.catch(() => [])` on `tenant_themes` | Unaudited. Same shape: 0 rows today. |
+| `b2b/quotes` `.catch(() => null)` on companies / price_lists | Unaudited. A missing price list silently prices at base. |
+| `lib/media-r2.ts` null-on-miss | Mitigated, not removed: `X-Media-Source` makes the read path observable, so a demotion to the signed-GET fallback is visible rather than inferred. |
