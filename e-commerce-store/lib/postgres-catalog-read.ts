@@ -255,26 +255,59 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
       });
     }
 
-    // .catch(() => []) preserved: a missing tenant_store_config row must not
-    // fail the whole catalog read, it just means no overrides.
-    const configRows = await db
-      .select<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>(
+    // SEV-2 GUARD. This read used to end in `.catch(() => [])` with the
+    // comment "a missing row just means no overrides" -- and that sentence was
+    // the entire bug. tenant_store_config had never had a single row, so
+    // `config: {}` flowed into mergePublicConfig, which returned pure
+    // defaults, and the live storefront served the built-in theme while
+    // ignoring everything the merchant had configured. Nothing alarmed,
+    // because an empty config is a perfectly plausible config.
+    //
+    // The rule now: a tenant that HAS PRODUCTS and NO CONFIG ROW is incoherent
+    // state, not a quiet default. We refuse the whole Postgres path (return
+    // null) rather than silently serve defaults, and we say so loudly. A read
+    // that FAILS is likewise not "no overrides" -- it is a failed read.
+    //
+    // A row whose config is legitimately {} is fine and passes through: the
+    // distinction that matters is row-missing vs row-empty, which the old code
+    // could not make. See ARCHITECTURE.md, "Standing pattern: silent fallbacks
+    // are SEV candidates".
+    let configRows: Array<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>;
+    try {
+      configRows = (await db.select<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>(
         'tenant_store_config',
         {
           where: { tenant_id: eq(tenantId) },
           select: ['config', 'schedule_override', 'social_override'],
           limit: 1,
         },
-      )
-      .catch(() => []);
+      )) as Array<{ config?: Record<string, unknown>; schedule_override?: Record<string, unknown>; social_override?: Record<string, unknown> }>;
+    } catch (err) {
+      console.error(
+        '[postgres-catalog-read] tenant_store_config READ FAILED for tenant ' + tenantId + ' — ' +
+          ((err as Error)?.message || String(err)) +
+          '. Refusing the Postgres catalog path rather than serving default config.',
+      );
+      return null;
+    }
+
     const configRow = configRows?.[0];
+    if (!configRow) {
+      console.error(
+        '[postgres-catalog-read] NO tenant_store_config ROW for tenant ' + tenantId + ', but it has ' +
+          products.length + ' product(s). This is the SEV-2 condition: serving default branding, ' +
+          'copy and theme while the merchant believes their settings are live. Refusing the ' +
+          'Postgres catalog path. Fix: npx tsx scripts/restore-store-config.ts --after <kv-branch-url> --commit',
+      );
+      return null;
+    }
 
     return {
       productsRaw,
       liveStates,
-      config: configRow?.config || {},
-      scheduleOverride: configRow?.schedule_override || {},
-      socialOverride: configRow?.social_override || {},
+      config: configRow.config || {},
+      scheduleOverride: configRow.schedule_override || {},
+      socialOverride: configRow.social_override || {},
     };
   } catch (err) {
     console.error('[postgres-catalog-read] failed, falling back to Redis', (err as Error)?.message || err);

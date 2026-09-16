@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation, checkNotificationDeadLetter } from '../lib/system-diagnostics-pure.ts';
+import { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation, checkNotificationDeadLetter, checkTenantStoreConfig } from '../lib/system-diagnostics-pure.ts';
 
 test('checkCsrf always reports ok — it is unconditionally enforced, not configurable', () => {
   const check = checkCsrf();
@@ -74,4 +74,22 @@ test('checkNotificationDeadLetter: ANY dead-lettered notification is an ERROR', 
 test('checkNotificationDeadLetter: negative or junk counts do not crash', () => {
   assert.equal(checkNotificationDeadLetter(-5).status, 'ok');
   assert.equal(checkNotificationDeadLetter(NaN).status, 'ok');
+});
+
+test('checkTenantStoreConfig: a config row present is ok', () => {
+  assert.equal(checkTenantStoreConfig(4, true).status, 'ok');
+  assert.equal(checkTenantStoreConfig(0, true).status, 'ok');
+});
+
+test('checkTenantStoreConfig: no products and no config is just a new tenant', () => {
+  assert.equal(checkTenantStoreConfig(0, false).status, 'not_configured');
+});
+
+test('checkTenantStoreConfig: products WITHOUT a config row is the SEV-2 condition — an error', () => {
+  // This is the exact state production was in: 4 products live, zero config
+  // rows, storefront quietly serving defaults while every check passed.
+  const c = checkTenantStoreConfig(4, false);
+  assert.equal(c.status, 'error');
+  assert.match(c.detail, /SEV-2/);
+  assert.match(c.detail, /^4 product/);
 });

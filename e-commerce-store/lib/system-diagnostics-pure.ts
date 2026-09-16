@@ -116,3 +116,44 @@ export function checkNotificationDeadLetter(deadLetterCount: number): Check {
       'Inspect the dead-letter list and contact them manually.',
   };
 }
+
+/**
+ * Is the tenant's store config actually reachable by the storefront?
+ *
+ * Exists because SEV-2 ran undetected: tenant_store_config had never had a
+ * row, readCatalogFromPostgres turned that into `config: {}`, and the live
+ * storefront served built-in defaults while the merchant believed their
+ * branding, copy and theme were live. Every existing check passed throughout,
+ * because nothing was failing — the wrong answer was simply plausible.
+ *
+ * The signal is the COMBINATION: products but no config row. A tenant with
+ * neither is just new, and a row whose config is empty is a legitimate choice.
+ */
+export function checkTenantStoreConfig(productCount: number, hasConfigRow: boolean): Check {
+  const products = Math.max(0, Math.floor(productCount) || 0);
+  if (hasConfigRow) {
+    return {
+      id: 'tenant_store_config',
+      label: 'Store Configuration',
+      status: 'ok',
+      detail: 'The tenant has a store-config row; the storefront serves its real settings.',
+    };
+  }
+  if (products === 0) {
+    return {
+      id: 'tenant_store_config',
+      label: 'Store Configuration',
+      status: 'not_configured',
+      detail: 'No store config yet, and no products either — expected for a new tenant.',
+    };
+  }
+  return {
+    id: 'tenant_store_config',
+    label: 'Store Configuration',
+    status: 'error',
+    detail:
+      `${products} product(s) are live but this tenant has NO store-config row, so the storefront ` +
+      'is serving default branding, copy and theme instead of the merchant\'s own (SEV-2). ' +
+      'Run scripts/restore-store-config.ts to repair.',
+  };
+}
