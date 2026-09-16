@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { resolveStripeClient } from '@/services/payment/factory';
+import { resolveStripeClient, isPaymentConfigured } from '@/services/payment/factory';
 import {
   createRedisClient,
   safeParseRedisItem,
@@ -72,6 +72,13 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const password = url.searchParams.get('password') || '';
   let authorized = false;
+  // Configured-ness comes from the payment PORT, never from reading
+  // STRIPE_SECRET_KEY: the driver prefers a Setup-Wizard key, so env alone
+  // reports on a key that may not be the one charging. Declared out here so
+  // the error path below answers with the same source of truth.
+  let paymentConfigured = false;
+  try { paymentConfigured = await isPaymentConfigured(); } catch { /* stays false */ }
+
   try {
     authorized = await adminAuthorized(request, password);
   } catch {
@@ -82,6 +89,8 @@ export async function GET(request: Request) {
   }
 
   try {
+    // ENV PRESENCE ONLY — reported under `env` below as a diagnostic. Never
+    // used to answer "is a payment provider configured"; that is paymentConfigured.
     const hasStripeKey = Boolean(process.env.STRIPE_SECRET_KEY);
     const hasRedisUrl = Boolean(
       process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL,
@@ -105,7 +114,7 @@ export async function GET(request: Request) {
     const hasMapboxEnv = Boolean(process.env.NEXT_PUBLIC_MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN);
 
     const mailProvider = platform.mail_provider || (hasResend ? 'resend' : null);
-    const paymentProvider = platform.payment_provider || (hasStripeKey ? 'stripe' : null);
+    const paymentProvider = platform.payment_provider || (paymentConfigured ? 'stripe' : null);
     const mapProvider = platform.map_provider || (hasMapboxEnv ? 'mapbox' : null);
     const aiProvider = platform.ai_provider;
 
@@ -134,13 +143,13 @@ export async function GET(request: Request) {
       try { await redis.ping(); redisOk = true; } catch (e: any) { redisError = e?.message; redis = null; }
     }
     if (stripe) {
-      try { await stripe.balance.retrieve(); stripeOk = true; } catch (e: any) { stripeError = e?.message; stripeOk = hasStripeKey; }
+      try { await stripe.balance.retrieve(); stripeOk = true; } catch (e: any) { stripeError = e?.message; stripeOk = paymentConfigured; }
     }
 
     const status: any = {
       storageProvider,
       integrations,
-      stripeConfigured: Boolean(stripe) || hasStripeKey,
+      stripeConfigured: Boolean(stripe) || paymentConfigured,
       redisConfigured: redisOk || (hasRedisUrl && hasRedisToken),
       resendConfigured: hasResend,
       resendFrom: process.env.RESEND_FROM || null,
@@ -227,7 +236,7 @@ export async function GET(request: Request) {
         error: err?.message || 'status failed',
         storageProvider: detectStorageProvider(),
         integrations: [],
-        stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+        stripeConfigured: paymentConfigured,
         redisConfigured: Boolean(
           (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || process.env.REDIS_REST_URL || process.env.REDIS_URL) &&
             (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || process.env.REDIS_REST_TOKEN || process.env.REDIS_TOKEN),

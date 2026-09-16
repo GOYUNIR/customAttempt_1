@@ -14,7 +14,7 @@ import {
   type LiveStateRecord,
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
-import { resolveStripeClient } from '@/services/payment/factory';
+import { resolveStripeClient, isPaymentConfigured } from '@/services/payment/factory';
 import { supabaseEnvSummary } from '@/services/config/edge';
 import { getPlatformSettings, isPlatformConfigured } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
@@ -134,14 +134,18 @@ export async function GET(request: Request) {
 
   // Payments — only demand a key for the ACTIVE provider.
   const paymentProvider = providers.payment_provider;
-  if (paymentProvider === 'stripe') {
-    const stripeKey = platformSettings?.payment_api_key || process.env.STRIPE_SECRET_KEY || '';
-    push('Payments (Stripe)', Boolean(stripeKey), stripeKey ? 'key set' : 'Stripe is the active payment provider but no key is set');
-  } else if (paymentProvider) {
+  // Ask the payment PORT, which applies the same precedence the app charges
+  // through (wizard key first, env fallback second) and covers every provider.
+  // Re-deriving that precedence here duplicated it, and missed the env
+  // fallback for non-Stripe providers entirely.
+  const paymentReady = await isPaymentConfigured();
+  if (paymentProvider) {
     push(
-      'Payments',
-      Boolean(platformSettings?.payment_api_key),
-      platformSettings?.payment_api_key ? `${paymentProvider} key set` : `${paymentProvider} is active but no key is set`
+      paymentProvider === 'stripe' ? 'Payments (Stripe)' : 'Payments',
+      paymentReady,
+      paymentReady
+        ? `${paymentProvider} key set`
+        : `${paymentProvider} is the active payment provider but no key is set`,
     );
   } else {
     push('Payments', true, 'no payment provider selected (payments optional until one is chosen)');

@@ -75,3 +75,21 @@ export async function resolvePaymentWebhookSecret(): Promise<string> {
   }
   return process.env.STRIPE_WEBHOOK_SECRET || '';
 }
+
+/**
+ * Is a payment provider configured, according to the SAME precedence the rest
+ * of the app charges through (wizard settings first, env fallback second)?
+ *
+ * Callers must not answer this by reading STRIPE_SECRET_KEY directly. Doing so
+ * reports on a key the driver may not be using: a wizard-configured store with
+ * no env var reads as "unconfigured" while checkout works, and a store with
+ * both reads as configured on the wrong key. That divergence is exactly what
+ * the admin status panel was doing.
+ */
+export async function isPaymentConfigured(): Promise<boolean> {
+  try {
+    return (await PaymentFactory.getDriver()) !== null;
+  } catch {
+    return false;
+  }
+}
