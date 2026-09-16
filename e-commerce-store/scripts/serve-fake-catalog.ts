@@ -53,6 +53,41 @@ async function main() {
     soldOutBehavior: 'stay_visible',
   });
 
+  // Two scheduled products, so the REAL applyLifecycle() in app/api/store can
+  // be exercised: one whose go-live moment has passed (shouldGoLive must fire
+  // and flip it live) and one still in the future (must stay upcoming).
+  // Neither was ever visible to the reader while it filtered status='live'.
+  await writeProductToPostgres(tenantId, {
+    id: 'prod-due',
+    name: 'Due To Go Live',
+    slug: 'due-to-go-live',
+    desc: 'Scheduled for a moment that has already passed.',
+    priceCategories: [{ size: 'OS', price: 100, stripeId: 'price_due', checkoutMode: 'FCFS' }],
+    isActive: false,
+    isUpcoming: true,
+    isArchived: false,
+    checkoutMode: 'FCFS',
+    goLiveAt: '2020-01-01 10:00',
+    totalInventory: 10,
+    inventoryPerSize: { OS: 10 },
+    soldOutBehavior: 'stay_visible',
+  });
+  await writeProductToPostgres(tenantId, {
+    id: 'prod-future',
+    name: 'Still Upcoming',
+    slug: 'still-upcoming',
+    desc: 'Scheduled far in the future.',
+    priceCategories: [{ size: 'OS', price: 100, stripeId: 'price_future', checkoutMode: 'FCFS' }],
+    isActive: false,
+    isUpcoming: true,
+    isArchived: false,
+    checkoutMode: 'FCFS',
+    goLiveAt: '2099-01-01 10:00',
+    totalInventory: 10,
+    inventoryPerSize: { OS: 10 },
+    soldOutBehavior: 'stay_visible',
+  });
+
   console.log('FAKE_CATALOG_READY port=' + db.port + ' tenant=' + tenantId);
   console.log('tables: ' + Object.keys(db.tables).join(', '));
   setInterval(() => {}, 1 << 30); // stay alive for the dev server

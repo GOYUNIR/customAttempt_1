@@ -180,6 +180,80 @@ async function main() {
   check(same(sc.m?.customDropSchedule, { dayOfWeek: 6, hour: 12 }), 'per-size custom drop schedule (key normalized to lower case)', JSON.stringify(sc));
   check(sc.M === undefined, 'size keys are normalized, not stored raw');
 
+  // ---------------------------------------------------------------------
+  // LIFECYCLE VISIBILITY (difference 1).
+  //
+  // The reader used to query `status: eq('live')`. `status` is derived from
+  // the flags (statusFromFlags), so an upcoming product is 'draft' and an
+  // archived one is 'archived' — BOTH were silently invisible to the
+  // storefront, and applyLifecycle() never saw the upcoming one, so its
+  // shouldGoLive transition could never fire. The Redis path loads every
+  // product unfiltered. These assertions pin that contract.
+  // ---------------------------------------------------------------------
+  console.log(String.fromCharCode(10) + "Lifecycle visibility - upcoming and archived products" + String.fromCharCode(10) + '='.repeat(56));
+
+  const upcoming = {
+    id: 'prod-upcoming',
+    name: 'Upcoming Drop',
+    slug: 'upcoming-drop',
+    desc: 'Scheduled, not yet live.',
+    priceCategories: [{ size: 'OS', price: 120, stripeId: 'price_up', checkoutMode: 'RAFFLE' }],
+    isActive: false,
+    isUpcoming: true,
+    isArchived: false,
+    checkoutMode: 'RAFFLE',
+    goLiveAt: '2099-01-01 10:00',
+    totalInventory: 25,
+    inventoryPerSize: { OS: 25 },
+  };
+  const archived = {
+    id: 'prod-archived',
+    name: 'Archived Drop',
+    slug: 'archived-drop',
+    desc: 'Past drop, kept for the archive shelf.',
+    priceCategories: [{ size: 'OS', price: 60, stripeId: 'price_arch', checkoutMode: 'FCFS' }],
+    isActive: false,
+    isUpcoming: false,
+    isArchived: true,
+    checkoutMode: 'FCFS',
+    totalInventory: 0,
+    inventoryPerSize: { OS: 0 },
+  };
+  const wUp = await writeProductToPostgres(tenantId, upcoming);
+  const wArch = await writeProductToPostgres(tenantId, archived);
+  check(wUp.ok === true, 'upcoming product written', wUp.error || '');
+  check(wArch.ok === true, 'archived product written', wArch.error || '');
+
+  // Confirm the DB really stored them under the statuses that used to be
+  // filtered out — otherwise this test would pass for the wrong reason.
+  const statusRows = (db.tables['products'] || []) as Array<Record<string, unknown>>;
+  const statusBySlug = new Map(statusRows.map((r) => [String(r.slug), String(r.status)]));
+  check(statusBySlug.get('upcoming-drop') === 'draft', "upcoming product is stored as status='draft'", String(statusBySlug.get('upcoming-drop')));
+  check(statusBySlug.get('archived-drop') === 'archived', "archived product is stored as status='archived'", String(statusBySlug.get('archived-drop')));
+
+  const catalog2 = await readCatalogFromPostgres(tenantId);
+  const bySlug = new Map(
+    ((catalog2?.productsRaw || []) as Array<Record<string, unknown>>).map((r) => [String(r.slug), r]),
+  );
+  check(bySlug.size === 3, 'all three products are visible to the storefront reader', 'saw ' + bySlug.size + ': ' + [...bySlug.keys()].join(', '));
+
+  const up = bySlug.get('upcoming-drop');
+  check(Boolean(up), 'UPCOMING product reaches the storefront reader (was dropped by status=live)');
+  check(up?.isUpcoming === true, 'upcoming: isUpcoming is true', JSON.stringify(up?.isUpcoming));
+  check(up?.isActive === false, 'upcoming: isActive is false', JSON.stringify(up?.isActive));
+  check(up?.isArchived === false, 'upcoming: isArchived is false', JSON.stringify(up?.isArchived));
+  check(up?.goLiveAt === '2099-01-01 10:00', 'upcoming: goLiveAt survives for applyLifecycle to compare against', JSON.stringify(up?.goLiveAt));
+
+  const arch = bySlug.get('archived-drop');
+  check(Boolean(arch), 'ARCHIVED product reaches the storefront reader (was dropped by status=archived)');
+  check(arch?.isArchived === true, 'archived: isArchived is true', JSON.stringify(arch?.isArchived));
+  check(arch?.isUpcoming === false, 'archived: isUpcoming is false', JSON.stringify(arch?.isUpcoming));
+
+  // The live product must still be live — the fix widened the query, it did
+  // not blur the lifecycle flags.
+  const live = bySlug.get('round-trip-hoodie');
+  check(live?.isActive === true && live?.isUpcoming === false && live?.isArchived === false, 'live product still reads as live', JSON.stringify({ a: live?.isActive, u: live?.isUpcoming, r: live?.isArchived }));
+
   db.close();
   console.log('='.repeat(56));
   console.log(fail === 0 ? 'CATALOG ROUND TRIP VERIFIED - full field set\n' : fail + ' FAILURE(S)\n');

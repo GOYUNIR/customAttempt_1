@@ -102,8 +102,16 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
   try {
     const db = getDb();
 
+    // NO status filter. `status` is a pure derivation of the isActive/
+    // isArchived flags (lib/catalog-write.ts's statusFromFlags), so filtering
+    // status='live' here silently dropped every upcoming (draft) and archived
+    // product — and, worse, meant applyLifecycle() never saw a scheduled
+    // product, so its shouldGoLive transition could never fire and a drop
+    // would never auto-go-live. The Redis path this replaces does an
+    // unfiltered hgetall(PRODUCTS_KEY) and lets applyLifecycle decide; that is
+    // the contract, and this query has to match it.
     const products = await db.select<PgProduct>('products', {
-      where: { tenant_id: eq(tenantId), status: eq('live') },
+      where: { tenant_id: eq(tenantId) },
       select: [
           'id', 'external_id', 'name', 'slug', 'description', 'tagline',
           'marketing_notes', 'media_gallery',
@@ -178,8 +186,8 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
         images: media.map((m) => m?.url).filter((url): url is string => Boolean(url)),
         crops: media.some((m) => m?.crop) ? media.map((m) => m?.crop || { x: 0, y: 0, w: 1, h: 1 }) : undefined,
         sizeConfigs: mergedSizeConfigs,
-        // Real lifecycle columns (00019). Previously hardcoded isActive: true
-        // because the query filtered status='live' and nothing else existed.
+        // Real lifecycle columns (00019). These — not the `status` column —
+        // are what applyLifecycle() reads to decide live/upcoming/archived.
         isActive: p.is_active !== null ? Boolean(p.is_active) : true,
         isArchived: Boolean(p.is_archived),
         isUpcoming: Boolean(p.is_upcoming),
