@@ -106,7 +106,13 @@
     // bare root, so the portal subdomains MUST route to this Worker first.
     // They do now, via the wildcard route above (admin.goyunir.com went
     // 522 -> 200 once it was applied). Do not enable this without that route.
-    "PLATFORM_ROOT_DOMAIN": "goyunir.com"
+    "PLATFORM_ROOT_DOMAIN": "goyunir.com",
+
+    // PHASE G — Postgres is the authoritative catalog store.
+    // The relational schema (00009 -> 00019) is applied; lib/catalog-write.ts
+    // writes the full product, lib/postgres-catalog-read.ts reconstructs it.
+    // With this off, /api/store reads the legacy Redis catalog instead.
+    "USE_POSTGRES_PRIMARY": "true"
   }
   //
   // ── SECRETS — set in the dashboard ("Secrets" column) or via: ──────────────
