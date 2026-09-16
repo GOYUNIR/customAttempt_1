@@ -55,6 +55,37 @@ function buildConfig(product: Record<string, unknown>, columnFields: Set<string>
   return config;
 }
 
+/**
+ * Loud warning when base64 reaches products.media_gallery (Phase H1).
+ *
+ * Media lives in R2 now and media_gallery should hold URLs. New uploads go
+ * straight to R2 via /api/admin/media/presign, so the one path that still
+ * produces base64 here is re-saving a product whose images were loaded from
+ * the (not yet migrated) KV blob -- which silently undoes the backfill for
+ * that product, with a successful save and no visible symptom until someone
+ * notices the payload grew again.
+ *
+ * This does NOT block the write: refusing a merchant's save over a storage
+ * detail is worse than the regression. It makes the regression findable.
+ * Removable once H3 moves the admin catalog off the KV blob.
+ */
+function warnOnBase64Media(
+  gallery: Array<{ url: string; crop?: unknown }>,
+  product: Record<string, unknown>,
+): Array<{ url: string; crop?: unknown }> {
+  const base64 = gallery.filter((m) => /^data:/i.test(String(m?.url || '')));
+  if (base64.length > 0) {
+    const bytes = base64.reduce((n, m) => n + String(m.url).length, 0);
+    console.error(
+      '[catalog-write] BASE64 MEDIA written to products.media_gallery — this undoes the R2 backfill. ' +
+        `product=${String(product.slug || product.id || '?')} images=${base64.length} bytes=${bytes}. ` +
+        'Cause is almost always a product re-saved from the legacy KV blob; re-run ' +
+        'scripts/backfill-media-to-r2.ts --commit to move it back to R2.',
+    );
+  }
+  return gallery;
+}
+
 /** `images` + `crops` are parallel arrays in Redis; one array of objects here. */
 function buildMediaGallery(product: Record<string, unknown>): Array<{ url: string; crop?: unknown }> {
   const images = Array.isArray(product.images) ? product.images : [];
@@ -114,7 +145,7 @@ export async function writeProductToPostgres(
         status: statusFromFlags(product),
         tagline: String(product.tagline || ''),
         marketing_notes: Array.isArray(product.notes) ? product.notes : [],
-        media_gallery: buildMediaGallery(product),
+        media_gallery: warnOnBase64Media(buildMediaGallery(product), product),
         is_active: product.isActive === true,
         is_archived: product.isArchived === true,
         is_upcoming: product.isUpcoming === true,
