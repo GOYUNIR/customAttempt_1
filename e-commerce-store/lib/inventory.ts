@@ -19,7 +19,8 @@
 
 import { createRedisClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 export type InventoryLevel = {
   variantId: string;
@@ -28,7 +29,7 @@ export type InventoryLevel = {
 };
 
 function assertSupabase(): void {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Postgres inventory requires Supabase (SUPABASE_SERVICE_ROLE_KEY).');
   }
 }
@@ -44,17 +45,19 @@ function assertSupabase(): void {
  */
 export async function resolveVariantId(tenantId: string, externalProductId: string, size: string): Promise<string | null> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const products = (await supabaseRestFetch(
-    `/products?tenant_id=eq.${encodeURIComponent(tenantId)}&external_id=eq.${encodeURIComponent(externalProductId)}&select=id&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string }>;
+  const db = getDb();
+  const products = await db.select<{ id: string }>('products', {
+    where: { tenant_id: eq(tenantId), external_id: eq(externalProductId) },
+    select: ['id'],
+    limit: 1,
+  });
   const productId = products?.[0]?.id;
   if (!productId) return null;
-  const variants = (await supabaseRestFetch(
-    `/product_variants?product_id=eq.${encodeURIComponent(productId)}&option_label=eq.${encodeURIComponent(size)}&select=id&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string }>;
+  const variants = await db.select<{ id: string }>('product_variants', {
+    where: { product_id: eq(productId), option_label: eq(size) },
+    select: ['id'],
+    limit: 1,
+  });
   return variants?.[0]?.id || null;
 }
 
@@ -64,11 +67,11 @@ export async function resolveVariantId(tenantId: string, externalProductId: stri
  *  stock-in rather than pre-creating a row per variant). */
 export async function getInventoryLevel(tenantId: string, variantId: string): Promise<InventoryLevel | null> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/inventory_levels?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}&select=variant_id,quantity_available,quantity_reserved&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ variant_id: string; quantity_available: number; quantity_reserved: number }>;
+  const rows = await getDb().select<{ variant_id: string; quantity_available: number; quantity_reserved: number }>('inventory_levels', {
+    where: { tenant_id: eq(tenantId), variant_id: eq(variantId) },
+    select: ['variant_id', 'quantity_available', 'quantity_reserved'],
+    limit: 1,
+  });
   const row = rows?.[0];
   if (!row) return null;
   return {
@@ -104,8 +107,6 @@ export async function decrementInventory(
     // the safe default the caller should retry.
     return { ok: false, reason: 'lock_contended' };
   }
-
-  const { serviceRoleKey } = readSupabaseEnv();
   const lockResult = await withRedisLock(redis, `inventory:pg:${tenantId}:${variantId}`, async (): Promise<DecrementResult> => {
     const current = await getInventoryLevel(tenantId, variantId);
     if (!current) return { ok: false, reason: 'no_inventory_row' };
@@ -119,15 +120,13 @@ export async function decrementInventory(
     // concurrent writer slipped in despite the lock, e.g. a direct SQL
     // edit bypassing the app), the caller gets a clear failure instead of
     // silently double-decrementing.
-    const updated = (await supabaseRestFetch(
-      `/inventory_levels?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}&quantity_available=eq.${current.quantityAvailable}`,
-      {
-        key: serviceRoleKey,
-        method: 'PATCH',
-        body: { quantity_available: nextAvailable },
-        prefer: 'return=representation',
-      },
-    )) as Array<{ quantity_available: number }>;
+    // The compare-and-swap: quantity_available must STILL equal what we read.
+    // Zero rows back means a concurrent writer won the race.
+    const updated = await getDb().update<{ quantity_available: number }>(
+      'inventory_levels',
+      { where: { tenant_id: eq(tenantId), variant_id: eq(variantId), quantity_available: eq(current.quantityAvailable) } },
+      { quantity_available: nextAvailable },
+    );
     if (!Array.isArray(updated) || updated.length === 0) {
       return { ok: false, reason: 'insufficient_stock', remaining: current.quantityAvailable };
     }
@@ -144,27 +143,22 @@ export async function decrementInventory(
 export async function restockInventory(tenantId: string, variantId: string, quantity: number): Promise<InventoryLevel> {
   assertSupabase();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const { serviceRoleKey } = readSupabaseEnv();
   const current = await getInventoryLevel(tenantId, variantId);
   if (!current) {
-    const created = (await supabaseRestFetch('/inventory_levels', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: { tenant_id: tenantId, variant_id: variantId, quantity_available: qty, quantity_reserved: 0 },
-      prefer: 'return=representation',
-    })) as Array<{ variant_id: string; quantity_available: number; quantity_reserved: number }>;
+    const created = await getDb().insert<{ variant_id: string; quantity_available: number; quantity_reserved: number }>('inventory_levels', {
+      tenant_id: tenantId,
+      variant_id: variantId,
+      quantity_available: qty,
+      quantity_reserved: 0,
+    });
     const row = created[0];
     return { variantId: row.variant_id, quantityAvailable: Number(row.quantity_available) || 0, quantityReserved: Number(row.quantity_reserved) || 0 };
   }
-  const updated = (await supabaseRestFetch(
-    `/inventory_levels?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}`,
-    {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: { quantity_available: current.quantityAvailable + qty },
-      prefer: 'return=representation',
-    },
-  )) as Array<{ variant_id: string; quantity_available: number; quantity_reserved: number }>;
+  const updated = await getDb().update<{ variant_id: string; quantity_available: number; quantity_reserved: number }>(
+    'inventory_levels',
+    { where: { tenant_id: eq(tenantId), variant_id: eq(variantId) } },
+    { quantity_available: current.quantityAvailable + qty },
+  );
   const row = updated[0];
   return { variantId: row.variant_id, quantityAvailable: Number(row.quantity_available) || 0, quantityReserved: Number(row.quantity_reserved) || 0 };
 }
