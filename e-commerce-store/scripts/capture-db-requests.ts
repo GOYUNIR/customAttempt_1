@@ -143,7 +143,7 @@ async function main() {
   await scenario('findPendingEntryId', () => raffle.findPendingEntryId('tenant-1', 'variant-1', 'a@example.com'));
   await scenario('markRaffleEntryOutcome:charged', () => raffle.markRaffleEntryOutcome('tenant-1', 'entry-1', 'charged'));
   await scenario('markRaffleEntryOutcome:declined', () => raffle.markRaffleEntryOutcome('tenant-1', 'entry-2', 'declined'));
-  await scenario('executeDrawWithCharging', () => raffle.executeDrawWithCharging('tenant-1', 'variant-1', { winnerCount: 3 } as never));
+  await scenario('executeDrawWithCharging', () => raffle.executeDrawWithCharging('tenant-1', 'variant-1', 3));
   await scenario('decrementSharedPool', () => raffle.decrementSharedPool('tenant-1', 'pool-slug', 1));
   await scenario('decrementSharedPoolById', () => raffle.decrementSharedPoolById('tenant-1', 'pool-1', 1));
   await scenario('restockSharedPoolById', () => raffle.restockSharedPoolById('tenant-1', 'pool-1', 1));
@@ -173,7 +173,31 @@ async function main() {
     }
     return value;
   };
-  const normalised = recorded.map((r) => ({
+  // Within a scenario, sort requests by their content.
+  //
+  // The charge loop iterates WINNERS, whose order comes from the shuffle, so
+  // the per-entry markRaffleEntryOutcome PATCHes arrive in a random sequence.
+  // The SET is deterministic; the order is not.
+  //
+  // CAVEAT, same as the array sorting below: this also hides a genuine
+  // reordering of requests within a scenario. A migration that intends to
+  // change the ORDER of database calls must be reviewed by reading, not by
+  // this diff. It does not hide a request appearing, vanishing or changing.
+  const sortWithinLabel = (rows: typeof recorded): typeof recorded => {
+    const out: typeof recorded = [];
+    let i = 0;
+    while (i < rows.length) {
+      let j = i;
+      while (j < rows.length && rows[j].label === rows[i].label) j++;
+      const group = rows.slice(i, j);
+      group.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      out.push(...group);
+      i = j;
+    }
+    return out;
+  };
+
+  const normalised = sortWithinLabel(recorded).map((r) => ({
     ...r,
     path: sortInList(String(scrub(r.path))),
     body: scrub(r.body),

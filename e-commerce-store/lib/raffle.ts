@@ -13,7 +13,8 @@
 
 import { createRedisClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq, inList } from '@/lib/db/query';
 import { selectWinners } from '@/lib/raffle-draw';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { sendWinnerEmail } from '@/lib/email';
@@ -21,7 +22,7 @@ import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 function assertSupabase(): void {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Postgres raffle engine requires Supabase (SUPABASE_SERVICE_ROLE_KEY).');
   }
 }
@@ -49,12 +50,8 @@ export type CreateRaffleEntryResult =
  *  clean result instead of a raw PostgREST 409. */
 export async function createRaffleEntry(input: RaffleEntryInput): Promise<CreateRaffleEntryResult> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
   try {
-    const rows = (await supabaseRestFetch('/raffle_entries', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: {
+    const rows = await getDb().insert<{ id: string }>('raffle_entries', {
         tenant_id: input.tenantId,
         variant_id: input.variantId,
         customer_id: input.customerId ?? null,
@@ -63,10 +60,8 @@ export async function createRaffleEntry(input: RaffleEntryInput): Promise<Create
         promo_code: input.promoCode ?? null,
         discount_percent: input.discountPercent ?? null,
         shipping_address: input.shippingAddress ?? null,
-        status: 'pending',
-      },
-      prefer: 'return=representation',
-    })) as Array<{ id: string }>;
+      status: 'pending',
+    });
     const entryId = rows?.[0]?.id;
     if (!entryId) return { ok: false, reason: 'error', error: 'No row returned.' };
     return { ok: true, entryId };
@@ -79,11 +74,11 @@ export async function createRaffleEntry(input: RaffleEntryInput): Promise<Create
   }
 }
 
-async function listPendingEntries(tenantId: string, variantId: string, serviceRoleKey: string) {
-  return (await supabaseRestFetch(
-    `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}&status=eq.pending&select=*`,
-    { key: serviceRoleKey },
-  )) as Array<Record<string, unknown>>;
+async function listPendingEntries(tenantId: string, variantId: string) {
+  return getDb().select<Record<string, unknown>>('raffle_entries', {
+    where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('pending') },
+    select: ['*'],
+  });
 }
 
 // ── Draws ─────────────────────────────────────────────────────────────────────
@@ -110,8 +105,7 @@ export type DrawExecutionResult = {
  */
 export async function executeDraw(tenantId: string, variantId: string, winnerCount: number): Promise<DrawExecutionResult> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const entries = await listPendingEntries(tenantId, variantId, serviceRoleKey);
+  const entries = await listPendingEntries(tenantId, variantId);
   const { winners, notSelected } = selectWinners(entries, winnerCount);
 
   const nowIso = new Date().toISOString();
@@ -119,32 +113,30 @@ export async function executeDraw(tenantId: string, variantId: string, winnerCou
   const notSelectedIds = notSelected.map((e) => String(e.id));
 
   if (winnerIds.length > 0) {
-    await supabaseRestFetch(`/raffle_entries?id=in.(${winnerIds.map(encodeURIComponent).join(',')})`, {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: { status: 'winner', decided_at: nowIso },
-    });
+    // returning: 'default' — the legacy PATCH sent no Prefer header.
+    await getDb().update(
+      'raffle_entries',
+      { where: { id: inList(winnerIds) } },
+      { status: 'winner', decided_at: nowIso },
+      { returning: 'default' },
+    );
   }
   if (notSelectedIds.length > 0) {
-    await supabaseRestFetch(`/raffle_entries?id=in.(${notSelectedIds.map(encodeURIComponent).join(',')})`, {
-      key: serviceRoleKey,
-      method: 'PATCH',
-      body: { status: 'not_selected', decided_at: nowIso },
-    });
+    await getDb().update(
+      'raffle_entries',
+      { where: { id: inList(notSelectedIds) } },
+      { status: 'not_selected', decided_at: nowIso },
+      { returning: 'default' },
+    );
   }
 
-  const drawRows = (await supabaseRestFetch('/drop_draws', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
+  const drawRows = await getDb().insert<{ id: string }>('drop_draws', {
       tenant_id: tenantId,
       variant_id: variantId,
       winner_count: winnerIds.length,
       entries_count: entries.length,
-      summary: { winnerEntryIds: winnerIds, notSelectedEntryIds: notSelectedIds },
-    },
-    prefer: 'return=representation',
-  })) as Array<{ id: string }>;
+    summary: { winnerEntryIds: winnerIds, notSelectedEntryIds: notSelectedIds },
+  });
 
   return {
     drawId: drawRows?.[0]?.id || '',
@@ -164,11 +156,16 @@ export async function executeDraw(tenantId: string, variantId: string, winnerCou
  *  or already decided) — the caller skips the mirror, never errors. */
 export async function findPendingEntryId(tenantId: string, variantId: string, email: string): Promise<string | null> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  const rows = (await supabaseRestFetch(
-    `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&variant_id=eq.${encodeURIComponent(variantId)}&email=eq.${encodeURIComponent(String(email || '').trim().toLowerCase())}&status=eq.pending&select=id&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string }>;
+  const rows = await getDb().select<{ id: string }>('raffle_entries', {
+    where: {
+      tenant_id: eq(tenantId),
+      variant_id: eq(variantId),
+      email: eq(String(email || '').trim().toLowerCase()),
+      status: eq('pending'),
+    },
+    select: ['id'],
+    limit: 1,
+  });
   return rows?.[0]?.id || null;
 }
 
@@ -177,10 +174,12 @@ export async function findPendingEntryId(tenantId: string, variantId: string, em
  *  owns the actual Stripe call; this only records the outcome. */
 export async function markRaffleEntryOutcome(tenantId: string, entryId: string, outcome: 'charged' | 'declined'): Promise<void> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(
-    `/raffle_entries?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(entryId)}`,
-    { key: serviceRoleKey, method: 'PATCH', body: { status: outcome } },
+  // returning: 'default' — the legacy PATCH sent no Prefer header.
+  await getDb().update(
+    'raffle_entries',
+    { where: { tenant_id: eq(tenantId), id: eq(entryId) } },
+    { status: outcome },
+    { returning: 'default' },
   );
 }
 
@@ -208,14 +207,14 @@ export async function executeDrawWithCharging(
   assertSupabase();
   const draw = await executeDraw(tenantId, variantId, winnerCount);
   if (draw.winners.length === 0) return { draw, charges: [] };
-
-  const { serviceRoleKey } = readSupabaseEnv();
   const stripe = await resolveStripeClient();
 
-  const variantRows = (await supabaseRestFetch(
-    `/product_variants?id=eq.${encodeURIComponent(variantId)}&select=option_label,price_cents,products(name)`,
-    { key: serviceRoleKey },
-  ).catch(() => [])) as Array<{ option_label: string; price_cents: number; products: { name: string } | null }>;
+  const variantRows = await getDb()
+    .select<{ option_label: string; price_cents: number; products: { name: string } | null }>('product_variants', {
+      where: { id: eq(variantId) },
+      select: ['option_label', 'price_cents', { relation: 'products', columns: ['name'] }],
+    })
+    .catch(() => []);
   const variant = variantRows?.[0];
   const productName = variant?.products?.name || 'Item';
   const size = variant?.option_label || 'Standard';
@@ -290,20 +289,22 @@ export type PoolDecrementResult =
   | { ok: true; remaining: number }
   | { ok: false; reason: 'insufficient_stock' | 'lock_contended' | 'no_pool'; remaining?: number };
 
-async function getPoolLevel(tenantId: string, slug: string, serviceRoleKey: string): Promise<{ id: string; quantityAvailable: number } | null> {
-  const rows = (await supabaseRestFetch(
-    `/shared_inventory_pools?tenant_id=eq.${encodeURIComponent(tenantId)}&slug=eq.${encodeURIComponent(slug)}&select=id,quantity_available&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string; quantity_available: number }>;
+async function getPoolLevel(tenantId: string, slug: string): Promise<{ id: string; quantityAvailable: number } | null> {
+  const rows = await getDb().select<{ id: string; quantity_available: number }>('shared_inventory_pools', {
+    where: { tenant_id: eq(tenantId), slug: eq(slug) },
+    select: ['id', 'quantity_available'],
+    limit: 1,
+  });
   const row = rows?.[0];
   return row ? { id: row.id, quantityAvailable: Number(row.quantity_available) || 0 } : null;
 }
 
-async function getPoolLevelById(tenantId: string, poolId: string, serviceRoleKey: string): Promise<{ id: string; quantityAvailable: number } | null> {
-  const rows = (await supabaseRestFetch(
-    `/shared_inventory_pools?tenant_id=eq.${encodeURIComponent(tenantId)}&id=eq.${encodeURIComponent(poolId)}&select=id,quantity_available&limit=1`,
-    { key: serviceRoleKey },
-  )) as Array<{ id: string; quantity_available: number }>;
+async function getPoolLevelById(tenantId: string, poolId: string): Promise<{ id: string; quantityAvailable: number } | null> {
+  const rows = await getDb().select<{ id: string; quantity_available: number }>('shared_inventory_pools', {
+    where: { tenant_id: eq(tenantId), id: eq(poolId) },
+    select: ['id', 'quantity_available'],
+    limit: 1,
+  });
   const row = rows?.[0];
   return row ? { id: row.id, quantityAvailable: Number(row.quantity_available) || 0 } : null;
 }
@@ -312,16 +313,18 @@ async function decrementPoolRow(
   tenantId: string,
   pool: { id: string; quantityAvailable: number },
   qty: number,
-  serviceRoleKey: string,
 ): Promise<PoolDecrementResult> {
   if (pool.quantityAvailable < qty) {
     return { ok: false, reason: 'insufficient_stock', remaining: pool.quantityAvailable };
   }
   const nextAvailable = pool.quantityAvailable - qty;
-  const updated = (await supabaseRestFetch(
-    `/shared_inventory_pools?id=eq.${encodeURIComponent(pool.id)}&quantity_available=eq.${pool.quantityAvailable}`,
-    { key: serviceRoleKey, method: 'PATCH', body: { quantity_available: nextAvailable }, prefer: 'return=representation' },
-  )) as Array<{ quantity_available: number }>;
+  // Compare-and-swap: quantity_available must STILL be what we read, or a
+  // concurrent draw already took the stock.
+  const updated = await getDb().update<{ quantity_available: number }>(
+    'shared_inventory_pools',
+    { where: { id: eq(pool.id), quantity_available: eq(pool.quantityAvailable) } },
+    { quantity_available: nextAvailable },
+  );
   if (!Array.isArray(updated) || updated.length === 0) {
     return { ok: false, reason: 'insufficient_stock', remaining: pool.quantityAvailable };
   }
@@ -337,12 +340,11 @@ export async function decrementSharedPool(tenantId: string, slug: string, quanti
   const qty = Math.max(1, Math.floor(quantity) || 0);
   const redis = createRedisClient();
   if (!redis) return { ok: false, reason: 'lock_contended' };
-  const { serviceRoleKey } = readSupabaseEnv();
 
   const lockResult = await withRedisLock(redis, `shared-pool:pg:${tenantId}:${slug}`, async (): Promise<PoolDecrementResult> => {
-    const current = await getPoolLevel(tenantId, slug, serviceRoleKey);
+    const current = await getPoolLevel(tenantId, slug);
     if (!current) return { ok: false, reason: 'no_pool' };
-    return decrementPoolRow(tenantId, current, qty, serviceRoleKey);
+    return decrementPoolRow(tenantId, current, qty);
   });
 
   if (!lockResult.ok) return { ok: false, reason: 'lock_contended' };
@@ -358,12 +360,11 @@ export async function decrementSharedPoolById(tenantId: string, poolId: string, 
   const qty = Math.max(1, Math.floor(quantity) || 0);
   const redis = createRedisClient();
   if (!redis) return { ok: false, reason: 'lock_contended' };
-  const { serviceRoleKey } = readSupabaseEnv();
 
   const lockResult = await withRedisLock(redis, `shared-pool:pg:id:${tenantId}:${poolId}`, async (): Promise<PoolDecrementResult> => {
-    const current = await getPoolLevelById(tenantId, poolId, serviceRoleKey);
+    const current = await getPoolLevelById(tenantId, poolId);
     if (!current) return { ok: false, reason: 'no_pool' };
-    return decrementPoolRow(tenantId, current, qty, serviceRoleKey);
+    return decrementPoolRow(tenantId, current, qty);
   });
 
   if (!lockResult.ok) return { ok: false, reason: 'lock_contended' };
@@ -378,26 +379,26 @@ export async function decrementSharedPoolById(tenantId: string, poolId: string, 
 export async function restockSharedPoolById(tenantId: string, poolId: string, quantity: number): Promise<void> {
   assertSupabase();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const { serviceRoleKey } = readSupabaseEnv();
-  const current = await getPoolLevelById(tenantId, poolId, serviceRoleKey);
+  const current = await getPoolLevelById(tenantId, poolId);
   if (!current) return;
-  await supabaseRestFetch(`/shared_inventory_pools?id=eq.${encodeURIComponent(poolId)}`, {
-    key: serviceRoleKey,
-    method: 'PATCH',
-    body: { quantity_available: current.quantityAvailable + qty },
-  });
+  // returning: 'default' — the legacy PATCH sent no Prefer header.
+  await getDb().update(
+    'shared_inventory_pools',
+    { where: { id: eq(poolId) } },
+    { quantity_available: current.quantityAvailable + qty },
+    { returning: 'default' },
+  );
 }
 
 // ── Waitlist ──────────────────────────────────────────────────────────────────
 
 export async function addToWaitlist(tenantId: string, variantId: string, email: string): Promise<{ ok: boolean; alreadyWaiting?: boolean }> {
   assertSupabase();
-  const { serviceRoleKey } = readSupabaseEnv();
   try {
-    await supabaseRestFetch('/waitlist_entries', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: { tenant_id: tenantId, variant_id: variantId, email: String(email || '').trim().toLowerCase() },
+    await getDb().insert('waitlist_entries', {
+      tenant_id: tenantId,
+      variant_id: variantId,
+      email: String(email || '').trim().toLowerCase(),
     });
     return { ok: true };
   } catch (err) {

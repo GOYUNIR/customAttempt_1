@@ -16,7 +16,8 @@
     "simulate:concurrency": "tsx scripts/simulate-concurrency.ts",
     "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts",
     "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts",
-    "verify:cloudflare-sync": "tsx scripts/verify-cloudflare-domain-sync.ts"
+    "verify:cloudflare-sync": "tsx scripts/verify-cloudflare-domain-sync.ts",
+    "dryrun:raffle": "tsx scripts/dry-run-raffle-draw.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",
