@@ -3,7 +3,6 @@ import {
   createKvClient,
   loadProducts,
   defaultStripePriceId,
-  PRODUCTS_KEY,
   STORE_CONFIG_KEY,
   safeParseKvItem,
   unarchiveProductFromCatalog,
@@ -116,25 +115,25 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
   // read path can resolve state from a single field (and the two never drift).
   product.status = statusFromLegacy(product);
 
-  // Products live ONLY in store:products. No mirror hashes to maintain —
-  // active/archived/upcoming are derived by filtering at read time.
-  await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
-
-  // PHASE G — Postgres is becoming the authoritative catalog store. The full
-  // product (00019's real columns + config jsonb) is written through the
-  // DbClient port here.
+  // H3 — THE BRIDGE IS GONE. Postgres is the only catalog store; the
+  // `redis.hset(PRODUCTS_KEY, ...)` that stood here is deleted. The bridge's
+  // own end condition (flag on + round trip verified live) is met, and
+  // loadProducts reads Postgres for all 26 of its callers.
   //
-  // TRANSITIONAL: the Redis write above stays until USE_POSTGRES_PRIMARY is
-  // flipped, because the storefront still reads Redis until then — removing it
-  // first would leave new products invisible. This is a BRIDGE with a defined
-  // end, not a permanent dual-write: once the flag is on and the round trip is
-  // verified live, the Redis write is deleted. Never allowed to fail the save.
-  try {
-    const tenantId = await ensureDefaultTenant();
-    const result = await writeProductToPostgres(tenantId, product);
-    if (!result.ok && result.error !== 'not_configured') {
-      console.error('[admin/products] Postgres catalog write failed', result.error);
-    }
+  // THE WRITE IS NOW LOAD-BEARING, so it can no longer swallow failures.
+  // While the KV write existed, a failed Postgres write was invisible and
+  // harmless. Without it, the same swallowed error means the merchant sees
+  // "saved" and nothing persisted -- the SEV-2 shape on the write path. So a
+  // failure THROWS. POST has no outer catch, so Next converts that into a 500:
+  // an ugly error is the correct outcome when a save did not happen, and is
+  // strictly better than a cheerful { success: true } over lost work.
+  const tenantId = await ensureDefaultTenant();
+  const result = await writeProductToPostgres(tenantId, product);
+  if (!result.ok) {
+    console.error('[admin/products] catalog write FAILED — refusing to report success', result.error);
+    throw new Error('Could not save the product to the catalog database: ' + (result.error || 'unknown error'));
+  }
+  {
     // Two price categories sharing a size collapse into one variant row
     // (unique product_id, option_label) and the last one silently wins.
     // The merchant sees a successful save and one of their tiers is gone.
@@ -147,15 +146,15 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
         result.duplicateLabels.map((d) => d.label + ' x' + d.count).join(', '),
       );
     }
-  } catch (err) {
-    console.error('[admin/products] Postgres catalog write threw', (err as Error)?.message || err);
   }
 
   await syncCatalogConfigForProduct(redis, product, options);
 }
 
 async function deleteProduct(redis: any, id: string) {
-  const rawProduct = await redis.hget(PRODUCTS_KEY, id);
+  // Read through loadProducts (Postgres since H3) rather than the KV blob, so
+  // the product being deleted is the one the storefront actually serves.
+  const rawProduct = (await loadProducts(redis))[id] || null;
   // Upstash REST Redis auto-deserializes stored JSON, so `hget` can return an
   // ALREADY-PARSED OBJECT (not a string). Reading it through safeParseKvItem
   // (which accepts both) guarantees the catalog-preview cleanup below actually
@@ -163,14 +162,17 @@ async function deleteProduct(redis: any, id: string) {
   // it on the default provider and a deleted product kept rendering in the
   // catalog's Upcoming/Past Archives sections forever.
   const deletedProduct = safeParseKvItem<any>(rawProduct);
-  await redis.hdel(PRODUCTS_KEY, id);
 
-  // Mirror the delete into Postgres (Phase G bridge — see saveProduct).
-  try {
-    const slug = String(deletedProduct?.slug || '').trim();
-    if (slug) await deleteProductFromPostgres(await ensureDefaultTenant(), slug);
-  } catch (err) {
-    console.error('[admin/products] Postgres catalog delete failed', (err as Error)?.message || err);
+  // H3 — Postgres is the only catalog store, so this delete is load-bearing
+  // rather than a mirror, and a failure must not read as success. A product
+  // the merchant believes is deleted but which still sells is worse than an
+  // error message.
+  const slug = String(deletedProduct?.slug || '').trim();
+  if (!slug) throw new Error('Cannot delete a product with no slug: ' + id);
+  const removed = await deleteProductFromPostgres(await ensureDefaultTenant(), slug);
+  if (!removed) {
+    console.error('[admin/products] catalog delete FAILED — refusing to report success', slug);
+    throw new Error('Could not delete the product from the catalog database: ' + slug);
   }
 
   try {
@@ -362,7 +364,8 @@ export async function POST(request: Request) {
     // [{ id, sortOrder }] where sortOrder is already sequential (0, 1, 2, …).
     const orders = Array.isArray(body.orders) ? body.orders : [];
     if (orders.length === 0) return NextResponse.json({ error: 'No orders provided' }, { status: 400 });
-    const writes: Record<string, string> = {};
+    const changed: any[] = [];
+    const tenantId = await ensureDefaultTenant();
     let reordered = 0;
     for (const item of orders) {
       const id = String(item?.id || '');
@@ -373,10 +376,21 @@ export async function POST(request: Request) {
       product.sortOrder = next;
       product.updatedAt = new Date().toISOString();
       product.status = statusFromLegacy(product);
-      writes[id] = JSON.stringify(product);
+      changed.push(product);
       reordered += 1;
     }
-    if (reordered > 0) await redis.hset(PRODUCTS_KEY, writes);
+    // H3: sortOrder is a real column, so re-indexing is N writes through the
+    // port rather than one blob rewrite. Losing atomicity here is acceptable
+    // and was never real anyway -- the old "atomic" hset rewrote whole product
+    // JSON blobs, so a concurrent edit during a reorder silently lost that
+    // edit. Per-product writes touch only the reordered rows.
+    for (const product of changed) {
+      const result = await writeProductToPostgres(tenantId, product);
+      if (!result.ok) {
+        console.error('[admin/products] reorder write FAILED', product.slug, result.error);
+        throw new Error('Could not re-index the catalog: ' + (result.error || 'unknown error'));
+      }
+    }
     try {
       await appendAudit(redis, { action: 'PRODUCTS_REORDERED', detail: `${reordered} products re-indexed`, actor: 'admin' });
     } catch {}
