@@ -1045,15 +1045,60 @@ export function getFallbackStoreProducts(): Record<string, any> {
   }, {});
 }
 
-export async function loadProducts(redis: any): Promise<Record<string, any>> {
-  // Return an empty map when Redis is missing or has no products yet — the
-  // storefront should show zero items until a seed is generated in Redis via
-  // the admin portal (Seed Defaults / Add Product). No config fallback catalog
-  // is served on the public site.
-  if (!redis) return {};
+/**
+ * The catalog, keyed by product id.
+ *
+ * H3: the SOURCE is now Postgres, with the KV blob as a temporary fallback.
+ * This one function is called by 26 files -- every checkout path, both draw
+ * engines, trigger-drop, the admin product list -- so switching it here
+ * migrates all of them at once, and re-pointing them individually would have
+ * been 26 chances to introduce a divergence.
+ *
+ * Only the SOURCE changes. The normalization below is untouched and runs
+ * identically over either source, which is what makes the swap safe: a
+ * difference can only come from the data, never from two implementations of
+ * the same reshaping. scripts/verify-loadproducts-parity.ts compares the two
+ * sources field by field over the real catalog.
+ *
+ * `opts.source` forces one side; it exists for that parity harness and for
+ * the backfill, not for request paths.
+ */
+export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgres' }): Promise<Record<string, any>> {
+  const forced = opts?.source;
+  let raw: Record<string, any> | null = null;
+
+  if (forced !== 'kv') {
+    try {
+      const [{ readProductsFromPostgres }, { ensureDefaultTenant }] = await Promise.all([
+        import('@/lib/postgres-catalog-read'),
+        import('@/lib/tenant-context'),
+      ]);
+      const pg = await readProductsFromPostgres(await ensureDefaultTenant());
+      if (pg) {
+        raw = {};
+        for (const item of pg.productsRaw) raw[String(item.id)] = item;
+      }
+    } catch (err) {
+      console.error('[loadProducts] Postgres read threw', (err as Error)?.message || err);
+      raw = null;
+    }
+  }
+
+  if (raw === null) {
+    if (forced === 'postgres') return {};
+    // TEMPORARY, and deliberately LOUD. Falling back to the KV blob without
+    // saying so would be the SEV-2 shape exactly: a stale catalog serving
+    // successfully while Postgres is the supposed source of truth. This whole
+    // branch is deleted once the KV catalog is removed.
+    if (forced !== 'kv') {
+      console.warn('[loadProducts] Postgres returned no catalog — falling back to the KV blob. ' +
+        'If USE_POSTGRES_PRIMARY is on, this is a real problem, not a quiet default.');
+    }
+    if (!redis) return {};
+    raw = await redis.hgetall(PRODUCTS_KEY);
+  }
 
   try {
-    const raw = await redis.hgetall(PRODUCTS_KEY);
     if (!raw || Object.keys(raw).length === 0) return {};
 
     const out: Record<string, any> = {};

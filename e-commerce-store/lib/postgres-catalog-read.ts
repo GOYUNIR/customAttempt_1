@@ -95,7 +95,20 @@ type PgVariant = {
 type PgInventoryRow = { variant_id: string; quantity_available: number };
 type PgPool = { id: string; slug: string; quantity_available: number };
 
-export async function readCatalogFromPostgres(tenantId: string): Promise<PostgresCatalogRead | null> {
+/**
+ * Products + live inventory ONLY, with no config read and therefore no
+ * config guard. Split out of readCatalogFromPostgres so the admin catalog,
+ * checkout and both draw engines can read the catalog through the same
+ * reconstruction the storefront uses, without being refused when a tenant has
+ * no store-config row -- refusing to LIST PRODUCTS because branding is
+ * missing would be its own bug.
+ *
+ * ONE implementation, two callers. Re-deriving this mapping for the admin
+ * side is exactly how the storefront and admin drift apart.
+ */
+export async function readProductsFromPostgres(
+  tenantId: string,
+): Promise<{ productsRaw: Array<Record<string, unknown>>; liveStates: LiveStateRecord[] } | null> {
   if (!isPostgresPrimaryEnabled()) return null;
   if (!getDb().configured) return null;
 
@@ -254,6 +267,24 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
         inventorySyncSlug: pool.slug,
       });
     }
+
+    return { productsRaw, liveStates };
+  } catch (err) {
+    console.error('[postgres-catalog-read] product read failed', (err as Error)?.message || err);
+    return null;
+  }
+}
+
+export async function readCatalogFromPostgres(tenantId: string): Promise<PostgresCatalogRead | null> {
+  if (!isPostgresPrimaryEnabled()) return null;
+  if (!getDb().configured) return null;
+
+  try {
+    const db = getDb();
+    const base = await readProductsFromPostgres(tenantId);
+    if (!base) return null;
+    const { productsRaw, liveStates } = base;
+    const products = productsRaw; // for the guard message below
 
     // SEV-2 GUARD. This read used to end in `.catch(() => [])` with the
     // comment "a missing row just means no overrides" -- and that sentence was

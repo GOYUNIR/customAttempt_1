@@ -98,6 +98,14 @@ async function main() {
 
   const source = fullProduct();
   const tenantId = '00000000-0000-4000-8000-0000000000aa';
+
+  // A tenant_store_config row must exist: since the SEV-2 fix,
+  // readCatalogFromPostgres REFUSES a tenant that has products but no config
+  // row rather than silently serving defaults. Production has one; this
+  // fixture needs one too, or it tests a state that can no longer occur.
+  db.tables['tenant_store_config'] = [
+    { tenant_id: tenantId, config: {}, schedule_override: {}, social_override: {} },
+  ];
   const written = await writeProductToPostgres(tenantId, source);
   check(written.ok === true, 'product written through the port', written.error || '');
   check(written.variantCount === 2, 'both variants written', String(written.variantCount));
