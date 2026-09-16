@@ -48,7 +48,8 @@ loadDotEnvLocal();
 
 import { supabaseServiceConfigured } from '@/services/config/supabase-client';
 import { createRedisClient } from '@/lib/server-config';
-import { getDbAdapter } from '@/lib/adapters/db';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { decrementInventory } from '@/lib/inventory';
 import { createRaffleEntry } from '@/lib/raffle';
@@ -87,7 +88,7 @@ async function main() {
     process.exit(1);
   }
 
-  const db = getDbAdapter();
+  const db = getDb();
   const tenantId = await ensureDefaultTenant();
   const tag = `concurrency-test-${Date.now()}`;
 
@@ -141,10 +142,11 @@ async function main() {
     console.log(`  ok=${tally.ok} insufficient_stock=${tally.insufficient_stock} lock_contended=${tally.lock_contended} no_inventory_row=${tally.no_inventory_row} threw=${tally.threw}`);
     console.log(`  latency ms — p50=${percentile(latencies, 50)} p95=${percentile(latencies, 95)} p99=${percentile(latencies, 99)} max=${latencies[latencies.length - 1] ?? 0}`);
 
-    const [finalInventory] = await db.select<{ quantity_available: number }>(
-      'inventory_levels',
-      `variant_id=eq.${variant.id}&select=quantity_available&limit=1`,
-    );
+    const [finalInventory] = await db.select<{ quantity_available: number }>('inventory_levels', {
+      where: { variant_id: eq(variant.id) },
+      select: ['quantity_available'],
+      limit: 1,
+    });
     const expectedRemaining = stock - tally.ok;
     console.log(`  Postgres remaining=${finalInventory.quantity_available} expected=${expectedRemaining}`);
 
@@ -185,10 +187,10 @@ async function main() {
       console.log('  ✔ Dedup holds — exactly one entry accepted under concurrent load.');
     }
 
-    await db.remove('raffle_entries', `variant_id=eq.${variant.id}`);
+    await db.remove('raffle_entries', { where: { variant_id: eq(variant.id) } });
   } finally {
     console.log(`\nCleaning up seeded test product "${tag}" (cascades to its variant + inventory row)…`);
-    await db.remove('products', `id=eq.${product.id}`);
+    await db.remove('products', { where: { id: eq(product.id) } });
   }
 
   console.log(exitCode === 0 ? '\n✔ Concurrency test passed.\n' : '\n✖ Concurrency test FAILED.\n');

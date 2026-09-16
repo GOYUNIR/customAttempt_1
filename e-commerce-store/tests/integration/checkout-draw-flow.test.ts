@@ -15,7 +15,7 @@
  * So instead of faking that limitation away, this test exercises every
  * piece of the flow that genuinely CAN run under `node --test` — real,
  * unmodified imports, not reimplementations:
- *   - `lib/adapters/db.ts`'s `DbAdapter` (mocked `fetch`) issues the EXACT
+ *   - `lib/db/client.ts`s `DbClient` (mocked `fetch`) issues the EXACT
  *     same PostgREST request shapes (`select=`/`quantity_available=eq.…`
  *     optimistic-concurrency PATCH/POST bodies) that `lib/inventory.ts` /
  *     `lib/raffle.ts` build internally — proving the data CONTRACT those
@@ -29,7 +29,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDbAdapter } from '../../lib/adapters/db.ts';
+import { getDb } from '../../lib/db/client.ts';
+import { eq, inList } from '../../lib/db/query.ts';
 import { selectWinners } from '../../lib/raffle-draw.ts';
 import { actorHasSalesAccess } from '../../lib/admin-actor.ts';
 
@@ -66,7 +67,7 @@ function installFetchMock(handler: (call: Call, index: number) => { ok: boolean;
 
 test('end-to-end: catalog load -> checkout decrement -> raffle dual-write -> draw selection -> notify gate', async () => {
   await withPostgresEnv(async () => {
-    const db = getDbAdapter();
+    const db = getDb();
 
     // ── 1. Catalog load: products + variants + inventory (same query shape
     // lib/postgres-catalog-read.ts's readCatalogFromPostgres builds). ──────
@@ -79,9 +80,18 @@ test('end-to-end: catalog load -> checkout decrement -> raffle dual-write -> dra
       }
       return { ok: true, status: 200, text: async () => JSON.stringify([{ variant_id: 'variant-1', quantity_available: 3 }]) };
     });
-    const products = await db.select<{ id: string; name: string }>('products', "tenant_id=eq.t1&status=eq.live&select=id,external_id,name,slug,description");
-    const variants = await db.select<{ id: string; option_label: string }>('product_variants', 'product_id=in.(prod-1)&select=id,product_id,option_label,price_cents,checkout_mode,shared_pool_id');
-    const inventory = await db.select<{ variant_id: string; quantity_available: number }>('inventory_levels', 'variant_id=in.(variant-1)&select=variant_id,quantity_available');
+    const products = await db.select<{ id: string; name: string }>('products', {
+      where: { tenant_id: eq('t1'), status: eq('live') },
+      select: ['id', 'external_id', 'name', 'slug', 'description'],
+    });
+    const variants = await db.select<{ id: string; option_label: string }>('product_variants', {
+      where: { product_id: inList(['prod-1']) },
+      select: ['id', 'product_id', 'option_label', 'price_cents', 'checkout_mode', 'shared_pool_id'],
+    });
+    const inventory = await db.select<{ variant_id: string; quantity_available: number }>('inventory_levels', {
+      where: { variant_id: inList(['variant-1']) },
+      select: ['variant_id', 'quantity_available'],
+    });
     restoreCatalog();
 
     assert.equal(products.length, 1);
@@ -99,8 +109,9 @@ test('end-to-end: catalog load -> checkout decrement -> raffle dual-write -> dra
         ? { ok: true, status: 200, text: async () => JSON.stringify([{ quantity_available: 2 }]) } // first decrement wins
         : { ok: true, status: 200, text: async () => JSON.stringify([]) }, // second (concurrent) decrement loses the CAS
     );
-    const firstDecrement = await db.update<{ quantity_available: number }>('inventory_levels', 'variant_id=eq.variant-1&quantity_available=eq.3', { quantity_available: 2 });
-    const secondDecrement = await db.update<{ quantity_available: number }>('inventory_levels', 'variant_id=eq.variant-1&quantity_available=eq.3', { quantity_available: 2 });
+    const casSpec = { where: { variant_id: eq('variant-1'), quantity_available: eq(3) } };
+    const firstDecrement = await db.update<{ quantity_available: number }>('inventory_levels', casSpec, { quantity_available: 2 });
+    const secondDecrement = await db.update<{ quantity_available: number }>('inventory_levels', casSpec, { quantity_available: 2 });
     restoreDecrement();
 
     assert.equal(firstDecrement.length, 1, 'the first concurrent decrement succeeds');
