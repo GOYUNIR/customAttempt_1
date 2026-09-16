@@ -665,3 +665,39 @@ NOT a CommerceMode. Either promote it to a mode or explain why it is not one.
 **Honest current state:** the vocabulary and storage shape exist and are
 reasonable; the behaviour does not. That phase extends a schema and a type
 system, and builds engines fresh.
+
+### DEFERRED-4 — Remove the Redis catalog write bridge
+
+**Status:** deferred (2026-09-16). The bridge STAYS until every reader is
+migrated. Do not delete the Redis write before then.
+
+**What.** `app/api/admin/products` writes the catalog to BOTH Redis and
+Postgres. Phase G made Postgres authoritative for the storefront read
+(`/api/store`), and the bridge was described as scaffolding with a simple end
+condition — "flip verified live".
+
+**That framing was wrong.** The blast radius was scoped against `/api/store`
+only. A survey found **39 files reading the Redis catalog** (`PRODUCTS_KEY` /
+`loadProducts`), of which exactly ONE was migrated. Still Redis-only:
+
+  - `app/api/admin/products` GET — the admin panel's own product list
+  - `lib/auto-draw.ts`, `lib/draw.ts` — the draw engines
+  - `app/api/checkout/direct`, `checkout/cart`, `stripe/webhook` — MONEY PATH
+  - `app/media/[...parts]` — serves base64 images out of the product record
+  - `app/api/catalog/status` — the catalog page's Upcoming/Archive sections
+  - ~30 more admin and account routes
+
+So the real state is: **Postgres is authoritative for the storefront catalog
+read; Redis remains authoritative for everything else.** The bridge is not
+scaffolding — it is what keeps those 38 readers correct. Removing it first
+would silently stale the admin product list and feed checkout stale prices.
+
+**Condition to proceed:** migrate the readers to the DbClient port /
+readCatalogFromPostgres, money-path LAST (checkout, draw engines) with the
+same dry-run discipline used for lib/raffle.ts. Only once every reader is
+confirmed migrated does the Redis write come out.
+
+**Why it is acceptable meanwhile:** dual-write is not the end state, but it is
+currently correct — both stores are written on every save. The failure mode it
+guards against (one store going stale) is exactly what premature removal would
+cause.

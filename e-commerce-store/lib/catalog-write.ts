@@ -63,8 +63,17 @@ function statusFromFlags(product: Record<string, unknown>): 'draft' | 'live' | '
   return 'draft';
 }
 
-function normalizeMode(value: unknown): 'RAFFLE' | 'FCFS' {
-  return String(value || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE';
+/**
+ * LOWERCASE, matching the database. 00012 established
+ * ('fcfs','raffle','waitlist') on product_variants and 00020 aligned products
+ * to it. Writing 'RAFFLE' violates the CHECK constraint (23514) — which a fake
+ * PostgREST will not catch, because fixtures do not enforce constraints.
+ */
+function normalizeMode(value: unknown): 'fcfs' | 'raffle' | 'waitlist' {
+  const v = String(value || '').toLowerCase();
+  if (v === 'fcfs') return 'fcfs';
+  if (v === 'waitlist') return 'waitlist';
+  return 'raffle';
 }
 
 /**

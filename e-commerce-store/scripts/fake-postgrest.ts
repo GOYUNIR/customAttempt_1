@@ -21,6 +21,44 @@ export interface FakeDb {
   close(): void;
 }
 
+/**
+ * CHECK constraints the real database enforces.
+ *
+ * A fixture that accepts anything a real constraint would reject is worse than
+ * no fixture: it turns a production 23514 into a passing local test. This cost
+ * a failed production write during Phase G — catalog-write.ts emitted
+ * 'RAFFLE' where product_variants.checkout_mode only permits lowercase, and
+ * the local round trip passed 55/55 regardless.
+ *
+ * Mirrors migrations 00009 (status), 00012 + 00020 (checkout_mode).
+ */
+const CHECK_CONSTRAINTS: Record<string, Record<string, readonly string[]>> = {
+  products: {
+    status: ['draft', 'live', 'archived'],
+    checkout_mode: ['fcfs', 'raffle', 'waitlist'],
+  },
+  product_variants: {
+    checkout_mode: ['fcfs', 'raffle', 'waitlist'],
+  },
+  orders: {
+    checkout_mode: ['fcfs', 'raffle', 'waitlist', 'rfq_quote'],
+  },
+};
+
+/** Returns an error message when a row violates a known CHECK, else null. */
+function checkViolation(table: string, row: Row): string | null {
+  const rules = CHECK_CONSTRAINTS[table];
+  if (!rules) return null;
+  for (const [column, allowed] of Object.entries(rules)) {
+    const value = row[column];
+    if (value === undefined || value === null) continue;
+    if (!allowed.includes(String(value))) {
+      return `new row for relation "${table}" violates check constraint "${table}_${column}_check" (got ${JSON.stringify(value)}, allowed: ${allowed.join(', ')})`;
+    }
+  }
+  return null;
+}
+
 let idCounter = 0;
 function newId(): string {
   idCounter += 1;
@@ -113,6 +151,10 @@ export async function startFakePostgrest(preferredPort = 0): Promise<FakeDb> {
         const onConflict = (params.get('on_conflict') || '').split(',').map((c) => c.trim()).filter(Boolean);
         const written: Row[] = [];
         for (const row of incoming) {
+          const violation = checkViolation(table, row);
+          if (violation) {
+            return respond({ code: '23514', message: violation, details: JSON.stringify(row).slice(0, 200) }, 400);
+          }
           let existing: Row | undefined;
           if (onConflict.length > 0) {
             existing = tables[table].find((r) => onConflict.every((c) => String(r[c]) === String(row[c])));
@@ -148,6 +190,8 @@ export async function startFakePostgrest(preferredPort = 0): Promise<FakeDb> {
       if (limit) rows = rows.slice(0, Number(limit));
 
       if (req.method === 'PATCH') {
+        const violation = checkViolation(table, body as Row);
+        if (violation) return respond({ code: '23514', message: violation }, 400);
         for (const row of rows) Object.assign(row, body);
         return respond(rows);
       }
