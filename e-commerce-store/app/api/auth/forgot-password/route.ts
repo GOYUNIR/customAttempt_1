@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, passwordResetKey } from '@/lib/server-config';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail } from '@/lib/validation';
@@ -31,13 +31,13 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('auth_forgot_password', request, 10, 60);
     if (limited) return limited;
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
     const raw = await redis.hgetall(USERS_KEY);
     let user: any = null;
     for (const value of Object.values(raw || {})) {
-      const parsed = safeParseRedisItem<any>(value);
+      const parsed = safeParseKvItem<any>(value);
       if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail) {
         user = parsed;
         break;

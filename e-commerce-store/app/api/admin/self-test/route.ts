@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   loadProducts,
-  safeParseRedisItem,
+  safeParseKvItem,
   PROMO_CODES_KEY,
   POOL_KEY_PREFIX,
   STORE_CONFIG_KEY,
@@ -190,7 +190,7 @@ export async function GET(request: Request) {
 
   // Redis + Stripe connectivity
   // ------------------------------------------------------------------
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const stripe = await resolveStripeClient();
   push('Redis client', Boolean(redis), redis ? 'ok' : 'failed');
 
@@ -220,7 +220,7 @@ export async function GET(request: Request) {
     let configReadError: string | null = null;
     try {
       const configRaw = await redis.get(STORE_CONFIG_KEY);
-      config = safeParseRedisItem<any>(configRaw);
+      config = safeParseKvItem<any>(configRaw);
     } catch (e: any) {
       configReadError = e?.message || 'redis read failed';
     }

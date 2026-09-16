@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'crypto';
-import { createRedisClient, safeParseRedisItem, PRODUCTS_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, PRODUCTS_KEY } from '@/lib/server-config';
 import { AiFactory } from '@/services/ai';
 import {
   buildAnimationPrompt,
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
   const limited = await rateLimitedResponse('ai_hero_animation', request, 60, 60);
   if (limited) return limited;
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     return NextResponse.json({ ok: true, result: fallbackAnimation('drift'), cached: false });
   }
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     const products: any[] = [];
     if (raw) {
       for (const value of Object.values(raw)) {
-        const p = safeParseRedisItem<any>(value);
+        const p = safeParseKvItem<any>(value);
         if (p) products.push(p);
       }
     }
@@ -88,7 +88,7 @@ export async function GET(request: Request) {
 
     const cachedRaw = await redis.get(cacheKey).catch(() => null);
     if (cachedRaw) {
-      const cached = safeParseRedisItem<{ imageFingerprint?: string; result?: AnimationResult }>(cachedRaw);
+      const cached = safeParseKvItem<{ imageFingerprint?: string; result?: AnimationResult }>(cachedRaw);
       if (cached && cached.imageFingerprint === imageFingerprint && cached.result) {
         return NextResponse.json({ ok: true, result: cached.result, cached: true, productId });
       }

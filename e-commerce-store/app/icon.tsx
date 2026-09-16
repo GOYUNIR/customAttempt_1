@@ -1,5 +1,5 @@
 import { ImageResponse } from 'next/og';
-import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { resolveBrandImageForSatori } from '@/lib/brand-image';
 import { safeCssColor } from '@/lib/share-card-config';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
@@ -11,7 +11,7 @@ export const contentType = 'image/png';
 
 export default async function Icon() {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const config = await loadStoreConfigCached(redis);
     const branding = config.branding || {};
     // ImageResponse requires ABSOLUTE image URLs AND fetches remote images

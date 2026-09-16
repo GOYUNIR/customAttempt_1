@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getGlobalScheduleOverride, getAllProductOverrides } from '@/lib/server-config';
+import { createKvClient, getGlobalScheduleOverride, getAllProductOverrides } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const payload = await withTtlCache('config:public:v1', 30_000, async () => {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return { globalScheduleOverride: null, productOverrides: {} };
     }

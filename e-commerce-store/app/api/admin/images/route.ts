@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, PRODUCTS_KEY} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, PRODUCTS_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
@@ -15,12 +15,12 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const productId = url.searchParams.get('productId');
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ images: [] });
 
     if (productId) {
       const raw = await redis.hget(PRODUCTS_KEY, productId);
-      const product = safeParseRedisItem<any>(raw);
+      const product = safeParseKvItem<any>(raw);
       const images = Array.isArray(product?.images) ? product.images : [];
       return NextResponse.json({ images });
     }
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     const imagesByProduct: Record<string, string[]> = {};
     if (raw) {
       for (const [key, value] of Object.entries(raw)) {
-        const product = safeParseRedisItem<any>(value);
+        const product = safeParseKvItem<any>(value);
         if (product && Array.isArray(product.images)) {
           imagesByProduct[key] = product.images;
         }
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     // All image state is read/written through the product object in
     // store:products — no separate image keys to keep in sync.
     const raw = await redis.hget(PRODUCTS_KEY, productId);
-    const product = safeParseRedisItem<any>(raw);
+    const product = safeParseKvItem<any>(raw);
     const current = (Array.isArray(product?.images) ? product.images : []).filter(Boolean);
 
     if (action === 'add') {
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 
 async function updateProductImages(redis: any, productId: string, images: string[]) {
   const raw = await redis.hget(PRODUCTS_KEY, productId);
-  const product = safeParseRedisItem<any>(raw);
+  const product = safeParseKvItem<any>(raw);
   if (product) {
     const nextImages = Array.isArray(images) ? images : [];
     product.images = nextImages;
@@ -126,7 +126,7 @@ async function updateProductImages(redis: any, productId: string, images: string
 
 export async function DELETE(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const url = new URL(request.url);

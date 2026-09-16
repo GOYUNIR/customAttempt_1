@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, createRedisClient } from '@/lib/server-config';
+import { adminRequestAuthorized, createKvClient } from '@/lib/server-config';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import { getLicenseStatus, isWriteAllowed } from '@/lib/license';
 import { AiFactory } from '@/services/ai';
@@ -154,7 +154,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const storage = createRedisClient();
+  const storage = createKvClient();
   if (storage) {
     await trackUsage(storage, { prefix: ANALYTICS_USAGE_PREFIX, metric: 'ai_generations' }).catch(() => {});
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, WAITLIST_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, WAITLIST_KEY } from '@/lib/server-config';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     let body: any = {};
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     if (limited) return limited;
 
     const raw = await redis.hget(WAITLIST_KEY, email);
-    const existing = safeParseRedisItem<any>(raw) || {};
+    const existing = safeParseKvItem<any>(raw) || {};
     const sources = Array.from(new Set([...(Array.isArray(existing.sources) ? existing.sources : []), source]));
     const mergedInterests = Array.from(new Set([...(Array.isArray(existing.interests) ? existing.interests : []), ...interests]));
     const now = new Date().toISOString();

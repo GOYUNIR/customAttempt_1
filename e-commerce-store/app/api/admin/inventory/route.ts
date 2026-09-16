@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   getOrSeedLiveState,
   saveLiveState,
   loadProducts,
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline.' }, { status: 500 });
 
     const body = await request.json();

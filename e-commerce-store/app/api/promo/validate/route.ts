@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, safeParseRedisItem, trackPromoClick, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
+import { createKvClient, loadProducts, safeParseKvItem, trackPromoClick, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 import { isRateLimited } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -29,11 +29,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ valid: false, error: 'Too many requests' }, { status: 429 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ valid: false, error: 'Offline' });
 
   const raw = await redis.hget(PROMO_CODES_KEY, code);
-  const promo = safeParseRedisItem<any>(raw);
+  const promo = safeParseKvItem<any>(raw);
   if (!promo || promo.active === false) {
     return NextResponse.json({ valid: false, error: 'Invalid or inactive code' });
   }

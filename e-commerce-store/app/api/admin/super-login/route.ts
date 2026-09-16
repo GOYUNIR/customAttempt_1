@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminDevice, isSuperAdminSession } from '@/lib/admin-verify';
 import { verifySuperAdminSignIn, supabaseAuthMissingReason, supabaseServiceConfigured } from '@/services/config/supabase-client';
 import { isPlatformConfigured } from '@/services/config/platform-settings';
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid credentials or not a super-admin.' }, { status: 401 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     return NextResponse.json({ error: 'Redis offline.' }, { status: 500 });
   }

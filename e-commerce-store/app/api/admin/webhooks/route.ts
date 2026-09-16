@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { adminAuthorized, resolveAdminActor, actorHasFullAdminAccess } from '@/lib/admin-verify';
-import { safeParseRedisItem } from '@/lib/server-config';
+import { safeParseKvItem } from '@/lib/server-config';
 import { WEBHOOK_CONFIG_KEY, WEBHOOK_QUEUE_KEY } from '@/lib/redis-keys';
 import { flushWebhookQueue, WEBHOOK_EVENTS } from '@/lib/webhooks';
 
@@ -15,7 +15,7 @@ const authorized = adminAuthorized;
 
 /** Parse the stored subscribers map (event → URL). */
 function parseSubscribers(raw: unknown): Record<string, string> {
-  const parsed = safeParseRedisItem<Record<string, unknown>>(raw);
+  const parsed = safeParseKvItem<Record<string, unknown>>(raw);
   if (!parsed || typeof parsed !== 'object') return {};
   const out: Record<string, string> = {};
   for (const event of WEBHOOK_EVENTS) {
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   if (!(await authorized(request))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const storage = createRedisClient();
+  const storage = createKvClient();
   const subscribers = storage ? parseSubscribers(await storage.get(WEBHOOK_CONFIG_KEY)) : {};
   const queueLength = storage ? await storage.llen(WEBHOOK_QUEUE_KEY) : 0;
   return NextResponse.json({ ok: true, events: WEBHOOK_EVENTS, subscribers, queueLength });
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   if (!actorHasFullAdminAccess(actor)) {
     return NextResponse.json({ error: 'Not permitted for an impersonation session.' }, { status: 403 });
   }
-  const storage = createRedisClient();
+  const storage = createKvClient();
   if (!storage) {
     return NextResponse.json({ error: 'No data store configured.' }, { status: 500 });
   }

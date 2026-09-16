@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseRedisItem, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
+import { createKvClient, ARCHIVE_LEDGER_KEY, loadProducts, safeParseKvItem, PROMO_CODES_KEY, promoCreditKey, poolKey } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { sendAccountUpdateEmail, sendDeliveryIncentiveEmail } from '@/lib/email';
 import { appendAudit } from '@/app/api/admin/audit/route';
@@ -36,7 +36,7 @@ function statusMessage(shippingStatus: string, trackingNumber?: string) {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     let notified = false;
 
     for (let i = 0; i < all.length; i++) {
-      const e = safeParseRedisItem<any>(all[i]);
+      const e = safeParseKvItem<any>(all[i]);
       if (!e) continue;
       if (
         e.type === 'WINNER_CHARGED' &&
@@ -167,7 +167,7 @@ export async function POST(request: Request) {
       const pool = poolKey(variant, size);
       const items = await redis.lrange(pool, 0, -1);
       for (let i = 0; i < items.length; i++) {
-        const parsed = safeParseRedisItem<any>(items[i]);
+        const parsed = safeParseKvItem<any>(items[i]);
         if (parsed && String(parsed.email || '').toLowerCase() === email) {
           const updated = { ...parsed, shippingStatus, trackingNumber: trackingNumber || parsed.trackingNumber };
           await redis.lset(pool, i, JSON.stringify(updated));

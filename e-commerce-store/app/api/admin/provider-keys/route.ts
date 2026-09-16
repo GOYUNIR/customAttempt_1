@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, adminRequestAuthorized } from '@/lib/server-config';
+import { createKvClient, adminRequestAuthorized } from '@/lib/server-config';
 import {
   adminLoginAuthorized,
   isSuperAdminSession,
@@ -73,7 +73,7 @@ async function authorized(request: Request, password: string): Promise<boolean> 
   if (adminRequestAuthorized(request, password)) return true;
   if (await adminLoginAuthorized(request, password)) return true;
   if (await isSuperAdminSession(request)) return true;
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const token = adminDeviceTokenFromRequest(request);
   if (redis && token) {
     return await isAdminDeviceValid(redis, token).catch(() => false);
@@ -213,7 +213,7 @@ export async function POST(request: Request) {
       body.payment_provider.trim() &&
       body.payment_provider.trim() !== (existing?.payment_provider || ''));
   if (existing?.is_configured && touchesLockedPaymentField) {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const fresh = redis ? await isStepUpVerified(redis, request, password) : false;
     if (!fresh) {
       return NextResponse.json(

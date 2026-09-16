@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
+import { createKvClient, defaultStripePriceId, getLiveProductState, PRODUCTS_KEY, STORE_CONFIG_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
@@ -584,7 +584,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
     }

@@ -1,7 +1,7 @@
 import {
-  createRedisClient,
+  createKvClient,
   loadStoreConfigCached,
-  safeParseRedisItem,
+  safeParseKvItem,
   PRODUCTS_KEY,
 } from '@/lib/server-config';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
@@ -83,7 +83,7 @@ export async function GET(
     const { parts } = await ctx.params;
     if (!Array.isArray(parts) || parts.length === 0) return notFound();
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
 
     // /media/logo → the brand logo from store:config.
     if (parts[0] === 'logo') {
@@ -101,7 +101,7 @@ export async function GET(
       if (!Number.isInteger(index) || index < 0 || index > 99) return notFound();
 
       const raw = redis ? await redis.hget(PRODUCTS_KEY, productId) : null;
-      const product = raw ? safeParseRedisItem<any>(raw) : null;
+      const product = raw ? safeParseKvItem<any>(raw) : null;
       const media = decodeDataUrl(product?.images?.[index]);
       return media ? serve(media) : notFound();
     }

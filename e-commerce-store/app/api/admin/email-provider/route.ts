@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, adminRequestAuthorized } from '@/lib/server-config';
+import { createKvClient, adminRequestAuthorized } from '@/lib/server-config';
 import {
   adminLoginAuthorized,
   isSuperAdminSession,
@@ -29,7 +29,7 @@ async function authorized(request: Request, password: string): Promise<boolean> 
   // A normal verified device cookie (issued after the 2FA code) is also a valid
   // admin session — the middleware has already validated it, this is defense in
   // depth so the route can never be reached by an unauthenticated caller.
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const token = adminDeviceTokenFromRequest(request);
   if (redis && token) {
     return await isAdminDeviceValid(redis, token).catch(() => false);

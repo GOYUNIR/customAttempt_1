@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { STORED_CARTS_KEY } from '@/lib/redis-keys';
 import { readCartItemsFromPostgres } from '@/lib/postgres-read-fallback';
@@ -70,10 +70,10 @@ export async function GET(request: Request) {
       }
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ items: [] });
     const raw = await redis.hget(STORED_CARTS_KEY, user.userId);
-    const parsed = safeParseRedisItem<any>(raw);
+    const parsed = safeParseKvItem<any>(raw);
     return NextResponse.json({ items: sanitizeItems(parsed) });
   } catch {
     return NextResponse.json({ items: [] });
@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     }
     const body = await request.json().catch(() => ({}));
     const items = sanitizeItems(body?.items);
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (redis) {
       await redis.hset(STORED_CARTS_KEY, { [user.userId]: JSON.stringify(items) });
     }

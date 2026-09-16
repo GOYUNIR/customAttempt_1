@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   archiveEntry,
   cleanupMatchingIntent,
   emailBlockKey,
   cardBlockKey,
   poolStatField,
   POOL_STATS_KEY,
-  safeParseRedisItem,
+  safeParseKvItem,
   loadProducts,
   getLiveProductState,
   saveLiveState,
@@ -73,7 +73,7 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
   try {
     if (!email || Number(amountCents) <= 0) return;
     const rawConfig = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(rawConfig) || {};
+    const config = safeParseKvItem<any>(rawConfig) || {};
     const rate = Math.max(0, Number(config?.rewards?.purchasePointsPerDollar) || 10);
     if (rate <= 0) return;
     const pointsEarned = Math.floor((Number(amountCents) / 100) * rate);
@@ -81,7 +81,7 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return;
     for (const [k, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         u.rewards = Math.max(0, Number(u.rewards || 0)) + pointsEarned;
         await redis.hset(USERS_KEY, { [k]: JSON.stringify(u) });
@@ -101,7 +101,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
       }
@@ -114,7 +114,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
 }
 
 async function resolvePromo(
-  redis: NonNullable<ReturnType<typeof createRedisClient>>,
+  redis: NonNullable<ReturnType<typeof createKvClient>>,
   rawCode: string,
   email: string,
 ) {
@@ -127,7 +127,7 @@ async function resolvePromo(
 
   try {
     const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
-    const promo = safeParseRedisItem<any>(raw);
+    const promo = safeParseKvItem<any>(raw);
     if (!promo || promo.active === false) {
       console.warn('[webhook] promo not found or inactive', promoCode);
       return { appliedPromo: undefined, discountPercent: 0 };
@@ -159,7 +159,7 @@ async function resolvePromo(
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   // Resolve the Stripe client + webhook secret through the payment driver
   // engine (Setup Wizard settings → legacy env fallback).
   const [stripe, webhookSecret] = await Promise.all([resolveStripeClient(), resolvePaymentWebhookSecret()]);
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
   let refPrefix = 'GU';
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     refPrefix = normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     refPrefix = 'GU';
@@ -335,7 +335,7 @@ export async function POST(request: Request) {
         const pool = poolKey(variant, size);
         const existingEntries = await redis.lrange(pool, 0, -1);
         const activeCountForEmail = existingEntries.reduce((count: number, row: any) => {
-          const parsed = safeParseRedisItem<any>(row);
+          const parsed = safeParseKvItem<any>(row);
           if (String(parsed?.email || '').toLowerCase() === email) return count + 1;
           return count;
         }, 0);
@@ -418,7 +418,7 @@ export async function POST(request: Request) {
             try {
               await redis.sadd(promoUsedKey(appliedPromo), email);
               const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
-              const promo = safeParseRedisItem<any>(raw);
+              const promo = safeParseKvItem<any>(raw);
               if (promo) {
                 promo.uses = (promo.uses || 0) + 1;
                 await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });
@@ -435,7 +435,7 @@ export async function POST(request: Request) {
               const listPrice = category?.price;
               const userRewards = await lookupUserRewards(redis, email);
               const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
-              const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+              const storeConfig = safeParseKvItem<any>(rawStoreConfig) || {};
               const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
               const emailResult = await sendEntryConfirmedEmail({
                 to: email,
@@ -630,7 +630,7 @@ export async function POST(request: Request) {
           await redis.sadd(promoUsedKey(appliedPromo), email);
           await redis.del(promoPendingKey(appliedPromo, email));
           const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
-          const promo = safeParseRedisItem<any>(raw);
+          const promo = safeParseKvItem<any>(raw);
           if (promo) {
             promo.uses = (Number(promo.uses) || 0) + 1;
             await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });

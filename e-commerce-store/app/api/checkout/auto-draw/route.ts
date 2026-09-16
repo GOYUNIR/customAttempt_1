@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runAutoDraws } from '@/lib/auto-draw';
-import { createRedisClient, autoDrawRateLimitKey } from '@/lib/server-config';
+import { createKvClient, autoDrawRateLimitKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -36,7 +36,7 @@ function clientIp(request: Request): string {
 
 async function rateLimited(request: Request): Promise<boolean> {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return false;
     const key = autoDrawRateLimitKey(clientIp(request));
     const count = await redis.incr(key);

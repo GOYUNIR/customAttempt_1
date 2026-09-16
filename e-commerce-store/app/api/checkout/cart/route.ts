@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   loadProducts,
   getLiveProductState,
   ARCHIVE_LEDGER_KEY,
-  safeParseRedisItem,
+  safeParseKvItem,
   emailBlockKey,
   PROMO_CODES_KEY,
   promoUsedKey,
@@ -33,7 +33,7 @@ type CartInputItem = {
 async function getRefPrefix(redis: any): Promise<string> {
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     return normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     return 'GU';
@@ -62,7 +62,7 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
     const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
     let count = 0;
     for (const row of poolItems) {
-      const parsed = safeParseRedisItem<any>(row);
+      const parsed = safeParseKvItem<any>(row);
       if (parsed && String(parsed.email || '').toLowerCase() === email.toLowerCase()) count += 1;
     }
     return count;
@@ -75,7 +75,7 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
@@ -210,7 +210,7 @@ export async function POST(request: Request) {
 
       if (normalizedPromo) {
         const rawPromo = await redis.hget(PROMO_CODES_KEY, normalizedPromo);
-        const promo = safeParseRedisItem<any>(rawPromo);
+        const promo = safeParseKvItem<any>(rawPromo);
         if (!promo || promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
         }

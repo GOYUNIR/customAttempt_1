@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, sessionKey } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, sessionKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ user: null });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return unconfiguredResponse();
     }
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ user: null });
     }
 
-    const session = safeParseRedisItem<any>(sessionData);
+    const session = safeParseKvItem<any>(sessionData);
     if (!session || Date.now() > session.expiresAt) {
       await redis.del(sessionKeyName);
       return NextResponse.json({ user: null });
@@ -60,7 +60,7 @@ export async function GET(request: Request) {
     if (session.userId) {
       try {
         const rawUser = await redis.hget(USERS_KEY, session.userId);
-        const user = safeParseRedisItem<any>(rawUser);
+        const user = safeParseKvItem<any>(rawUser);
         if (user) {
           rewards = Number(user.rewards ?? rewards) || 0;
           welcomePromoCode = typeof user.welcomePromoCode === 'string' ? user.welcomePromoCode : null;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, trackPromoClick } from '@/lib/server-config';
+import { createKvClient, trackPromoClick } from '@/lib/server-config';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   try {
     const limited = await rateLimitedResponse('promo_track', request, 30, 60);
     if (limited) return limited;
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ ok: false });
     let body: any = {};
     try {

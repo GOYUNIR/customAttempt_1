@@ -3,7 +3,8 @@
  *
  * The provider is chosen ONCE per process by `STORAGE_PROVIDER`:
  *   - `supabase` / unset    → Supabase (the DEFAULT primary store — `store_kv` +
- *     `global_platform_settings`); falls back to Redis when Supabase env is absent.
+ *     `global_platform_settings`). Unconfigured means UNAVAILABLE, never a
+ *     silent switch to another store.
  *   - `cloudflare-kv`       → Workers KV adapter (zero third-party storage;
  *     see the concurrency caveats in cloudflare-kv.ts before routing
  *     payment/raffle writes at it).
@@ -11,7 +12,7 @@
  *     Vercel, Netlify, Cloudflare via Upstash's Marketplace integration, or any
  *     Node host).
  *
- * Every route reaches this through `createRedisClient()` in
+ * Every route reaches this through `createKvClient()` in
  * `lib/server-config.ts`, so swapping the backend is a one-line env change —
  * no code changes needed anywhere else.
  */
@@ -30,15 +31,30 @@ import {
 export * from './types';
 export { ReplicatedStorageClient } from './replicated';
 
-/** Instantiate ONE provider. `cloudflare-kv` never returns null (it falls back
- *  to an in-memory store for local dev); `supabase` falls back to Upstash when
- *  Supabase is not configured; `upstash` returns null when unconfigured. */
+/** Instantiate ONE provider, or null. NEVER a different provider than the one
+ *  selected -- see the fail-closed note below. `cloudflare-kv` never returns
+ *  null (it falls back to an in-memory store for local dev); `supabase` and
+ *  `upstash` return null when unconfigured. */
 function createSingleClient(provider: StorageProvider): StorageClient | null {
   if (provider === 'supabase') {
+    // NO FALLBACK. This used to drop to Upstash when Supabase was selected but
+    // unconfigured, which meant a missing or mistyped SUPABASE_URL silently
+    // routed every write to a DIFFERENT datastore instead of failing -- the
+    // store would look healthy while the real database went stale. Any machine
+    // holding both sets of credentials (a dev box, a half-migrated deploy)
+    // could diverge without a single error.
+    //
+    // Selecting a provider now means that provider or nothing. Callers already
+    // treat a null client as "storage unavailable" and answer 503, which is
+    // the correct, visible failure for a misconfiguration.
     const supabase = createSupabaseClient();
-    if (supabase) return supabase;
-    // Supabase selected but not actually configured → fall back to Redis.
-    return createUpstashClient();
+    if (!supabase) {
+      console.error(
+        '[storage] STORAGE_PROVIDER=supabase but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are missing. ' +
+          'Refusing to fall back to another store; storage is unavailable until this is fixed.',
+      );
+    }
+    return supabase;
   }
   if (provider === 'cloudflare-kv') {
     // Never returns null (falls back to an in-memory store for local dev).

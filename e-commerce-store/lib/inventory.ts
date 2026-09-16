@@ -17,7 +17,7 @@
  * checkout path against).
  */
 
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
@@ -98,7 +98,7 @@ export async function decrementInventory(
 ): Promise<DecrementResult> {
   assertSupabase();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     // No lock backend available at all — refuse rather than risk an
     // unprotected oversell. This mirrors lib/redis-lock.ts's own

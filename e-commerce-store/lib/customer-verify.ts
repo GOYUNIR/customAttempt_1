@@ -14,7 +14,7 @@
 
 import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto';
 import { emailVerifyKey, USERS_KEY } from '@/lib/redis-keys';
-import { safeParseRedisItem } from '@/lib/server-config';
+import { safeParseKvItem } from '@/lib/server-config';
 import { sendCustomerVerificationEmail } from '@/lib/email';
 
 const VERIFY_TTL_SECONDS = 30 * 60; // 30 minutes
@@ -54,8 +54,8 @@ export async function issueCustomerVerifyCode(
   const existing = await redis.get(key).catch(() => null);
   if (existing) {
     // Upstash auto-deserializes JSON, so `existing` may already be an object —
-    // parse via the shared safeParseRedisItem helper (never JSON.parse(String)).
-    const prev = safeParseRedisItem<{ createdAt?: number }>(existing);
+    // parse via the shared safeParseKvItem helper (never JSON.parse(String)).
+    const prev = safeParseKvItem<{ createdAt?: number }>(existing);
     if (prev && Date.now() - Number(prev.createdAt || 0) < RESEND_THROTTLE_SECONDS * 1000) {
       const wait = Math.max(1, Math.ceil(RESEND_THROTTLE_SECONDS - (Date.now() - Number(prev.createdAt || 0)) / 1000));
       return { ok: false, throttled: true, retryAfterSeconds: wait, error: `Please wait ${wait}s before requesting another code.` };
@@ -101,8 +101,8 @@ export async function consumeCustomerVerifyCode(
   if (!raw) {
     return { ok: false, error: 'No active code — request a new one.' };
   }
-  // Upstash auto-deserializes JSON — parse via safeParseRedisItem (object-safe).
-  const payload = safeParseRedisItem<{ codeHash?: string; attempts?: number }>(raw) || {};
+  // Upstash auto-deserializes JSON — parse via safeParseKvItem (object-safe).
+  const payload = safeParseKvItem<{ codeHash?: string; attempts?: number }>(raw) || {};
 
   if (!verifyCodeHash(payload.codeHash || '', String(code || '').trim())) {
     const attempts = Number(payload.attempts || 0) + 1;
@@ -146,7 +146,7 @@ export async function nudgeUnverifiedAccounts(
 
   for (const [id, value] of Object.entries(raw)) {
     if (sent >= max) break;
-    const user = safeParseRedisItem<any>(value);
+    const user = safeParseKvItem<any>(value);
     if (!user || user.emailVerified === true || !user.email) {
       skipped++;
       continue;

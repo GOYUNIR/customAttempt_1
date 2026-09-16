@@ -72,7 +72,7 @@ export type StoreRewardsConfig = {
   giftDiscountPercent?: number;
 };
 
-export function safeParseRedisItem<T = any>(item: unknown): T | null {
+export function safeParseKvItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
   if (typeof item === 'object') return item as T;
   if (typeof item === 'string') {
@@ -113,7 +113,7 @@ export async function archiveEntry(redis: StorageClient, record: ArchiveRecord) 
 export async function loadStoreConfig(redis: StorageClient | null | undefined): Promise<Record<string, any>> {
   if (!redis) return {};
   try {
-    return safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
+    return safeParseKvItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
   } catch {
     return {};
   }
@@ -320,7 +320,7 @@ export async function getOrSeedLiveState(
   const syncSlug = resolveInventorySyncSlug(product, size);
   const field = syncSlug ? sharedInventoryField(syncSlug) : liveStateField(product.id, product.slug, size);
   const raw = await redis.hget(LIVE_STATE_KEY, field);
-  const existing = safeParseRedisItem<LiveStateRecord>(raw);
+  const existing = safeParseKvItem<LiveStateRecord>(raw);
   // Per-size inventory wins when the operator set it in /admin (2 different
   // sizes = 2 different pools/stock counts); otherwise fall back to the
   // product-wide total.
@@ -412,7 +412,7 @@ export async function listLiveStates(redis: StorageClient): Promise<LiveStateRec
   try {
     const hash = (await redis.hgetall(LIVE_STATE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
-    return Object.values(hash).map((r) => safeParseRedisItem<LiveStateRecord>(r)).filter(Boolean) as LiveStateRecord[];
+    return Object.values(hash).map((r) => safeParseKvItem<LiveStateRecord>(r)).filter(Boolean) as LiveStateRecord[];
   } catch {
     return [];
   }
@@ -501,7 +501,7 @@ export async function cleanupMatchingIntent(redis: StorageClient, variant: strin
   try {
     const intentItems = await redis.lrange(intentKey, 0, -1);
     for (const item of intentItems) {
-      const parsed = safeParseRedisItem<any>(item);
+      const parsed = safeParseKvItem<any>(item);
       if (parsed && String(parsed.email || '').toLowerCase() === email.toLowerCase()) {
         await redis.lrem(intentKey, 1, item);
         removedCount++;
@@ -539,7 +539,7 @@ export async function findLedgerEntriesByEmailVariant(
     const all = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     const refs: LedgerRef[] = [];
     for (let i = 0; i < all.length; i++) {
-      const record = safeParseRedisItem<any>(all[i]);
+      const record = safeParseKvItem<any>(all[i]);
       if (!record) continue;
       if (String(record.email || '').toLowerCase() !== normalizedEmail) continue;
       if (String(record.variant || '') !== variant) continue;
@@ -585,7 +585,7 @@ export async function findPoolEntriesByEmail(redis: StorageClient, productNames:
       const size = sizeFromPoolKey(poolKey);
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
-        const parsed = safeParseRedisItem<any>(raw);
+        const parsed = safeParseKvItem<any>(raw);
         if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail) {
           matches.push({ poolKey, variant: productName, size, index, parsed });
         }
@@ -610,7 +610,7 @@ export async function findAllOpenOrders(redis: StorageClient, productNames: stri
       const size = sizeFromPoolKey(poolKey);
       const items = await redis.lrange(poolKey, 0, -1);
       items.forEach((raw, index) => {
-        const parsed = safeParseRedisItem<any>(raw);
+        const parsed = safeParseKvItem<any>(raw);
         if (parsed) matches.push({ poolKey, variant: productName, size, index, parsed });
       });
     }
@@ -704,7 +704,7 @@ export async function getCatalogArchiveRecords(redis: StorageClient): Promise<Ca
   try {
     const hash = (await redis.hgetall(CATALOG_ARCHIVE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
-    return Object.values(hash).map((raw) => safeParseRedisItem<CatalogArchiveRecord>(raw)).filter(Boolean) as CatalogArchiveRecord[];
+    return Object.values(hash).map((raw) => safeParseKvItem<CatalogArchiveRecord>(raw)).filter(Boolean) as CatalogArchiveRecord[];
   } catch {
     return [];
   }
@@ -732,8 +732,10 @@ export async function getOnlineVisitors(redis: StorageClient, trafficKey: string
  * `createStorageClient()` in lib/storage/index.ts. The backend is selected
  * ONCE per process by `STORAGE_PROVIDER`:
  *
- *   - `supabase` / unset      → Supabase (the DEFAULT primary store); falls
- *     back to Upstash Redis when Supabase env is absent.
+ *   - `supabase` / unset      → Supabase (the DEFAULT, and what production
+ *     actually runs: the `store_kv` table in the SAME Postgres database as
+ *     the relational tables). Unconfigured means unavailable -- it never
+ *     silently switches to another store. See lib/storage/index.ts.
  *   - `cloudflare-kv`          → Workers-KV adapter (zero third-party storage;
  *     see the concurrency caveats in lib/storage/cloudflare-kv.ts before
  *     routing payment/raffle writes at it).
@@ -741,10 +743,18 @@ export async function getOnlineVisitors(redis: StorageClient, trafficKey: string
  *     (UPSTASH_REDIS_REST_URL → KV_REST_API_URL → REDIS_REST_URL → REDIS_URL
  *     → KV_URL) and token aliases live in lib/storage/upstash.ts.
  *
- * The function name is kept so every route/helper in the codebase continues
- * to import from here without changes.
+ * NAMING: this was `createRedisClient` until Phase H0. It was never Redis in
+ * production -- STORAGE_PROVIDER is "supabase", so every "Redis" call in this
+ * codebase has been reading and writing a Postgres table through a
+ * Redis-shaped API (hgetall/rpush/lrange over one jsonb blob per key). The
+ * name cost real time to unlearn, so it is gone.
+ *
+ * What remains legitimately KV-shaped after the migration: sessions,
+ * rate-limit counters, AI response caches and analytics ticks -- all TTL'd,
+ * all poor fits for relational rows. Durable business data lives in real
+ * tables reached through lib/db/client.ts.
  */
-export function createRedisClient(): StorageClient | null {
+export function createKvClient(): StorageClient | null {
   return createStorageClient();
 }
 
@@ -868,14 +878,14 @@ export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
 // hash (see lib/redis-keys.ts). Reading via HGET / writing via HSET keeps the
 // ops namespace to ONE key no matter how many products have overrides.
 export async function getGlobalScheduleOverride(redis: StorageClient): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD));
+  return safeParseKvItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD));
 }
 export async function saveGlobalScheduleOverride(redis: StorageClient, value: Record<string, any>) {
   await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SCHEDULE_FIELD]: JSON.stringify(value) });
 }
 
 export async function getSocialProofOverride(redis: StorageClient): Promise<Record<string, any> | null> {
-  return safeParseRedisItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD));
+  return safeParseKvItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD));
 }
 export async function saveSocialProofOverride(redis: StorageClient, value: Record<string, any>) {
   await redis.hset(OVERRIDES_KEY, { [OVERRIDE_SOCIAL_PROOF_FIELD]: JSON.stringify(value) });
@@ -887,7 +897,7 @@ export interface ProductOverride {
   price100ml?: number;
 }
 export async function getProductOverride(redis: StorageClient, productId: string): Promise<ProductOverride | null> {
-  return safeParseRedisItem<ProductOverride>(await redis.hget(OVERRIDES_KEY, productOverrideField(productId)));
+  return safeParseKvItem<ProductOverride>(await redis.hget(OVERRIDES_KEY, productOverrideField(productId)));
 }
 export async function saveProductOverride(redis: StorageClient, productId: string, value: ProductOverride) {
   await redis.hset(OVERRIDES_KEY, { [productOverrideField(productId)]: JSON.stringify(value) });
@@ -902,7 +912,7 @@ export async function getAllProductOverrides(redis: StorageClient, productIds: s
       if (!field.startsWith('product:')) continue;
       const productId = field.slice('product:'.length);
       if (!productIds.includes(productId)) continue;
-      const parsed = safeParseRedisItem<ProductOverride>(raw);
+      const parsed = safeParseKvItem<ProductOverride>(raw);
       if (parsed) out[productId] = parsed;
     }
   } catch {
@@ -913,7 +923,7 @@ export async function getAllProductOverrides(redis: StorageClient, productIds: s
 
 export async function trackPromoClick(redis: StorageClient, code: string) {
   const raw = await redis.hget(PROMO_CODES_KEY, code);
-  const promo = safeParseRedisItem<any>(raw);
+  const promo = safeParseKvItem<any>(raw);
   if (!promo) return false;
   promo.clicks = (promo.clicks || 0) + 1;
   await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(promo) });
@@ -1048,7 +1058,7 @@ export async function loadProducts(redis: any): Promise<Record<string, any>> {
 
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(raw)) {
-      const parsed = safeParseRedisItem<any>(v);
+      const parsed = safeParseKvItem<any>(v);
       if (parsed) {
         const normalized = {
           ...parsed,

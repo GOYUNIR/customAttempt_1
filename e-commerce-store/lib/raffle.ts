@@ -11,7 +11,7 @@
  * NOT wired into any live route yet — see the session's summary.
  */
 
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
 import { getDb } from '@/lib/db/client';
 import { eq, inList } from '@/lib/db/query';
@@ -338,7 +338,7 @@ async function decrementPoolRow(
 export async function decrementSharedPool(tenantId: string, slug: string, quantity: number): Promise<PoolDecrementResult> {
   assertSupabase();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return { ok: false, reason: 'lock_contended' };
 
   const lockResult = await withRedisLock(redis, `shared-pool:pg:${tenantId}:${slug}`, async (): Promise<PoolDecrementResult> => {
@@ -358,7 +358,7 @@ export async function decrementSharedPool(tenantId: string, slug: string, quanti
 export async function decrementSharedPoolById(tenantId: string, poolId: string, quantity: number): Promise<PoolDecrementResult> {
   assertSupabase();
   const qty = Math.max(1, Math.floor(quantity) || 0);
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return { ok: false, reason: 'lock_contended' };
 
   const lockResult = await withRedisLock(redis, `shared-pool:pg:id:${tenantId}:${poolId}`, async (): Promise<PoolDecrementResult> => {

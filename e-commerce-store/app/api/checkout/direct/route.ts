@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   getLiveProductState,
   saveLiveState,
   archiveEntry,
   ArchiveRecord,
   ARCHIVE_LEDGER_KEY,
   loadProducts, // new helper to fetch product from Redis
-  safeParseRedisItem,
+  safeParseKvItem,
   STORE_CONFIG_KEY,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
@@ -51,7 +51,7 @@ export const maxDuration = 30;
 async function getRefPrefix(redis: any): Promise<string> {
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     return normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     return 'GU';
@@ -60,7 +60,7 @@ async function getRefPrefix(redis: any): Promise<string> {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });

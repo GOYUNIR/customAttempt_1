@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseRedisItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createKvClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseKvItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { PaymentFactory } from '@/services/payment/factory';
 import { StripeDriver } from '@/services/payment/stripe.driver';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -17,7 +17,7 @@ const PROMO_PENDING_TTL_SECONDS = 10 * 60;
 async function getRefPrefix(redis: any): Promise<string> {
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     return normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     return 'GU';
@@ -43,7 +43,7 @@ async function countChargedByEmail(redis: any, email: string, variant: string, s
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
       try {
         const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
         for (const row of poolItems) {
-          const parsed = safeParseRedisItem<any>(row);
+          const parsed = safeParseKvItem<any>(row);
           if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail) alreadyEnteredCount += 1;
         }
       } catch {}
@@ -132,7 +132,7 @@ export async function POST(request: Request) {
         try {
           const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
           for (const row of poolItems) {
-            const parsed = safeParseRedisItem<any>(row);
+            const parsed = safeParseKvItem<any>(row);
             if (parsed && String(parsed.email || '').toLowerCase() === normalizedEmail && formatOrderRef(String(parsed.orderRef || ''), refPrefix)) {
               originalRef = formatOrderRef(String(parsed.orderRef || ''), refPrefix) || originalRef;
               break;
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
 
     if (normalizedPromo && checkoutMode === 'FCFS') {
       const rawPromo = await redis.hget(PROMO_CODES_KEY, normalizedPromo);
-      const promo = safeParseRedisItem<any>(rawPromo);
+      const promo = safeParseKvItem<any>(rawPromo);
       if (!promo || promo.active === false) {
         return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });
       }
@@ -212,7 +212,7 @@ export async function POST(request: Request) {
       // draw/webhook applies it at charge time). We only validate that the code
       // is active, belongs to this email, and has quota left.
       const rawPromo = await redis.hget(PROMO_CODES_KEY, normalizedPromo);
-      const promo = safeParseRedisItem<any>(rawPromo);
+      const promo = safeParseKvItem<any>(rawPromo);
       if (promo) {
         if (promo.active === false) {
           return NextResponse.json({ error: 'Invalid or inactive promo code.' }, { status: 400 });

@@ -138,7 +138,7 @@ async function basicAuthRateLimited(storage: ReturnType<typeof createStorageClie
 }
 /**
  * Edge-safe minimal JSON parse for Redis values. Mirrors
- * `safeParseRedisItem()` in lib/server-config.ts ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Upstash REST Redis
+ * `safeParseKvItem()` in lib/server-config.ts ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Upstash REST Redis
  * auto-deserializes JSON, so stored values can arrive as ALREADY-PARSED
  * objects (`String(object)` would be `"[object Object]"`).
  */

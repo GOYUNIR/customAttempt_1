@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   findPoolEntriesByEmail,
   ARCHIVE_LEDGER_KEY,
   STORE_CONFIG_KEY,
   USERS_KEY,
   PROMO_CODES_KEY,
   promoUsedKey,
-  safeParseRedisItem,
+  safeParseKvItem,
   loadProducts,
 } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Login required.' }, { status: 401 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Database offline.' }, { status: 500 });
 
     const email = sessionUser.email;
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     try {
       const ledger = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
       for (const raw of ledger) {
-        const e = safeParseRedisItem<any>(raw);
+        const e = safeParseKvItem<any>(raw);
         if (!e) continue;
         if (String(e.email || '').toLowerCase() !== email) continue;
         if (SKIP_TYPES.includes(String(e.type || ''))) continue;
@@ -165,7 +165,7 @@ export async function POST(request: Request) {
       const rawUsers = await redis.hgetall(USERS_KEY);
       if (rawUsers) {
         for (const [, v] of Object.entries(rawUsers)) {
-          const u = safeParseRedisItem<any>(v);
+          const u = safeParseKvItem<any>(v);
           if (u && String(u.email || '').toLowerCase() === email) {
             userRecord = u;
             break;
@@ -184,7 +184,7 @@ export async function POST(request: Request) {
       const rawPromos = await redis.hgetall(PROMO_CODES_KEY);
       if (rawPromos) {
         for (const [code, raw] of Object.entries(rawPromos)) {
-          const p = safeParseRedisItem<any>(raw);
+          const p = safeParseKvItem<any>(raw);
           if (!p) continue;
           const issuedToMe = String(p.issuedForEmail || '').toLowerCase() === email;
           const isWelcome = welcomePromoCode ? code === welcomePromoCode : false;
@@ -223,7 +223,7 @@ export async function POST(request: Request) {
     let rewardsConfig: { pointsPerDollar?: number; minRedeemPoints?: number; giftingEnabled?: boolean; giftDiscountPercent?: number; redemptionInfoMessage?: string } = {};
     try {
       const rawConfig = await redis.get(STORE_CONFIG_KEY);
-      const config = safeParseRedisItem<any>(rawConfig) || {};
+      const config = safeParseKvItem<any>(rawConfig) || {};
       rewardsConfig = {
         pointsPerDollar: Math.max(1, Number(config?.rewards?.pointsPerDollar) || 100),
         minRedeemPoints: Math.max(1, Number(config?.rewards?.minRedeemPoints) || 500),

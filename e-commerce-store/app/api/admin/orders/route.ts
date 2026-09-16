@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import {
-  createRedisClient,
+  createKvClient,
   findAllOpenOrders,
   adminCancelOrder,
   adminUpdateOrderAddress,
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const password = url.searchParams.get('password') || '';
   if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ orders: [] });
 
   const liveProducts = await loadProducts(redis);
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

@@ -6,7 +6,7 @@
  * --------------------
  * The app treats its key space through a Redis-compatible command surface
  * (hashes, lists, sets, zsets), but the data layer is backend-agnostic — every
- * route reaches the store through `createRedisClient()` in lib/server-config.ts.
+ * route reaches the store through `createKvClient()` in lib/server-config.ts.
  * This interface is the contract between the app and whatever backend actually
  * stores the bytes, so the data layer is NOT welded to the `@upstash/redis`
  * SDK:

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, AUDIT_LOG_KEY} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, AUDIT_LOG_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 import { clientIp } from '@/lib/rate-limit';
@@ -59,9 +59,9 @@ export async function GET(request: Request) {
   if (!(await adminAuthorized(request, password))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ entries: [] });
   const rows = await redis.lrange(AUDIT_LOG_KEY, -100, -1);
-  const entries = rows.map((r) => safeParseRedisItem(r)).filter(Boolean).reverse();
+  const entries = rows.map((r) => safeParseKvItem(r)).filter(Boolean).reverse();
   return NextResponse.json({ entries });
 }

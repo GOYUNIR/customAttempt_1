@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
-  safeParseRedisItem,
+  createKvClient,
+  safeParseKvItem,
   loadProducts,
   STORE_CONFIG_KEY,
   PROMO_CODES_KEY,
@@ -124,7 +124,7 @@ async function buildStoreSnapshot(redis: any): Promise<Record<string, unknown>> 
   }
   try {
     const configRaw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(configRaw) || {};
+    const config = safeParseKvItem<any>(configRaw) || {};
     snapshot.config = {
       requireSignup2FA: config.requireSignup2FA !== false,
       checkout: { requireAddressAutofill: config.checkout?.requireAddressAutofill },
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
   const limited = await rateLimitedResponse('ai_admin_helper', request, 20, 60);
   if (limited) return limited;
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Data store offline' }, { status: 500 });
 
   let body: any = {};
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, applied: [], message: 'No valid changes to apply.' });
     }
     const currentRaw = await redis.get(STORE_CONFIG_KEY);
-    const current = safeParseRedisItem<any>(currentRaw) || {};
+    const current = safeParseKvItem<any>(currentRaw) || {};
     let next = current;
     for (const change of applied) {
       next = setNested(next, change.key, change.value);

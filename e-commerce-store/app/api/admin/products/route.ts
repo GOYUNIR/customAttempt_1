@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   loadProducts,
   defaultStripePriceId,
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
-  safeParseRedisItem,
+  safeParseKvItem,
   unarchiveProductFromCatalog,
   LIVE_STATE_KEY,
   POOL_STATS_KEY,
@@ -157,12 +157,12 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
 async function deleteProduct(redis: any, id: string) {
   const rawProduct = await redis.hget(PRODUCTS_KEY, id);
   // Upstash REST Redis auto-deserializes stored JSON, so `hget` can return an
-  // ALREADY-PARSED OBJECT (not a string). Reading it through safeParseRedisItem
+  // ALREADY-PARSED OBJECT (not a string). Reading it through safeParseKvItem
   // (which accepts both) guarantees the catalog-preview cleanup below actually
   // runs — before this fix the `typeof rawProduct === 'string'` guard skipped
   // it on the default provider and a deleted product kept rendering in the
   // catalog's Upcoming/Past Archives sections forever.
-  const deletedProduct = safeParseRedisItem<any>(rawProduct);
+  const deletedProduct = safeParseKvItem<any>(rawProduct);
   await redis.hdel(PRODUCTS_KEY, id);
 
   // Mirror the delete into Postgres (Phase G bridge — see saveProduct).
@@ -230,7 +230,7 @@ export async function GET(request: Request) {
   }
   const url = new URL(request.url);
   const includeArchived = url.searchParams.get('includeArchived') === 'true';
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ products: [] });
   const all = await loadProducts(redis);
   let products = Object.values(all);
@@ -269,7 +269,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

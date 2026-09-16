@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY, PRODUCTS_KEY} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY, PRODUCTS_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { normalizeCategories, filterStaleCatalogEntries } from '@/lib/storefront-config';
 
@@ -9,13 +9,13 @@ export async function GET(request: Request) {
   if (!(await adminAuthorized(request))) {
     return NextResponse.json({ upcomingDrops: [], archiveScents: [] });
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ upcomingDrops: [], archiveScents: [] });
 
   // Catalog groupings are stored inside store:config.catalogPreview (single
   // source of truth) — shared with the admin Settings tab.
   const raw = await redis.get(STORE_CONFIG_KEY);
-  const config = safeParseRedisItem<any>(raw) || {};
+  const config = safeParseKvItem<any>(raw) || {};
   const preview = config.catalogPreview || {};
   // Same stale-entry reconciliation as /api/catalog/status: auto-created
   // entries for products that no longer exist (deleted) are dropped so the
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const products: any[] = [];
   if (allRaw) {
     for (const value of Object.values(allRaw)) {
-      const product = safeParseRedisItem<any>(value);
+      const product = safeParseKvItem<any>(value);
       if (product) products.push(product);
     }
   }
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
 
   // Read-modify-write store:config so non-catalog settings are preserved.
   const raw = await redis.get(STORE_CONFIG_KEY);
-  const current = safeParseRedisItem<any>(raw) || {};
+  const current = safeParseKvItem<any>(raw) || {};
   // The Catalog tab also carries the admin-managed category list — persist it
   // when the client sends one (an EMPTY array is valid: it means the operator
   // deleted every category). Undefined (older clients) preserves what's saved.

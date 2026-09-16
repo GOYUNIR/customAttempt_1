@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, ADMIN_DEVICES_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD, ANALYTICS_TICKS_KEY, TICKS_LAST_FIELD, TICKS_TODAY_FIELD, TICKS_DAY_FIELD, STORED_CARTS_KEY, LAST_AUTO_DRAW_HASH_KEY } from '@/lib/server-config';
 import { adminAuthorized, resolveAdminActor, actorHasFullAdminAccess } from '@/lib/admin-verify';
 import { maintainDedupeStructures, sweepOrphanedProductState } from '@/lib/redis-maintenance';
 import { pruneExpiredSupabaseKv } from '@/lib/storage/supabase';
@@ -116,7 +116,7 @@ async function copyDeleteFallback(redis: any, oldKey: string, newKey: string): P
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();
@@ -210,7 +210,7 @@ export async function POST(request: Request) {
             }
             const raw = await redis.get(key);
             const ttlMs = Number((await redis.pttl(key).catch(() => -1)) ?? -1);
-            const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw) || {};
+            const parsed = safeParseKvItem<{ email?: string; createdAt?: number }>(raw) || {};
             await redis.hset(ADMIN_DEVICES_KEY, {
               [token]: JSON.stringify({
                 email: String(parsed.email || ''),
@@ -312,9 +312,9 @@ export async function POST(request: Request) {
     try {
       const catalogExists = await redis.exists(CATALOG_CONFIG_KEY);
       if (catalogExists) {
-        const legacyCatalog = safeParseRedisItem<any>(await redis.get(CATALOG_CONFIG_KEY)) || {};
+        const legacyCatalog = safeParseKvItem<any>(await redis.get(CATALOG_CONFIG_KEY)) || {};
         const configRaw = await redis.get('store:config');
-        const storeConfig = safeParseRedisItem<any>(configRaw) || {};
+        const storeConfig = safeParseKvItem<any>(configRaw) || {};
         const preview = storeConfig.catalogPreview || {};
         const upcomingDrops = Array.isArray(preview.upcomingDrops) ? preview.upcomingDrops : [];
         const archiveScents = Array.isArray(preview.archiveScents) ? preview.archiveScents : [];

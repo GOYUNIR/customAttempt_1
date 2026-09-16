@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
@@ -15,7 +15,7 @@ import { getSupportEmail } from '@/lib/env';
  * never need a code change to update their policies.
  */
 export default async function LegalPage({ page }: { page: LegalPageKey }) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const config = await loadStoreConfigCached(redis);
   const colors = { ...GOYUNIR_STORE_SUITE.themeColors, ...(config.themeColors || {}) };
   const legal = { ...DEFAULT_LEGAL, ...(config.legal || {}) };

@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import SiteChrome from '@/components/SiteChrome';
 import ThemeProvider, { type LiveThemeValue } from '@/components/ThemeProvider';
-import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent } from '@/lib/storefront-config';
 import { getSiteUrl, neutralBrandName } from '@/lib/env';
@@ -33,7 +33,7 @@ const CARD_REVISION = 8;
 export const dynamic = 'force-dynamic';
 
 /** Build the live theme blob shared by the layout inline script + ThemeProvider. */
-async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
+async function buildLiveTheme(redis: ReturnType<typeof createKvClient>) {
   const config = await loadStoreConfigCached(redis);
   const defaults = GOYUNIR_STORE_SUITE as any;
   const themeColors = { ...(defaults.themeColors || {}), ...(config.themeColors || {}) };
@@ -68,7 +68,7 @@ async function buildLiveTheme(redis: ReturnType<typeof createRedisClient>) {
 }
 
 export async function generateMetadata(): Promise<Metadata> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   const brandName = String(branding.brandName || branding.shareTitle || neutralBrandName());
@@ -141,7 +141,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export async function generateViewport(): Promise<Viewport> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
   return {
@@ -157,7 +157,7 @@ export default async function RootLayout({
   // Bake the live Redis theme (colors/font) into the server-rendered page shell
   // so design presets apply even before SiteChrome hydrates and updates the
   // body client-side. Falls back to the dark defaults when Redis is empty.
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const liveValue = await buildLiveTheme(redis);
   // Resolve the ACTIVE map provider token through the driver engine (Setup
   // Wizard → env fallback). The token rides in the theme blob and the inline

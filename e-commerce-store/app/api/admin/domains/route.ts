@@ -6,7 +6,7 @@ import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.error }, { status: result.notConfigured ? 503 : 502 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (redis) {
       await appendAudit(
         redis,
@@ -134,7 +134,7 @@ export async function DELETE(request: Request) {
       { returning: 'default' },
     );
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (redis) {
       await appendAudit(redis, { action: 'CUSTOM_DOMAIN_REMOVED', actor: actor?.email || 'admin', tenantId }, request);
     }

@@ -37,7 +37,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createStorageClient } from '@/lib/storage';
-import { loadProducts, safeParseRedisItem, USERS_KEY, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
+import { loadProducts, safeParseKvItem, USERS_KEY, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
 import { STORED_CARTS_KEY } from '@/lib/redis-keys';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { getDb } from '@/lib/db/client';
@@ -283,9 +283,9 @@ async function backfillCarts(
     // parsed object rather than a string, which a bare JSON.parse() throws
     // on (silently swallowed by a catch, which is exactly the bug that made
     // this function skip every cart during development — always go through
-    // safeParseRedisItem(), the same helper every other reader in this
+    // safeParseKvItem(), the same helper every other reader in this
     // codebase uses for this exact reason).
-    const u = safeParseRedisItem<any>(raw);
+    const u = safeParseKvItem<any>(raw);
     if (u?.email) userIdToEmail.set(id, String(u.email).toLowerCase());
   }
 
@@ -296,7 +296,7 @@ async function backfillCarts(
       carts.skipped += 1;
       continue;
     }
-    const rawItems = safeParseRedisItem<unknown[]>(raw);
+    const rawItems = safeParseKvItem<unknown[]>(raw);
     if (!rawItems) {
       carts.skipped += 1;
       continue;
@@ -374,7 +374,7 @@ async function backfillOrders(
   const rawRows = (await storage.lrange(ARCHIVE_LEDGER_KEY, 0, -1)) as string[];
 
   for (const raw of rawRows) {
-    const parsedJson = safeParseRedisItem<unknown>(raw);
+    const parsedJson = safeParseKvItem<unknown>(raw);
     if (!parsedJson) {
       orders.skipped += 1;
       continue;

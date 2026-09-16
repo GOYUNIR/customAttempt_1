@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomBytes, scryptSync } from 'crypto';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, passwordResetKey, AUTH_SESSION_PREFIX } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, passwordResetKey, AUTH_SESSION_PREFIX } from '@/lib/server-config';
 import { isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -29,11 +29,11 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('auth_reset_password', request, 10, 60);
     if (limited) return limited;
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
     const resetKeyName = passwordResetKey(token);
-    const resetData = safeParseRedisItem<any>(await redis.get(resetKeyName));
+    const resetData = safeParseKvItem<any>(await redis.get(resetKeyName));
     if (!resetData?.email) {
       return NextResponse.json({ error: 'Reset link expired or invalid' }, { status: 400 });
     }
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     let userId: string | null = null;
     let user: any = null;
     for (const [key, value] of Object.entries(raw || {})) {
-      const parsed = safeParseRedisItem<any>(value);
+      const parsed = safeParseKvItem<any>(value);
       if (parsed && String(parsed.email || '').toLowerCase() === String(resetData.email).toLowerCase()) {
         userId = key;
         user = parsed;
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       const keys = await redis.keys(`${AUTH_SESSION_PREFIX}*`);
       for (const key of keys) {
         const sessionRaw = await redis.get(key);
-        const session = safeParseRedisItem<any>(sessionRaw);
+        const session = safeParseKvItem<any>(sessionRaw);
         if (session && String(session.userId || '') === userId) {
           await redis.del(key);
         }

@@ -7,7 +7,7 @@ import { getDb } from '@/lib/db/client';
 import { eq, inList, isNull } from '@/lib/db/query';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
         original_price_cents: l.originalPriceCents,
     })));
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (redis) {
       await appendAudit(
         redis,

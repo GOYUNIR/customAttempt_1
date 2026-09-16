@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { normalizeCategories } from '@/lib/storefront-config';
 
@@ -12,11 +12,11 @@ export async function GET(request: Request) {
     if (!(await adminAuthorized(request))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ success: false, fallback: true, error: 'Redis offline', settings: {} }, { status: 200 });
 
     const raw = await redis.get(SETTINGS_KEY);
-    const settings = safeParseRedisItem<any>(raw) || {};
+    const settings = safeParseKvItem<any>(raw) || {};
     return NextResponse.json({ settings });
   } catch (err: any) {
     console.error('[Settings API] GET Error:', err);
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ success: false, fallback: true, error: 'Redis offline' }, { status: 200 });
 
     const body = await request.json();
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     
     // Get current config to merge
     const currentRaw = await redis.get(SETTINGS_KEY);
-    const current = safeParseRedisItem<any>(currentRaw) || {};
+    const current = safeParseKvItem<any>(currentRaw) || {};
     
     const settings = {
       ...current,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -21,14 +21,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ results: [] });
     const query = (url.searchParams.get('q') || '').trim().toLowerCase();
     if (!query) return NextResponse.json({ results: [] });
 
     const allRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, 0, -1);
     const matches = allRaw
-      .map((item) => safeParseRedisItem<any>(item))
+      .map((item) => safeParseKvItem<any>(item))
       .filter(Boolean)
       .filter((entry) => {
         const email = String(entry.email || '').toLowerCase();

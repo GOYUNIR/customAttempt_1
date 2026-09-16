@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, STORE_CONFIG_KEY, USERS_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY, USERS_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { randomBytes } from 'crypto';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -16,7 +16,7 @@ const DEFAULT_REWARDS = {
 async function loadRewardsConfig(redis: any) {
   try {
     const raw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(raw) || {};
+    const config = safeParseKvItem<any>(raw) || {};
     return { ...DEFAULT_REWARDS, ...(config.rewards || {}) };
   } catch {
     return DEFAULT_REWARDS;
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('redeem_points', request, 10, 60);
     if (limited) return limited;
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
     const body = await request.json();
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       let userId = '';
       if (raw) {
         for (const [k, v] of Object.entries(raw)) {
-          const u = safeParseRedisItem<any>(v);
+          const u = safeParseKvItem<any>(v);
           if (u && String(u.email || '').toLowerCase() === sessionUser.email) {
             user = u;
             userId = k;

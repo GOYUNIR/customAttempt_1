@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { createKvClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminAuthSession, issueAdminDevice } from '@/lib/admin-verify';
 import { verifySuperAdminSignIn, supabaseConfigured, supabaseAuthMissingReason } from '@/services/config/supabase-client';
 import { EmailFactory } from '@/services/email/factory';
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     return NextResponse.json(
       { error: 'No storage backend configured — set up your database first, then try again.' },

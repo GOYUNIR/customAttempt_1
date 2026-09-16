@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY } from '@/lib/server-config';
 import { consumeCustomerVerifyCode } from '@/lib/customer-verify';
 import {
   grantWelcomeRewards,
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('auth_verify_email', request, 10, 60);
     if (limited) return limited;
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
     const result = await consumeCustomerVerifyCode(redis, email, code);
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     let user: any = null;
     if (raw) {
       for (const [, v] of Object.entries(raw)) {
-        const u = safeParseRedisItem<any>(v);
+        const u = safeParseKvItem<any>(v);
         if (u && String(u.email || '').toLowerCase() === email) { user = u; break; }
       }
     }

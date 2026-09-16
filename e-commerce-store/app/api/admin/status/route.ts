@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { resolveStripeClient, isPaymentConfigured } from '@/services/payment/factory';
 import {
-  createRedisClient,
-  safeParseRedisItem,
+  createKvClient,
+  safeParseKvItem,
   getOrSeedLiveState,
   getOnlineVisitors,
   POOL_STATS_KEY,
@@ -126,12 +126,12 @@ export async function GET(request: Request) {
       { id: 'ai', category: 'AI', label: aiProvider ? (PROVIDER_DISPLAY[aiProvider] || aiProvider) + (platform.ai_provider_secondary ? ` + ${PROVIDER_DISPLAY[platform.ai_provider_secondary] || platform.ai_provider_secondary}` : '') : null, configured: Boolean(aiProvider) },
     ];
 
-    let redis = null as ReturnType<typeof createRedisClient>;
+    let redis = null as ReturnType<typeof createKvClient>;
     let stripe: Awaited<ReturnType<typeof resolveStripeClient>> = null;
     let redisError: string | null = null;
     let stripeError: string | null = null;
 
-    try { redis = createRedisClient(); } catch (e: any) { redisError = e?.message; }
+    try { redis = createKvClient(); } catch (e: any) { redisError = e?.message; }
     // Through the PaymentDriver port, so a Setup-Wizard-configured key is
     // honoured instead of only STRIPE_SECRET_KEY, which the removed direct
     // client ignored.
@@ -216,12 +216,12 @@ export async function GET(request: Request) {
 
     try {
       const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
-      status.lastDraw = safeParseRedisItem<any>(lastDrawRaw) ?? null;
+      status.lastDraw = safeParseKvItem<any>(lastDrawRaw) ?? null;
     } catch {}
 
     try {
       const recentRaw = await redis.lrange(ARCHIVE_LEDGER_KEY, -150, -1);
-      status.fallbackEntries = recentRaw.map((item: string) => safeParseRedisItem<any>(item)).filter(Boolean).reverse();
+      status.fallbackEntries = recentRaw.map((item: string) => safeParseKvItem<any>(item)).filter(Boolean).reverse();
     } catch {}
 
     return NextResponse.json(status);

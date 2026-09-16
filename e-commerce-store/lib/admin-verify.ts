@@ -22,7 +22,7 @@ import {
   adminStepUpKey,
   ADMIN_AUTH_COOKIE,
 } from '@/lib/redis-keys';
-import { createRedisClient, safeParseRedisItem, getAdminVerifyEmail, adminRequestAuthorized } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, getAdminVerifyEmail, adminRequestAuthorized } from '@/lib/server-config';
 import { sendAdminVerificationEmail } from '@/lib/email';
 import { STEP_UP_TTL_MS } from '@/lib/lockdown';
 import { actorHasFullAdminAccess, IMPERSONATION_TTL_SECONDS as PURE_IMPERSONATION_TTL_SECONDS } from '@/lib/admin-actor';
@@ -56,7 +56,7 @@ async function readChallenge(redis: any, email: string): Promise<AdminChallenge 
   const raw = await redis.get(adminVerifyKey(email)).catch(() => null);
   if (!raw) return null;
   // Upstash auto-deserializes JSON stored via setex — handle both forms.
-  const parsed = safeParseRedisItem<Partial<AdminChallenge>>(raw) || {};
+  const parsed = safeParseKvItem<Partial<AdminChallenge>>(raw) || {};
   return {
     codeHash: String(parsed.codeHash || ''),
     createdAt: Number(parsed.createdAt) || 0,
@@ -222,7 +222,7 @@ export async function isAdminDeviceValid(redis: any, token: string): Promise<boo
   // be the parsed object, so JSON.parse(String(raw)) would throw on
   // "[object Object]" and make every /api/admin request return 401
   // ADMIN_2FA_REQUIRED even after a successful code confirm.
-  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number; expiresAt?: number }>(raw);
+  const parsed = safeParseKvItem<{ email?: string; createdAt?: number; expiresAt?: number }>(raw);
   if (!parsed) return false;
   // Lazy expiry: hash fields can't expire on their own, so an expired token is
   // removed the first time it is checked — keeps `admin:devices` self-cleaning.
@@ -266,7 +266,7 @@ export async function readAdminDevice(
   if (!token) return null;
   const raw = await redis.hget(ADMIN_DEVICES_KEY, token).catch(() => null);
   if (!raw) return null;
-  const parsed = safeParseRedisItem<{
+  const parsed = safeParseKvItem<{
     email?: string;
     createdAt?: number;
     expiresAt?: number;
@@ -292,7 +292,7 @@ export async function readAdminDevice(
  *  Used to let that account re-configure providers without the env Basic-Auth
  *  password. */
 export async function isSuperAdminSession(request: Request): Promise<boolean> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return false;
   const token = adminDeviceTokenFromRequest(request);
   const record = await readAdminDevice(redis, token);
@@ -314,7 +314,7 @@ export async function isSuperAdminSession(request: Request): Promise<boolean> {
  * Returns null when there is no recognizable admin session at all.
  */
 export async function resolveAdminActor(request: Request): Promise<AdminActor | null> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const token = adminDeviceTokenFromRequest(request);
   if (redis && token) {
     const record = await readAdminDevice(redis, token);
@@ -391,7 +391,7 @@ export async function consumeAdminAuthSession(
   if (!token) return null;
   const raw = await redis.get(adminAuthKey(token)).catch(() => null);
   if (!raw) return null;
-  const parsed = safeParseRedisItem<{ email?: string; createdAt?: number }>(raw);
+  const parsed = safeParseKvItem<{ email?: string; createdAt?: number }>(raw);
   const email = String(parsed?.email || '').trim().toLowerCase();
   if (!email) return null;
   return { email };
@@ -401,7 +401,7 @@ export async function consumeAdminAuthSession(
  *  session's email, then fall back to ADMIN_VERIFY_EMAIL / SUPPORT_EMAIL (the
  *  legacy env-driven inbox). */
 export async function resolveAdminLoginEmail(request: Request): Promise<string> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const token = adminAuthTokenFromRequest(request);
   if (redis && token) {
     const session = await consumeAdminAuthSession(redis, token);
@@ -418,7 +418,7 @@ export async function adminLoginAuthorized(
   suppliedPassword?: string,
 ): Promise<boolean> {
   if (adminRequestAuthorized(request, suppliedPassword)) return true;
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return false;
   const token = adminAuthTokenFromRequest(request);
   if (token) {
@@ -454,7 +454,7 @@ export async function adminAuthorized(
 ): Promise<boolean> {
   if (adminRequestAuthorized(request, suppliedPassword)) return true;
   if (await isSuperAdminSession(request)) return true;
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return false;
   const token = adminDeviceTokenFromRequest(request);
   if (!token) return false;

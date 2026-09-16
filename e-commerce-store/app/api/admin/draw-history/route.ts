@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, LAST_DRAW_KEY, DRAW_HISTORY_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, LAST_DRAW_KEY, DRAW_HISTORY_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
@@ -11,17 +11,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ draws: [] });
 
   // Get the most recent draw summary
   const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
-  const lastDraw = safeParseRedisItem<any>(lastDrawRaw);
+  const lastDraw = safeParseKvItem<any>(lastDrawRaw);
 
   // Get historical draws
   const historyRaw = await redis.lrange(DRAW_HISTORY_KEY, -50, -1);
   const historicalDraws = historyRaw
-    .map((r) => safeParseRedisItem<any>(r))
+    .map((r) => safeParseKvItem<any>(r))
     .filter(Boolean)
     .reverse();
 
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

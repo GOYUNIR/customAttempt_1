@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, getAdminPassword, createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { adminRequestAuthorized, getAdminPassword, createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { isValidEmail } from '@/lib/validation';
 import { isSuperAdminSession, issueAdminDevice } from '@/lib/admin-verify';
 import {
@@ -704,7 +704,7 @@ export async function POST(request: Request) {
     // signed up while there was no email API — they can now finish verifying.
     if (normalized.input.mail_provider) {
       try {
-        const nudgeRedis = createRedisClient();
+        const nudgeRedis = createKvClient();
         if (nudgeRedis) await nudgeUnverifiedAccounts(nudgeRedis);
       } catch {
         // Best-effort — never block a save on a marketing nudge.
@@ -737,7 +737,7 @@ export async function POST(request: Request) {
         : 'Supabase credentials were entered inline and are NOT saved as environment variables. They only work for the current server session. Set SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in your hosting platform (and redeploy) — otherwise you will be locked out of the admin portal on the next restart or deploy.',
     });
     if (!alreadyConfigured || masterCredentialOk) {
-      const redis = createRedisClient();
+      const redis = createKvClient();
       if (redis) {
         try {
           const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, true, { superAdmin: true });

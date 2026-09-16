@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts, WAITLIST_KEY} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, loadProducts, WAITLIST_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { sendReleaseAnnouncementEmail } from '@/lib/email';
 
@@ -10,12 +10,12 @@ export async function GET(request: Request) {
   const password = String(url.searchParams.get('password') || '');
   if (!(await adminAuthorized(request, password))) return NextResponse.json({ error: 'Invalid password' }, { status: 403 });
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ subscribers: [], activeCount: 0 });
 
   const hash = (await redis.hgetall(WAITLIST_KEY)) as Record<string, string> | null;
   const subscribers = Object.values(hash || {})
-    .map((value) => safeParseRedisItem<any>(value))
+    .map((value) => safeParseKvItem<any>(value))
     .filter(Boolean)
     .sort((a: any, b: any) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
     const slug = String(product.slug || product.id);
     const hash = (await redis.hgetall(WAITLIST_KEY)) as Record<string, string> | null;
-    const subscribers = Object.values(hash || {}).map((value) => safeParseRedisItem<any>(value)).filter(Boolean);
+    const subscribers = Object.values(hash || {}).map((value) => safeParseKvItem<any>(value)).filter(Boolean);
     let sent = 0;
     let skipped = 0;
 

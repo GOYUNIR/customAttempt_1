@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { randomBytes, scryptSync } from 'crypto';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
 import { grantWelcomeRewards, createCustomerSession, trySendWelcomeEmail, CUSTOMER_SESSION_TTL_SECONDS } from '@/lib/customer-rewards';
@@ -29,7 +29,7 @@ async function emailProviderConfigured(): Promise<boolean> {
 async function requireSignup2FA(redis: any): Promise<boolean> {
   try {
     const raw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(raw) || {};
+    const config = safeParseKvItem<any>(raw) || {};
     return config.requireSignup2FA !== false;
   } catch {
     return true;
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   const limited = await rateLimitedResponse('auth_signup', request, 10, 60);
   if (limited) return limited;
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
   const normalizedEmail = String(email).trim().toLowerCase();
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
   let existingUser: any = null;
   if (raw) {
     for (const [, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === normalizedEmail) { existingUser = u; break; }
     }
   }

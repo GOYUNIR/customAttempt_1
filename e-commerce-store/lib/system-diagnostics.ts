@@ -10,7 +10,7 @@
  * claim.
  */
 
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { readDeadLetteredNotifications } from '@/lib/notifications';
 import { withRedisLock } from '@/lib/redis-lock';
 import { validateProductionEnv } from '@/lib/env-schema';
@@ -91,7 +91,7 @@ export async function checkSupabaseConnection(): Promise<Check> {
 
 /** Actually acquires and releases a real lock — not a config check. */
 export async function checkRedisLocks(): Promise<Check> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return { id: 'redis_locks', label: 'Redis Atomic Locks', status: 'not_configured', detail: 'No Redis/KV backend configured.' };
   const start = Date.now();
   const result = await withRedisLock(redis, 'system-health-diagnostic-ping', async () => true, { ttlSeconds: 5, retries: 1 });
@@ -103,7 +103,7 @@ export async function checkRedisLocks(): Promise<Check> {
 }
 
 export async function checkWebhookIdempotency(): Promise<Check> {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return { id: 'webhook_idempotency', label: 'Stripe Webhook Idempotency', status: 'not_configured', detail: 'No Redis/KV backend configured.' };
   try {
     // The dedupe key self-migrates from a legacy SET to a ZSET on its next

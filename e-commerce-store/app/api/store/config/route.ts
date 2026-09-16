@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createRedisClient, safeParseRedisItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, verifyAdminPassword, STORE_CONFIG_KEY, PRODUCTS_KEY, OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD, OVERRIDE_SOCIAL_PROOF_FIELD} from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { mergeOrbsConfig, normalizeCategories } from '@/lib/storefront-config';
 
@@ -177,11 +177,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const requestedSlug = searchParams.get('slug');
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const sortProducts = (items: StoreProduct[]) => [...items].sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name)));
 
     const configRaw = redis ? await redis.get(STORE_CONFIG_KEY) : null;
-    const config = safeParseRedisItem<any>(configRaw) || DEFAULT_CONFIG;
+    const config = safeParseKvItem<any>(configRaw) || DEFAULT_CONFIG;
     const effectiveConfig = {
       ...DEFAULT_CONFIG,
       ...config,
@@ -225,7 +225,7 @@ export async function GET(request: NextRequest) {
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
     if (allRaw) {
       for (const value of Object.values(allRaw)) {
-        const p = safeParseRedisItem<StoreProduct>(value);
+        const p = safeParseKvItem<StoreProduct>(value);
         if (p) allProducts.push(p);
       }
     }
@@ -250,11 +250,11 @@ export async function GET(request: NextRequest) {
 
     // Get global schedule override
     const scheduleRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD);
-    const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
+    const scheduleOverride = safeParseKvItem<any>(scheduleRaw) || {};
 
     // Get social proof override
     const socialRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD);
-    const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
+    const socialOverride = safeParseKvItem<any>(socialRaw) || {};
 
     return NextResponse.json({
       config: effectiveConfig,

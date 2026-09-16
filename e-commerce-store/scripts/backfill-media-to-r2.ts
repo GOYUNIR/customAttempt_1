@@ -47,7 +47,7 @@ function loadDotEnvLocal(): void {
 }
 loadDotEnvLocal();
 
-import { createRedisClient, loadStoreConfig, safeParseRedisItem, PRODUCTS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
+import { createKvClient, loadStoreConfig, safeParseKvItem, PRODUCTS_KEY, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { buildMediaObjectKey, parseDataUrl } from '@/lib/media-s3-keys';
 import { mimeToMediaExtension } from '@/lib/media';
 import { putMediaObject, readMediaS3Config, type MediaS3Config } from '@/lib/media-s3';
@@ -140,7 +140,7 @@ async function main() {
     );
     process.exit(2);
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     console.error('\nNo storage client configured — cannot read the catalog.');
     process.exit(2);
@@ -153,7 +153,7 @@ async function main() {
 
   for (const id of ids) {
     if (processed >= LIMIT) break;
-    const product = safeParseRedisItem<any>(all[id]);
+    const product = safeParseKvItem<any>(all[id]);
     if (!product || !Array.isArray(product.images) || product.images.length === 0) continue;
 
     const pending = product.images.filter((img: unknown) => parseDataUrl(img) !== null).length;

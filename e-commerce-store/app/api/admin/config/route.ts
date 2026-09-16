@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   getGlobalScheduleOverride,
   saveGlobalScheduleOverride,
   getSocialProofOverride,
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   if (!(await adminAuthorized(request))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const globalScheduleOverride = await getGlobalScheduleOverride(redis);
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

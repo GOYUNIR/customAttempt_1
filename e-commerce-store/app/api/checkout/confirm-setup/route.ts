@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
-  safeParseRedisItem,
+  createKvClient,
+  safeParseKvItem,
   archiveEntry,
   emailBlockKey,
   cardBlockKey,
@@ -51,7 +51,7 @@ async function resolvePromo(redis: any, rawCode: string, email: string) {
   if (!promoCode) return { appliedPromo: undefined as string | undefined, discountPercent: 0 };
   try {
     const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
-    const promo = safeParseRedisItem<any>(raw);
+    const promo = safeParseKvItem<any>(raw);
     if (!promo || promo.active === false) {
       return { appliedPromo: undefined, discountPercent: 0 };
     }
@@ -81,7 +81,7 @@ async function countActivePoolEntries(redis: any, variant: string, size: string,
     const poolItems = await redis.lrange(poolKey(variant, size), 0, -1);
     let count = 0;
     for (const row of poolItems) {
-      const parsed = safeParseRedisItem<any>(row);
+      const parsed = safeParseKvItem<any>(row);
       if (parsed && String(parsed.email || '').toLowerCase() === email.toLowerCase()) count += 1;
     }
     return count;
@@ -98,7 +98,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
       }
@@ -115,7 +115,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
 async function getRefPrefix(redis: any): Promise<string> {
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     return normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     return 'GU';
@@ -136,7 +136,7 @@ async function repairMissingEntryEmails(redis: any, request: Request, session: a
     const checkoutType = String(meta.checkoutType || 'single');
     const promoCode = String(meta.promoCode || meta.ref || '').trim().toUpperCase();
     const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
-    const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+    const storeConfig = safeParseKvItem<any>(rawStoreConfig) || {};
     const refPrefix = normalizeRefPrefix(storeConfig?.refPrefix || 'GU');
     const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
     const userRewards = await lookupUserRewards(redis, email);
@@ -307,7 +307,7 @@ async function lockOneEntry(opts: {
     try {
       await redis.sadd(promoUsedKey(appliedPromo), email);
       const raw = await redis.hget(PROMO_CODES_KEY, appliedPromo);
-      const promo = safeParseRedisItem<any>(raw);
+      const promo = safeParseKvItem<any>(raw);
       if (promo) {
         promo.uses = (promo.uses || 0) + 1;
         await redis.hset(PROMO_CODES_KEY, { [appliedPromo]: JSON.stringify(promo) });
@@ -325,7 +325,7 @@ async function lockOneEntry(opts: {
       const listPrice = product?.priceCategories?.find((category: any) => category.size === size)?.price || 0;
       const userRewards = await lookupUserRewards(redis, email);
       const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
-      const storeConfig = safeParseRedisItem<any>(rawStoreConfig) || {};
+      const storeConfig = safeParseKvItem<any>(rawStoreConfig) || {};
       const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
       const emailResult = await sendEntryConfirmedEmail({
         to: email,
@@ -360,7 +360,7 @@ async function lockOneEntry(opts: {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'System offline.' }, { status: 500 });

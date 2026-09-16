@@ -4,7 +4,7 @@ import { resolveActingTenantId } from '@/lib/tenant-context';
 import { runAssistantTurn } from '@/lib/ai-assistant/runner';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const result = await runAssistantTurn(message, { role: actor.role, impersonating: actor.impersonating }, tenantId, actor.email);
 
     if (result.toolCalled && result.ok) {
-      const redis = createRedisClient();
+      const redis = createKvClient();
       if (redis) {
         await appendAudit(
           redis,

@@ -16,7 +16,7 @@
  *   - on failure, enqueues for out-of-band retry
  *   - NEVER throws, so a notification can never affect a charge
  */
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { sendWinnerEmail } from '@/lib/email';
 import { NOTIFICATION_QUEUE_KEY, NOTIFICATION_DEAD_LETTER_KEY } from '@/lib/redis-keys';
 import {
@@ -32,7 +32,7 @@ import {
 type WinnerEmailOpts = Parameters<typeof sendWinnerEmail>[0];
 
 function storage(): NotificationStorage | null {
-  return createRedisClient() as unknown as NotificationStorage | null;
+  return createKvClient() as unknown as NotificationStorage | null;
 }
 
 /**

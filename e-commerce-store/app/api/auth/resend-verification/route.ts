@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY } from '@/lib/server-config';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('auth_resend_verification', request, 10, 60);
     if (limited) return limited;
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System error' }, { status: 500 });
 
     // Only unverified accounts can request a code.
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     let user: any = null;
     if (raw) {
       for (const [, v] of Object.entries(raw)) {
-        const u = safeParseRedisItem<any>(v);
+        const u = safeParseKvItem<any>(v);
         if (u && String(u.email || '').toLowerCase() === email) { user = u; break; }
       }
     }

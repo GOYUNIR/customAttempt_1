@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   aggregateLiveInventoryByProduct,
-  createRedisClient,
+  createKvClient,
   findLiveInventoryForProduct,
   indexSharedPools,
   listLiveStates,
   loadStoreConfigCached,
-  safeParseRedisItem,
+  safeParseKvItem,
   PRODUCTS_KEY,
   OVERRIDES_KEY,
   OVERRIDE_SCHEDULE_FIELD,
@@ -489,7 +489,7 @@ async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {
     // same way: the flag never removes the working fallback.
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
 
   if (!redis) {
     // No Redis configured and nothing has been seeded yet → start with zero
@@ -513,7 +513,7 @@ async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {
   // store config > static, so the storefront's next-raffle anchor agrees with
   // the draw engine.
   const scheduleRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD);
-  const scheduleOverride = safeParseRedisItem<any>(scheduleRaw) || {};
+  const scheduleOverride = safeParseKvItem<any>(scheduleRaw) || {};
   const globalSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
     ...(config?.dropSchedule || {}),
@@ -524,7 +524,7 @@ async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {
   const allRaw = await redis.hgetall(PRODUCTS_KEY);
   if (allRaw) {
     for (const value of Object.values(allRaw)) {
-      const p = safeParseRedisItem<any>(value);
+      const p = safeParseKvItem<any>(value);
       if (p) allProducts.push(sanitizeProduct(p));
     }
   }
@@ -538,7 +538,7 @@ async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {
     : null;
 
   const socialRaw = await redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD);
-  const socialOverride = safeParseRedisItem<any>(socialRaw) || {};
+  const socialOverride = safeParseKvItem<any>(socialRaw) || {};
 
   return {
     config,

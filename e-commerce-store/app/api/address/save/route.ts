@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   findAllOpenOrders,
   adminUpdateOrderAddress,
   loadProducts,
@@ -36,7 +36,7 @@ function isBlankAddress(value: string): boolean {
  */
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return NextResponse.json({ error: 'Infrastructure offline' }, { status: 500 });
     }

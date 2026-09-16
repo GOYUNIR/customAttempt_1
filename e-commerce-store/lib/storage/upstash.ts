@@ -6,7 +6,7 @@
  * structurally compatible with `StorageClient`; the cast documents that the
  * app treats it as the generic contract, not as the SDK.
  *
- * Env resolution matches the old `createRedisClient()` behavior exactly:
+ * Env resolution matches the old `createKvClient()` behavior exactly:
  *   URL:  UPSTASH_REDIS_REST_URL → KV_REST_API_URL → REDIS_REST_URL → REDIS_URL
  *         → KV_URL
  *   TOKEN: UPSTASH_REDIS_REST_TOKEN → KV_REST_API_TOKEN → REDIS_REST_TOKEN

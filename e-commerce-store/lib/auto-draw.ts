@@ -26,7 +26,7 @@ import {
   archiveProductToCatalog,
   buildAbsoluteUrl,
   cardBlockKey,
-  createRedisClient,
+  createKvClient,
   DRAW_HISTORY_KEY,
   emailBlockKey,
   getGlobalScheduleOverride,
@@ -43,7 +43,7 @@ import {
   PRODUCTS_KEY,
   PROMO_CODES_KEY,
   resolveCustomerId,
-  safeParseRedisItem,
+  safeParseKvItem,
   saveLiveState,
   sizeFromPoolKey,
   STORE_CONFIG_KEY,
@@ -117,7 +117,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
       }
@@ -266,7 +266,7 @@ async function evaluatePoolDue(opts: {
 }
 
 export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoDrawResult> {
-  const redis = options.redis || createRedisClient();
+  const redis = options.redis || createKvClient();
   const stripe = options.stripe || (await resolveStripeClient());
   const now = options.now ?? Date.now();
   const dryRun = options.dryRun === true;
@@ -305,7 +305,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   // the admin "Save Schedule" writes the override, and the static config is the
   // code-level fallback — priority is override > store config > static.
   const scheduleOverrideForTz = await getGlobalScheduleOverride(redis).catch(() => null);
-  const storeConfigForSchedule = safeParseRedisItem<any>(await redis.get(STORE_CONFIG_KEY).catch(() => null)) || {};
+  const storeConfigForSchedule = safeParseKvItem<any>(await redis.get(STORE_CONFIG_KEY).catch(() => null)) || {};
   const refPrefix = normalizeRefPrefix(storeConfigForSchedule?.refPrefix || 'GU');
   const globalSchedule = {
     ...GOYUNIR_STORE_SUITE.dropSchedule,
@@ -464,7 +464,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       const siteUrl = getSiteUrl() || (options.request ? buildAbsoluteUrl(options.request, '') : '') || fallbackSiteUrl();
 
       for (const winnerStr of shuffled) {
-        const rawWinnerData = safeParseRedisItem<any>(winnerStr);
+        const rawWinnerData = safeParseKvItem<any>(winnerStr);
         if (!rawWinnerData) continue;
         const winnerData = rawWinnerData.email && typeof rawWinnerData.email === 'object' ? rawWinnerData.email : rawWinnerData;
         const winnerEmail = String(winnerData.email || '').toLowerCase();
@@ -503,7 +503,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             if (promoCode) {
               try {
                 const raw = await redis.hget(PROMO_CODES_KEY, promoCode);
-                promoForCharge = safeParseRedisItem<any>(raw);
+                promoForCharge = safeParseKvItem<any>(raw);
                 if (promoForCharge && promoForCharge.active !== false) {
                   const self = promoForCharge.promoterEmail && String(promoForCharge.promoterEmail).toLowerCase() === winnerEmail;
                   if (!self) {
@@ -660,7 +660,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         await redis.del(emailBlockKey(productName, productSize));
         await redis.del(cardBlockKey(productName, productSize));
         for (const entry of remainingEntries) {
-          const parsed = safeParseRedisItem<any>(entry);
+          const parsed = safeParseKvItem<any>(entry);
           if (!parsed) continue;
           const em = String(parsed.email || '').toLowerCase();
           if (em) await redis.sadd(emailBlockKey(productName, productSize), em);
@@ -671,7 +671,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
         try {
           const remainingIntents = await redis.lrange(intentKey, 0, -1);
           for (const item of remainingIntents) {
-            const parsed = safeParseRedisItem<any>(item);
+            const parsed = safeParseKvItem<any>(item);
             if (parsed) {
               await archiveEntry(redis, {
                 email: String(parsed.email || 'Unknown'), variant: productName, size: productSize,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY, ANALYTICS_ONLINE_KEY } from '@/lib/server-config';
+import { createKvClient, POOL_STATS_KEY, getSocialProofOverride, SOCIAL_PROOF_BOOST_KEY, ANALYTICS_ONLINE_KEY } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { isRateLimited } from '@/lib/rate-limit';
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ socialProofDisplay: 0 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const url = new URL(request.url);
     const visitorId = String(url.searchParams.get('visitorId') || '').slice(0, 64);
 

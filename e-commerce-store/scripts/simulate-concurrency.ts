@@ -47,7 +47,7 @@ function loadDotEnvLocal(): void {
 loadDotEnvLocal();
 
 import { supabaseServiceConfigured } from '@/services/config/supabase-client';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
@@ -78,7 +78,7 @@ async function main() {
     console.error('✖ Supabase is not configured (SUPABASE_SERVICE_ROLE_KEY missing) — nothing to test against.');
     process.exit(1);
   }
-  if (!createRedisClient()) {
+  if (!createKvClient()) {
     console.error('✖ No Redis/KV backend configured — decrementInventory() fails closed without one, so this test would be meaningless.');
     process.exit(1);
   }

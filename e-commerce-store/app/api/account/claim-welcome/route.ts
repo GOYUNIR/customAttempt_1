@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
@@ -17,7 +17,7 @@ async function isWelcomeCodeUsed(redis: any, code: string, email: string): Promi
     const inSet = await redis.sismember(promoUsedKey(code), email);
     if (inSet === 1) return true;
     const raw = await redis.hget(PROMO_CODES_KEY, code);
-    const promo = safeParseRedisItem<any>(raw);
+    const promo = safeParseKvItem<any>(raw);
     const maxTotal = Number(promo?.maxUsesTotal || 0);
     return maxTotal > 0 && Number(promo?.uses || 0) >= maxTotal;
   } catch {
@@ -42,11 +42,11 @@ export async function POST(request: Request) {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const rawUser = await redis.hget(USERS_KEY, sessionUser.userId);
-    const user = safeParseRedisItem<any>(rawUser);
+    const user = safeParseKvItem<any>(rawUser);
     if (!user || String(user.email || '').toLowerCase() !== sessionUser.email) {
       return NextResponse.json({ error: 'Account not found.' }, { status: 404 });
     }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, PRODUCTS_KEY } from '@/lib/server-config';
+import { createKvClient, PRODUCTS_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +49,7 @@ function mediaKind(file: File): 'image' | 'video' | null {
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
     }

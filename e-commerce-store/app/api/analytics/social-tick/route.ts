@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, getSocialProofOverride, getAdminPassword } from '@/lib/server-config';
+import { createKvClient, getSocialProofOverride, getAdminPassword } from '@/lib/server-config';
 import { isCronAuthorized } from '@/lib/cron-auth';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { maybeAutoIncrementSocialProof } from '@/lib/social-proof';
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ skipped: true, reason: 'no redis' });
 
   const cfg = {

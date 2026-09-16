@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseRedisItem, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
+import { createKvClient, loadProducts, archiveEntry, getLiveProductState, saveLiveState, safeParseKvItem, POOL_STATS_KEY, poolStatField, LAST_DRAW_KEY, DRAW_HISTORY_KEY, POOL_KEY_PREFIX, intentPoolKey, waitlistPoolKey, STORE_CONFIG_KEY, USERS_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { resolveStripePriceIdWithSettings } from '@/services/config/platform-settings';
@@ -24,7 +24,7 @@ function siteUrlFromEnv() {
 async function getRefPrefix(redis: any): Promise<string> {
   try {
     const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseRedisItem<any>(rawCfg) || {};
+    const cfg = safeParseKvItem<any>(rawCfg) || {};
     return normalizeRefPrefix(cfg?.refPrefix || 'GU');
   } catch {
     return 'GU';
@@ -40,7 +40,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
     const raw = await redis.hgetall(USERS_KEY);
     if (!raw) return { hasAccount: false, rewardsBalance: 0 };
     for (const [, v] of Object.entries(raw)) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
         return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
       }
@@ -53,7 +53,7 @@ async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccoun
 
 export async function POST(request: Request) {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'System offline' }, { status: 500 });
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       const declinedEntries: string[] = [];
 
       for (const winnerStr of winners) {
-        const entry = safeParseRedisItem<any>(winnerStr);
+        const entry = safeParseKvItem<any>(winnerStr);
         if (!entry) continue;
         const customerId = entry.customerId || entry.stripeCustomerId;
         const paymentMethodId = entry.paymentMethodId;
@@ -221,7 +221,7 @@ export async function POST(request: Request) {
         const available = Math.max(0, live.inventoryRemaining);
         const pendingWaitlist = waitlistEntries.slice(0, available);
         for (const waitlistStr of pendingWaitlist) {
-          const entry = safeParseRedisItem<any>(waitlistStr);
+          const entry = safeParseKvItem<any>(waitlistStr);
           if (!entry) continue;
           const customerId = entry.customerId || entry.stripeCustomerId;
           const paymentMethodId = entry.paymentMethodId;

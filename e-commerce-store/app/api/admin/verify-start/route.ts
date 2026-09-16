@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { issueAdminCode, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const result = await issueAdminCode(redis, adminEmail);

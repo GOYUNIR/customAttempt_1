@@ -3,8 +3,8 @@ import type { NextRequest } from 'next/server';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import {
   buildAbsoluteUrl,
-  createRedisClient,
-  safeParseRedisItem,
+  createKvClient,
+  safeParseKvItem,
   archiveEntry,
   resolveCustomerId,
   resetPoolAndBlocks,
@@ -30,7 +30,7 @@ export interface DrawResult {
 }
 
 export async function runDropDraw(request: Request | NextRequest) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const stripe = await resolveStripeClient();
   const resultsSummary: DrawResult[] = [];
 
@@ -54,7 +54,7 @@ export async function runDropDraw(request: Request | NextRequest) {
 
       const allRegistrations = await redis.lrange(pool, 0, -1);
       const parsedPool = allRegistrations
-        .map((entry) => safeParseRedisItem<Record<string, unknown>>(entry))
+        .map((entry) => safeParseKvItem<Record<string, unknown>>(entry))
         .filter(Boolean) as Record<string, unknown>[];
 
       for (let index = parsedPool.length - 1; index > 0; index -= 1) {
@@ -232,7 +232,7 @@ export async function runDropDraw(request: Request | NextRequest) {
       try {
         const remainingIntents = await redis.lrange(intentKey, 0, -1);
         for (const item of remainingIntents) {
-          const parsed = safeParseRedisItem<any>(item);
+          const parsed = safeParseKvItem<any>(item);
           if (parsed) {
             await archiveEntry(redis, {
               email: String(parsed.email || 'Unknown'), variant: product.name, size,

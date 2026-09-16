@@ -1,4 +1,4 @@
-import { createRedisClient } from './server-config';
+import { createKvClient } from './server-config';
 import { mergeOrbsConfig } from './storefront-config';
 import { STORE_CONFIG_KEY } from './redis-keys';
 
@@ -383,7 +383,7 @@ const DEFAULT_CONFIG: Partial<StoreConfig> = {
 
 export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
   if (!redis) {
-    redis = createRedisClient();
+    redis = createKvClient();
   }
   
   if (!redis) {
@@ -392,7 +392,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
 
   try {
     const configRaw = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseRedisItem<any>(configRaw) || {};
+    const config = safeParseKvItem<any>(configRaw) || {};
     
     // Merge with defaults
     return {
@@ -417,7 +417,7 @@ export async function getStoreConfig(redis?: any): Promise<StoreConfig> {
   }
 }
 
-export function safeParseRedisItem<T = any>(item: unknown): T | null {
+export function safeParseKvItem<T = any>(item: unknown): T | null {
   if (item == null) return null;
   if (typeof item === 'object') return item as T;
   if (typeof item === 'string') {

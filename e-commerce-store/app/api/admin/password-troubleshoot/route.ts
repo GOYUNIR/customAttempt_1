@@ -8,7 +8,7 @@ import {
 import { isPlatformConfigured, getPlatformSettings } from '@/services/config/platform-settings';
 import { supabaseServiceConfigured, supabaseAuthConfigured } from '@/services/config/supabase-client';
 import { appendAudit } from '@/app/api/admin/audit/route';
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Re-authentication required.' }, { status: 403 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const adminPasswordSet = Boolean(getAdminPassword());
   const verifyEmail = getAdminVerifyEmail();
   const configured = (await isPlatformConfigured()) === true;

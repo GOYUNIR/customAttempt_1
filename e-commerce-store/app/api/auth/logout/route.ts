@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, sessionKey } from '@/lib/server-config';
+import { createKvClient, sessionKey } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   }
   
   if (token) {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (redis) {
       await redis.del(sessionKey(token));
     }

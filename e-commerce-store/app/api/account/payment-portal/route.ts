@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   findPoolEntriesByEmail,
   loadProducts,
   loadStoreConfig,
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Login required.' }, { status: 401 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const stripe = await resolveStripeClient();
     if (!redis || !stripe) {
       return NextResponse.json({ error: 'Infrastructure offline.' }, { status: 500 });

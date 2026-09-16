@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { isLegacyHeroContent, surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { DEFAULT_LEGAL } from '@/lib/legal-config';
@@ -8,7 +8,7 @@ import { getSupportEmail } from '@/lib/env';
 export const dynamic = 'force-dynamic';
 
 export default async function StoryPage() {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   const config = await loadStoreConfigCached(redis);
   const configPalette = { ...GOYUNIR_STORE_SUITE.themeColors, ...(config.themeColors || {}) };
   const legal = { ...DEFAULT_LEGAL, ...(config.legal || {}) };

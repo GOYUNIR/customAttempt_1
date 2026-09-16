@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, adminRequestAuthorized } from '@/lib/server-config';
+import { createKvClient, adminRequestAuthorized } from '@/lib/server-config';
 import {
   adminAuthorized,
   stampStepUp,
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Password required.' }, { status: 400 });
   }
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     return NextResponse.json({ error: 'System offline.' }, { status: 500 });
   }

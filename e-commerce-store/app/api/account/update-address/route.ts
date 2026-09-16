@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  createRedisClient,
+  createKvClient,
   findAllOpenOrders,
   adminUpdateOrderAddress,
   findLedgerEntriesByEmailVariant,
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const body = await request.json();

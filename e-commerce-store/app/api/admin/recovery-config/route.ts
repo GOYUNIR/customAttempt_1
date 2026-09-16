@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, RECOVERY_CONFIG_KEY} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, RECOVERY_CONFIG_KEY} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
@@ -17,15 +17,15 @@ export async function GET(request: Request) {
   if (!(await adminAuthorized(request))) {
     return NextResponse.json(defaultConfig());
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json(defaultConfig());
   const raw = await redis.get(RECOVERY_CONFIG_KEY);
-  const parsed = safeParseRedisItem<any>(raw);
+  const parsed = safeParseKvItem<any>(raw);
   return NextResponse.json({ ...defaultConfig(), ...(parsed || {}) });
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

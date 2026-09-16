@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, createRedisClient } from '@/lib/server-config';
+import { adminRequestAuthorized, createKvClient } from '@/lib/server-config';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import { readUsageTotals, USAGE_METRICS } from '@/lib/analytics';
 import { ANALYTICS_USAGE_PREFIX } from '@/lib/redis-keys';
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   const tenant = url.searchParams.get('tenant') || 'default';
   const days = Math.max(1, Math.min(90, Number(url.searchParams.get('days')) || 7));
 
-  const storage = createRedisClient();
+  const storage = createKvClient();
   if (!storage) {
     return NextResponse.json({ ok: true, tenant, days, totals: { api_calls: 0, ai_generations: 0, system_events: 0 }, metrics: USAGE_METRICS });
   }

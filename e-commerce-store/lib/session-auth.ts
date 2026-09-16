@@ -1,4 +1,4 @@
-import { createRedisClient, safeParseRedisItem } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem } from '@/lib/server-config';
 import { sessionKey } from '@/lib/redis-keys';
 
 type SessionUser = {
@@ -22,12 +22,12 @@ export async function getSessionUser(request: Request): Promise<SessionUser | nu
   const token = readSessionTokenFromCookie(request.headers.get('cookie'));
   if (!token) return null;
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return null;
 
   const sessionKeyName = sessionKey(token);
   const sessionRaw = await redis.get(sessionKeyName);
-  const session = safeParseRedisItem<any>(sessionRaw);
+  const session = safeParseKvItem<any>(sessionRaw);
   if (!session) return null;
 
   if (session.expiresAt && Date.now() > Number(session.expiresAt)) {

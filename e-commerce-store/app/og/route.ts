@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { ImageResponse } from 'next/og';
-import { createRedisClient, loadStoreConfigCached } from '@/lib/server-config';
+import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { getSiteUrl } from '@/lib/env';
 import { getRequestSiteUrl } from '@/lib/request-url';
 import { resolveBrandImageForSatori } from '@/lib/brand-image';
@@ -42,7 +42,7 @@ export async function GET() {
   // renderer still produces a *branded* fallback card, never a generic one).
   let fallbackBrandName = 'Store';
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     const config = await loadStoreConfigCached(redis);
     const branding = config.branding || {};
     const themeColors = config.themeColors || {};

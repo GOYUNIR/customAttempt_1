@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   aggregateLiveInventoryByProduct,
-  createRedisClient,
+  createKvClient,
   findLiveInventoryForProduct,
   getCatalogArchiveRecords,
   indexSharedPools,
   listLiveStates,
-  safeParseRedisItem,
+  safeParseKvItem,
   STORE_CONFIG_KEY,
   PRODUCTS_KEY,
   OVERRIDES_KEY,
@@ -52,11 +52,11 @@ export async function GET() {
 
 async function buildCatalogPayload() {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     // Catalog groupings are stored inside store:config.catalogPreview (single
     // source of truth) — there is no separate `store:catalog_config` key.
     // Read early: the store timezone below comes from the same config blob.
-    const storeConfig = safeParseRedisItem<any>(redis ? await redis.get(STORE_CONFIG_KEY) : null) || {};
+    const storeConfig = safeParseKvItem<any>(redis ? await redis.get(STORE_CONFIG_KEY) : null) || {};
     // Drop timestamps are naive wall-clock strings set in the STORE's
     // timezone. Parse them as such so the catalog's go-live logic agrees with
     // the product page countdown and the server draw engine.
@@ -98,7 +98,7 @@ async function buildCatalogPayload() {
     const allRaw = await redis.hgetall(PRODUCTS_KEY);
     if (allRaw) {
       for (const value of Object.values(allRaw)) {
-        const product = safeParseRedisItem<any>(value);
+        const product = safeParseKvItem<any>(value);
         if (product) allProducts.push(product);
       }
     }
@@ -132,7 +132,7 @@ async function buildCatalogPayload() {
     // Global drop-schedule override merged over the static config — used to
     // compute `nextReleaseEndsAt` exactly like /api/store so the catalog tile
     // timers agree with the product page and the draw engine.
-    const scheduleOverride = safeParseRedisItem<any>(redis ? await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD) : null) || {};
+    const scheduleOverride = safeParseKvItem<any>(redis ? await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD) : null) || {};
     const globalSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(storeConfig?.dropSchedule || {}), ...scheduleOverride };
 
     const now = Date.now();

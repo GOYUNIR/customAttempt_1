@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, PROMO_CODES_KEY, promoUsedKey} from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, PROMO_CODES_KEY, promoUsedKey} from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { appendAudit } from '@/app/api/admin/audit/route';
 
@@ -41,7 +41,7 @@ async function loadPromos(redis: any): Promise<Record<string, PromoRecord>> {
   if (!raw) return {};
   const out: Record<string, PromoRecord> = {};
   for (const [k, v] of Object.entries(raw)) {
-    const p = safeParseRedisItem<PromoRecord>(v);
+    const p = safeParseKvItem<PromoRecord>(v);
     if (p) out[k] = p;
   }
   return out;
@@ -51,14 +51,14 @@ export async function GET(request: Request) {
   if (!(await adminAuthorized(request))) {
     return NextResponse.json({ promos: [] });
   }
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ promos: [] });
   const map = await loadPromos(redis);
   return NextResponse.json({ promos: Object.values(map) });
 }
 
 export async function POST(request: Request) {
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
   const body = await request.json();

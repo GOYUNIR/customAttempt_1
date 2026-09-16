@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, sessionKey } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, sessionKey } from '@/lib/server-config';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   const limited = await rateLimitedResponse('auth_login', request, 20, 60);
   if (limited) return limited;
 
-  const redis = createRedisClient();
+  const redis = createKvClient();
   if (!redis) {
     return NextResponse.json({ error: 'System error' }, { status: 500 });
   }
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   let user: any = null;
   for (const [, value] of Object.entries(raw)) {
-    const u = safeParseRedisItem<any>(value);
+    const u = safeParseKvItem<any>(value);
     if (u && String(u.email || '').toLowerCase() === normalizedEmail) {
       user = u;
       break;

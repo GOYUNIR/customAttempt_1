@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminDevice, IMPERSONATION_TTL_SECONDS } from '@/lib/admin-verify';
 import { verifyPortalSignIn } from '@/services/config/supabase-client';
 import { getDb } from '@/lib/db/client';
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     // even a super_admin explicitly entering impersonation mode gets the
     // reduced, audited capability set, not a silent full-access bypass.
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
     const { token, maxAgeSeconds } = await issueAdminDevice(

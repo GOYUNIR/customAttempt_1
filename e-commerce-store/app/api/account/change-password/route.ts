@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, USERS_KEY, AUTH_SESSION_PREFIX } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, USERS_KEY, AUTH_SESSION_PREFIX } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
 import { isValidPassword } from '@/lib/validation';
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Login required.' }, { status: 401 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'System offline.' }, { status: 500 });
 
     let body: any = {};
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     let userId = sessionUser.userId;
     if (raw) {
       for (const [k, v] of Object.entries(raw)) {
-        const u = safeParseRedisItem<any>(v);
+        const u = safeParseKvItem<any>(v);
         if (u && String(u.email || '').toLowerCase() === sessionUser.email) {
           user = u;
           userId = k;
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       const keys = await redis.keys(`${AUTH_SESSION_PREFIX}*`);
       for (const key of keys) {
         const sessionRaw = await redis.get(key);
-        const session = safeParseRedisItem<any>(sessionRaw);
+        const session = safeParseKvItem<any>(sessionRaw);
         if (session && String(session.userId || '') === userId) {
           await redis.del(key);
         }

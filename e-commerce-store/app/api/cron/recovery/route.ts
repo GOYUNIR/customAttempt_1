@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, safeParseRedisItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey, USERS_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, loadProducts , getAdminPassword, RECOVERY_CONFIG_KEY, RECOVERY_SENT_KEY, intentPoolKey, USERS_KEY } from '@/lib/server-config';
 import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
@@ -11,7 +11,7 @@ export const maxDuration = 60;
 
 async function getConfig(redis: any) {
   const raw = await redis.get(RECOVERY_CONFIG_KEY);
-  const parsed = safeParseRedisItem<any>(raw) || {};
+  const parsed = safeParseKvItem<any>(raw) || {};
   return {
     enabled: parsed.enabled !== false,
     earlyDelayHours: Number(parsed.earlyDelayHours ?? 3),
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
 
     const config = await getConfig(redis);
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
     const usersRaw = await redis.hgetall(USERS_KEY).catch(() => null);
     const accountEmails = new Set<string>();
     for (const [, v] of Object.entries(usersRaw || {})) {
-      const u = safeParseRedisItem<any>(v);
+      const u = safeParseKvItem<any>(v);
       if (u?.email) accountEmails.add(String(u.email).toLowerCase());
     }
 
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
         const hoursToDraw = (drawAt - now) / (1000 * 60 * 60);
 
         for (let i = 0; i < items.length; i++) {
-          const parsed = safeParseRedisItem<any>(items[i]);
+          const parsed = safeParseKvItem<any>(items[i]);
           if (!parsed?.email) continue;
           const email = String(parsed.email).toLowerCase();
           const registeredAt = new Date(parsed.registeredAt || 0).getTime();

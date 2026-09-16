@@ -11,7 +11,7 @@
  * itself still enforces its real business rules (duplicates, caps, Stripe).
  */
 
-import { createRedisClient } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
 import { rateLimitKey } from '@/lib/redis-keys';
 
 /** Best-effort client IP from the standard proxy headers (never trusted as
@@ -31,7 +31,7 @@ export async function isRateLimited(
   windowS: number,
 ): Promise<boolean> {
   try {
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return false;
     const key = rateLimitKey(namespace, clientIp(request));
     const count = await redis.incr(key);

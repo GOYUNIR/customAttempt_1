@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
+import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { isAdminDeviceValid, adminDeviceTokenFromRequest, adminLoginAuthorized } from '@/lib/admin-verify';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({ verified: false, remember: false });
     }
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) {
       // No storage configured (fresh dev box) — there is no state to protect, so
       // don't hard-lock the portal behind a device cookie.

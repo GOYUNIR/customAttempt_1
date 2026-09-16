@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createRedisClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord, loadProducts, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
+import { createKvClient, findPoolEntriesByEmail, removeListEntryAtIndex, archiveEntry, poolStatField, POOL_STATS_KEY, emailBlockKey, cardBlockKey, ArchiveRecord, loadProducts, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
 import { sendAccountUpdateEmail } from '@/lib/email';
 import { getSessionUser } from '@/lib/session-auth';
 import { appendAudit } from '../../admin/audit/route';
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });
 
-    const redis = createRedisClient();
+    const redis = createKvClient();
     if (!redis) return NextResponse.json({ error: 'Database offline.' }, { status: 500 });
     const body = await request.json();
     const email = sessionUser.email;
