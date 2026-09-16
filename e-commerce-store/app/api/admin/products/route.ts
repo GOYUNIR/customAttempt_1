@@ -21,6 +21,8 @@ import {
   cardBlockKey,
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { writeProductToPostgres, deleteProductFromPostgres } from '@/lib/catalog-write';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { resolveDefaultStripePriceId } from '@/services/config/platform-settings';
 import { UNCONFIGURED_PRICE_SENTINEL, normalizeCategories, normalizeSizeConfigs, getSizeCheckoutMode } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
@@ -118,6 +120,25 @@ async function saveProduct(redis: any, product: any, options?: { previousSlug?: 
   // active/archived/upcoming are derived by filtering at read time.
   await redis.hset(PRODUCTS_KEY, { [product.id]: JSON.stringify(product) });
 
+  // PHASE G — Postgres is becoming the authoritative catalog store. The full
+  // product (00019's real columns + config jsonb) is written through the
+  // DbClient port here.
+  //
+  // TRANSITIONAL: the Redis write above stays until USE_POSTGRES_PRIMARY is
+  // flipped, because the storefront still reads Redis until then — removing it
+  // first would leave new products invisible. This is a BRIDGE with a defined
+  // end, not a permanent dual-write: once the flag is on and the round trip is
+  // verified live, the Redis write is deleted. Never allowed to fail the save.
+  try {
+    const tenantId = await ensureDefaultTenant();
+    const result = await writeProductToPostgres(tenantId, product);
+    if (!result.ok && result.error !== 'not_configured') {
+      console.error('[admin/products] Postgres catalog write failed', result.error);
+    }
+  } catch (err) {
+    console.error('[admin/products] Postgres catalog write threw', (err as Error)?.message || err);
+  }
+
   await syncCatalogConfigForProduct(redis, product, options);
 }
 
@@ -131,6 +152,14 @@ async function deleteProduct(redis: any, id: string) {
   // catalog's Upcoming/Past Archives sections forever.
   const deletedProduct = safeParseRedisItem<any>(rawProduct);
   await redis.hdel(PRODUCTS_KEY, id);
+
+  // Mirror the delete into Postgres (Phase G bridge — see saveProduct).
+  try {
+    const slug = String(deletedProduct?.slug || '').trim();
+    if (slug) await deleteProductFromPostgres(await ensureDefaultTenant(), slug);
+  } catch (err) {
+    console.error('[admin/products] Postgres catalog delete failed', (err as Error)?.message || err);
+  }
 
   try {
     // Remove EVERY trace so the product can never keep rendering AND its

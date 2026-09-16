@@ -66,6 +66,21 @@ type PgProduct = {
   tagline: string | null;
   marketing_notes: unknown;
   media_gallery: PgMediaItem[] | null;
+  // 00019 — the catalog became authoritative here.
+  is_active: boolean | null;
+  is_archived: boolean | null;
+  is_upcoming: boolean | null;
+  checkout_mode: string | null;
+  product_type: string | null;
+  max_per_email: number | null;
+  max_per_cart: number | null;
+  max_raffle_allocation_limit: number | null;
+  sort_order: number | null;
+  total_inventory: number | null;
+  go_live_at: string | null;
+  release_ends_at: string | null;
+  categories: unknown;
+  config: Record<string, unknown> | null;
 };
 type PgVariant = {
   id: string;
@@ -75,6 +90,7 @@ type PgVariant = {
   checkout_mode: string | null;
   shared_pool_id: string | null;
   custom_schedule: Record<string, unknown> | null;
+  config: Record<string, unknown> | null;
 };
 type PgInventoryRow = { variant_id: string; quantity_available: number };
 type PgPool = { id: string; slug: string; quantity_available: number };
@@ -88,14 +104,21 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
 
     const products = await db.select<PgProduct>('products', {
       where: { tenant_id: eq(tenantId), status: eq('live') },
-      select: ['id', 'external_id', 'name', 'slug', 'description', 'tagline', 'marketing_notes', 'media_gallery'],
+      select: [
+          'id', 'external_id', 'name', 'slug', 'description', 'tagline',
+          'marketing_notes', 'media_gallery',
+          'is_active', 'is_archived', 'is_upcoming', 'checkout_mode', 'product_type',
+          'max_per_email', 'max_per_cart', 'max_raffle_allocation_limit',
+          'sort_order', 'total_inventory', 'go_live_at', 'release_ends_at',
+          'categories', 'config',
+        ],
     });
     if (!Array.isArray(products) || products.length === 0) return null;
 
     const productIds = products.map((p) => p.id);
     const variants = await db.select<PgVariant>('product_variants', {
       where: { product_id: inList(productIds) },
-      select: ['id', 'product_id', 'option_label', 'price_cents', 'checkout_mode', 'shared_pool_id', 'custom_schedule'],
+      select: ['id', 'product_id', 'option_label', 'price_cents', 'checkout_mode', 'shared_pool_id', 'custom_schedule', 'config'],
     });
 
     const variantIds = variants.map((v) => v.id);
@@ -132,7 +155,20 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
           sizeConfigs[sizeConfigKey(v.option_label)] = { customDropSchedule: v.custom_schedule };
         }
       }
+      // `config` is spread FIRST so an explicit column always wins over a stale
+      // copy of the same key that may linger in the jsonb blob. The blob is
+      // presentation/copy only (00019's split rule); anything the database
+      // constrains or queries is a real column below.
+      const config = (p.config && typeof p.config === 'object' ? p.config : {}) as Record<string, unknown>;
+      // Per-size schedule overrides come from the variant column; merge them
+      // over any sizeConfigs carried in config so the column stays the source
+      // of truth for the part it owns.
+      const mergedSizeConfigs = {
+        ...((config.sizeConfigs && typeof config.sizeConfigs === 'object' ? config.sizeConfigs : {}) as Record<string, unknown>),
+        ...sizeConfigs,
+      };
       return {
+        ...config,
         id: p.external_id || p.id,
         name: p.name,
         slug: p.slug,
@@ -141,15 +177,35 @@ export async function readCatalogFromPostgres(tenantId: string): Promise<Postgre
         notes: Array.isArray(p.marketing_notes) ? p.marketing_notes : [],
         images: media.map((m) => m?.url).filter((url): url is string => Boolean(url)),
         crops: media.some((m) => m?.crop) ? media.map((m) => m?.crop || { x: 0, y: 0, w: 1, h: 1 }) : undefined,
-        sizeConfigs,
-        isActive: true, // already filtered to status='live'
-        totalInventory,
-        priceCategories: myVariants.map((v) => ({
-          size: v.option_label,
-          price: Math.max(0, Number(v.price_cents) || 0) / 100,
-          checkoutMode: String(v.checkout_mode || '').toUpperCase() === 'RAFFLE' ? 'RAFFLE' : 'FCFS',
-          inventorySyncSlug: v.shared_pool_id ? poolById.get(v.shared_pool_id)?.slug : undefined,
-        })),
+        sizeConfigs: mergedSizeConfigs,
+        // Real lifecycle columns (00019). Previously hardcoded isActive: true
+        // because the query filtered status='live' and nothing else existed.
+        isActive: p.is_active !== null ? Boolean(p.is_active) : true,
+        isArchived: Boolean(p.is_archived),
+        isUpcoming: Boolean(p.is_upcoming),
+        checkoutMode: String(p.checkout_mode || '').toUpperCase() === 'FCFS' ? 'FCFS' : 'RAFFLE',
+        isRaffle: String(p.checkout_mode || '').toUpperCase() !== 'FCFS',
+        productType: p.product_type || 'raffle',
+        maxPerEmail: Math.max(1, Number(p.max_per_email) || 1),
+        maxPerCart: Math.max(1, Number(p.max_per_cart) || 1),
+        maxRaffleAllocationLimit: Math.max(0, Number(p.max_raffle_allocation_limit) || 0),
+        sortOrder: Number(p.sort_order) || 0,
+        goLiveAt: p.go_live_at || '',
+        releaseEndsAt: p.release_ends_at || '',
+        categories: Array.isArray(p.categories) ? p.categories : [],
+        // Live inventory wins; the stored total is the configured fallback for
+        // a product whose variants have no inventory rows yet.
+        totalInventory: totalInventory > 0 ? totalInventory : Math.max(0, Number(p.total_inventory) || 0),
+        priceCategories: myVariants.map((v) => {
+          const vConfig = (v.config && typeof v.config === 'object' ? v.config : {}) as Record<string, unknown>;
+          return {
+            ...vConfig,
+            size: v.option_label,
+            price: Math.max(0, Number(v.price_cents) || 0) / 100,
+            checkoutMode: String(v.checkout_mode || '').toUpperCase() === 'RAFFLE' ? 'RAFFLE' : 'FCFS',
+            inventorySyncSlug: v.shared_pool_id ? poolById.get(v.shared_pool_id)?.slug : undefined,
+          };
+        }),
       };
     });
 
