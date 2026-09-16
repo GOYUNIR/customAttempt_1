@@ -15,7 +15,7 @@
  * Structured QuerySpecs only. Raw PostgREST would not pass the fence.
  */
 import { getDb } from '@/lib/db/client';
-import { eq } from '@/lib/db/query';
+import { eq, inList } from '@/lib/db/query';
 
 /** Fields that get their own column — everything else falls into `config`. */
 const COLUMN_FIELDS = new Set([
@@ -93,6 +93,63 @@ function buildMediaGallery(product: Record<string, unknown>): Array<{ url: strin
   return images
     .map((url, i) => ({ url: String(url || ''), crop: crops[i] }))
     .filter((m) => Boolean(m.url));
+}
+
+/**
+ * Create a missing inventory row per variant. Never updates an existing one.
+ * Never throws -- a catalog save must not fail on inventory bookkeeping -- but
+ * a variant left without a row cannot be sold, so failure is logged loudly.
+ */
+async function writeInventoryRows(
+  tenantId: string,
+  productId: string,
+  product: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const db = getDb();
+    const rows = (await db.select<{ id: string; option_label: string }>('product_variants', {
+      where: { product_id: eq(productId) },
+      select: ['id', 'option_label'],
+    })) as Array<{ id: string; option_label: string }>;
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const existing = (await db.select<{ variant_id: string; quantity_available: number }>('inventory_levels', {
+      where: { variant_id: inList(rows.map((r) => r.id)) },
+      select: ['variant_id', 'quantity_available'],
+    })) as Array<{ variant_id: string; quantity_available: number }>;
+    const have = new Map((existing || []).map((r) => [r.variant_id, r.quantity_available]));
+
+    const perSize = (product.inventoryPerSize && typeof product.inventoryPerSize === 'object'
+      ? product.inventoryPerSize
+      : {}) as Record<string, unknown>;
+
+    for (const row of rows) {
+      const configured = Math.max(0, Math.floor(Number(perSize[row.option_label]) || 0));
+      if (have.has(row.id)) {
+        const liveQty = have.get(row.id) ?? 0;
+        if (configured > 0 && configured !== liveQty) {
+          console.warn(
+            `[catalog-write] ${String(product.slug || product.id)}/${row.option_label}: configured inventory ` +
+              `${configured} differs from live stock ${liveQty}. Live stock wins — overwriting it would ` +
+              'resurrect sold units. Use the inventory screen to restock.',
+          );
+        }
+        continue;
+      }
+      await db.insert('inventory_levels', {
+        tenant_id: tenantId,
+        variant_id: row.id,
+        quantity_available: configured,
+        quantity_reserved: 0,
+      });
+    }
+  } catch (err) {
+    console.error(
+      '[catalog-write] inventory row creation FAILED — affected variants cannot be sold ' +
+        '(decrementInventory fails closed on a missing row)',
+      (err as Error)?.message || err,
+    );
+  }
 }
 
 /** draft / live / archived — the constrained column, derived from the flags. */
@@ -202,6 +259,17 @@ export async function writeProductToPostgres(
         { onConflict: 'product_id,option_label' },
       );
     }
+
+    // INVENTORY ROWS (H4, defect A). catalog-write created products and
+    // variants but never inventory_levels, and decrementInventory fails CLOSED
+    // on no_inventory_row -- so a newly created product could not be bought at
+    // all, and the H4 backfill would have decayed the moment anyone added one.
+    //
+    // CREATE-IF-MISSING, NEVER OVERWRITE. quantity_available is live stock,
+    // not configuration: rewriting it from the configured total on every save
+    // would resurrect already-sold units. Where the two disagree we say so
+    // rather than silently picking one.
+    await writeInventoryRows(tenantId, productId, product);
 
     return {
       ok: true,
