@@ -14,7 +14,7 @@
  * as its storage backend.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
 
 export type PlatformAuditEntry = {
   action: string;
@@ -54,13 +54,9 @@ export type PlatformAuditEntry = {
  * fail-open discipline as every rate limiter in this codebase).
  */
 export async function recordPlatformAudit(entry: PlatformAuditEntry): Promise<void> {
-  if (!supabaseServiceConfigured()) return;
+  if (!getDb().configured) return;
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    await supabaseRestFetch('/audit_logs', {
-      key: serviceRoleKey,
-      method: 'POST',
-      body: {
+    await getDb().insert('audit_logs', {
         tenant_id: entry.tenantId ?? null,
         target_tenant_id: entry.tenantId ?? null,
         actor: entry.actor || 'unknown',
@@ -68,8 +64,7 @@ export async function recordPlatformAudit(entry: PlatformAuditEntry): Promise<vo
         action: entry.action,
         detail: entry.detail ?? {},
         payload: entry.payload ?? entry.detail ?? {},
-        ip_address: entry.ipAddress ?? null,
-      },
+      ip_address: entry.ipAddress ?? null,
     });
   } catch (err) {
     console.warn('[platform-audit] write failed (non-fatal)', (err as Error)?.message || err);

@@ -18,7 +18,7 @@
  * route needs one; every subsequent call is a no-op merge.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
 import { neutralBrandName } from '@/lib/env';
 import type { AdminActor } from '@/lib/admin-actor';
 
@@ -34,21 +34,21 @@ const DEFAULT_TENANT_SLUG = 'default';
  *  callers that need a tenant id for a Postgres write have nothing useful
  *  to do without one. */
 export async function ensureDefaultTenant(): Promise<string> {
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     throw new Error('Supabase is not configured — the B2B engine requires SUPABASE_SERVICE_ROLE_KEY.');
   }
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch('/tenants', {
-    key: serviceRoleKey,
-    method: 'POST',
-    body: {
+  // returning: 'default' reproduces the pre-port request exactly — the legacy
+  // call sent Prefer: resolution=merge-duplicates with no return directive.
+  await getDb().insert(
+    'tenants',
+    {
       id: DEFAULT_TENANT_ID,
       slug: DEFAULT_TENANT_SLUG,
       name: neutralBrandName(),
       license_status: 'active',
     },
-    prefer: 'resolution=merge-duplicates',
-  });
+    { mergeDuplicates: true, returning: 'default' },
+  );
   return DEFAULT_TENANT_ID;
 }
 

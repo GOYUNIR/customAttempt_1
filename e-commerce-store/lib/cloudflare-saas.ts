@@ -16,7 +16,8 @@
  * crash.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { mapCloudflareDomainStatus, mapCloudflareSslStatus, type DomainStatus, type SslStatus } from '@/lib/cloudflare-status';
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
@@ -148,7 +149,7 @@ export interface TenantDomainSyncResult {
  */
 export async function syncTenantDomainStatus(tenantId: string, hostname: string): Promise<CloudflareResult<TenantDomainSyncResult>> {
   if (!cloudflareConfigured()) return notConfiguredResult();
-  if (!supabaseServiceConfigured()) {
+  if (!getDb().configured) {
     return { ok: false, error: 'Supabase is not configured — cannot persist domain status.' };
   }
 
@@ -164,11 +165,13 @@ export async function syncTenantDomainStatus(tenantId: string, hostname: string)
   const domainStatus = mapCloudflareDomainStatus(record.status);
   const sslStatus = mapCloudflareSslStatus(record.sslStatus);
 
-  const { serviceRoleKey } = readSupabaseEnv();
-  await supabaseRestFetch(`/tenants?id=eq.${encodeURIComponent(tenantId)}`, {
-    key: serviceRoleKey,
-    method: 'PATCH',
-    body: {
+  // returning: 'default' — the legacy PATCH sent no Prefer header at all, and
+  // this caller ignores the response, so asking for the rows back would change
+  // the request during a refactor meant to change nothing.
+  await getDb().update(
+    'tenants',
+    { where: { id: eq(tenantId) } },
+    {
       custom_domain: hostname,
       cloudflare_hostname_id: record.id,
       domain_status: domainStatus,
@@ -176,7 +179,8 @@ export async function syncTenantDomainStatus(tenantId: string, hostname: string)
       domain_verification: { records: record.verificationRecords },
       domain_checked_at: new Date().toISOString(),
     },
-  });
+    { returning: 'default' },
+  );
 
   return { ok: true, data: { domainStatus, sslStatus, verificationRecords: record.verificationRecords } };
 }

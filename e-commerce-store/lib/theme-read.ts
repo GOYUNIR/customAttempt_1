@@ -5,19 +5,21 @@
  * existing hardcoded homepage (`app/page.tsx`'s legacy component).
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { validateThemeSections, type ThemeSection } from '@/lib/theme-schema';
 
 export type TenantTheme = { id: string; name: string; sections: ThemeSection[] };
 
 export async function readActiveTheme(tenantId: string): Promise<TenantTheme | null> {
-  if (!supabaseServiceConfigured()) return null;
+  const db = getDb();
+  if (!db.configured) return null;
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    const rows = (await supabaseRestFetch(
-      `/tenant_themes?tenant_id=eq.${encodeURIComponent(tenantId)}&is_active=eq.true&select=id,name,sections&limit=1`,
-      { key: serviceRoleKey },
-    )) as Array<{ id: string; name: string; sections: unknown }>;
+    const rows = await db.select<{ id: string; name: string; sections: unknown }>('tenant_themes', {
+      where: { tenant_id: eq(tenantId), is_active: eq(true) },
+      select: ['id', 'name', 'sections'],
+      limit: 1,
+    });
     const row = rows?.[0];
     if (!row) return null;
     const { ok } = validateThemeSections(row.sections);

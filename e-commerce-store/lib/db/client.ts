@@ -27,11 +27,36 @@ export interface DbCallOptions {
   tier?: DbTier;
 }
 
-export interface InsertOptions extends DbCallOptions {
+/**
+ * What to ask for back from a write.
+ *   'representation' — return the written rows (the port default)
+ *   'minimal'        — explicitly ask for nothing back
+ *   'default'        — send NO return directive and let PostgREST decide
+ *
+ * 'default' exists so a migrated call site can reproduce legacy behaviour
+ * byte-for-byte: several pre-port callers sent no Prefer return directive at
+ * all, and silently switching them to an explicit one would change the request
+ * (and the response size) during a refactor that is supposed to change neither.
+ */
+export type ReturningMode = 'representation' | 'minimal' | 'default';
+
+export interface WriteOptions extends DbCallOptions {
+  returning?: ReturningMode;
+}
+
+export interface InsertOptions extends WriteOptions {
   /** Column list for upsert conflict resolution, e.g. 'tenant_id,variant_id'. */
   onConflict?: string;
-  /** Return the written rows (default true). */
-  returning?: boolean;
+  /** Send `resolution=merge-duplicates` without an on_conflict query param. */
+  mergeDuplicates?: boolean;
+}
+
+/** Build the Prefer header value, or undefined to send none at all. */
+function preferHeader(returning: ReturningMode, merge: boolean): string | undefined {
+  const parts: string[] = [];
+  if (returning !== 'default') parts.push(`return=${returning}`);
+  if (merge) parts.push('resolution=merge-duplicates');
+  return parts.length > 0 ? parts.join(',') : undefined;
 }
 
 export interface DbClient {
@@ -39,7 +64,7 @@ export interface DbClient {
   readonly configured: boolean;
   select<T = Record<string, unknown>>(table: string, spec?: QuerySpec, opts?: DbCallOptions): Promise<T[]>;
   insert<T = Record<string, unknown>>(table: string, rows: object | object[], opts?: InsertOptions): Promise<T[]>;
-  update<T = Record<string, unknown>>(table: string, spec: QuerySpec, patch: object, opts?: DbCallOptions): Promise<T[]>;
+  update<T = Record<string, unknown>>(table: string, spec: QuerySpec, patch: object, opts?: WriteOptions): Promise<T[]>;
   remove(table: string, spec: QuerySpec, opts?: DbCallOptions): Promise<void>;
 }
 
@@ -83,12 +108,10 @@ class SupabaseDbClient implements DbClient {
 
   async insert<T = Record<string, unknown>>(table: string, rows: object | object[], opts: InsertOptions = {}): Promise<T[]> {
     const conflict = opts.onConflict ? `?on_conflict=${encodeURIComponent(opts.onConflict)}` : '';
-    const prefer = [
-      opts.returning === false ? 'return=minimal' : 'return=representation',
-      opts.onConflict ? 'resolution=merge-duplicates' : '',
-    ]
-      .filter(Boolean)
-      .join(',');
+    const prefer = preferHeader(
+      opts.returning ?? 'representation',
+      Boolean(opts.onConflict || opts.mergeDuplicates),
+    );
     const result = await supabaseRestFetch(`/${assertTable(table)}${conflict}`, {
       key: this.key(),
       method: 'POST',
@@ -99,13 +122,13 @@ class SupabaseDbClient implements DbClient {
     return (result as T[]) ?? [];
   }
 
-  async update<T = Record<string, unknown>>(table: string, spec: QuerySpec, patch: object, opts: DbCallOptions = {}): Promise<T[]> {
+  async update<T = Record<string, unknown>>(table: string, spec: QuerySpec, patch: object, opts: WriteOptions = {}): Promise<T[]> {
     assertScoped(spec, 'update');
     const result = await supabaseRestFetch(`/${assertTable(table)}?${buildPostgrestQuery(spec)}`, {
       key: this.key(),
       method: 'PATCH',
       body: patch,
-      prefer: 'return=representation',
+      prefer: preferHeader(opts.returning ?? 'representation', false),
       tier: opts.tier,
     });
     return (result as T[]) ?? [];
