@@ -40,7 +40,8 @@ import { createStorageClient } from '@/lib/storage';
 import { loadProducts, safeParseRedisItem, USERS_KEY, ARCHIVE_LEDGER_KEY } from '@/lib/server-config';
 import { STORED_CARTS_KEY } from '@/lib/redis-keys';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 // ── .env.local loader (Next.js auto-loads this; a bare tsx process doesn't) ──
 // Every module imported above only reads `process.env` lazily, INSIDE a
@@ -138,14 +139,11 @@ function newCounts(): Counts {
   return { created: 0, updated: 0, skipped: 0, errors: 0 };
 }
 
-async function upsert(path: string, onConflict: string, body: Record<string, unknown>, serviceRoleKey: string): Promise<Record<string, unknown> | null> {
+async function upsert(path: string, onConflict: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   if (DRY_RUN) return null;
-  const rows = (await supabaseRestFetch(`${path}?on_conflict=${onConflict}`, {
-    key: serviceRoleKey,
-    method: 'POST',
-    body,
-    prefer: 'return=representation,resolution=merge-duplicates',
-  })) as Array<Record<string, unknown>>;
+  // `path` is historically "/table"; the port takes the bare table name.
+  const table = path.replace(/^\//, '');
+  const rows = await getDb().insert<Record<string, unknown>>(table, body, { onConflict });
   return rows?.[0] ?? null;
 }
 
@@ -158,7 +156,6 @@ function statusFromLegacy(p: RedisProduct): 'draft' | 'live' | 'archived' {
 async function backfillProducts(
   redisProducts: Record<string, unknown>,
   tenantId: string,
-  serviceRoleKey: string,
 ): Promise<{ products: Counts; variants: Counts; inventory: Counts; slugToProductId: Map<string, string>; variantKeyToId: Map<string, string> }> {
   const products = newCounts();
   const variants = newCounts();
@@ -187,7 +184,6 @@ async function backfillProducts(
         status: statusFromLegacy(p),
         metadata: { legacyId: p.id },
       },
-      serviceRoleKey,
     );
     const productId = DRY_RUN ? `dry-run:${p.slug}` : (productRow?.id as string | undefined);
     if (!DRY_RUN && !productId) {
@@ -210,7 +206,6 @@ async function backfillProducts(
           '/shared_inventory_pools',
           'tenant_id,slug',
           { tenant_id: tenantId, slug: cat.inventorySyncSlug, quantity_available: 0, quantity_reserved: 0 },
-          serviceRoleKey,
         );
         sharedPoolId = poolRow?.id as string | undefined;
       }
@@ -234,7 +229,6 @@ async function backfillProducts(
             stripeId: cat.stripeId || null,
           },
         },
-        serviceRoleKey,
       );
       const variantId = DRY_RUN ? `dry-run:${p.slug}:${cat.size}` : (variantRow?.id as string | undefined);
       if (!DRY_RUN && !variantId) {
@@ -253,7 +247,6 @@ async function backfillProducts(
           '/inventory_levels',
           'variant_id',
           { tenant_id: tenantId, variant_id: variantId, quantity_available: qty, quantity_reserved: 0 },
-          serviceRoleKey,
         );
         inventory.created += 1;
       }
@@ -277,7 +270,6 @@ async function findVariantForProductName(
 async function backfillCarts(
   storage: any,
   tenantId: string,
-  serviceRoleKey: string,
   redisProducts: Record<string, any>,
   variantKeyToId: Map<string, string>,
 ): Promise<{ carts: Counts; items: Counts }> {
@@ -313,25 +305,25 @@ async function backfillCarts(
     let customerId: string | undefined;
     let cartId: string | undefined;
     if (!DRY_RUN) {
-      const customerRow = await upsert('/customers', 'tenant_id,email', { tenant_id: tenantId, email }, serviceRoleKey);
+      const customerRow = await upsert('/customers', 'tenant_id,email', { tenant_id: tenantId, email });
       customerId = customerRow?.id as string | undefined;
       if (!customerId) {
         carts.errors += 1;
         continue;
       }
-      const existingCart = (await supabaseRestFetch(
-        `/carts?tenant_id=eq.${encodeURIComponent(tenantId)}&customer_id=eq.${encodeURIComponent(customerId)}&status=eq.active&select=id&limit=1`,
-        { key: serviceRoleKey },
-      )) as Array<{ id: string }>;
+      const existingCart = await getDb().select<{ id: string }>('carts', {
+        where: { tenant_id: eq(tenantId), customer_id: eq(customerId), status: eq('active') },
+        select: ['id'],
+        limit: 1,
+      });
       if (Array.isArray(existingCart) && existingCart.length > 0) {
         cartId = existingCart[0].id;
       } else {
-        const created = (await supabaseRestFetch('/carts', {
-          key: serviceRoleKey,
-          method: 'POST',
-          body: { tenant_id: tenantId, customer_id: customerId, status: 'active' },
-          prefer: 'return=representation',
-        })) as Array<{ id: string }>;
+        const created = await getDb().insert<{ id: string }>('carts', {
+          tenant_id: tenantId,
+          customer_id: customerId,
+          status: 'active',
+        });
         cartId = created?.[0]?.id;
       }
       if (!cartId) {
@@ -357,16 +349,12 @@ async function backfillCarts(
         continue;
       }
       if (!DRY_RUN && cartId) {
-        await supabaseRestFetch('/cart_items', {
-          key: serviceRoleKey,
-          method: 'POST',
-          body: {
+        await getDb().insert('cart_items', {
             tenant_id: tenantId,
             cart_id: cartId,
             variant_id: variantId,
             quantity: 1,
             unit_price_cents: Math.max(0, Math.round(Number(item.price || 0) * 100)),
-          },
         });
       }
       items.created += 1;
@@ -378,7 +366,6 @@ async function backfillCarts(
 async function backfillOrders(
   storage: any,
   tenantId: string,
-  serviceRoleKey: string,
   redisProducts: Record<string, any>,
   variantKeyToId: Map<string, string>,
 ): Promise<{ orders: Counts; lines: Counts }> {
@@ -404,7 +391,7 @@ async function backfillOrders(
 
     let customerId: string | undefined;
     if (!DRY_RUN && entry.email) {
-      const customerRow = await upsert('/customers', 'tenant_id,email', { tenant_id: tenantId, email: entry.email.toLowerCase() }, serviceRoleKey);
+      const customerRow = await upsert('/customers', 'tenant_id,email', { tenant_id: tenantId, email: entry.email.toLowerCase() });
       customerId = customerRow?.id as string | undefined;
     }
 
@@ -422,7 +409,6 @@ async function backfillOrders(
         currency: 'usd',
         metadata: { legacy: true, promoCode: entry.promoCode || null },
       },
-      serviceRoleKey,
     );
     const orderId = DRY_RUN ? null : (orderRow?.id as string | undefined);
     if (!DRY_RUN && !orderId) {
@@ -433,17 +419,13 @@ async function backfillOrders(
 
     if (!DRY_RUN && orderId) {
       const variantId = await findVariantForProductName(entry.variant, entry.size, redisProducts, variantKeyToId);
-      await supabaseRestFetch('/order_line_items', {
-        key: serviceRoleKey,
-        method: 'POST',
-        body: {
+      await getDb().insert('order_line_items', {
           tenant_id: tenantId,
           order_id: orderId,
           variant_id: variantId,
           quantity: 1,
           unit_price_cents: amountCents,
           line_total_cents: amountCents,
-        },
       });
       lines.created += 1;
     }
@@ -464,33 +446,32 @@ async function main() {
     process.exit(1);
   }
 
-  if (!DRY_RUN && !supabaseServiceConfigured()) {
+  if (!DRY_RUN && !getDb().configured) {
     console.error('SUPABASE_SERVICE_ROLE_KEY is not configured — cannot write. Re-run with --dry-run to validate without credentials, or set Supabase env vars.');
     process.exit(1);
   }
 
   const tenantId = tenantIdOverride || (DRY_RUN ? 'dry-run-tenant' : await ensureDefaultTenant());
   console.log(`Target tenant: ${tenantId}\n`);
-  const serviceRoleKey = DRY_RUN ? '' : readSupabaseEnv().serviceRoleKey;
 
   const redisProducts = await loadProducts(storage);
   console.log(`Found ${Object.keys(redisProducts).length} products in the legacy catalog.\n`);
 
-  const { products, variants, inventory, variantKeyToId } = await backfillProducts(redisProducts, tenantId, serviceRoleKey);
+  const { products, variants, inventory, variantKeyToId } = await backfillProducts(redisProducts, tenantId);
   console.log('\n--- Products ---');
   printCounts('products', products);
   printCounts('variants', variants);
   printCounts('inventory', inventory);
 
   if (!SKIP_CARTS) {
-    const { carts, items } = await backfillCarts(storage, tenantId, serviceRoleKey, redisProducts, variantKeyToId);
+    const { carts, items } = await backfillCarts(storage, tenantId, redisProducts, variantKeyToId);
     console.log('\n--- Carts ---');
     printCounts('carts', carts);
     printCounts('cart items', items);
   }
 
   if (!SKIP_ORDERS) {
-    const { orders, lines } = await backfillOrders(storage, tenantId, serviceRoleKey, redisProducts, variantKeyToId);
+    const { orders, lines } = await backfillOrders(storage, tenantId, redisProducts, variantKeyToId);
     console.log('\n--- Orders ---');
     printCounts('orders', orders);
     printCounts('order lines', lines);

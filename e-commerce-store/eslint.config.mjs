@@ -137,22 +137,6 @@ const eslintConfig = defineConfig([
     files: ["lib/db/**/*.ts", "services/config/supabase-client.ts", "scripts/verify-db-timeouts.ts", "lib/system-diagnostics.ts"],
     rules: { ...fenceRule("error", { includeDbPort: false }) },
   },
-  {
-    // GRANDFATHERED — the 1 caller that predate the DbClient port.
-    //
-    // The fence lands green by exempting exactly these, so it cannot be
-    // weakened later without this list shrinking. Each migration batch deletes
-    // its entries; when the list is empty the block goes with it (Phase D4.5)
-    // and the fence becomes absolute. A NEW file calling supabaseRestFetch is
-    // an error today — the list is closed, not a pattern.
-    //
-    // Note these still get the full vendor SDK fence: only the DB port entry
-    // is relaxed, so migrating one cannot quietly lose the other protection.
-    files: [
-      "scripts/migrate-redis-to-supabase.ts",
-    ],
-    rules: { ...fenceRule("error", { includeDbPort: false }) },
-  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
