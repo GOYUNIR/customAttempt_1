@@ -61,7 +61,10 @@ test('operators render their PostgREST forms', () => {
 test('encodeFilterValue: quotes values containing PostgREST syntax characters', () => {
   // A comma is the killer: unquoted, "a,b" inside in.(...) becomes TWO values.
   assert.equal(encodeFilterValue('a,b'), '"a,b"');
-  assert.equal(encodeFilterValue('a.b'), '"a.b"');
+  // '.' is NOT reserved: only the first dot splits operator from value, so
+  // quoting every dotted value (every email, every dotted id) changed request
+  // bytes against the pre-port code for nothing.
+  assert.equal(encodeFilterValue('a.b'), 'a.b');
   assert.equal(encodeFilterValue('a(b)'), '"a(b)"');
   assert.equal(encodeFilterValue('a b'), '"a b"');
 });
@@ -92,7 +95,8 @@ test('an email with a comma cannot split an in.() list', () => {
   // two, merging or losing a customer. The comma inside the address is
   // quoted AND percent-encoded; only the separator commas stay literal.
   const q = buildPostgrestQuery({ where: { email: inList(['a,b@x.com', 'c@x.com']) } });
-  assert.equal(q, 'email=in.(%22a%2Cb%40x.com%22,%22c%40x.com%22)');
+  // Only the value containing a comma needs quoting; the plain one does not.
+  assert.equal(q, 'email=in.(%22a%2Cb%40x.com%22,c%40x.com)');
   const inner = q.slice('email=in.('.length, -1);
   assert.equal(inner.split(',').length, 2, 'the address comma leaked as a separator');
 });
@@ -102,7 +106,9 @@ test('a value cannot inject an extra filter clause', () => {
   // before PostgREST ever sees the quotes. Percent-encoding is what makes it
   // safe, and this test is why that was found.
   const q = buildPostgrestQuery({ where: { id: eq('x&role=eq.admin') } });
-  assert.equal(q, 'id=eq.%22x%26role%3Deq.admin%22');
+  // Percent-encoding alone keeps this one clause; '&' is not a PostgREST
+  // filter-grammar character, so no quoting is required for safety here.
+  assert.equal(q, 'id=eq.x%26role%3Deq.admin');
   assert.equal(q.split('&').length, 1, `injection split the query: ${q}`);
   assert.ok(!q.includes('role=eq.admin'), 'an injected clause survived verbatim');
 });
@@ -119,4 +125,55 @@ test('invalid paging values throw', () => {
   assert.throws(() => buildPostgrestQuery({ limit: -1 }), /Invalid limit/);
   assert.throws(() => buildPostgrestQuery({ limit: 1.5 }), /Invalid limit/);
   assert.throws(() => buildPostgrestQuery({ offset: -5 }), /Invalid offset/);
+});
+
+// ── Embedded relations (PostgREST nested select) ──────────────────────────
+
+test('select: renders an embedded relation', () => {
+  assert.equal(
+    buildPostgrestQuery({ select: ['option_label', 'price_cents', { relation: 'products', columns: ['name'] }] }),
+    'select=option_label,price_cents,products(name)',
+  );
+});
+
+test('select: renders a nested embed, matching the cart-items query', () => {
+  assert.equal(
+    buildPostgrestQuery({
+      select: [
+        'quantity',
+        'unit_price_cents',
+        {
+          relation: 'product_variants',
+          columns: ['option_label', 'checkout_mode', { relation: 'products', columns: ['external_id', 'name'] }],
+        },
+      ],
+    }),
+    'select=quantity,unit_price_cents,product_variants(option_label,checkout_mode,products(external_id,name))',
+  );
+});
+
+test('select: embeds validate their identifiers too', () => {
+  assert.throws(
+    () => buildPostgrestQuery({ select: [{ relation: 'products),secret(', columns: ['name'] }] }),
+    /Invalid embedded relation/,
+  );
+  assert.throws(
+    () => buildPostgrestQuery({ select: [{ relation: 'products', columns: ['name,secret'] }] }),
+    /Invalid select column/,
+  );
+});
+
+test('select: an empty embed is rejected rather than rendering "rel()"', () => {
+  assert.throws(() => buildPostgrestQuery({ select: [{ relation: 'products', columns: [] }] }), /needs at least one column/);
+});
+
+test('a STRING that reads as a PostgREST literal is quoted, a real one is not', () => {
+  // eq.null matches SQL NULL. Without quoting, the text 'null' would silently
+  // become a NULL comparison — a wrong-results bug, not a formatting one.
+  assert.equal(buildPostgrestQuery({ where: { v: eq('null') } }), 'v=eq.%22null%22');
+  assert.equal(buildPostgrestQuery({ where: { v: eq('true') } }), 'v=eq.%22true%22');
+  assert.equal(buildPostgrestQuery({ where: { v: eq('false') } }), 'v=eq.%22false%22');
+  // Real null / booleans stay bare, which is what actually means NULL/true.
+  assert.equal(buildPostgrestQuery({ where: { v: eq(null) } }), 'v=eq.null');
+  assert.equal(buildPostgrestQuery({ where: { v: eq(true) } }), 'v=eq.true');
 });

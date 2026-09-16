@@ -39,16 +39,33 @@ export const like = (value: string): FilterOp => ({ op: 'like', value });
 export const inList = (values: Array<string | number>): FilterOp => ({ op: 'in', values });
 export const isNull = (): FilterOp => ({ op: 'is', value: null });
 
+/**
+ * A selected column, or an embedded relation with its own columns.
+ *
+ * Embeds are kept STRUCTURED rather than accepted as a raw
+ * "rel(a,b)" string: PostgREST spells this as a nested select, another
+ * backend would spell it as a join, and the point of the port is that the
+ * call site states the intent and the renderer owns the dialect.
+ */
+export type SelectItem = string | { relation: string; columns: SelectItem[] };
+
 export interface QuerySpec {
   where?: Record<string, FilterOp>;
-  select?: string[];
+  select?: SelectItem[];
   order?: { column: string; ascending?: boolean };
   limit?: number;
   offset?: number;
 }
 
-/** Characters PostgREST parses as syntax inside a filter value. */
-const RESERVED = /[,.()":\s]/;
+/**
+ * Characters PostgREST parses as syntax inside a filter value.
+ *
+ * A '.' is deliberately NOT here. Only the FIRST dot separates the operator
+ * from the value, so dots inside a value are ordinary characters. Treating
+ * them as reserved quoted every email and dotted id, which changed the
+ * request bytes against the pre-port code for no benefit.
+ */
+const RESERVED = /[,()":\s]/;
 
 /**
  * Render one value. Reserved characters force double-quoting, and embedded
@@ -59,6 +76,10 @@ export function encodeFilterValue(value: string | number | boolean | null): stri
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
   const s = String(value);
   if (s === '') return '""';
+  // A STRING that reads as a PostgREST literal must be quoted or it changes
+  // meaning: eq.null matches SQL NULL, not the text 'null'. Booleans and
+  // null passed as real types are handled above and stay unquoted.
+  if (/^(null|true|false)$/i.test(s)) return `"${s}"`;
   if (RESERVED.test(s)) return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   return s;
 }
@@ -96,6 +117,16 @@ function renderFilter(filter: FilterOp): string {
   }
 }
 
+/** Render one select item, recursing into embedded relations. */
+function renderSelectItem(item: SelectItem): string {
+  if (typeof item === 'string') return assertIdentifier(item, 'select column');
+  const relation = assertIdentifier(item.relation, 'embedded relation');
+  if (!Array.isArray(item.columns) || item.columns.length === 0) {
+    throw new Error(`Embedded relation "${relation}" needs at least one column`);
+  }
+  return `${relation}(${item.columns.map(renderSelectItem).join(',')})`;
+}
+
 /**
  * Render a spec as a PostgREST query string WITHOUT the leading '?'.
  * Deterministic key order, so the same spec always produces the same string
@@ -107,7 +138,7 @@ export function buildPostgrestQuery(spec: QuerySpec = {}): string {
     parts.push(`${assertIdentifier(column, 'filter column')}=${renderFilter(filter)}`);
   }
   if (spec.select && spec.select.length > 0) {
-    parts.push(`select=${spec.select.map((c) => assertIdentifier(c, 'select column')).join(',')}`);
+    parts.push(`select=${spec.select.map(renderSelectItem).join(',')}`);
   }
   if (spec.order) {
     const dir = spec.order.ascending === false ? '.desc' : '.asc';

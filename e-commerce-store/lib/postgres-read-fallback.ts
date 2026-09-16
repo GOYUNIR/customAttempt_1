@@ -20,7 +20,8 @@
  * construction, is identical to today's behavior.
  */
 
-import { supabaseServiceConfigured, readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export type CartSyncItem = {
@@ -51,30 +52,39 @@ type EmbeddedCartItemRow = {
  */
 export async function readCartItemsFromPostgres(tenantId: string, email: string): Promise<CartSyncItem[] | null> {
   if (!isPostgresPrimaryEnabled()) return null;
-  if (!supabaseServiceConfigured()) return null;
+  if (!getDb().configured) return null;
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
 
   try {
-    const { serviceRoleKey } = readSupabaseEnv();
-    const customerRows = (await supabaseRestFetch(
-      `/customers?tenant_id=eq.${encodeURIComponent(tenantId)}&email=eq.${encodeURIComponent(normalized)}&select=id&limit=1`,
-      { key: serviceRoleKey },
-    )) as Array<{ id: string }>;
+    const db = getDb();
+    const customerRows = await db.select<{ id: string }>('customers', {
+      where: { tenant_id: eq(tenantId), email: eq(normalized) },
+      select: ['id'],
+      limit: 1,
+    });
     const customerId = customerRows?.[0]?.id;
     if (!customerId) return null; // not backfilled yet — fall back
 
-    const cartRows = (await supabaseRestFetch(
-      `/carts?tenant_id=eq.${encodeURIComponent(tenantId)}&customer_id=eq.${encodeURIComponent(customerId)}&status=eq.active&select=id&limit=1`,
-      { key: serviceRoleKey },
-    )) as Array<{ id: string }>;
+    const cartRows = await db.select<{ id: string }>('carts', {
+      where: { tenant_id: eq(tenantId), customer_id: eq(customerId), status: eq('active') },
+      select: ['id'],
+      limit: 1,
+    });
     const cartId = cartRows?.[0]?.id;
     if (!cartId) return null; // no Postgres cart yet — fall back
 
-    const itemRows = (await supabaseRestFetch(
-      `/cart_items?tenant_id=eq.${encodeURIComponent(tenantId)}&cart_id=eq.${encodeURIComponent(cartId)}&select=quantity,unit_price_cents,product_variants(option_label,checkout_mode,products(external_id,name))`,
-      { key: serviceRoleKey },
-    )) as EmbeddedCartItemRow[];
+    const itemRows = await db.select<EmbeddedCartItemRow>('cart_items', {
+      where: { tenant_id: eq(tenantId), cart_id: eq(cartId) },
+      select: [
+        'quantity',
+        'unit_price_cents',
+        {
+          relation: 'product_variants',
+          columns: ['option_label', 'checkout_mode', { relation: 'products', columns: ['external_id', 'name'] }],
+        },
+      ],
+    });
 
     const items: CartSyncItem[] = [];
     for (const row of itemRows || []) {
