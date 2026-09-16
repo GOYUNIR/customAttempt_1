@@ -463,6 +463,24 @@ bytes per hit are not.
 
 ## Deferred work register
 
+**DEFERRED-5: separate tenant settings from the storefront payload.**
+Condition to pick up: when the merchant panel's SETTINGS screens are built.
+
+Originally H2 step 3, scoped to fix a 950KB config blob shipping on every
+storefront read. That problem no longer exists -- the R2 backfill took 945KB
+of base64 out of `store:config`, which is now 5,776B, and the live
+`/api/store` payload is 18,429B. Building the split now would be solving a
+solved problem.
+
+What remains genuinely worth doing is structural, not size: `store:config` is
+one blob mixing storefront presentation (theme, hero, copy) with tenant
+operational settings (rewards, 2FA policy, ref prefix, recovery config). A
+settings screen that edits one field has to read and rewrite the whole thing,
+which is both a lost-update race and the reason a single bad write can take
+out unrelated configuration. Split it where the editing UI makes the seams
+obvious, rather than guessing at them from here.
+
+
 Changes consciously deferred, with the condition for picking them up. Deferred
 is not dropped: each entry names what it needs, so it can be scheduled rather
 than rediscovered.
