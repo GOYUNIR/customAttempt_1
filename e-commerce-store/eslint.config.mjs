@@ -44,10 +44,47 @@ const VENDOR_SDK_FENCE_PATTERNS = [
   },
 ];
 
-const fenceRule = (severity) => ({
+/**
+ * DATABASE PORT FENCE (ARCHITECTURE.md, Phase D4).
+ *
+ * `supabaseRestFetch` takes a raw PostgREST path, so every caller hand-writes
+ * Supabase's query dialect. That is the deepest vendor coupling in the codebase
+ * — 112 call sites across 27 files, and invisible to the vendor SDK fence above
+ * because it is a LOCAL import, not a package. Business logic goes through the
+ * DbClient port (lib/db/client.ts) instead, which takes a structured QuerySpec.
+ */
+const DB_PORT_FENCE = [
+  {
+    name: "@/services/config/supabase-client",
+    importNames: ["supabaseRestFetch"],
+    message:
+      "Use the DbClient port — getDb() from @/lib/db/client — instead of supabaseRestFetch. Raw PostgREST paths hard-code Supabase's query dialect into business logic.",
+  },
+];
+
+const DB_PORT_FENCE_PATTERNS = [
+  {
+    group: ["**/services/config/supabase-client", "**/services/config/supabase-client.ts"],
+    importNames: ["supabaseRestFetch"],
+    message:
+      "Use the DbClient port — getDb() from @/lib/db/client — instead of supabaseRestFetch.",
+  },
+];
+
+/**
+ * `includeDbPort: false` keeps the vendor SDK fence fully enforced while
+ * exempting a file from the DB port fence only. Grandfathered callers below
+ * use it, so migrating them cannot quietly lose vendor-SDK protection.
+ */
+const fenceRule = (severity, { includeDbPort = true } = {}) => ({
   "@typescript-eslint/no-restricted-imports": [
     severity,
-    { paths: VENDOR_SDK_FENCE, patterns: VENDOR_SDK_FENCE_PATTERNS },
+    {
+      paths: includeDbPort ? [...VENDOR_SDK_FENCE, ...DB_PORT_FENCE] : VENDOR_SDK_FENCE,
+      patterns: includeDbPort
+        ? [...VENDOR_SDK_FENCE_PATTERNS, ...DB_PORT_FENCE_PATTERNS]
+        : VENDOR_SDK_FENCE_PATTERNS,
+    },
   ],
 });
 
@@ -85,6 +122,56 @@ const eslintConfig = defineConfig([
     // The ONE layer allowed to touch a vendor SDK at runtime.
     files: ["services/**/*.driver.ts"],
     rules: { "@typescript-eslint/no-restricted-imports": "off" },
+  },
+  {
+    // THE PORT AND ITS TRANSPORT — permanently exempt, same principle as
+    // services/**/*.driver.ts: these files ARE the vendor boundary.
+    //   lib/db/**                            the DbClient port itself
+    //   services/config/supabase-client.ts   the PostgREST transport it calls
+    //   scripts/verify-db-timeouts.ts        exercises that transport directly,
+    //                                        which is the whole point of it
+    files: ["lib/db/**/*.ts", "services/config/supabase-client.ts", "scripts/verify-db-timeouts.ts"],
+    rules: { ...fenceRule("error", { includeDbPort: false }) },
+  },
+  {
+    // GRANDFATHERED — the 25 callers that predate the DbClient port.
+    //
+    // The fence lands green by exempting exactly these, so it cannot be
+    // weakened later without this list shrinking. Each migration batch deletes
+    // its entries; when the list is empty the block goes with it (Phase D4.5)
+    // and the fence becomes absolute. A NEW file calling supabaseRestFetch is
+    // an error today — the list is closed, not a pattern.
+    //
+    // Note these still get the full vendor SDK fence: only the DB port entry
+    // is relaxed, so migrating one cannot quietly lose the other protection.
+    files: [
+      "app/api/admin/b2b/price-list/route.ts",
+      "app/api/admin/b2b/quotes/route.ts",
+      "app/api/admin/domains/route.ts",
+      "app/api/admin/impersonate/route.ts",
+      "app/api/admin/inventory-matrix/route.ts",
+      "app/api/admin/telemetry/route.ts",
+      "app/api/admin/tenants/route.ts",
+      "app/api/admin/theme/route.ts",
+      "app/api/admin/users/route.ts",
+      "lib/adapters/db.ts",
+      "lib/ai-assistant/tools.ts",
+      "lib/carts.ts",
+      "lib/cloudflare-saas.ts",
+      "lib/inventory.ts",
+      "lib/orders.ts",
+      "lib/platform-audit.ts",
+      "lib/postgres-catalog-read.ts",
+      "lib/postgres-read-fallback.ts",
+      "lib/postgres-shadow-write.ts",
+      "lib/products.ts",
+      "lib/raffle.ts",
+      "lib/system-diagnostics.ts",
+      "lib/tenant-context.ts",
+      "lib/theme-read.ts",
+      "scripts/migrate-redis-to-supabase.ts",
+    ],
+    rules: { ...fenceRule("error", { includeDbPort: false }) },
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
