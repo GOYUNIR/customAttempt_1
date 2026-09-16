@@ -15,7 +15,8 @@
     "check:production-readiness": "tsx scripts/production-readiness-check.ts",
     "simulate:concurrency": "tsx scripts/simulate-concurrency.ts",
     "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts",
-    "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts"
+    "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts",
+    "verify:cloudflare-sync": "tsx scripts/verify-cloudflare-domain-sync.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",
