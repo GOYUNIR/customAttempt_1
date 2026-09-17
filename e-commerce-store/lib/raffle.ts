@@ -480,3 +480,39 @@ export async function addToWaitlist(tenantId: string, variantId: string, email: 
     throw err;
   }
 }
+
+/**
+ * Does this email already hold an ACTIVE entry for this product+size?
+ *
+ * H6: the Postgres half of the pre-charge duplicate gate. The KV check it
+ * joins is `sismember(emailBlockKey)` + a pool scan, and `sadd` runs through
+ * the same non-atomic read-modify-write as the broken lock did -- so two
+ * concurrent entries from one email could both pass it. The partial unique
+ * index cannot be raced, which is why this is the half that actually decides.
+ *
+ * Semantics deliberately match the KV gate rather than replace it: one active
+ * entry per email per variant, and re-entry allowed once that entry has been
+ * decided (the index is partial on 'pending'). Verified by evaluating the KV
+ * predicate across its state space -- `maxPerEmail > 1` is unreachable there,
+ * because the email-block set is written on every registration.
+ *
+ * Returns false when Postgres cannot answer. Callers OR this with the KV
+ * check, so an unavailable database can never turn into "allowed twice"; it
+ * just falls back to the weaker guard.
+ */
+export async function hasActiveRaffleEntry(
+  tenantId: string,
+  externalProductId: string,
+  size: string,
+  email: string,
+): Promise<boolean> {
+  try {
+    const { resolveVariantId } = await import('./inventory.ts');
+    const variantId = await resolveVariantId(tenantId, externalProductId, size);
+    if (!variantId) return false;
+    return (await findPendingEntryId(tenantId, variantId, String(email || '').trim().toLowerCase())) !== null;
+  } catch (err) {
+    console.error('[raffle] duplicate-entry check failed, deferring to the KV gate', externalProductId, size, (err as Error)?.message || err);
+    return false;
+  }
+}

@@ -408,10 +408,31 @@ export async function saveLiveState(redis: StorageClient, state: LiveStateRecord
   await redis.hset(LIVE_STATE_KEY, { [normalized.productId]: JSON.stringify(normalized) });
 }
 
+/**
+ * Live inventory for every variant.
+ *
+ * H6: sourced from Postgres inventory_levels, which has been authoritative
+ * since H4 -- readProductsFromPostgres already assembles records in exactly
+ * this shape, so there is ONE implementation of the mapping rather than a
+ * second one here to drift from it. The KV blob is a fallback that says so
+ * out loud; a silent fall back to a stale stock count is the SEV-2 shape on
+ * the most expensive field in the system.
+ */
 export async function listLiveStates(redis: StorageClient): Promise<LiveStateRecord[]> {
+  try {
+    const [{ readProductsFromPostgres }, { ensureDefaultTenant }] = await Promise.all([
+      import('@/lib/postgres-catalog-read'),
+      import('@/lib/tenant-context'),
+    ]);
+    const pg = await readProductsFromPostgres(await ensureDefaultTenant());
+    if (pg) return pg.liveStates;
+  } catch (err) {
+    console.error('[listLiveStates] Postgres read threw', (err as Error)?.message || err);
+  }
   try {
     const hash = (await redis.hgetall(LIVE_STATE_KEY)) as Record<string, string> | null;
     if (!hash) return [];
+    console.warn('[listLiveStates] falling back to the KV live-state blob — stock counts may be stale.');
     return Object.values(hash).map((r) => safeParseKvItem<LiveStateRecord>(r)).filter(Boolean) as LiveStateRecord[];
   } catch {
     return [];
@@ -456,7 +477,43 @@ export async function getLiveProductState(redis: StorageClient, productOrId: any
     priceCategories: (productOrId && typeof productOrId === 'object' && Array.isArray(productOrId.priceCategories) ? productOrId.priceCategories : undefined),
   }, size, winners);
   if (!isActive) { state.isActive = false; await saveLiveState(redis, state); }
+
+  // H6: OVERLAY the authoritative stock count. The synthesis above is kept
+  // wholesale -- it resolves per-size limits, raffle caps and seeding defaults,
+  // and rewriting that against Postgres would be a large unverifiable change
+  // to logic that already works. Only the number money depends on is replaced.
+  //
+  // A missing Postgres row means this variant has no inventory row, which
+  // decrementInventory already treats as unsellable; the synthesized value is
+  // left alone so display surfaces still render, and the sale is refused at
+  // the gate rather than here.
+  try {
+    const pgRemaining = await postgresRemainingFor(id, size);
+    if (pgRemaining !== null) {
+      state.inventoryRemaining = pgRemaining;
+      if (state.totalInventory < pgRemaining) state.totalInventory = pgRemaining;
+    }
+  } catch (err) {
+    console.error('[getLiveProductState] Postgres stock overlay failed', id, size, (err as Error)?.message || err);
+  }
   return state;
+}
+
+/**
+ * Authoritative remaining stock for one external product id + size, or null
+ * when there is no inventory row (or Postgres is unavailable).
+ */
+async function postgresRemainingFor(externalProductId: string, size: string): Promise<number | null> {
+  if (!externalProductId || !size) return null;
+  const [{ resolveVariantId, getInventoryLevel }, { ensureDefaultTenant }] = await Promise.all([
+    import('@/lib/inventory'),
+    import('@/lib/tenant-context'),
+  ]);
+  const tenantId = await ensureDefaultTenant();
+  const variantId = await resolveVariantId(tenantId, externalProductId, size);
+  if (!variantId) return null;
+  const level = await getInventoryLevel(tenantId, variantId);
+  return level ? Math.max(0, Number(level.quantityAvailable) || 0) : null;
 }
 
 export async function setLiveProductState(redis: StorageClient, state: any) {

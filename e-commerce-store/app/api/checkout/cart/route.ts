@@ -1,3 +1,5 @@
+import { hasActiveRaffleEntry } from '@/lib/raffle';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { NextResponse } from 'next/server';
 import {
   createKvClient,
@@ -184,7 +186,16 @@ export async function POST(request: Request) {
         // we only block when this email actually has an ACTIVE entry in the pool.
         const activeCount = await countActivePoolEntries(redis, variant, item.size, email);
         const blocked = await redis.sismember(emailBlockKey(variant, item.size), email);
-        if (activeCount > 0 && (blocked === 1 || activeCount + item.quantity > maxPerEmail)) {
+        // H6: Postgres is the authoritative duplicate gate -- the KV
+        // sismember runs through the same non-atomic mutate() that made the
+        // distributed lock non-exclusive, so two concurrent entries from one
+        // email could both pass it. The partial unique index cannot be raced.
+        // ORed, never replaced: an unavailable database falls back to the
+        // weaker guard instead of turning into "allowed twice".
+        const pgBlocked = await hasActiveRaffleEntry(
+          await ensureDefaultTenant(), String(product.id), String(item.size), email,
+        );
+        if (pgBlocked || (activeCount > 0 && (blocked === 1 || activeCount + item.quantity > maxPerEmail))) {
           return NextResponse.json({ error: `You're already entered for ${product.name} (${item.size}). Good luck! Pro tip: you can enter a different raffle.`, alreadyEntered: true, code: 'DUPLICATE_BLOCKED' }, { status: 409 });
         }
         raffleLines.push({

@@ -1,3 +1,5 @@
+import { hasActiveRaffleEntry } from '@/lib/raffle';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { NextResponse } from 'next/server';
 import { createKvClient, loadProducts, getLiveProductState, ARCHIVE_LEDGER_KEY, archiveEntry, safeParseKvItem, emailBlockKey, PROMO_CODES_KEY, promoUsedKey, promoPendingKey, poolKey, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { PaymentFactory } from '@/services/payment/factory';
@@ -123,7 +125,16 @@ export async function POST(request: Request) {
       // new cycle. A stale fraud-block flag from the previous cycle must NOT block
       // a fresh entry when the pool no longer holds this email — so only block when
       // the email actually has an ACTIVE entry (or has hit the per-email cap).
-      const hasActiveEntry = alreadyEnteredCount > 0;
+      // H6: Postgres is the authoritative duplicate gate -- the KV
+      // sismember runs through the same non-atomic mutate() that made the
+      // distributed lock non-exclusive, so two concurrent entries from one
+      // email could both pass it. The partial unique index cannot be raced.
+      // ORed, never replaced: an unavailable database falls back to the
+      // weaker guard instead of turning into "allowed twice".
+      const pgBlocked = await hasActiveRaffleEntry(
+        await ensureDefaultTenant(), String(product?.id || ''), String(size), normalizedEmail,
+      );
+      const hasActiveEntry = pgBlocked || alreadyEnteredCount > 0;
       if (hasActiveEntry && (blocked === 1 || alreadyEnteredCount >= maxPerEmail)) {
         // Reuse the ORIGINAL entry's order ref (if any) so the ledger REF for
         // the DUPLICATE_BLOCKED row matches the original entry instead of a
