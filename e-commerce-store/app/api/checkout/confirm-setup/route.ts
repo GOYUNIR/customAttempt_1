@@ -1,3 +1,6 @@
+import { createRaffleEntry, addToWaitlist } from '@/lib/raffle';
+import { resolveVariantId } from '@/lib/inventory';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { NextResponse } from 'next/server';
 import {
   createKvClient,
@@ -288,6 +291,46 @@ async function lockOneEntry(opts: {
   }
   await redis.sadd(emailBlockKey(variant, size), email);
   if (cardFingerprint) await redis.sadd(cardBlockKey(variant, size), cardFingerprint);
+
+  // H5 — ADDITIVE Postgres write. Nothing above is removed: KV stays
+  // authoritative for entries until H6 moves the charging path.
+  //
+  // This exists because the draw engines now READ raffle_entries. The webhook
+  // already wrote entries to Postgres, but this route did not -- so a draw
+  // reading Postgres would simply never see anyone who entered here, and they
+  // would never win. That is the Phase G divergence again, on the money path,
+  // which is why the write lands before the read switches rather than after.
+  //
+  // Never throws: this route has already created a Stripe SetupIntent, and
+  // failing it here would leave the customer registered in KV, charged
+  // nothing, and told the entry failed.
+  try {
+    const pgTenant = await ensureDefaultTenant();
+    const pgVariant = productId ? await resolveVariantId(pgTenant, String(productId), String(size)) : null;
+    if (!pgVariant) {
+      console.error('[confirm-setup] entry NOT mirrored to Postgres — no variant for', productId, size);
+    } else if (entryType === 'waitlist') {
+      await addToWaitlist(pgTenant, pgVariant, email);
+    } else {
+      const created = await createRaffleEntry({
+        tenantId: pgTenant,
+        variantId: pgVariant,
+        email,
+        paymentMethodRef: paymentMethodId || undefined,
+        promoCode: appliedPromo || undefined,
+        discountPercent: appliedPromo && discountPercent > 0 ? discountPercent : undefined,
+        shippingAddress: shippingAddress || undefined,
+      });
+      // already_entered is the EXPECTED outcome for a legitimate retry -- the
+      // KV duplicate check above already let this through once, and the
+      // partial unique index is the authoritative block.
+      if (!created.ok && created.reason !== 'already_entered') {
+        console.error('[confirm-setup] entry NOT mirrored to Postgres', created.reason, created.error);
+      }
+    }
+  } catch (err) {
+    console.error('[confirm-setup] Postgres entry mirror threw', (err as Error)?.message || err);
+  }
   await redis.hincrby(POOL_STATS_KEY, poolStatField('sub', variant, size), 1);
   await cleanupMatchingIntent(redis, variant, size, email);
 

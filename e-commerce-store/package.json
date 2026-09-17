@@ -24,7 +24,8 @@
     "verify:r2": "tsx scripts/verify-r2-roundtrip.ts",
     "verify:parity": "tsx scripts/verify-loadproducts-parity.ts",
     "verify:inventory": "tsx scripts/verify-inventory-decrement.ts",
-    "verify:lock": "tsx scripts/verify-lock-mutual-exclusion.ts"
+    "verify:lock": "tsx scripts/verify-lock-mutual-exclusion.ts",
+    "verify:entries": "tsx scripts/verify-raffle-entries.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",

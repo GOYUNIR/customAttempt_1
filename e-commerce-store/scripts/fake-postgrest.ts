@@ -44,6 +44,24 @@ const UNIQUE_KEYS: Record<string, string[]> = {
   tenant_store_config: ['tenant_id'],                 // 00014 primary key
 };
 
+/**
+ * PARTIAL unique indexes. Postgres can enforce uniqueness over a SUBSET of
+ * rows, and raffle_entries relies on exactly that: one PENDING entry per
+ * email per variant, so a decided entry does not block re-entry (00012).
+ *
+ * Modelled separately from UNIQUE_KEYS because a fixture that treats a
+ * partial index as unconditional would wrongly reject legitimate re-entry,
+ * and one that ignores it entirely lets duplicate entries through -- which is
+ * what this fixture did, reporting 8 of 8 concurrent identical entries
+ * accepted while production accepts one.
+ */
+const PARTIAL_UNIQUE: Record<string, { cols: string[]; when: { field: string; equals: unknown } }> = {
+  raffle_entries: {
+    cols: ['tenant_id', 'variant_id', 'email'],
+    when: { field: 'status', equals: 'pending' },
+  },
+};
+
 const CHECK_CONSTRAINTS: Record<string, Record<string, readonly string[]>> = {
   products: {
     status: ['draft', 'live', 'archived'],
@@ -174,6 +192,20 @@ export async function startFakePostgrest(preferredPort = 0): Promise<FakeDb> {
           // providing no exclusion in production. Same failure as the CHECK
           // constraints: a fixture more permissive than the database is worse
           // than no fixture, because it manufactures confidence.
+          const partial = PARTIAL_UNIQUE[table];
+          if (partial && String(row[partial.when.field]) === String(partial.when.equals)) {
+            const clash = tables[table].find(
+              (r) =>
+                String(r[partial.when.field]) === String(partial.when.equals) &&
+                partial.cols.every((c) => String(r[c]) === String(row[c])),
+            );
+            if (clash) {
+              return respond(
+                { code: '23505', message: 'duplicate key value violates unique constraint on ' + table + ' (' + partial.cols.join(', ') + ') where ' + partial.when.field + ' = ' + String(partial.when.equals) },
+                409,
+              );
+            }
+          }
           const unique = UNIQUE_KEYS[table];
           if (unique && onConflict.length === 0) {
             const clash = tables[table].find((r) => unique.every((c) => String(r[c]) === String(row[c])));
