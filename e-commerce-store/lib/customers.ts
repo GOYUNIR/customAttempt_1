@@ -81,15 +81,43 @@ export async function ensureCustomer(
     return null;
   } catch (err) {
     const message = (err as Error)?.message || String(err);
-    // Lost the race on (tenant_id, email) — the other writer's row is the
-    // one that exists, so use it rather than reporting failure.
+    // A unique violation here is one of TWO different situations, and they
+    // need different answers. Returning null for both was wrong: a null means
+    // the entry carries no customer, which means it can never be charged --
+    // it would win a draw, decline as no_payment_method, roll back to the
+    // pool and sit there silently forever.
     if (/duplicate key|already exists|23505/i.test(message)) {
       try {
+        // (a) Lost the race on (tenant_id, email): the other writer's row is
+        //     the one that exists, so use it.
         const again = (await getDb().select<CustomerRow>('customers', {
           where: { tenant_id: eq(tenantId), email: eq(normalized) },
           select: ['id', 'email', 'stripe_customer_id'],
           limit: 1,
         })) as CustomerRow[];
+        if (!again?.[0]?.id && stripeId) {
+          // (b) This STRIPE customer is already linked to a different email.
+          //     Production creates a Stripe customer per email
+          //     (stripe.customers.list({ email }) in the checkout routes), so
+          //     this means one Stripe customer now spans two addresses --
+          //     typically an email edited in the Stripe dashboard. The Stripe
+          //     customer is the stronger identity here (it owns the saved
+          //     payment methods we would charge), so the entry links to that
+          //     existing record rather than being left unchargeable.
+          const byStripe = (await getDb().select<CustomerRow>('customers', {
+            where: { tenant_id: eq(tenantId), stripe_customer_id: eq(stripeId) },
+            select: ['id', 'email', 'stripe_customer_id'],
+            limit: 1,
+          })) as CustomerRow[];
+          if (byStripe?.[0]?.id) {
+            console.warn(
+              '[customers] Stripe customer ' + stripeId + ' is already linked to ' + byStripe[0].email +
+                ', not ' + normalized + '. Linking this entry to the existing record so it stays chargeable; ' +
+                'the two addresses are worth reconciling.',
+            );
+            return byStripe[0].id;
+          }
+        }
         if (again?.[0]?.id) {
           if (stripeId && again[0].stripe_customer_id !== stripeId) {
             await getDb().update(

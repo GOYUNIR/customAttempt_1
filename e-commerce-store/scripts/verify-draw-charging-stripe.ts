@@ -80,13 +80,25 @@ async function main() {
   const createdCustomers: string[] = [];
   const createdIntents: string[] = [];
   const customerUuids: string[] = [];
+  const stripeByEmail = new Map<string, string>();
   let drawId = '';
 
-  // A real, chargeable test payment method, attached to a real test customer.
-  const customer = await stripe.customers.create({ description: tag });
-  createdCustomers.push(customer.id);
-  await stripe.paymentMethods.attach('pm_card_visa', { customer: customer.id });
-  console.log('     a REAL chargeable test customer exists: ' + customer.id + ' + pm_card_visa');
+  // ONE STRIPE CUSTOMER PER ENTRANT, because that is what production does:
+  // every checkout route resolves the Stripe customer by email
+  // (stripe.customers.list({ email }) in checkout/cart and checkout/route).
+  //
+  // The first run attached all three entrants to a SINGLE Stripe customer,
+  // which correctly violated the new (tenant_id, stripe_customer_id) unique
+  // index -- three people cannot share one Stripe identity. That was the
+  // fixture being unrealistic, not the code failing; recorded so nobody
+  // simplifies it back.
+  async function customerFor(label: string) {
+    const c = await stripe.customers.create({ description: tag + '-' + label });
+    createdCustomers.push(c.id);
+    const pm = await stripe.paymentMethods.create({ type: 'card', card: { token: 'tok_visa' } });
+    await stripe.paymentMethods.attach(pm.id, { customer: c.id });
+    return { customerId: c.id, paymentMethodId: pm.id };
+  }
 
   try {
     // ── Entries exactly as the webhook now creates them ────────────────────
@@ -96,24 +108,26 @@ async function main() {
     for (const label of ['a', 'b', 'c']) {
       const email = `${tag}-${label}@example.invalid`;
       emails.push(email);
-      const customerUuid = await ensureCustomer(tenantId, email, customer.id);
+      const { customerId: stripeCust, paymentMethodId } = await customerFor(label);
+      stripeByEmail.set(email, stripeCust);
+      const customerUuid = await ensureCustomer(tenantId, email, stripeCust);
       check(Boolean(customerUuid), 'customer record created/linked for ' + label, String(customerUuid));
       if (customerUuid) customerUuids.push(customerUuid);
       const resolved = customerUuid ? await stripeCustomerIdFor(tenantId, customerUuid) : null;
-      check(resolved === customer.id, 'and it resolves back to the Stripe customer for ' + label, String(resolved));
+      check(resolved === stripeCust, 'and it resolves back to that entrant own Stripe customer for ' + label, String(resolved));
       const r = await createRaffleEntry({
         tenantId,
         variantId: variant.id,
         customerId: customerUuid,
         email,
-        paymentMethodRef: 'pm_card_visa',
+        paymentMethodRef: paymentMethodId,
       });
       check(r.ok === true, 'entry created for ' + label, JSON.stringify(r));
     }
 
     // Linking is idempotent: a second call for the same email must reuse the
     // row, not create a second identity for the same person.
-    const relinked = await ensureCustomer(tenantId, emails[0], customer.id);
+    const relinked = await ensureCustomer(tenantId, emails[0], stripeByEmail.get(emails[0]) as string);
     check(relinked === customerUuids[0], 'ensureCustomer is idempotent — same person, same customer row', relinked + ' vs ' + customerUuids[0]);
 
     const stored = (await db.select<{ email: string; customer_id: string | null; payment_method_ref: string | null }>('raffle_entries', {
@@ -156,6 +170,19 @@ async function main() {
     check(!result.charges.some((c) => c.error === 'no_payment_method'),
       'no winner was declined for a missing payment method',
       JSON.stringify(result.charges.map((c) => c.error).filter(Boolean)));
+
+    // The AMOUNT matters as much as the fact of a charge: a draw that bills
+    // the wrong price is worse than one that bills nobody.
+    console.log('     intent amounts: ' + JSON.stringify(mine.map((pi) => pi.amount)) + '  expected ' + basePriceCents);
+    check(mine.length > 0 && mine.every((pi) => pi.amount === basePriceCents),
+      'every PaymentIntent charges the variant price (' + basePriceCents + ' = $' + (basePriceCents / 100).toFixed(2) + ')',
+      JSON.stringify(mine.map((pi) => pi.amount)));
+    check(mine.every((pi) => pi.currency === 'usd'), 'every PaymentIntent is USD', JSON.stringify(mine.map((pi) => pi.currency)));
+    check(mine.every((pi) => pi.status === 'succeeded'), 'every PaymentIntent actually SUCCEEDED', JSON.stringify(mine.map((pi) => pi.status)));
+    const uniqueCustomers = new Set(mine.map((pi) => String(pi.customer || '')));
+    check(uniqueCustomers.size === mine.length,
+      'each charge went to a DIFFERENT Stripe customer - nobody was billed for someone else',
+      JSON.stringify([...uniqueCustomers]));
   } finally {
     console.log('\n     cleaning up…');
     for (const id of [...new Set(createdIntents)]) {
