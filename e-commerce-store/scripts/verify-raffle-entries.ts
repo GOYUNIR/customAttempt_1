@@ -149,6 +149,34 @@ async function main() {
       'winners are no longer pending — a second draw cannot re-select them',
     );
 
+    // ── 6. NON-WINNERS ROLL OVER (option 1, matching the KV engines) ──────
+    const stillPendingAfter = (await db.select<{ id: string; status: string }>('raffle_entries', {
+      where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('pending') }, select: ['id', 'status'],
+    })) as Array<{ id: string; status: string }>;
+    check(
+      stillPendingAfter.length === draw.notSelectedEntryIds.length,
+      'every non-winner is STILL PENDING after the draw — they roll over',
+      'pending=' + stillPendingAfter.length + ' notSelected=' + draw.notSelectedEntryIds.length,
+    );
+    const noneMarkedNotSelected = (await db.select<{ id: string }>('raffle_entries', {
+      where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('not_selected') }, select: ['id'],
+    })) as Array<{ id: string }>;
+    check(noneMarkedNotSelected.length === 0, 'no entry was marked not_selected', String(noneMarkedNotSelected.length));
+
+    // A SECOND draw must still see them — the whole point of rolling over.
+    const draw2 = await executeDraw(tenantId, variantId, 1);
+    createdIds.push(draw2.drawId);
+    check(
+      draw2.entriesCount === draw.notSelectedEntryIds.length,
+      'a SECOND draw sees the rolled-over entries (' + draw.notSelectedEntryIds.length + ')',
+      'entriesCount=' + draw2.entriesCount,
+    );
+    check(draw2.winnerCount === 1, 'and can select a winner from them', String(draw2.winnerCount));
+    check(
+      !draw2.winnerEntryIds.some((id) => draw.winnerEntryIds.includes(id)),
+      'draw 2 did not re-select draw 1’s winner',
+    );
+
     for (const e of drawEmails) {
       try { await db.remove('raffle_entries', { where: { tenant_id: eq(tenantId), email: eq(e) } }); } catch {}
     }

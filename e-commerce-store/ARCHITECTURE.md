@@ -830,3 +830,43 @@ Known instances, to audit as each phase reaches them:
 | `b2b/quotes` contract-pricing reads | **AUDITED + FIXED.** Was fail-OPEN: a failed price_lists / price_list_entries read yielded `entries = []`, indistinguishable from "no negotiated pricing", so resolveUnitPriceCents correctly returned BASE price and a draft quote was saved at list price. NOT live-active — companies, price_lists, price_list_entries, quotes are all 0 rows, so nothing has ever been mispriced. Now returns 503 and logs. The quotes LIST read had the same shape (failed read rendered as "no quotes") and also fails closed now. |
 | `b2b/quotes` companies / variants `.catch(() => null)` | Audited, acceptable: both fail CLOSED (404 / 400), no quote is created. Caveat: a DB error is reported to the user as "Company not found", which is misleading to diagnose but safe in outcome. |
 | `lib/media-r2.ts` null-on-miss | Mitigated, not removed: `X-Media-Source` makes the read path observable, so a demotion to the signed-GET fallback is visible rather than inferred. |
+
+## Merchant panel requirement: per-drop win/loss and decline policy
+
+Not a deferred idea — a required part of commerce-mode configuration, raised
+by a real divergence found during H5.
+
+The two draw engines disagreed about what happens to an entry that does not
+win. The KV engines re-push non-winners into the pool, so a loser is
+automatically in the next drop. The Postgres `executeDraw` marked them
+`not_selected`, which removed them from every future draw. Proven by running
+two consecutive draws: Postgres gave draw 2 zero entries where Redis would
+have given it two.
+
+H5 resolved it by matching the KV behaviour (non-winners stay `pending` and
+roll over), on the principle that a storage migration does not get to change
+what customers experience. But "matching the old behaviour" is not the same
+as "this is the right behaviour", and the answer legitimately differs per
+drop:
+
+| Setting | Options | Why a merchant would choose either |
+|---|---|---|
+| Loss rollover | roll over / one-shot | A weekly restock rewards persistence with rollover. A one-off collaboration drop wants fresh intent each time, and rollover quietly inflates entrant counts with people who entered months ago. |
+| Decline retry | retry next draw / release | KV retries the same failing card every draw indefinitely. That is right for a temporary hold failure and wrong for a dead card. |
+| Winner re-entry | eligible / excluded | Some drops deliberately exclude previous winners; the current model has no notion of it. |
+
+Two constraints the implementation has to respect, both discovered rather
+than designed:
+
+1. The duplicate-entry index is PARTIAL on `status = 'pending'`, so a
+   non-pending entry does not block re-entry. Any policy that parks entries
+   in a non-pending state silently re-opens entry for that email.
+2. While an entry sits at `status = 'winner'`, the same email can create a
+   fresh pending entry. Rolling a declined winner back to `pending` can
+   therefore collide with that fresh entry;
+   `rollDeclinedEntryBackToPool` leaves it declined in that case rather than
+   handing one person two slots.
+
+A `pending` entry also holds a saved payment method indefinitely, which is
+the strongest argument for offering one-shot mode: a card sitting in a pool
+for months is materially more likely to decline.

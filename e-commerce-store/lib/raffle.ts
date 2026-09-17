@@ -121,21 +121,31 @@ export async function executeDraw(tenantId: string, variantId: string, winnerCou
       { returning: 'default' },
     );
   }
-  if (notSelectedIds.length > 0) {
-    await getDb().update(
-      'raffle_entries',
-      { where: { id: inList(notSelectedIds) } },
-      { status: 'not_selected', decided_at: nowIso },
-      { returning: 'default' },
-    );
-  }
+  // NON-WINNERS STAY PENDING — they roll over into the next draw.
+  //
+  // This used to set status='not_selected', which removed them from
+  // listPendingEntries and therefore from every future draw. That silently
+  // changed a customer-facing mechanic: the KV engines re-push non-winners
+  // into the pool (trigger-drop: "keep the rest ... who keep their entry for
+  // the next draw"), so under Redis a loser is automatically in next week's
+  // drop. Proven by running two consecutive draws: Postgres gave draw 2 zero
+  // entries where Redis would have given it two.
+  //
+  // Storage migrations do not get to change what customers experience, so the
+  // KV behaviour wins. Who was not selected is still recorded on the
+  // drop_draws row below, so the draw history is unchanged.
+  //
+  // Whether a loss rolls over is a legitimate per-drop merchant choice -- see
+  // ARCHITECTURE.md's merchant-panel commerce-mode requirements.
 
   const drawRows = await getDb().insert<{ id: string }>('drop_draws', {
       tenant_id: tenantId,
       variant_id: variantId,
       winner_count: winnerIds.length,
       entries_count: entries.length,
-    summary: { winnerEntryIds: winnerIds, notSelectedEntryIds: notSelectedIds },
+    // notSelectedEntryIds is the ONLY record that these entries lost this
+    // draw, now that their status stays 'pending' so they roll over.
+    summary: { winnerEntryIds: winnerIds, notSelectedEntryIds: notSelectedIds, nonWinnersRolledOver: true },
   });
 
   return {
@@ -172,6 +182,44 @@ export async function findPendingEntryId(tenantId: string, variantId: string, em
 /** Mark a winning entry as charged (after a successful Stripe charge) or
  *  declined (after a failed one) — the caller (webhook/charge route) still
  *  owns the actual Stripe call; this only records the outcome. */
+/**
+ * Return a DECLINED winner to the pool, matching the KV engines, which
+ * re-push declined winners alongside non-winners
+ * (`[...shuffled.slice(winnerCount), ...declinedEntries]`).
+ *
+ * EDGE CASE that only exists in Postgres: the duplicate-entry index is
+ * partial on 'pending', so while this entry sat at status='winner' the same
+ * email was free to create a FRESH pending entry. Rolling this one back would
+ * then violate the index. If that happens the entry stays 'declined' -- the
+ * customer already has a live entry, so rolling this one over would give them
+ * two slots in the next draw.
+ *
+ * Worth flagging as a policy question rather than a fact of nature: this
+ * retries the same failing card every draw, indefinitely, which is what the
+ * KV engines already do. Retry-on-decline belongs with the per-drop
+ * commerce-mode settings.
+ */
+async function rollDeclinedEntryBackToPool(tenantId: string, entryId: string): Promise<void> {
+  try {
+    await getDb().update(
+      'raffle_entries',
+      { where: { tenant_id: eq(tenantId), id: eq(entryId) } },
+      { status: 'pending', decided_at: null },
+      { returning: 'default' },
+    );
+  } catch (err) {
+    const message = (err as Error)?.message || String(err);
+    if (/duplicate key|already exists|23505/i.test(message)) {
+      console.warn(
+        '[raffle] declined entry ' + entryId + ' left as declined — the same email already has a ' +
+          'pending entry, and rolling this one over would give them two slots.',
+      );
+      return;
+    }
+    console.error('[raffle] could not roll a declined entry back to the pool', entryId, message);
+  }
+}
+
 export async function markRaffleEntryOutcome(tenantId: string, entryId: string, outcome: 'charged' | 'declined'): Promise<void> {
   assertSupabase();
   // returning: 'default' — the legacy PATCH sent no Prefer header.
@@ -232,6 +280,8 @@ export async function executeDrawWithCharging(
 
     if (!stripe || !customerId || !paymentMethodId) {
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
+      // Option 1: a declined winner returns to the pool, as the KV engines do.
+      await rollDeclinedEntryBackToPool(tenantId, entryId);
       charges.push({ entryId, email, status: 'declined', error: 'no_payment_method' });
       continue;
     }
@@ -276,6 +326,8 @@ export async function executeDrawWithCharging(
       }
     } catch (err) {
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
+      // Option 1: a declined winner returns to the pool, as the KV engines do.
+      await rollDeclinedEntryBackToPool(tenantId, entryId);
       charges.push({ entryId, email, status: 'declined', error: (err as Error)?.message || String(err) });
     }
   }
