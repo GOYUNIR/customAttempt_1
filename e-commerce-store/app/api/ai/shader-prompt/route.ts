@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { adminRequestAuthorized, createKvClient } from '@/lib/server-config';
+import { adminRequestAuthorized } from '@/lib/server-config';
 import { isSuperAdminSession } from '@/lib/admin-verify';
 import { getLicenseStatus, isWriteAllowed } from '@/lib/license';
 import { AiFactory } from '@/services/ai';
 import { rateLimitedResponse } from '@/lib/rate-limit';
-import { trackUsage } from '@/lib/analytics';
-import { ANALYTICS_USAGE_PREFIX } from '@/lib/redis-keys';
+import { recordUsageEvent } from '@/lib/analytics-events';
 import {
   compileShaderParams,
   buildShaderPrompt,
@@ -154,10 +153,10 @@ export async function POST(request: Request) {
     }
   }
 
-  const storage = createKvClient();
-  if (storage) {
-    await trackUsage(storage, { prefix: ANALYTICS_USAGE_PREFIX, metric: 'ai_generations' }).catch(() => {});
-  }
+  // H8: usage metrics land in public.analytics_events, not the
+  // analytics:usage KV counter. Best-effort, exactly as before — a metrics
+  // write must never fail the generation the caller is waiting on.
+  await recordUsageEvent({ metric: 'ai_generations' }).catch(() => {});
 
   return NextResponse.json({
     ok: true,

@@ -998,3 +998,74 @@ can never be a real inbox) and delete what they create. The first version of
 the round trip cleaned up its `REWARD-` codes but not the `WELCOME-` code the
 grant mints, and left three behind in the live promo table; they were removed
 and the script now cleans up both.
+
+## Phase order from H8 onwards
+
+Decided deliberately rather than by what was next in the key list: lowest-risk
+storage moves first, money paths last, each money path with its own phase and
+its own checkpoint.
+
+| Phase | Scope | Why here |
+|---|---|---|
+| **H8** | drop-alert subscribers, usage metrics | No money, no data to lose (both KV sources are empty in production) |
+| **Orders phase** | `archive:ledger` → `orders`/`order_line_items`, **plus draw history** | Money. Needs schema design before code — see below |
+| **Promos phase** | `promo:codes` → a table that does not exist yet | Money-adjacent: welcome credits, redemption credits, promoter payouts |
+| **H9** | delete the KV bridge | Only defensible once the above are real |
+
+### DEFERRED-7: draw history belongs to the orders phase
+
+Not unfinished H8 work — moved on purpose.
+
+`drop_draws` (00012) is **one row per variant**: `variant_id uuid not null`,
+`winner_count`, `entries_count`. A draw RUN is not that shape. `draws:history`
+stores one entry per run, containing `processedWinners[]` where each winner
+carries its own `product`, `size`, `status`, `amountCents` and **`orderRef`**.
+One run spans many variants, and `draws:last` — the "most recent run" the admin
+status screen reads — has no home in the schema at all.
+
+Modelling it needs either a `drop_draw_runs` table with a `run_id` on
+`drop_draws`, or a different decomposition. Either way the design depends on
+how the orders phase resolves `checkout_mode`, the raffle-entry-charged-later
+concept and shared pools — the same gaps `lib/postgres-shadow-write.ts` names
+as the reason orders were never cut over. Designing a draw-run table first
+means designing it against a shape that is about to change.
+
+The coupling is concrete, not theoretical: `processedWinners[].orderRef` and
+`.amountCents` are order facts living inside a draw record. Whatever table
+holds them should be designed in the same sitting as the orders schema.
+
+Production state at the time of deferral: `draws:history` is empty and
+`draws:last` is unset — no draw has ever run here — so nothing is at risk while
+this waits.
+
+### H8 scope notes
+
+**The drop-alert list got a new table (00023), not `waitlist_entries`.**
+`waitlist_entries` models "notify me when THIS VARIANT restocks"
+(`variant_id not null`). `customer:waitlist` is a store-wide announcement list
+keyed by email, with `sources` and `interests` and no variant anywhere in the
+record. Putting one in the other would have meant inventing a `variant_id` per
+subscriber. `waitlist_entries` stays empty and reserved for its real purpose —
+nothing writes it yet.
+
+**Analytics moved as counters → events, and only partly.** The usage counters
+(`analytics:usage:<tenant>:<day>`) now write `public.analytics_events`, a table
+that had sat in the schema since 00001 with **zero writers and zero readers**.
+Affordable as one row per occurrence because `trackUsage` has exactly three
+call sites, all AI-generation routes, and an AI generation is slow and
+human-triggered.
+
+Staying in KV, deliberately: `analytics:online` (a ZSET of visitor ids scored
+by last-seen), `analytics:social_boost` and `analytics:ticks`. These are
+real-time ephemeral state read on the storefront hot path; an append-only
+events table is the wrong shape for them and would add a database round trip
+per request for data nobody queries historically. H9 must treat these as
+named exceptions, not leftovers.
+
+No analytics backfill: every daily usage hash in production is empty, and a
+counter carries no per-event timestamps, so even a non-empty one could only
+have been backfilled as a single synthetic event per day.
+
+**`api_calls` and `system_events` read as zero** on the admin analytics screen.
+They have no writer anywhere in the app and never did — that predates this
+phase and is not something the move lost.

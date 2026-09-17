@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createKvClient, safeParseKvItem, WAITLIST_KEY } from '@/lib/server-config';
+import { createKvClient } from '@/lib/server-config';
+import { subscribe } from '@/lib/alert-subscribers';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -29,23 +31,17 @@ export async function POST(request: Request) {
     const limited = await rateLimitedResponse('alerts_subscribe', request, 10, 60);
     if (limited) return limited;
 
-    const raw = await redis.hget(WAITLIST_KEY, email);
-    const existing = safeParseKvItem<any>(raw) || {};
-    const sources = Array.from(new Set([...(Array.isArray(existing.sources) ? existing.sources : []), source]));
-    const mergedInterests = Array.from(new Set([...(Array.isArray(existing.interests) ? existing.interests : []), ...interests]));
-    const now = new Date().toISOString();
-    const record = {
-      email,
-      status: 'active',
-      sources,
-      interests: mergedInterests,
-      createdAt: existing.createdAt || now,
-      updatedAt: now,
-      notifications: existing.notifications || {},
-    };
+    // H8: the list lives in public.alert_subscribers (migration 00023).
+    const tenantId = await ensureDefaultTenant();
+    const result = await subscribe(tenantId, email, { source, interests });
+    if (!result.ok) {
+      return NextResponse.json({ error: 'Subscription failed. Please try again.' }, { status: 500 });
+    }
 
-    await redis.hset(WAITLIST_KEY, { [email]: JSON.stringify(record) });
-    if (!existing.createdAt) {
+    // Only a BRAND NEW subscriber gets the confirmation email. The KV version
+    // decided this by `existing.createdAt` being absent; the insert itself now
+    // says so, which is the same rule without a second read that could race.
+    if (result.created) {
       await sendWaitlistConfirmationEmail({ to: email });
     }
 
