@@ -30,6 +30,7 @@
     "verify:profile": "tsx scripts/verify-customer-profile.ts",
     "verify:profile-roundtrip": "tsx scripts/verify-profile-roundtrip.ts",
     "verify:h8": "tsx scripts/verify-h8-domains.ts",
+    "verify:audit": "tsx scripts/verify-audit-trail.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",
     "backfill:profiles": "tsx scripts/backfill-customer-profiles.ts"
   },

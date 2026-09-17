@@ -1069,3 +1069,39 @@ have been backfilled as a single synthetic event per day.
 **`api_calls` and `system_events` read as zero** on the admin analytics screen.
 They have no writer anywhere in the app and never did — that predates this
 phase and is not something the move lost.
+
+### The empty audit trail was correct — and is now proven
+
+`public.audit_logs` had **zero rows** while `admin:audit_log` held 86, and
+`appendAudit` dual-writes both (deliberately `await`ed, so a freezing
+serverless runtime cannot drop the Postgres half). That looks exactly like a
+silent failure, and `recordPlatformAudit` is built to be silent: it returns
+early when `getDb().configured` is false and downgrades every error to a
+`console.warn`.
+
+Three explanations, separated before anything was written:
+
+| # | Hypothesis | Verdict |
+|---|---|---|
+| 1 | The Worker lacks `SUPABASE_SERVICE_ROLE_KEY`, so the writer returns at line 1 | **Ruled out** — both secrets confirmed present on `customattempt-1` |
+| 2 | The deployed build predates the dual write | **Ruled out** — it landed 73 commits before the deployed tip |
+| 3 | No admin action has happened since it shipped | **Confirmed** |
+
+All 86 KV entries are dated 2026-08-30 to 2026-09-06. The dual write landed
+2026-09-14. Nobody has performed an admin action since. The empty table was the
+correct state, and no code was changed.
+
+That is a diagnosis, not a proof. A path that has never executed in production
+is a path nobody has watched work — which is how the H4 lock, the H5 mirror and
+the H6 charging blocker were all found. So `npm run verify:audit -- --probe`
+executed it once, on purpose, rather than letting the first real admin action be
+the first attempt. It works, and the row is permanent by design.
+
+**While there, the tamper-resistance claim was tested for the first time.**
+00008 says triggers block UPDATE and DELETE on `audit_logs` unconditionally,
+service-role key included. Nothing had ever checked. A scoped DELETE of the
+probe row was attempted: it was refused and the row survived. The claim holds.
+
+`npm run verify:audit` is read-only and safe to re-run; it reconciles the two
+stores and reports a mismatch as a failure. `--probe` is opt-in precisely
+because its row can never be removed.
