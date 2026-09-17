@@ -1,3 +1,4 @@
+import { ensureCustomer } from '@/lib/customers';
 import { NextResponse } from 'next/server';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
@@ -388,9 +389,17 @@ export async function POST(request: Request) {
             if (raffleTenantId && productId) {
               const raffleVariantId = await resolveVariantId(raffleTenantId, productId, size).catch(() => null);
               if (raffleVariantId) {
+                // ONE durable customer record per entrant, linked to Stripe.
+                // Without this the entry's customer_id stayed NULL and every
+                // winner declined as no_payment_method.
+                const customerUuid = await ensureCustomer(raffleTenantId, email, customerId || null);
+                if (!customerUuid) {
+                  console.error('[webhook] no customer record for entrant — this entry cannot be charged', email);
+                }
                 await createRaffleEntry({
                   tenantId: raffleTenantId,
                   variantId: raffleVariantId,
+                  customerId: customerUuid,
                   email,
                   paymentMethodRef: paymentMethodId || null,
                   promoCode: appliedPromo || null,

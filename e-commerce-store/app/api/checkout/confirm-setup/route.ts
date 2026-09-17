@@ -1,3 +1,4 @@
+import { ensureCustomer } from '@/lib/customers';
 import { createRaffleEntry, addToWaitlist } from '@/lib/raffle';
 import { resolveVariantId } from '@/lib/inventory';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
@@ -312,9 +313,14 @@ async function lockOneEntry(opts: {
     } else if (entryType === 'waitlist') {
       await addToWaitlist(pgTenant, pgVariant, email);
     } else {
+      const customerUuid = await ensureCustomer(pgTenant, email, customerId || null);
+      if (!customerUuid) {
+        console.error('[confirm-setup] no customer record for entrant — this entry cannot be charged', email);
+      }
       const created = await createRaffleEntry({
         tenantId: pgTenant,
         variantId: pgVariant,
+        customerId: customerUuid,
         email,
         paymentMethodRef: paymentMethodId || undefined,
         promoCode: appliedPromo || undefined,

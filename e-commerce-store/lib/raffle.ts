@@ -11,6 +11,7 @@
  * NOT wired into any live route yet — see the session's summary.
  */
 
+import { stripeCustomerIdFor } from '@/lib/customers';
 import { createKvClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
 import { getDb } from '@/lib/db/client';
@@ -273,7 +274,13 @@ export async function executeDrawWithCharging(
   for (const entry of draw.winners) {
     const entryId = String(entry.id);
     const email = String(entry.email || '');
-    const customerId = String(entry.customer_id || '');
+    // The Stripe customer is resolved THROUGH the customer record, never read
+    // straight off the entry. entry.customer_id is a uuid FK to
+    // public.customers; passing it to Stripe as `customer:` was what made
+    // this path decline every winner (0 of 3 charged in a test-mode dry run
+    // while the Redis engines charged them).
+    const customerUuid = String(entry.customer_id || '');
+    const customerId = customerUuid ? (await stripeCustomerIdFor(tenantId, customerUuid)) || '' : '';
     const paymentMethodId = String(entry.payment_method_ref || '');
     const discountPercent = Math.min(50, Math.max(0, Number(entry.discount_percent) || 0));
     const priceCents = discountPercent > 0 ? Math.max(50, Math.round(basePriceCents * (1 - discountPercent / 100))) : basePriceCents;

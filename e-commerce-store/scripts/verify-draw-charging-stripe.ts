@@ -7,13 +7,17 @@
  * gets charged, so it is proven with REAL Stripe test-mode calls rather than
  * mocks — the same standard as the raffle checkpoint.
  *
- * It reproduces entries EXACTLY as production creates them. The only caller
- * that writes raffle_entries in production is the Stripe webhook, and it
- * passes tenantId, variantId, email, paymentMethodRef, promoCode,
- * discountPercent and shippingAddress — NOT customerId. So customer_id is
- * always NULL, and this harness leaves it NULL rather than hand-filling a
- * value production never has. Filling it in would have proven the code works
- * on inputs it never receives.
+ * It reproduces entries EXACTLY as production creates them, by calling the
+ * same ensureCustomer + createRaffleEntry({ customerId }) pair the Stripe
+ * webhook calls — not a hand-assembled approximation.
+ *
+ * The first version of this harness caught why the path was broken: the
+ * webhook never passed customerId, so customer_id was always NULL and the
+ * guard `if (!stripe || !customerId || !paymentMethodId)` declined every
+ * winner (0 of 3 charged, 0 PaymentIntents created). It deliberately did NOT
+ * hand-fill a Stripe id, because production never had one — doing so would
+ * have proven the code works on inputs it never receives, which is exactly
+ * how the bug stayed invisible.
  *
  * SAFETY: refuses to run against a live key; settles every PaymentIntent it
  * creates and deletes every row it writes.
@@ -52,6 +56,7 @@ async function main() {
   const stripe = new Stripe(key, { apiVersion: '2025-08-27.basil' as never });
 
   const { createRaffleEntry, executeDrawWithCharging } = await import('../lib/raffle');
+  const { ensureCustomer, stripeCustomerIdFor } = await import('../lib/customers');
   const { getDb } = await import('../lib/db/client');
   const { eq, inList } = await import('../lib/db/query');
   const { ensureDefaultTenant } = await import('../lib/tenant-context');
@@ -74,6 +79,7 @@ async function main() {
   const emails: string[] = [];
   const createdCustomers: string[] = [];
   const createdIntents: string[] = [];
+  const customerUuids: string[] = [];
   let drawId = '';
 
   // A real, chargeable test payment method, attached to a real test customer.
@@ -83,19 +89,32 @@ async function main() {
   console.log('     a REAL chargeable test customer exists: ' + customer.id + ' + pm_card_visa');
 
   try {
-    // ── Entries exactly as production creates them ─────────────────────────
+    // ── Entries exactly as the webhook now creates them ────────────────────
+    // ensureCustomer + createRaffleEntry({ customerId }) is verbatim what
+    // app/api/stripe/webhook does, so this exercises the real flow rather
+    // than a hand-assembled approximation of it.
     for (const label of ['a', 'b', 'c']) {
       const email = `${tag}-${label}@example.invalid`;
       emails.push(email);
+      const customerUuid = await ensureCustomer(tenantId, email, customer.id);
+      check(Boolean(customerUuid), 'customer record created/linked for ' + label, String(customerUuid));
+      if (customerUuid) customerUuids.push(customerUuid);
+      const resolved = customerUuid ? await stripeCustomerIdFor(tenantId, customerUuid) : null;
+      check(resolved === customer.id, 'and it resolves back to the Stripe customer for ' + label, String(resolved));
       const r = await createRaffleEntry({
         tenantId,
         variantId: variant.id,
+        customerId: customerUuid,
         email,
-        paymentMethodRef: 'pm_card_visa',   // what the webhook stores
-        // customerId intentionally omitted — the webhook never passes it.
+        paymentMethodRef: 'pm_card_visa',
       });
       check(r.ok === true, 'entry created for ' + label, JSON.stringify(r));
     }
+
+    // Linking is idempotent: a second call for the same email must reuse the
+    // row, not create a second identity for the same person.
+    const relinked = await ensureCustomer(tenantId, emails[0], customer.id);
+    check(relinked === customerUuids[0], 'ensureCustomer is idempotent — same person, same customer row', relinked + ' vs ' + customerUuids[0]);
 
     const stored = (await db.select<{ email: string; customer_id: string | null; payment_method_ref: string | null }>('raffle_entries', {
       where: { tenant_id: eq(tenantId), email: inList(emails) },
@@ -103,7 +122,7 @@ async function main() {
     })) as Array<{ email: string; customer_id: string | null; payment_method_ref: string | null }>;
     console.log('\n     as stored in production shape:');
     for (const r of stored) console.log('       ' + String(r.email).padEnd(44) + 'customer_id=' + r.customer_id + '  payment_method_ref=' + r.payment_method_ref);
-    check(stored.every((r) => r.customer_id === null), 'customer_id is NULL, as production always leaves it', JSON.stringify(stored.map((r) => r.customer_id)));
+    check(stored.every((r) => r.customer_id !== null), 'every entry now carries a customer_id FK', JSON.stringify(stored.map((r) => r.customer_id)));
 
     // ── Count Stripe activity before, so we can prove what the draw did ────
     const before = (await stripe.paymentIntents.list({ limit: 100 })).data.length;
@@ -148,6 +167,7 @@ async function main() {
     }
     for (const c of createdCustomers) { try { await stripe.customers.del(c); } catch { /* ignore */ } }
     try { await db.remove('raffle_entries', { where: { tenant_id: eq(tenantId), email: inList(emails) } }); } catch { /* ignore */ }
+    try { await db.remove('customers', { where: { tenant_id: eq(tenantId), email: inList(emails) } }); } catch { /* ignore */ }
     if (drawId) { try { await db.remove('drop_draws', { where: { id: eq(drawId) } }); } catch { /* ignore */ } }
     const leftover = (await db.select<{ id: string }>('raffle_entries', {
       where: { tenant_id: eq(tenantId), email: inList(emails) }, select: ['id'],
