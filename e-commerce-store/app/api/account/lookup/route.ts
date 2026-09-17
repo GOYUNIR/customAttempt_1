@@ -11,6 +11,8 @@ import {
   loadProducts,
 } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
+import { readProfile } from '@/lib/customer-profile';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -155,6 +157,25 @@ export async function POST(request: Request) {
       return dateB - dateA;
     });
 
+    // ── The authoritative profile (H7) ────────────────────────────────────
+    // /account renders the points balance from whatever this endpoint and
+    // /api/auth/me return, so this reads public.customers (migration 00022)
+    // rather than the KV blob. Note what is NOT taken from here:
+    // welcomePromoCode below still comes from store:users, because the welcome
+    // promo code is promo bookkeeping that 00022 deliberately did not move.
+    let rewardsBalance = 0;
+    let customerRole = 'customer';
+    try {
+      const tenantId = await ensureDefaultTenant();
+      const profile = await readProfile(tenantId, email);
+      if (profile) {
+        rewardsBalance = profile.rewardsBalance;
+        customerRole = profile.role;
+      }
+    } catch (profileErr) {
+      console.error('[account/lookup] profile read failed', (profileErr as Error)?.message || profileErr);
+    }
+
     // ── Account-bound promos (welcome credit + anything issued to this email) ──
     // The user record carries the welcome code; the promo records live in
     // promo:codes. We surface every promo the customer can actually use so the
@@ -237,9 +258,9 @@ export async function POST(request: Request) {
       // 200 + empty array (not 404) — a signed-in user with no entries yet is a
       // perfectly normal state. 404 here just flooded the console with
       // "Failed to load resource: the server responded with a status of 404".
-      return NextResponse.json({ entries: [], promos, welcomePromoCode, rewards: rewardsConfig });
+      return NextResponse.json({ entries: [], promos, welcomePromoCode, rewards: rewardsConfig, rewardsBalance, role: customerRole });
     }
-    return NextResponse.json({ entries, promos, welcomePromoCode, rewards: rewardsConfig });
+    return NextResponse.json({ entries, promos, welcomePromoCode, rewards: rewardsConfig, rewardsBalance, role: customerRole });
   } catch (err: any) {
     console.error('[account/lookup] failed', err?.message || err);
     return NextResponse.json({ error: 'Could not load your account. Please try again.' }, { status: 500 });

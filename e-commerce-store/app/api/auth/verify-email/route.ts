@@ -9,6 +9,8 @@ import {
 } from '@/lib/customer-rewards';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { readProfile } from '@/lib/customer-profile';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,15 +62,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'This email is already verified — log in instead.' }, { status: 400 });
     }
 
-    const { updatedUser, welcomeCode } = await grantWelcomeRewards(redis, user, email);
+    const { updatedUser, welcomeCode, rewardsGranted } = await grantWelcomeRewards(redis, user, email);
     await trySendWelcomeEmail(email, welcomeCode);
+
+    // H7: read the balance and role back from public.customers rather than
+    // trusting the object we just built. grantWelcomeRewards already puts the
+    // authoritative number on updatedUser, but re-reading is what makes this
+    // route a reader of the authoritative store — if the points write failed,
+    // this returns the balance that really exists instead of the one we hoped
+    // for. The session is minted from the same numbers so /account and the
+    // cookie cannot disagree the moment the customer lands.
+    const tenantId = await ensureDefaultTenant();
+    const profile = await readProfile(tenantId, email);
+    if (!rewardsGranted) {
+      console.error('[verify-email] ' + email + ' verified but welcome points were not granted');
+    }
+    const rewards = profile?.rewardsBalance ?? 0;
+    const role = profile?.role || user.role || 'customer';
+    updatedUser.rewards = rewards;
+    updatedUser.role = role;
 
     const token = await createCustomerSession(redis, email, updatedUser);
 
     const response = NextResponse.json({
       success: true,
       verified: true,
-      user: { id: user.id, email, role: user.role, rewards: updatedUser.rewards, welcomePromoCode: welcomeCode },
+      user: { id: user.id, email, role, rewards, welcomePromoCode: welcomeCode },
     });
     createSessionCookie(response, token);
     return response;

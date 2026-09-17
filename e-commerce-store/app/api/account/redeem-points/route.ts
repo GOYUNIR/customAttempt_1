@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
-import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY, USERS_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
+import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY, PROMO_CODES_KEY } from '@/lib/server-config';
 import { getSessionUser } from '@/lib/session-auth';
 import { randomBytes } from 'crypto';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { withRedisLock } from '@/lib/redis-lock';
+import { readProfile, adjustRewards } from '@/lib/customer-profile';
+import { mirrorRewardsToKv } from '@/lib/customer-profile-bridge';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,30 +54,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Minimum redemption is ${minRedeemPoints} points.` }, { status: 400 });
     }
 
-    // The balance check-and-deduct below is a read-modify-write; without a
-    // lock, two concurrent redemption requests for the same account can both
-    // read the same balance, both pass the check, and both mint a fully
-    // valid promo code while the balance only ever gets decremented once.
+    // H7: the balance now lives in public.customers.rewards_balance, not in
+    // the store:users KV blob.
+    //
+    // The lock is kept as a first line of defence — it stops two tabs doing
+    // redundant work — but it is NOT what makes this correct. The distributed
+    // lock was found to provide no mutual exclusion at all (see
+    // lib/redis-lock.ts), and a redemption mints real store credit.
+    // Correctness comes from the compare-and-swap inside adjustRewards: the
+    // UPDATE only lands if the balance is still what was read, so two
+    // concurrent redemptions cannot both spend the same points even with the
+    // lock wide open. Proven under real parallel load in
+    // scripts/verify-customer-profile.ts.
     const result = await withRedisLock(redis, `redeem-points:${sessionUser.email}`, async () => {
-      // Find the user record
-      const raw = await redis.hgetall(USERS_KEY);
-      let user: any = null;
-      let userId = '';
-      if (raw) {
-        for (const [k, v] of Object.entries(raw)) {
-          const u = safeParseKvItem<any>(v);
-          if (u && String(u.email || '').toLowerCase() === sessionUser.email) {
-            user = u;
-            userId = k;
-            break;
-          }
-        }
-      }
-      if (!user) {
+      const tenantId = await ensureDefaultTenant();
+      const profile = await readProfile(tenantId, sessionUser.email);
+      if (!profile) {
         return { error: 'Account not found.', status: 404 } as const;
       }
 
-      const balance = Math.floor(Number(user.rewards || 0));
+      const balance = profile.rewardsBalance;
       if (balance < requestedPoints) {
         return { error: `You only have ${balance.toLocaleString()} points.`, status: 400 } as const;
       }
@@ -87,6 +86,26 @@ export async function POST(request: Request) {
         return { error: `That amount is below $1.00 of credit (${pointsPerDollar} points = $1).`, status: 400 } as const;
       }
       const usedPoints = dollars * pointsPerDollar;
+
+      // SPEND BEFORE MINTING. The old order minted the promo code first and
+      // deducted afterwards, so any failure between the two handed out a fully
+      // valid credit that was never paid for. Points come off the
+      // authoritative balance first; if the code cannot then be saved, the
+      // points are refunded below.
+      const spend = await adjustRewards(tenantId, sessionUser.email, -usedPoints);
+      if (!spend.ok) {
+        if (spend.reason === 'insufficient_points') {
+          // The balance moved between the read above and the CAS — report the
+          // number that actually applied, not the stale one.
+          return { error: `You only have ${Math.max(0, spend.balance ?? 0).toLocaleString()} points.`, status: 400 } as const;
+        }
+        if (spend.reason === 'contended') {
+          return { error: 'Your points balance is being updated — please try again in a moment.', status: 409 } as const;
+        }
+        return { error: 'Unable to redeem your points right now.', status: 500 } as const;
+      }
+      // Display mirror for the email templates that still read store:users.
+      await mirrorRewardsToKv(redis, sessionUser.email, spend.balance);
 
       // Create a fixed-amount credit code. When gifting is enabled (admin
       // toggle) the code is NOT bound to this email so it can be shared/gifted;
@@ -129,12 +148,19 @@ export async function POST(request: Request) {
         await redis.hset(PROMO_CODES_KEY, { [code]: JSON.stringify(promo) });
       } catch (err) {
         console.error('[redeem-points] save promo failed', err);
+        // The points are already gone. Put them back, or the customer paid for
+        // a credit they never received.
+        const refund = await adjustRewards(tenantId, sessionUser.email, usedPoints);
+        if (refund.ok) {
+          await mirrorRewardsToKv(redis, sessionUser.email, refund.balance);
+        } else {
+          console.error(
+            '[redeem-points] REFUND FAILED for ' + sessionUser.email + ' (' + refund.reason + '): ' +
+              usedPoints + ' points were spent and no credit was issued. Needs manual correction.',
+          );
+        }
         return { error: 'Unable to create your credit right now.', status: 500 } as const;
       }
-
-      // Deduct the points actually consumed.
-      user.rewards = Math.max(0, balance - usedPoints);
-      await redis.hset(USERS_KEY, { [userId]: JSON.stringify(user) });
 
       return {
         success: true,
@@ -142,7 +168,7 @@ export async function POST(request: Request) {
         code,
         dollars,
         usedPoints,
-        remainingPoints: user.rewards,
+        remainingPoints: spend.balance,
       } as const;
     });
 

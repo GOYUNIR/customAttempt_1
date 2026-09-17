@@ -53,6 +53,23 @@ const toProfile = (row: ProfileRow): CustomerProfile => ({
 
 const normalizeEmail = (email: unknown): string => String(email || '').trim().toLowerCase();
 
+/**
+ * Jittered backoff between CAS attempts.
+ *
+ * The first version retried IMMEDIATELY. That keeps every contender in
+ * lockstep: they lose the compare-and-swap together, re-read the same balance
+ * at the same instant and collide again, so the retry budget burns down
+ * without anyone making progress. Ten concurrent grants against one balance
+ * dropped two of them that way — measured against the live database in
+ * scripts/verify-customer-profile.ts, not guessed. Full jitter spreads the
+ * retries so they stop landing on top of each other.
+ */
+const backoff = (attempt: number): Promise<void> =>
+  new Promise((resolve) => {
+    const ceiling = Math.min(250, 10 * 2 ** attempt);
+    setTimeout(resolve, Math.floor(Math.random() * ceiling));
+  });
+
 /** The profile for an email, or null when there is no customer record yet. */
 export async function readProfile(tenantId: string, email: string): Promise<CustomerProfile | null> {
   const normalized = normalizeEmail(email);
@@ -111,8 +128,17 @@ export async function adjustRewards(
     if (!created) return { ok: false, reason: 'no_customer' };
   }
 
-  const ATTEMPTS = 5;
+  // A GRANT and a SPEND fail differently, so they get different budgets.
+  //
+  // A spend is conditional: it can legitimately be refused, the customer is
+  // shown an error and retries, and nothing is lost. A grant is
+  // unconditional — the points have been EARNED (a purchase completed, an
+  // account was verified) — so giving up on one silently destroys money the
+  // customer is owed, with nothing but a log line to show for it. Grants
+  // therefore try roughly twice as hard before admitting defeat.
+  const ATTEMPTS = change > 0 ? 12 : 6;
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await backoff(attempt);
     const profile = await readProfile(tenantId, normalized);
     if (!profile) return { ok: false, reason: 'no_customer' };
 
@@ -136,12 +162,16 @@ export async function adjustRewards(
       )) as ProfileRow[];
       if (Array.isArray(updated) && updated.length > 0) return { ok: true, balance: next };
       // Zero rows: someone changed the balance between the read and the
-      // write. Re-read and try again rather than reporting a wrong reason.
+      // write. Back off, re-read and try again rather than reporting a wrong
+      // reason.
     } catch (err) {
       console.error('[customer-profile] rewards CAS failed', normalized, (err as Error)?.message || err);
       return { ok: false, reason: 'error' };
     }
   }
+  // Out of attempts. Nothing was lost — the balance is whatever the winners
+  // left it at — but for a GRANT this is money the customer earned and did not
+  // receive, so it is the caller's job to shout about it, not to shrug.
   return { ok: false, reason: 'contended' };
 }
 

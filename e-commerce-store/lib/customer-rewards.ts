@@ -14,6 +14,8 @@ import { randomBytes } from 'crypto';
 import { USERS_KEY, PROMO_CODES_KEY, sessionKey } from '@/lib/redis-keys';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
+import { adjustRewards } from '@/lib/customer-profile';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const WELCOME_POINTS = 250;
 export const WELCOME_DISCOUNT_PERCENT = 10;
@@ -31,12 +33,30 @@ export function generateWelcomeCode(email: string): string {
  * account verified. Saves the promo + the updated user atomically-ish (two hash
  * writes; the promo write is best-effort so a promo-save failure never blocks
  * the account). Does NOT send email or create a session — callers decide.
+ *
+ * H7: the POINTS now land in public.customers.rewards_balance, which is
+ * authoritative (migration 00022). The KV record is still written, but with
+ * whatever balance Postgres ended up holding — it is a display mirror for the
+ * email templates this phase does not repoint, not a second source of truth.
+ * See lib/customer-profile-bridge.ts.
+ *
+ * The grant is a DELTA (+250) where the KV version ASSIGNED `rewards = 250`.
+ * That assignment silently erased points earned before verification: a
+ * purchase made between signup and confirming the inbox awards points through
+ * the Stripe webhook, and the welcome grant would have wiped them. A delta
+ * cannot do that.
+ *
+ * `rewardsGranted: false` means the authoritative write did not happen. The
+ * account is still verified and the promo still issued — those are separate
+ * facts, and withholding them would lock a customer out of their account over
+ * a points failure — but the points are not reported as granted when they
+ * were not.
  */
 export async function grantWelcomeRewards(
   redis: any,
   user: any,
   email: string,
-): Promise<{ updatedUser: any; welcomeCode: string }> {
+): Promise<{ updatedUser: any; welcomeCode: string; rewardsGranted: boolean }> {
   const welcomeCode = generateWelcomeCode(email);
 
   const welcomePromo = {
@@ -73,16 +93,35 @@ export async function grantWelcomeRewards(
     console.error('[customer-rewards] welcome promo save failed', promoErr);
   }
 
+  // AUTHORITATIVE FIRST: Postgres decides the balance, KV is told the result.
+  let balance = Math.max(0, Math.floor(Number(user.rewards || 0) || 0));
+  let rewardsGranted = false;
+  try {
+    const tenantId = await ensureDefaultTenant();
+    const result = await adjustRewards(tenantId, email, WELCOME_POINTS);
+    if (result.ok) {
+      balance = result.balance;
+      rewardsGranted = true;
+    } else {
+      console.error(
+        '[customer-rewards] WELCOME POINTS NOT GRANTED for ' + email + ' (' + result.reason + '). ' +
+          'The account is verified and the promo issued, but the balance did not move.',
+      );
+    }
+  } catch (err) {
+    console.error('[customer-rewards] welcome points write threw', email, (err as Error)?.message || err);
+  }
+
   const updatedUser = {
     ...user,
     emailVerified: true,
-    rewards: WELCOME_POINTS,
+    rewards: balance,
     welcomePromoCode: welcomeCode,
     welcomePromoIssuedAt: new Date().toISOString(),
   };
   await redis.hset(USERS_KEY, { [user.id]: JSON.stringify(updatedUser) });
 
-  return { updatedUser, welcomeCode };
+  return { updatedUser, welcomeCode, rewardsGranted };
 }
 
 /** Best-effort welcome email (skips silently when no email provider is set up). */

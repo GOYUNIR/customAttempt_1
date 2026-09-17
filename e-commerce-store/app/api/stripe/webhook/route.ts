@@ -1,4 +1,6 @@
 import { ensureCustomer } from '@/lib/customers';
+import { adjustRewards, readProfile } from '@/lib/customer-profile';
+import { mirrorRewardsToKv } from '@/lib/customer-profile-bridge';
 import { NextResponse } from 'next/server';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
@@ -14,7 +16,6 @@ import {
   getLiveProductState,
   saveLiveState,
   STORE_CONFIG_KEY,
-  USERS_KEY,
   PRODUCTS_KEY,
   PROMO_CODES_KEY,
   promoUsedKey,
@@ -70,6 +71,16 @@ function siteUrlFromEnv() {
 /**
  * Every paid purchase earns rewards points for the account owner (if they have
  * an account). Rate is configurable in /admin → Settings → Rewards & Points.
+ *
+ * H7: this is a WRITER of the loyalty balance, so it had to move to
+ * public.customers with the two the phase named. Left on the KV hash it would
+ * have kept adding points to a copy nobody reads any more, and every purchase
+ * would have looked like it earned nothing.
+ *
+ * adjustRewards creates the customer record when it does not exist yet, so a
+ * purchaser who never signed up still accrues a balance against their email —
+ * which is the behaviour the KV version could not provide (it silently did
+ * nothing when the scan found no account).
  */
 async function awardPurchasePoints(redis: any, email: string, amountCents: number) {
   try {
@@ -80,35 +91,27 @@ async function awardPurchasePoints(redis: any, email: string, amountCents: numbe
     if (rate <= 0) return;
     const pointsEarned = Math.floor((Number(amountCents) / 100) * rate);
     if (pointsEarned <= 0) return;
-    const raw = await redis.hgetall(USERS_KEY);
-    if (!raw) return;
-    for (const [k, v] of Object.entries(raw)) {
-      const u = safeParseKvItem<any>(v);
-      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
-        u.rewards = Math.max(0, Number(u.rewards || 0)) + pointsEarned;
-        await redis.hset(USERS_KEY, { [k]: JSON.stringify(u) });
-        break;
-      }
+    const tenantId = await ensureDefaultTenant();
+    const result = await adjustRewards(tenantId, email, pointsEarned);
+    if (!result.ok) {
+      console.error('[webhook] purchase points NOT awarded to ' + maskEmail(email) + ' (' + result.reason + ')');
+      return;
     }
+    await mirrorRewardsToKv(redis, email, result.balance);
   } catch (e) {
     console.error('[webhook] award points failed', e);
   }
 }
 
-/** Look up whether an email has a store account and its current rewards balance
- * (mirrors the store:users scan in awardPurchasePoints). */
+/** Whether this email has a customer record, and its authoritative balance —
+ * the number printed in the order-confirmation email. */
 async function lookupUserRewards(redis: any, email: string): Promise<{ hasAccount: boolean; rewardsBalance: number }> {
   try {
     if (!email) return { hasAccount: false, rewardsBalance: 0 };
-    const raw = await redis.hgetall(USERS_KEY);
-    if (!raw) return { hasAccount: false, rewardsBalance: 0 };
-    for (const [, v] of Object.entries(raw)) {
-      const u = safeParseKvItem<any>(v);
-      if (u && String(u.email || '').toLowerCase() === String(email || '').toLowerCase()) {
-        return { hasAccount: true, rewardsBalance: Math.max(0, Number(u.rewards || 0)) };
-      }
-    }
-    return { hasAccount: false, rewardsBalance: 0 };
+    const tenantId = await ensureDefaultTenant();
+    const profile = await readProfile(tenantId, email);
+    if (!profile) return { hasAccount: false, rewardsBalance: 0 };
+    return { hasAccount: true, rewardsBalance: profile.rewardsBalance };
   } catch (e) {
     console.error('[webhook] lookup rewards failed', e);
     return { hasAccount: false, rewardsBalance: 0 };

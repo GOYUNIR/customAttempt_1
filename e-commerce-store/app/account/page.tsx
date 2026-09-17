@@ -293,6 +293,12 @@ export default function AccountPage() {
         if (typeof data.welcomePromoCode === 'string' && data.welcomePromoCode) {
           setUser((prev: any) => ({ ...(prev || {}), welcomePromoCode: data.welcomePromoCode }));
         }
+        // The balance here is read from public.customers (H7). Merging it keeps
+        // the points card correct after a redemption made in another tab,
+        // without waiting for the session snapshot to be refreshed.
+        if (typeof data.rewardsBalance === 'number') {
+          setUser((prev: any) => (prev ? { ...prev, rewards: data.rewardsBalance } : prev));
+        }
         const filteredEntries = (data.entries || []).filter(
           (e: EntryRecord) => e.status !== 'NO_ACTIVE_ENTRY'
         );

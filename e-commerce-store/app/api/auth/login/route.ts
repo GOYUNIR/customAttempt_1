@@ -3,6 +3,8 @@ import { createKvClient, safeParseKvItem, USERS_KEY, sessionKey } from '@/lib/se
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { readProfile } from '@/lib/customer-profile';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 const SESSION_DURATION = 7 * 24 * 60 * 60; // 7 days in seconds
 
@@ -72,6 +74,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 
+  // H7: the password lives in KV (DEFERRED-6) but the BALANCE and ROLE come
+  // from public.customers, which is authoritative (migration 00022). A null
+  // profile means no customer record exists yet — which for an account that
+  // has never been granted anything is the truthful answer, zero, not a reason
+  // to fall back to the stale KV copy.
+  const tenantId = await ensureDefaultTenant();
+  const profile = await readProfile(tenantId, normalizedEmail);
+  const rewards = profile?.rewardsBalance ?? 0;
+  const role = profile?.role || user.role || 'customer';
+
   // Create session
   const token = randomBytes(32).toString('hex');
   const sessionKeyName = sessionKey(token);
@@ -79,14 +91,14 @@ export async function POST(request: Request) {
   await redis.setex(sessionKeyName, SESSION_DURATION, JSON.stringify({
     userId: user.id,
     email: user.email,
-    role: user.role,
-    rewards: user.rewards || 0,
+    role,
+    rewards,
     emailVerified: user.emailVerified === true,
     expiresAt,
   }));
 
   // Set cookie
-  const response = NextResponse.json({ success: true, user: { id: user.id, email: user.email, role: user.role, rewards: user.rewards || 0, emailVerified: user.emailVerified === true } });
+  const response = NextResponse.json({ success: true, user: { id: user.id, email: user.email, role, rewards, emailVerified: user.emailVerified === true } });
   response.cookies.set('goyunir_session', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

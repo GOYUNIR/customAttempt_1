@@ -3,6 +3,8 @@ import { createKvClient, safeParseKvItem, USERS_KEY, STORE_CONFIG_KEY } from '@/
 import { randomBytes, scryptSync } from 'crypto';
 import { issueCustomerVerifyCode } from '@/lib/customer-verify';
 import { grantWelcomeRewards, createCustomerSession, trySendWelcomeEmail, CUSTOMER_SESSION_TTL_SECONDS } from '@/lib/customer-rewards';
+import { setProfileFields } from '@/lib/customer-profile';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -134,6 +136,29 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString(),
   };
   await redis.hset(USERS_KEY, { [id]: JSON.stringify(user) });
+
+  // H7: CONSENT is recorded in public.customers (migration 00022), and signup
+  // is the only place it is ever captured. It is written here rather than at
+  // verification because the customer agreed to the terms NOW — the timestamp
+  // has to be the moment of agreement, and an account that never confirms its
+  // email still generated a consent record that compliance has to be able to
+  // produce. This also creates the customer row, so a reader has something to
+  // find before any points exist.
+  //
+  // Best-effort: a consent-write failure must not cost the customer their
+  // account, which is already created above. It is logged loudly instead.
+  try {
+    const tenantId = await ensureDefaultTenant();
+    const recorded = await setProfileFields(tenantId, normalizedEmail, {
+      emailOptIn: emailOptIn === true,
+      termsAgreedAt: user.termsAgreedAt,
+    });
+    if (!recorded) {
+      console.error('[signup] CONSENT NOT RECORDED for ' + normalizedEmail + ' — the account exists with no consent row');
+    }
+  } catch (consentErr) {
+    console.error('[signup] consent write threw', normalizedEmail, (consentErr as Error)?.message || consentErr);
+  }
 
   // 2FA not required (admin toggle off, or no email provider) → unlock the
   // account + rewards right now and sign them in.

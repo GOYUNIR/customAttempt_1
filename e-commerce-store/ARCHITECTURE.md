@@ -903,3 +903,98 @@ Note for whoever picks this up: ten separate routes each do their own
 `hgetall(USERS_KEY)` and match by email, rather than going through a shared
 lookup. There is no single seam to swap, so this needs a real auth adapter,
 which is another reason it is not a small change.
+
+## H7 (profile): the loyalty balance moved, and was proven under load
+
+Migration 00022 gave `public.customers` the four fields `store:users` had been
+bundling. This is the phase that made them real: one existing account
+backfilled, every writer and reader repointed, and the compare-and-swap
+exercised against the live database rather than reasoned about.
+
+### What is authoritative now
+
+`public.customers` owns `rewards_balance`, `email_opt_in`, `terms_agreed_at`
+and `role`. `store:users` still holds `password` and `emailVerified`
+(DEFERRED-6) plus `welcomePromoCode`, which is promo bookkeeping 00022 did not
+move, and a **display mirror** of the balance.
+
+The mirror exists because paths this phase did not repoint — the
+order-confirmation email, the entry-confirmation email, the winner emails, the
+admin users list — still scan the hash for `u.rewards` to print a number to a
+customer. Every writer therefore writes Postgres FIRST, with the CAS, and then
+tells KV what Postgres ended up holding. `lib/customer-profile-bridge.ts` is
+that one seam, and it carries its own H9 deletion criteria.
+
+### The scope correction
+
+The phase was scoped as two writers (`grantWelcomeRewards`, `redeem-points`)
+and four readers. There were **five** writers of the balance, and a sixth
+writer of consent:
+
+| Writer | What it does | Was in scope |
+|---|---|---|
+| `grantWelcomeRewards` | +250 on verification | yes |
+| `account/redeem-points` | spends points for credit | yes |
+| `stripe/webhook` → `awardPurchasePoints` | points on every paid purchase | **no** |
+| `account/claim-welcome` | +250 when no welcome code yet | **no** |
+| `auth/signup` | the ONLY writer of consent | **no** |
+
+Repointing only the named two would have left the authoritative balance read
+by every display path but written by less than half of what changes it — every
+purchase would have earned points that vanished, and no new account would ever
+have recorded consent, which is the compliance case 00022 was justified by. A
+money field half-migrated is worse than either end state, so all of them moved.
+
+`app/admin` also POSTs `{ action, email, role, rewards }` to `/api/admin/users`
+to edit a customer's points. That route only implements GET and PATCH for
+platform RBAC roles, so the POST has been answering 405 — the admin "adjust
+points" feature does not work and did not work before this phase either. Left
+alone deliberately: it is a broken feature, not a migration gap. The comment in
+`auth/me` that cited it as a reason to re-read has been rewritten accordingly.
+
+### Two bugs found by exercising it, not by reading it
+
+**1. Concurrent grants were silently dropped.** The CAS retried *immediately*
+on a lost swap, which keeps every contender in lockstep — they re-read the same
+balance at the same instant and collide again until the budget is gone. Ten
+parallel grants against one balance lost **two of them**: points a customer had
+earned, discarded with a log line. Fixed with jittered backoff and a larger
+budget for grants than for spends, because a spend may legitimately fail and a
+grant may not. `lib/inventory.ts`'s `decrementInventory` has the same
+no-backoff retry loop; there a lost race refuses a sale rather than destroying
+anything, so it is a smaller problem, but it is the same shape.
+
+**2. `redeem-points` minted the credit code BEFORE deducting.** Any failure
+between the two handed out a fully valid fixed-amount promo code that was never
+paid for. The order is now: CAS the points off, then mint; if the mint fails,
+refund and say so.
+
+### The proof
+
+`npm run verify:profile` (live database) and `npm run verify:profile-roundtrip`
+(live database + the real HTTP routes, `npm run dev` running).
+
+The invariant asserted for concurrency is **conservation** —
+`successes x amount + final balance === starting balance` — not "about half
+succeeded". A lost update breaks conservation loudly; retry exhaustion does
+not, and conflating the two is how a broken CAS passes a sloppy test.
+
+Measured, four runs, against the live database:
+
+| Race | Result |
+|---|---|
+| 10 parallel x100 against 500 | 5 succeeded, final 0, conservation exact |
+| 8 parallel x100 against 100 | 1 succeeded, final 0, conservation exact |
+| 20 parallel x25 against 250 | 10 succeeded, final 0, conservation exact |
+| 10 parallel grants of +10 | all 10 landed (was 8/10 before the backoff fix) |
+
+And through the real route, with the real session, lock and CAS: six parallel
+redemptions of 100 against a balance of 100 returned `200,400,400,400,400,400`,
+left the balance at 0, and minted **exactly one** credit code — asserted on the
+codes that actually exist in `promo:codes`, not on what the responses claimed.
+
+Both scripts write only to `@goyunir.invalid` addresses (a reserved TLD that
+can never be a real inbox) and delete what they create. The first version of
+the round trip cleaned up its `REWARD-` codes but not the `WELCOME-` code the
+grant mints, and left three behind in the live promo table; they were removed
+and the script now cleans up both.

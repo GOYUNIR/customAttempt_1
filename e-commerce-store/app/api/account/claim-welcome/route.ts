@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createKvClient, safeParseKvItem, USERS_KEY, PROMO_CODES_KEY, promoUsedKey } from '@/lib/server-config';
+import { readProfile, adjustRewards } from '@/lib/customer-profile';
+import { mirrorRewardsToKv } from '@/lib/customer-profile-bridge';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
@@ -56,12 +59,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Confirm your email first — the verification code unlocks your welcome rewards.' }, { status: 403 });
     }
 
+    // H7: the balance comes from public.customers, not from the KV record.
+    const tenantId = await ensureDefaultTenant();
+
     if (user.welcomePromoCode) {
       const used = await isWelcomeCodeUsed(redis, user.welcomePromoCode, user.email);
+      const existing = await readProfile(tenantId, user.email);
       return NextResponse.json({
         success: true,
         promoCode: user.welcomePromoCode,
-        points: user.rewards || 0,
+        points: existing?.rewardsBalance ?? 0,
         used,
       });
     }
@@ -96,10 +103,29 @@ export async function POST(request: Request) {
     };
     await redis.hset(PROMO_CODES_KEY, { [welcomeCode]: JSON.stringify(promo) });
 
-    const points = Math.max(0, Number(user.rewards || 0) || 0);
+    // Grant the welcome points only if this account has never held any. The KV
+    // version expressed that as `rewards: points > 0 ? points : WELCOME_POINTS`
+    // — a read-modify-write on the same field two other paths also write, with
+    // nothing stopping it from clobbering a concurrent change. Expressed as a
+    // conditional DELTA it goes through the same compare-and-swap as every
+    // other change to the balance.
+    const before = await readProfile(tenantId, user.email);
+    let points = before?.rewardsBalance ?? 0;
+    if (points <= 0) {
+      const granted = await adjustRewards(tenantId, user.email, WELCOME_POINTS);
+      if (granted.ok) {
+        points = granted.balance;
+        await mirrorRewardsToKv(redis, user.email, granted.balance);
+      } else {
+        console.error(
+          '[claim-welcome] welcome points NOT granted to ' + user.email + ' (' + granted.reason + ')',
+        );
+      }
+    }
+
     const updatedUser = {
       ...user,
-      rewards: points > 0 ? points : WELCOME_POINTS,
+      rewards: points,
       welcomePromoCode: welcomeCode,
       welcomePromoIssuedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
