@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath } from '@/lib/staff-realms';
 
 
@@ -310,6 +310,27 @@ export async function middleware(request: NextRequest) {
   // at the route/layout level (app/admin/layout.tsx, app/sales/page.tsx).
   if (!isPortalPathAllowed(pathname, portal, platformRootDomain)) {
     return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  // A staff host must not serve the consumer storefront. It used to: every
+  // path that was not /admin or /sales fell through the fence, so
+  // sales.<root>/catalog rendered the full shop — cart, /account and checkout
+  // included. The visible symptom was the header logo, whose correct `/` href
+  // resolved against the staff host and bounced the user to a sign-in page.
+  //
+  // A REDIRECT to the portal home rather than a 404: these are real pages that
+  // exist, reached on the wrong host, usually from a stray link or a bookmark.
+  // Sending the person where they meant to go beats telling them the page does
+  // not exist. Only reached when platformRootDomain is set, so single-domain
+  // deployments never see it.
+  if (platformRootDomain && isStrayStorefrontPath(pathname, portal)) {
+    const portalHome = portalHomeRewrite('/', portal);
+    if (portalHome) {
+      const homeUrl = request.nextUrl.clone();
+      homeUrl.pathname = portalHome;
+      homeUrl.search = '';
+      return NextResponse.redirect(homeUrl, { headers: { 'Cache-Control': 'no-store' } });
+    }
   }
 
   // The Setup Wizard is ALSO the "re-configure providers" page: once the

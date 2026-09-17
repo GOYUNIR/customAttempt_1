@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, isStrayStorefrontPath, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
 import { STAFF_REALMS, isStaffLoginPath, loginPathForPortal } from '../lib/staff-realms.ts';
 
 const ROOT = 'site.com';
@@ -322,4 +322,42 @@ test('the /app merchant fence does NOT swallow storefront routes starting with "
   assert.equal(isPortalPathAllowed('/application-form', 'storefront', ROOT), true);
   assert.equal(isPortalPathAllowed('/app', 'storefront', ROOT), false);
   assert.equal(isPortalPathAllowed('/app/dashboard', 'storefront', ROOT), false);
+});
+
+// ── Staff hosts must not serve the consumer storefront ──────────────────────
+
+test('REGRESSION: the storefront is NOT served on a staff host', () => {
+  // Reported as "clicking the logo sends you to sales.goyunir.com/admin/login".
+  // The logo href is `/` and always was correct. The fault was that
+  // sales.<root>/catalog rendered the whole shop, so `/` resolved against the
+  // STAFF host, rewrote to the portal home, and bounced to sign-in.
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    for (const path of ['/catalog', '/story', '/account', '/terms', '/some-product-slug']) {
+      assert.equal(isStrayStorefrontPath(path, portal), true, `${portal} must not serve ${path}`);
+    }
+  }
+});
+
+test('consumer hosts are completely untouched by the stray check', () => {
+  for (const portal of ['storefront', 'marketing'] as const) {
+    for (const path of ['/catalog', '/story', '/account', '/', '/anything']) {
+      assert.equal(isStrayStorefrontPath(path, portal), false, `${portal} ${path} must be served`);
+    }
+  }
+});
+
+test('a staff host keeps its OWN tree, the shared auth paths and the APIs', () => {
+  assert.equal(isStrayStorefrontPath('/sales', 'sales'), false);
+  assert.equal(isStrayStorefrontPath('/sales/login', 'sales'), false);
+  assert.equal(isStrayStorefrontPath('/admin', 'admin'), false);
+  assert.equal(isStrayStorefrontPath('/admin/setup', 'admin'), false);
+  assert.equal(isStrayStorefrontPath('/app/login', 'merchant'), false);
+  // Every API stays reachable: the portal UIs call a wide, changing set, and
+  // fencing them by guesswork would break the portal to fix a link.
+  for (const api of ['/api/config-check', '/api/store', '/api/admin/users', '/api/sales/quotes']) {
+    assert.equal(isStrayStorefrontPath(api, 'sales'), false, `${api} must stay reachable`);
+  }
+  // Tab icon / share image generators.
+  assert.equal(isStrayStorefrontPath('/og', 'admin'), false);
+  assert.equal(isStrayStorefrontPath('/icon', 'admin'), false);
 });

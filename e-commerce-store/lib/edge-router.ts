@@ -148,6 +148,46 @@ export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain
   return true;
 }
 
+/**
+ * On a STAFF host, is this path consumer-storefront surface that does not
+ * belong there?
+ *
+ * THE BUG THIS FIXES, reported as "clicking the logo sends you to
+ * sales.goyunir.com/admin/login". The logo's href is `/`, which is correct.
+ * The fault was that sales.<root>/catalog served the whole consumer storefront
+ * — `isPortalPathAllowed` only ever narrowed /admin and /sales, so every other
+ * path fell through to `return true` on every host. From that page the logo's
+ * `/` resolves against the STAFF host, where it rewrites to the portal home,
+ * which is unauthenticated, which redirects to the sign-in page.
+ *
+ * So it was never a broken link. It was the storefront being served somewhere
+ * it should never appear — which is also a portal-isolation hole in its own
+ * right: the cart, /account and the checkout routes were all reachable on
+ * admin., app. and sales.
+ *
+ * WHAT STAYS REACHABLE on a staff host, deliberately:
+ *   - that portal's own tree, and the shared staff auth paths
+ *   - everything under /api/, because the portal UIs call a wide and changing
+ *     set of endpoints (/api/config-check, /api/store, /api/admin/*, …).
+ *     Fencing those by guesswork would break the portal to fix a link.
+ *   - /og and /icon, which generate the tab icon and share images
+ *
+ * Returns false for every non-staff portal, so the storefront and marketing
+ * hosts are completely untouched.
+ */
+export function isStrayStorefrontPath(pathname: string, portal: Portal): boolean {
+  if (portal !== 'admin' && portal !== 'merchant' && portal !== 'sales') return false;
+  if (pathname.startsWith('/api/')) return false;
+  if (pathname === '/og' || pathname.startsWith('/og/')) return false;
+  if (pathname === '/icon' || pathname.startsWith('/icon/')) return false;
+  if (isSharedStaffAuthPath(pathname)) return false;
+  // The portal's own tree. `/` never reaches here — portalHomeRewrite has
+  // already turned it into the portal home.
+  if (pathname.startsWith('/admin') || pathname.startsWith('/sales')) return false;
+  if (isMerchantPath(pathname)) return false;
+  return true;
+}
+
 /** Whether a cross-origin request's `Origin` header may be treated as
  *  same-portal for CORS purposes (distinct from lib/csrf.ts's same-HOST
  *  check — this is for an intentionally cross-subdomain API call, e.g. the
