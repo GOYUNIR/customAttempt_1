@@ -870,3 +870,36 @@ than designed:
 A `pending` entry also holds a saved payment method indefinitely, which is
 the strongest argument for offering one-shot mode: a card sitting in a pool
 for months is materially more likely to decline.
+
+## DEFERRED-6: storefront auth to Supabase Auth
+
+Condition to pick up: its own dedicated phase, not folded into a storage
+migration.
+
+Numbered 6, not 5, because DEFERRED-5 (tenant settings vs storefront payload)
+already exists. Reusing the number would have made the register ambiguous.
+
+`store:users` bundled four unrelated concerns in one KV blob:
+
+| Concern | Fields | Where it lives now |
+|---|---|---|
+| Authentication | `password`, `emailVerified` | **still KV** — this entry |
+| Loyalty | `rewards` | `customers.rewards_balance` (00022) |
+| Consent | `emailOptIn`, `termsAgreedAt` | `customers.email_opt_in`, `terms_agreed_at` |
+| Authorization | `role` | `customers.role` |
+
+Auth stayed because moving it is customer-facing work, not a storage swap:
+password reset, session handling and email verification all become managed
+features with different flows, and getting any of them wrong locks customers
+out of their accounts. It deserves a phase where that is the whole focus.
+
+CONSEQUENCE, accepted explicitly rather than discovered later: **H9 cannot
+fully delete the KV bridge.** `store:users` stays alive specifically to hold
+password and emailVerified until this is done. That is a known, logged
+exception with a named reason — not a silent gap. Everything else the bridge
+carried does get deleted.
+
+Note for whoever picks this up: ten separate routes each do their own
+`hgetall(USERS_KEY)` and match by email, rather than going through a shared
+lookup. There is no single seam to swap, so this needs a real auth adapter,
+which is another reason it is not a small change.
