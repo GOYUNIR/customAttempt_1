@@ -31,6 +31,8 @@
     "verify:profile-roundtrip": "tsx scripts/verify-profile-roundtrip.ts",
     "verify:h8": "tsx scripts/verify-h8-domains.ts",
     "verify:audit": "tsx scripts/verify-audit-trail.ts",
+    "verify:staff-auth": "tsx scripts/verify-staff-auth.ts",
+    "verify:invites": "tsx scripts/verify-staff-invites.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",
     "backfill:profiles": "tsx scripts/backfill-customer-profiles.ts"
   },

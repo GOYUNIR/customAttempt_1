@@ -28,7 +28,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { isStaffLoginPath } from './staff-realms.ts';
+import { isStaffLoginPath, isStaffInvitePath } from './staff-realms.ts';
 
 export type Portal = 'marketing' | 'sales' | 'admin' | 'merchant' | 'storefront';
 
@@ -99,6 +99,9 @@ export function cookieDomainForPortal(portal: Portal, rootDomain: string | undef
  */
 function isSharedStaffAuthPath(pathname: string): boolean {
   if (isStaffLoginPath(pathname)) return true;
+  // Invite acceptance: the invitee has no account yet, so this cannot require
+  // one. The token in the link is the credential.
+  if (isStaffInvitePath(pathname)) return true;
   return (
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login/') ||

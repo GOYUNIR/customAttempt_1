@@ -3,6 +3,7 @@ import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { consumeAdminCode, issueAdminDevice, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { portalCookieAttrs } from '@/lib/portal-cookies';
+import { readStaffIdentity, deviceMetaFor } from '@/lib/staff-identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +49,24 @@ export async function POST(request: Request) {
     }
 
     const remember = body?.remember === true;
-    const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, remember);
+
+    // Stamp the REAL role onto the device.
+    //
+    // This used to pass no metadata at all, which sent resolveAdminActor down
+    // its legacy branch and granted 'owner' — full merchant access — to whoever
+    // passed the emailed code. That was survivable while exactly one account
+    // existed; it stops being survivable the moment a sales rep can sign in.
+    //
+    // Read fresh from public.users rather than carried through from the
+    // password step, so a role change or a removed account takes effect on the
+    // next sign-in instead of whenever a stale session happens to expire.
+    //
+    // No staff row means the legacy Basic-Auth operator (the store's own
+    // secret, which has no identity row anywhere) — it keeps its historical
+    // full-access grant rather than being locked out by this change.
+    const identity = await readStaffIdentity(adminEmail);
+    const meta = identity ? deviceMetaFor(identity) : {};
+    const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, remember, meta);
 
     const response = NextResponse.json({ ok: true, verified: true, remember });
     response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));

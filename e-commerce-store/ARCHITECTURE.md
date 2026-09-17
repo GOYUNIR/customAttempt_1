@@ -1105,3 +1105,93 @@ probe row was attempted: it was refused and the row survived. The claim holds.
 `npm run verify:audit` is read-only and safe to re-run; it reconciles the two
 stores and reports a mismatch as a failure. `--probe` is opt-in precisely
 because its row can never be removed.
+
+## Auth phase: staff identity, invites, and who may sign in
+
+The platform could create exactly ONE staff account — the master super-admin
+the Setup Wizard makes. The eight RBAC roles from 00015 were fully enforced by
+`lib/admin-actor.ts` and completely unassignable, because nothing ever inserted
+a row to assign them to. That single hole blocked staff onboarding, sales reps
+(so the sales portal had no account that could use it) and tenant owner
+provisioning at the same time.
+
+### Three blockers, not one
+
+| # | Blocker | Fix |
+|---|---|---|
+| 1 | No way to CREATE a staff identity | `staff_invites` (00024) + `lib/staff-invites.ts` |
+| 2 | Even if one existed, it could not SIGN IN — `/api/admin/login` used `verifySuperAdminSignIn`, which fails closed without `is_super_admin` | the route verifies the password, then resolves the role from `public.users` |
+| 3 | `profiles` and `users` both held a role and neither synced | 00024 backfilled `users` and made it authoritative |
+
+Blocker 2 was the dangerous one: the invite flow could have been built
+perfectly and the invited rep still could not have logged in.
+
+### A privilege bug fixed on the way past
+
+`verify-confirm` issued the admin device with NO metadata, which sent
+`resolveAdminActor` down its legacy branch and granted **`owner` — full
+merchant access — to whoever passed the emailed 6-digit code.** Survivable
+while exactly one account existed; not survivable the moment a sales rep can
+sign in. The device now carries the real role, read fresh from `public.users`
+at the moment it is issued rather than carried through from the password step,
+so a role change or a removed account takes effect on the next sign-in.
+
+### What makes the invite flow safe
+
+- **The token is never stored.** `staff_invites.token_hash` holds SHA-256; the
+  token exists only in the emailed link. An invite row IS a grant of privilege,
+  so a database dump must not be usable to accept one.
+- **The role comes from the invite row, never the request body.** Verified:
+  posting `role: 'super_admin'` while holding a `sales_rep` invite produces a
+  `sales_rep`.
+- **Acceptance claims the row BEFORE creating the account**, with a conditional
+  update — the same compare-and-swap shape as the loyalty balance. Four
+  parallel acceptances of one link produced `200,409,409,409` and exactly one
+  account. A failed creation RELEASES the claim.
+- **Escalation gate on issuing.** Inviting a `super_admin`, or a platform-level
+  invite with no tenant, requires platform-admin access — otherwise an `owner`
+  could invite a `super_admin` and escalate past their own ceiling.
+- **Account creation is all-or-nothing.** `public.users.id` is an FK to
+  `auth.users(id)`, so the Auth user is created first; if the `users` row then
+  fails, the Auth user is DELETED. Otherwise the account could authenticate
+  with no role, which reads as "invalid email or password" forever.
+
+### Unverified customers can no longer sign in
+
+Login used to let an unverified customer in and merely withhold the welcome
+rewards, making "verified" a rewards rule rather than an identity one. It now
+refuses, as Shopify does, and returns `needsVerification: true` so the page can
+offer to resend the code.
+
+The test is `emailVerified === false`, NOT falsy. Accounts created before email
+verification existed have no such field, and treating those as unverified would
+lock out every legacy customer over a flag that was never set — the same rule
+`/api/auth/me` already applied.
+
+**Consequence on this deployment:** the one existing customer record has
+`emailVerified: false` and must confirm their address before signing in again.
+Intended, not an oversight.
+
+### Tenant provisioning now produces an owner
+
+`/api/admin/tenants` takes `ownerEmail` and issues an `owner` invite scoped to
+the new tenant; a tenant created without one returns an explicit warning rather
+than silently being unreachable.
+
+`/api/signup/merchant` adds self-serve signup, **disabled by default** behind
+`ALLOW_MERCHANT_SIGNUP=true`. Public tenant creation on a single-brand store
+would let anyone create tenants on somebody's live shop. It sends an invite
+rather than taking a password directly: an `owner` can read customer records
+and change payment settings, so proving the inbox first is the right trade.
+
+### A deployment gap this surfaced
+
+`SUPABASE_ANON_KEY` is **not set**. `supabaseConfigured()` is therefore false
+and the Supabase branch of `/api/admin/login` never executes — every account
+gets 401 and the only way in is the legacy `ADMIN_BASIC_AUTH_PASSWORD`. The
+service key is present, so invites and account creation work; it is
+specifically the PASSWORD GRANT that needs the anon key.
+
+`npm run verify:staff-auth` reports this as BLOCKED rather than skipping it,
+because a silent skip is how a gap like this reads as "auth works" right up
+until nobody can sign in.

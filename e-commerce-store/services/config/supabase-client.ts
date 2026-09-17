@@ -255,7 +255,11 @@ export async function supabaseRestFetch(
 /** GoTrue (auth) fetch — used to create / verify the master super-admin. */
 export async function supabaseAuthFetch(
   path: string,
-  options: { key: string; method?: 'GET' | 'POST' | 'PUT'; body?: unknown },
+  // DELETE is here for staff-account lifecycle (removing an invitee's Auth user
+  // when an invite is rolled back, and cleaning up verification runs). GoTrue's
+  // admin API exposes it at /admin/users/:id and there is no other way to undo
+  // a created account.
+  options: { key: string; method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown },
 ): Promise<unknown> {
   const { url } = readSupabaseEnv();
   if (!url || !options.key) throw new Error('Supabase is not configured (SUPABASE_URL / key missing).');

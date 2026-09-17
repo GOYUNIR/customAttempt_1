@@ -767,3 +767,77 @@ export async function sendCustomerVerificationEmail(opts: { to: string; code: st
     logoUrl: emailBrandLogo(),
   });
 }
+
+/**
+ * Escape text that is interpolated into an email's HTML.
+ *
+ * The invitation below embeds the INVITER'S EMAIL, which is operator-supplied
+ * and therefore not trustworthy as markup. An unescaped value there would let
+ * whoever controls an admin account inject arbitrary HTML — including a second,
+ * convincing link — into a message the recipient has every reason to trust.
+ */
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * STAFF INVITATION — the email that carries the only copy of an invite token.
+ *
+ * The token is not stored anywhere in a usable form (lib/staff-invites.ts keeps
+ * SHA-256 of it), so this message IS the credential. Two consequences shape it:
+ *
+ *   - the link is stated plainly as well as linked, because a mail client that
+ *     mangles the anchor would otherwise leave the invitee with no way in and
+ *     no way to ask for the value back
+ *   - the role is named in the body, so the person can tell before accepting
+ *     whether the access they are being handed is what they expected — an
+ *     invitation that silently grants more than the recipient assumes is how
+ *     social-engineered escalation works
+ */
+export async function sendStaffInviteEmail(opts: {
+  to: string;
+  role: string;
+  invitedBy: string;
+  acceptUrl: string;
+  expiresInDays: number;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
+  const brand = emailBrandName();
+  try {
+    const { error } = await resend.emails.send({
+      from: from(),
+      to: opts.to,
+      replyTo: replyTo(),
+      subject: `You have been invited to join ${brand}`,
+      html: `
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+          <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand.toUpperCase()}</p>
+          <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">You have been invited</h1>
+          <p style="margin:0 0 14px;color:#4b5563">
+            <strong>${escapeHtml(opts.invitedBy)}</strong> invited you to join the ${brand} team as
+            <strong>${escapeHtml(opts.role)}</strong>.
+          </p>
+          <p style="margin:0 0 20px;color:#4b5563">Choose a password to finish setting up your account.</p>
+          <p style="margin:0 0 20px">
+            <a href="${opts.acceptUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:13px 22px;border-radius:999px;font-weight:700;font-size:14px">Accept the invitation</a>
+          </p>
+          <p style="margin:0 0 6px;color:#6b7280;font-size:12px">Or paste this link into your browser:</p>
+          <p style="margin:0 0 20px;color:#6b7280;font-size:12px;word-break:break-all">${opts.acceptUrl}</p>
+          <p style="margin:0;color:#9ca3af;font-size:12px">
+            This invitation expires in ${opts.expiresInDays} days. If you were not expecting it, ignore this email — no account is created until the link is used.
+          </p>
+        </div>
+      `,
+    });
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}

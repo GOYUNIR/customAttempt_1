@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createKvClient, getAdminVerifyEmail, getAdminPassword, verifyAdminPassword, ADMIN_AUTH_COOKIE, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminAuthSession, issueAdminDevice } from '@/lib/admin-verify';
-import { verifySuperAdminSignIn, supabaseConfigured, supabaseAuthMissingReason } from '@/services/config/supabase-client';
+import { verifySuperAdminCredentials, supabaseConfigured, supabaseAuthMissingReason } from '@/services/config/supabase-client';
+import { readStaffIdentity, deviceMetaFor, type StaffIdentity } from '@/lib/staff-identity';
 import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -86,14 +87,35 @@ export async function POST(request: Request) {
     );
   }
 
-  // 1. Master admin — the Supabase super-admin account created by the wizard.
+  // 1. ANY staff account in Supabase Auth — not just the master super-admin.
+  //
+  // This used to call verifySuperAdminSignIn, which fails closed for anyone
+  // without is_super_admin. That made this endpoint — the ONE login all three
+  // staff realms post to — accept exactly one account in the entire platform,
+  // so an invited sales rep could be created perfectly and still never sign in.
+  //
+  // The password is verified against Supabase Auth first; the ROLE then comes
+  // from public.users (migration 00024), never from the credentials. A valid
+  // password for someone with no staff row is not a staff sign-in.
   let authorized = false;
+  let identity: StaffIdentity | null = null;
   if (supabaseConfigured()) {
-    const account = await verifySuperAdminSignIn(email, password);
-    if (account) authorized = true;
+    const credentials = await verifySuperAdminCredentials(email, password);
+    if (credentials) {
+      identity = await readStaffIdentity(credentials.email);
+      if (identity) authorized = true;
+      else {
+        // Correct password, but this person is not staff (a customer account,
+        // or a staff row that was removed). Refused, and logged: silently
+        // treating it as a bad password would hide a revoked operator still
+        // trying to get in.
+        console.warn('[admin/login] valid credentials with no staff identity:', credentials.email);
+      }
+    }
   }
 
   // 2. Fallback — the legacy Basic-Auth password, paired with the admin email.
+  //    It IS the store's own secret, so it stays full-access and role-less.
   if (!authorized && verifyAdminPassword(password)) {
     const adminEmail = getAdminVerifyEmail();
     if (adminEmail && adminEmail.trim().toLowerCase() === email) authorized = true;
@@ -120,10 +142,13 @@ export async function POST(request: Request) {
   const twoStepEnabled = await emailProviderConfigured();
 
   if (!twoStepEnabled) {
-    // Issue the long-lived device cookie directly (marked superAdmin so the
-    // middleware skips both Basic Auth and the 2FA gate) — the operator is now
-    // fully signed in.
-    const { token, maxAgeSeconds } = await issueAdminDevice(redis, email, true, { superAdmin: true });
+    // Issue the long-lived device cookie directly — the operator is now fully
+    // signed in. The device carries the REAL role from public.users, so a sales
+    // rep signing in here becomes a sales rep and not, as this previously
+    // hardcoded, a super-admin. The legacy Basic-Auth path has no identity and
+    // keeps its historical full-access grant.
+    const meta = identity ? deviceMetaFor(identity) : { superAdmin: true };
+    const { token, maxAgeSeconds } = await issueAdminDevice(redis, email, true, meta);
     const response = NextResponse.json({ ok: true, needs2fa: false, twoStepEnabled: false, email });
     response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
     return response;

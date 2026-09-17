@@ -74,6 +74,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
   }
 
+  // UNVERIFIED ACCOUNTS ARE REFUSED, not merely limited.
+  //
+  // This used to let an unverified customer sign in and simply withhold the
+  // welcome rewards, which made "verified" a rewards rule rather than an
+  // identity one: anyone could hold an account on an address they had never
+  // proven they control. Shopify refuses the sign-in outright until the account
+  // is activated, and so does this now.
+  //
+  // The test is `=== false`, NOT falsy. Accounts created before email
+  // verification existed have no `emailVerified` field at all, and treating
+  // those as unverified would lock out every legacy customer over a flag that
+  // was never set. This is the same rule /api/auth/me already applies
+  // (`user.emailVerified !== false`), kept deliberately in step with it.
+  //
+  // The response is specific, and carries the address, so the client can offer
+  // to resend the code instead of leaving the person at a dead end. That is not
+  // an enumeration leak: reaching this line already required a correct password.
+  if (user.emailVerified === false) {
+    return NextResponse.json(
+      {
+        error: 'Confirm your email address before signing in. We can send you a new code.',
+        needsVerification: true,
+        email: normalizedEmail,
+      },
+      { status: 403 },
+    );
+  }
+
   // H7: the password lives in KV (DEFERRED-6) but the BALANCE and ROLE come
   // from public.customers, which is authoritative (migration 00022). A null
   // profile means no customer record exists yet — which for an account that

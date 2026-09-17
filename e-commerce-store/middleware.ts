@@ -9,7 +9,7 @@ import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenan
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
 import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
-import { loginPathForPortal, isStaffLoginPath } from '@/lib/staff-realms';
+import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -371,6 +371,9 @@ export async function middleware(request: NextRequest) {
   // redirected to itself forever.
   const isLoginPath =
     isStaffLoginPath(pathname) ||
+    // Invite acceptance is credential-ESTABLISHING, like the login form: the
+    // invitee has no session and cannot get one until they have used it.
+    isStaffInvitePath(pathname) ||
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login');
 

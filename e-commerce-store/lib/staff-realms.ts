@@ -110,6 +110,25 @@ export function loginPathForPortal(portal: string): string {
   return realmForPortal(portal)?.loginPath ?? STAFF_REALMS.admin.loginPath;
 }
 
+/**
+ * Staff INVITE acceptance — the page an invitee opens from their email, and the
+ * API behind it.
+ *
+ * These must be reachable with NO session on every staff host: the person using
+ * them has no account yet, which is the entire point of an invitation. They sit
+ * beside the login paths for the same reason — both are credential-ESTABLISHING
+ * rather than credential-requiring.
+ */
+export const STAFF_INVITE_PATHS: readonly string[] = [
+  '/admin/accept-invite',
+  '/api/admin/accept-invite',
+];
+
+export function isStaffInvitePath(pathname: string): boolean {
+  const p = String(pathname || '');
+  return STAFF_INVITE_PATHS.some((base) => p === base || p.startsWith(base + '/'));
+}
+
 /** Every staff login path — what the path fence must keep reachable. */
 export const STAFF_LOGIN_PATHS: readonly string[] = [
   STAFF_REALMS.admin.loginPath,

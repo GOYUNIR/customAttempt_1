@@ -13,6 +13,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  // Set when the account exists and the password was RIGHT, but the address has
+  // never been confirmed. Without this the person is told "sign-in failed" for
+  // a problem no amount of retrying the password can fix.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
   const [loading, setLoading] = useState(false);
   // Live theme palette — initialized from the server-baked theme (no flash) and
   // refreshed from /api/store so design presets apply to the login page.
@@ -49,6 +54,8 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNeedsVerification(false);
+    setResendState('idle');
     setLoading(true);
     notify({ id: 'auth-login', type: 'loading', message: 'Signing you in...', persist: true });
     try {
@@ -62,6 +69,7 @@ export default function LoginPage() {
         notify({ id: 'auth-login', type: 'success', message: 'Signed in.' });
         router.push('/account');
       } else {
+        if (data?.needsVerification === true) setNeedsVerification(true);
         setError(data.error || 'Login failed');
         notify({ id: 'auth-login', type: 'error', message: data.error || 'Login failed.' });
       }
@@ -89,6 +97,31 @@ export default function LoginPage() {
             <Link href="/auth/forgot-password" prefetch={false} style={{ color: configPalette.accentBlue, textDecoration: 'none', fontSize: 12 }}>Forgot password?</Link>
           </div>
           {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
+          {needsVerification && (
+            <button
+              type="button"
+              disabled={resendState === 'sending' || resendState === 'sent'}
+              onClick={async () => {
+                setResendState('sending');
+                try {
+                  const res = await fetch('/api/auth/resend-verification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                  });
+                  setResendState(res.ok ? 'sent' : 'failed');
+                } catch {
+                  setResendState('failed');
+                }
+              }}
+              style={{ background: 'transparent', border: '1px solid #52525b', color: '#e4e4e7', borderRadius: 999, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: resendState === 'sending' || resendState === 'sent' ? 'default' : 'pointer' }}
+            >
+              {resendState === 'sending' ? 'Sending…'
+                : resendState === 'sent' ? 'Code sent — check your inbox'
+                : resendState === 'failed' ? 'Could not send — try again shortly'
+                : 'Send me a new confirmation code'}
+            </button>
+          )}
           <button type="submit" disabled={loading} style={{ padding: 12, borderRadius: 999, border: 'none', background: configPalette.checkoutCtaButton, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>{loading ? 'Logging in…' : 'Log In'}</button>
         </form>
         <p style={{ marginTop: 16, fontSize: 13, color: configPalette.cardTextMuted, textAlign: 'center' }}>
