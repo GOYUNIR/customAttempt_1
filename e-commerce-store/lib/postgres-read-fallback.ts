@@ -31,6 +31,8 @@ export type CartSyncItem = {
   price: number;
   productType: string;
   checkoutMode: string;
+  /** Units of this line. See the sync route: it was dropped before H7. */
+  quantity: number;
 };
 
 type EmbeddedCartItemRow = {
@@ -102,6 +104,10 @@ export async function readCartItemsFromPostgres(tenantId: string, email: string)
         price: Math.max(0, Number(row.unit_price_cents) || 0) / 100,
         productType: '',
         checkoutMode: String(variant.checkout_mode || 'fcfs').toUpperCase(),
+        // H7: quantity is a real column and the client tracks it (checkout
+        // reads item.quantity), but the sync payload used to drop it, so a
+        // cross-device cart holding 3 of something came back as 1.
+        quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)),
       });
     }
     return items;

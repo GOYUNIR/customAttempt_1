@@ -4,6 +4,7 @@ import { getSessionUser } from '@/lib/session-auth';
 import { STORED_CARTS_KEY } from '@/lib/redis-keys';
 import { readCartItemsFromPostgres } from '@/lib/postgres-read-fallback';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { writeCartToPostgres, type CartItemInput } from '@/lib/cart-write';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,11 @@ function sanitizeItems(input: unknown): Array<Record<string, string | number>> {
       price: Math.max(0, Number((raw as any).price) || 0),
       productType: String((raw as any).productType || '').slice(0, 40),
       checkoutMode: String((raw as any).checkoutMode || '').slice(0, 20),
+      // Persisted from H7 on. It was dropped here, so a signed-in cart with
+      // 3 of an item restored as 1 on another device -- silently, because the
+      // line itself came back. Capped so a tampered payload cannot store an
+      // absurd quantity, matching how every other field here is re-normalized.
+      quantity: Math.min(99, Math.max(1, Math.floor(Number((raw as any).quantity) || 1))),
     };
     if (!item.productId || !item.size) continue;
     const key = `${item.productId}::${item.size}`;
@@ -88,11 +94,30 @@ export async function POST(request: Request) {
     }
     const body = await request.json().catch(() => ({}));
     const items = sanitizeItems(body?.items);
+
+    // H7: Postgres is where the cart lives now. The GET above already read
+    // from Postgres first (Phase 2) while this only ever wrote the KV blob,
+    // so the read had nothing to find and always fell through -- the
+    // cross-device cart this route exists to provide never actually worked
+    // through Postgres.
+    //
+    // The KV write is KEPT for now: the browser reads through GET, which
+    // prefers Postgres and falls back to KV, so removing it would strand any
+    // cart written before this deploy. It goes when the KV bridge does.
+    let pgSaved = false;
+    if (isPostgresPrimaryEnabled()) {
+      const result = await writeCartToPostgres(await ensureDefaultTenant(), user.email, items as unknown as CartItemInput[]);
+      pgSaved = result.ok;
+      if (!result.ok) {
+        console.error('[cart/sync] Postgres cart write failed', result.error);
+      }
+    }
+
     const redis = createKvClient();
     if (redis) {
       await redis.hset(STORED_CARTS_KEY, { [user.userId]: JSON.stringify(items) });
     }
-    return NextResponse.json({ saved: true, count: items.length });
+    return NextResponse.json({ saved: true, count: items.length, postgres: pgSaved });
   } catch {
     return NextResponse.json({ saved: false, error: 'CART_SYNC_FAILED' }, { status: 500 });
   }
