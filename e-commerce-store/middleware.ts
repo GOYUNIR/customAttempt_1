@@ -8,7 +8,8 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, portalHomeRewrite, resolveRequestHost } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
+import { loginPathForPortal, isStaffLoginPath } from '@/lib/staff-realms';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -225,16 +226,28 @@ async function adminAuthValid(redis: any, token: string): Promise<string | null>
   return email || null;
 }
 
-/** The in-site /admin/login form + its API replace the native Basic-Auth dialog. */
-function adminAuthRequired(request: NextRequest) {
+/**
+ * Send an unauthenticated staff request to ITS OWN portal's sign-in page.
+ *
+ * `portal` is passed in rather than re-derived here: this used to send every
+ * portal to /admin/login, which told a sales rep they were signing in to an
+ * admin panel and — because the login page then returned everyone to /admin —
+ * dropped them on a 404 that the path fence produces for /admin on the sales
+ * host. See lib/staff-realms.ts.
+ *
+ * The JSON `redirect` for API callers is realm-correct for the same reason:
+ * a client that follows it must land somewhere it is allowed to be.
+ */
+function adminAuthRequired(request: NextRequest, portal: Portal) {
+  const loginPath = loginPathForPortal(portal);
   if (request.nextUrl.pathname.startsWith('/api/admin') || request.nextUrl.pathname.startsWith('/api/sales')) {
     return NextResponse.json(
-      { error: 'AUTH_REQUIRED', redirect: '/admin/login' },
+      { error: 'AUTH_REQUIRED', redirect: loginPath },
       { status: 401, headers: { 'Cache-Control': 'no-store' } },
     );
   }
   const url = request.nextUrl.clone();
-  url.pathname = '/admin/login';
+  url.pathname = loginPath;
   url.search = '';
   return NextResponse.redirect(url, { headers: { 'Cache-Control': 'no-store' } });
 }
@@ -331,11 +344,12 @@ export async function middleware(request: NextRequest) {
   // by the "ready" redirect above so the reconfigure entry point reaches the
   // route's own auth guard instead of being silently bounced to /admin.
 
-  // The in-site login form (page + API) must stay reachable before ANY auth
-  // exists — it is the replacement for the native Basic-Auth dialog.
+  // The in-site login forms (pages + the shared API) must stay reachable before
+  // ANY auth exists — they replace the native Basic-Auth dialog. All three
+  // realms' pages count, or the realm whose page is not listed here would be
+  // redirected to itself forever.
   const isLoginPath =
-    pathname === '/admin/login' ||
-    pathname.startsWith('/admin/login') ||
+    isStaffLoginPath(pathname) ||
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login');
 
@@ -442,7 +456,7 @@ export async function middleware(request: NextRequest) {
       !isSuperLoginPath &&
       !ADMIN_PASSWORD
     ) {
-      return adminAuthRequired(request);
+      return adminAuthRequired(request, portal);
     }
 
     // Gate 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â HTTP Basic Auth on EVERY admin path (page + all APIs). There is
@@ -469,7 +483,7 @@ export async function middleware(request: NextRequest) {
       authCookieOk ||
       deviceCookieValid;
     if (!passwordPassed) {
-      return adminAuthRequired(request);
+      return adminAuthRequired(request, portal);
     }
 
     // Gate 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â two-step email verification. The /admin page itself and the

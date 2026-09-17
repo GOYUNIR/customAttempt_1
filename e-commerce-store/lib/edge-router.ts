@@ -21,10 +21,14 @@
  * DEPLOYMENT.md's "Edge router / portal DNS setup" section for the exact
  * records to create.
  *
- * ZERO imports (mirrors lib/csrf.ts / lib/rbac.ts) so this loads in the Edge
- * middleware runtime AND under `node --test` with no adapter needed.
+ * Edge-safe: the only import is lib/staff-realms.ts, which is itself
+ * import-free, so this whole module still loads in the Edge middleware runtime
+ * AND under `node --test` with no adapter needed. That property is load-
+ * bearing — anything imported here must stay free of Node built-ins.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+
+import { isStaffLoginPath } from './staff-realms.ts';
 
 export type Portal = 'marketing' | 'sales' | 'admin' | 'merchant' | 'storefront';
 
@@ -80,16 +84,22 @@ export function cookieDomainForPortal(portal: Portal, rootDomain: string | undef
  */
 /**
  * Credential-establishing paths shared by every staff portal. These must stay
- * reachable from admin./app./sales. alike, because middleware redirects
- * unauthenticated staff requests to /admin/login regardless of which portal
- * they came from. Deliberately narrow: the login page and its API, the setup
- * wizard (bootstrap, before any credential exists) and staff impersonation
- * sign-in — never /admin itself.
+ * reachable from admin./app./sales. alike. Deliberately narrow: the sign-in
+ * PAGES, the shared auth API, the setup wizard (bootstrap, before any
+ * credential exists) and staff impersonation sign-in — never /admin itself.
+ *
+ * Each realm now has its OWN sign-in page (/admin/login, /app/login,
+ * /sales/login — lib/staff-realms.ts), but all three stay reachable from all
+ * three staff hosts. That is deliberate: a bookmarked or emailed link to the
+ * wrong realm's login should render the wrong LABEL, which a person can see and
+ * correct, rather than a 404, which reads as "this portal is broken". The
+ * session it establishes is cookie-scoped per portal by
+ * `cookieDomainForPortal` regardless of which page was used, so this
+ * reachability grants no cross-portal access.
  */
 function isSharedStaffAuthPath(pathname: string): boolean {
+  if (isStaffLoginPath(pathname)) return true;
   return (
-    pathname === '/admin/login' ||
-    pathname.startsWith('/admin/login/') ||
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login/') ||
     pathname === '/admin/setup' ||
@@ -101,15 +111,32 @@ function isSharedStaffAuthPath(pathname: string): boolean {
   );
 }
 
+/**
+ * Is this the MERCHANT hub tree (app.<root>'s own paths)?
+ *
+ * Matched exactly or with a trailing slash — never `startsWith('/app')`, which
+ * would also swallow a storefront route like /apparel and hand it to the portal
+ * fence. A fence that matches more than it means to is how a public page
+ * becomes a 404 for everyone outside the portal.
+ */
+function isMerchantPath(pathname: string): boolean {
+  return pathname === '/app' || pathname.startsWith('/app/');
+}
+
 export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain: string | undefined): boolean {
   if (!rootDomain) return true;
-  // /admin/login is the SHARED staff login for all three staff portals — no
-  // separate /login route exists (Phase 2). Without this exemption the sales
-  // portal is unusable: middleware redirects an unauthenticated /sales request
-  // to /admin/login, which the fence would then 404 on that same host, so a
-  // sales user is bounced into a dead end and can never sign in. Confirmed
-  // live before it was fixed: sales.goyunir.com/admin/login returned 404.
-  // Only the credential-establishing endpoints are exempt, not /admin itself.
+  // Each staff realm has its own sign-in page, and all three stay reachable
+  // from all three staff hosts. Without this exemption the sales portal is
+  // unusable: middleware redirects an unauthenticated /sales request to a
+  // login page, which the fence would then 404 on that same host, so a rep is
+  // bounced into a dead end and can never sign in. Confirmed live before it
+  // was first fixed: sales.goyunir.com/admin/login returned 404.
+  //
+  // Only the credential-establishing endpoints are exempt, never /admin itself
+  // -- which is the OTHER half of the same bug: /admin was the post-sign-in
+  // destination for EVERY realm, so a sales rep signed in successfully and
+  // landed on a 404. That half is fixed in lib/staff-realms.ts by giving each
+  // realm its own home.
   if (isSharedStaffAuthPath(pathname)) {
     return portal === 'admin' || portal === 'merchant' || portal === 'sales';
   }
@@ -117,6 +144,7 @@ export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain
   const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
   if (isAdminPath) return portal === 'admin' || portal === 'merchant';
   if (isSalesPath) return portal === 'sales' || portal === 'admin';
+  if (isMerchantPath(pathname)) return portal === 'merchant' || portal === 'admin';
   return true;
 }
 

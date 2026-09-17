@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
+import { STAFF_REALMS, isStaffLoginPath, loginPathForPortal } from '../lib/staff-realms.ts';
 
 const ROOT = 'site.com';
 
@@ -247,4 +248,78 @@ test('isPortalPathAllowed: consumer hosts get NO staff-auth exemption', () => {
     assert.equal(isPortalPathAllowed('/admin/login', portal, ROOT), false, `${portal} must not reach staff login`);
     assert.equal(isPortalPathAllowed('/api/admin/setup', portal, ROOT), false);
   }
+});
+
+// ── Per-realm staff sign-in (the sales dead end) ────────────────────────────
+
+test('REGRESSION: a sales rep can reach their sign-in AND their home after it', () => {
+  // The bug: middleware sent every portal to /admin/login, and that page sent
+  // everyone to /admin on success — which the fence 404s on the sales host. So
+  // a rep with correct credentials could sign in and land on a dead end.
+  const portal = classifyHost('sales.site.com', ROOT);
+  assert.equal(portal, 'sales');
+  assert.equal(loginPathForPortal(portal), '/sales/login');
+  assert.equal(isPortalPathAllowed('/sales/login', portal, ROOT), true, 'must be able to sign in');
+  assert.equal(
+    isPortalPathAllowed(STAFF_REALMS.sales.home, portal, ROOT),
+    true,
+    'and must be able to reach where sign-in sends them',
+  );
+});
+
+test('every staff realm home is reachable from its own portal — no realm may dead-end', () => {
+  const portals = { admin: 'admin', merchant: 'merchant', sales: 'sales' } as const;
+  for (const [key, portal] of Object.entries(portals) as Array<[keyof typeof STAFF_REALMS, 'admin' | 'merchant' | 'sales']>) {
+    const realm = STAFF_REALMS[key];
+    assert.equal(isPortalPathAllowed(realm.loginPath, portal, ROOT), true, `${key}: login unreachable`);
+    assert.equal(isPortalPathAllowed(realm.home, portal, ROOT), true, `${key}: home unreachable after sign-in`);
+  }
+});
+
+test('each realm is redirected to ITS OWN login, not the admin one', () => {
+  assert.equal(loginPathForPortal('sales'), '/sales/login');
+  assert.equal(loginPathForPortal('merchant'), '/app/login');
+  assert.equal(loginPathForPortal('admin'), '/admin/login');
+});
+
+test('a portal with no realm falls back to /admin/login (single-domain, unchanged)', () => {
+  assert.equal(loginPathForPortal('storefront'), '/admin/login');
+  assert.equal(loginPathForPortal('marketing'), '/admin/login');
+});
+
+test('all three login pages stay reachable from all three staff hosts', () => {
+  // A bookmarked link to the wrong realm's login should show the wrong LABEL
+  // (visible, correctable) rather than a 404 (reads as "portal is broken").
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    for (const path of ['/admin/login', '/app/login', '/sales/login']) {
+      assert.equal(isPortalPathAllowed(path, portal, ROOT), true, `${portal} -> ${path}`);
+    }
+  }
+});
+
+test('consumer hosts get NO staff login exemption, for any realm', () => {
+  for (const portal of ['storefront', 'marketing'] as const) {
+    for (const path of ['/admin/login', '/app/login', '/sales/login']) {
+      assert.equal(isPortalPathAllowed(path, portal, ROOT), false, `${portal} must not reach ${path}`);
+    }
+  }
+});
+
+test('isStaffLoginPath does not match a wider surface than it means to', () => {
+  assert.equal(isStaffLoginPath('/sales/login'), true);
+  assert.equal(isStaffLoginPath('/sales/login/'), true);
+  assert.equal(isStaffLoginPath('/app/login'), true);
+  // The prefix trap: a bare startsWith would exempt these.
+  assert.equal(isStaffLoginPath('/sales/loginsomething'), false);
+  assert.equal(isStaffLoginPath('/app/logins'), false);
+  assert.equal(isStaffLoginPath('/admin/loginx'), false);
+});
+
+test('the /app merchant fence does NOT swallow storefront routes starting with "app"', () => {
+  // `startsWith('/app')` would have made /apparel a portal path and 404'd it
+  // for every shopper.
+  assert.equal(isPortalPathAllowed('/apparel', 'storefront', ROOT), true);
+  assert.equal(isPortalPathAllowed('/application-form', 'storefront', ROOT), true);
+  assert.equal(isPortalPathAllowed('/app', 'storefront', ROOT), false);
+  assert.equal(isPortalPathAllowed('/app/dashboard', 'storefront', ROOT), false);
 });
