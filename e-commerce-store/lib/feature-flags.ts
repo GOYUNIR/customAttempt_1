@@ -2,16 +2,20 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * FEATURE FLAGS — the Postgres cutover switch.
  *
- * `USE_POSTGRES_PRIMARY` does NOT (yet) make Postgres the authoritative
- * read/write source for checkout/catalog — see the header on
- * lib/postgres-shadow-write.ts for exactly why, and what a real read
- * cutover for THIS store (raffle/FCFS drop mechanics, not generic retail)
- * actually requires. Today the flag turns on SHADOW WRITES: every real
- * checkout/cart mutation is best-effort mirrored into the 00009 Postgres
- * tables, alongside (never instead of) the existing Redis path, so the
- * write path gets validated against live traffic before anything is ever
- * switched to read from it. Off by default — setting the env var is the
- * only way to turn it on, and unsetting it is the only revert needed.
+ * `USE_POSTGRES_PRIMARY` turns on the Postgres paths. What that means has
+ * changed as the migrations landed, and this comment was stale for a long
+ * time — it claimed a read cutover was blocked by schema gaps
+ * (`orders.checkout_mode`, raffle-entries-charged-later, shared pools) that
+ * 00011, 00012 and 00013 had already closed. Verified against the live
+ * database before this was rewritten; every one of those columns and tables
+ * exists.
+ *
+ * Today the flag makes Postgres AUTHORITATIVE for the catalog (H3), inventory
+ * (H4), raffle entries (H5), customers and their loyalty balance (H6/H7),
+ * carts, and ORDERS (lib/order-write.ts). The Redis path remains as a mirror
+ * for the surfaces not yet repointed — see ARCHITECTURE.md's phase log for
+ * what is still on it. Off by default — setting the env var is the only way
+ * to turn it on, and unsetting it is the only revert needed.
  *
  * Zero imports — edge-safe, `node --test`-loadable, mirrors lib/csrf.ts /
  * lib/env-schema.ts's design.

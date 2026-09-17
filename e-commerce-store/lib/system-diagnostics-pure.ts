@@ -90,6 +90,53 @@ export function checkPortalIsolation(env: Record<string, string | undefined> = p
 }
 
 /**
+ * Can anybody actually SIGN IN?
+ *
+ * The password grant needs SUPABASE_ANON_KEY. Without it `supabaseConfigured()`
+ * is false, the whole Supabase branch of /api/admin/login is skipped, and every
+ * staff account — including the master super-admin and every invited member —
+ * gets "Invalid email or password" for a correct password.
+ *
+ * That failure is SILENT by construction: the branch does not error, it simply
+ * does not run, and the caller sees the same 401 a wrong password produces. A
+ * deployment can therefore look completely healthy while nobody can sign in,
+ * which is exactly the class of gap this file exists to surface.
+ *
+ * ERROR, not a warning, when a service key is present without an anon key:
+ * that combination means Supabase is genuinely in use (so accounts exist there)
+ * while the only way to authenticate against it is missing. The legacy
+ * ADMIN_BASIC_AUTH_PASSWORD may still let ONE operator in, which is what makes
+ * this so easy to miss — it is reported separately below rather than treated
+ * as "fine".
+ */
+export function checkStaffSignIn(env: Record<string, string | undefined> = process.env): Check {
+  const url = String(env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+  const anon = String(env.SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+  const service = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const basicAuth = String(env.ADMIN_BASIC_AUTH_PASSWORD || '').trim();
+  const id = 'staff_sign_in';
+  const label = 'Staff sign-in (Supabase password grant)';
+
+  if (!url && !service) {
+    return {
+      id, label, status: 'not_configured',
+      detail: 'Supabase is not configured on this deployment, so staff sign-in runs on ADMIN_BASIC_AUTH_PASSWORD alone.',
+    };
+  }
+  if (url && anon) {
+    return { id, label, status: 'ok', detail: 'SUPABASE_ANON_KEY is present — the password grant can run, so invited staff can sign in.' };
+  }
+  return {
+    id, label, status: 'error',
+    detail:
+      'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are set but SUPABASE_ANON_KEY is MISSING. The password grant cannot run, so the Supabase branch of /api/admin/login never executes and EVERY staff account — including invited members — gets "Invalid email or password" for a correct password.' +
+      (basicAuth
+        ? ' ADMIN_BASIC_AUTH_PASSWORD is set, so one operator can still get in, which is what makes this easy to miss.'
+        : ' No ADMIN_BASIC_AUTH_PASSWORD either, so NOBODY can sign in at all.'),
+  };
+}
+
+/**
  * Dead-lettered notifications = customers charged but never told.
  *
  * Pure so it is directly testable: the caller reads the dead-letter list and

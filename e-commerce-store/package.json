@@ -33,6 +33,7 @@
     "verify:audit": "tsx scripts/verify-audit-trail.ts",
     "verify:staff-auth": "tsx scripts/verify-staff-auth.ts",
     "verify:invites": "tsx scripts/verify-staff-invites.ts",
+    "verify:orders": "tsx scripts/verify-order-write.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",
     "backfill:profiles": "tsx scripts/backfill-customer-profiles.ts"
   },

@@ -24,13 +24,14 @@ import {
   checkNoDestructiveActionsAllowed,
   checkCloudflareConfigured,
   checkPortalIsolation,
+  checkStaffSignIn,
   type Check,
   type CheckStatus,
   checkNotificationDeadLetter,
 } from '@/lib/system-diagnostics-pure';
 
 export type { Check, CheckStatus };
-export { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation };
+export { checkCsrf, checkNoDestructiveActionsAllowed, checkCloudflareConfigured, checkPortalIsolation, checkStaffSignIn };
 
 export function checkEnvSchema(): Check {
   const { errors, warnings } = validateProductionEnv();
@@ -176,6 +177,7 @@ export async function runAllHealthChecks(): Promise<Check[]> {
     checkEnvSchema(),
     checkCsrf(),
     checkPortalIsolation(),
+    checkStaffSignIn(),
     rls,
     redisLocks,
     webhookIdempotency,

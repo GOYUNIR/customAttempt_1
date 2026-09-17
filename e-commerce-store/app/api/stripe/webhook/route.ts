@@ -29,7 +29,7 @@ import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/pay
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
-import { shadowWriteOrder } from '@/lib/postgres-shadow-write';
+import { recordOrder } from '@/lib/order-write';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory } from '@/lib/inventory';
@@ -41,7 +41,7 @@ import { recordPlatformAudit } from '@/lib/platform-audit';
  * has ALREADY charged the customer by the time this runs, so — unlike
  * checkout/direct/route.ts, which can gate the sale before charging — this
  * can only record the authoritative count and flag a discrepancy; it never
- * blocks or fails the webhook response (see lib/postgres-shadow-write.ts's
+ * blocks or fails the webhook response (see lib/order-write.ts's
  * identical "never blocks the real transaction" contract).
  */
 async function shadowDecrementInventory(tenantId: string, externalProductId: string, size: string, qty: number): Promise<void> {
@@ -591,20 +591,30 @@ export async function POST(request: Request) {
           await awardPurchasePoints(redis, email, priceCents * qty);
 
           if (isPostgresPrimaryEnabled()) {
-            const shadowTenantId = await ensureDefaultTenant().catch(() => null);
-            if (shadowTenantId) {
-              await shadowWriteOrder({
-                tenantId: shadowTenantId,
+            const orderTenantId = await ensureDefaultTenant().catch(() => null);
+            if (orderTenantId) {
+              // The card is already charged at this point. A failed order write
+              // is money taken with no order behind it, so it is logged as the
+              // defect it is rather than warned about — the KV archive entry
+              // written above is what makes it recoverable.
+              const recorded = await recordOrder({
+                tenantId: orderTenantId,
                 orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
                 email,
+                externalProductId: String(thisProduct.id),
                 productName: thisProduct.name,
                 size: thisSize,
                 quantity: qty,
                 amountCents: priceCents * qty,
                 checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
                 promoCode: appliedPromo,
+                stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
               });
-              await shadowDecrementInventory(shadowTenantId, String(thisProduct.id), thisSize, qty);
+              if (!recorded.ok) {
+                console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+                  ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
+              }
+              await shadowDecrementInventory(orderTenantId, String(thisProduct.id), thisSize, qty);
             }
           }
         }
@@ -669,20 +679,26 @@ export async function POST(request: Request) {
           await awardPurchasePoints(redis, email, Number(session.amount_total || 0));
 
           if (isPostgresPrimaryEnabled()) {
-            const shadowTenantId = await ensureDefaultTenant().catch(() => null);
-            if (shadowTenantId) {
-              await shadowWriteOrder({
-                tenantId: shadowTenantId,
+            const orderTenantId = await ensureDefaultTenant().catch(() => null);
+            if (orderTenantId) {
+              const recorded = await recordOrder({
+                tenantId: orderTenantId,
                 orderRef: orderRef || `DIRECT-${session.id}`,
                 email,
+                externalProductId: String(product.id),
                 productName: product.name,
                 size,
                 quantity: 1,
                 amountCents: Number(session.amount_total || 0),
                 checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
                 promoCode: appliedPromo,
+                stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
               });
-              await shadowDecrementInventory(shadowTenantId, String(product.id), size, 1);
+              if (!recorded.ok) {
+                console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+                  ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
+              }
+              await shadowDecrementInventory(orderTenantId, String(product.id), size, 1);
             }
           }
         }
