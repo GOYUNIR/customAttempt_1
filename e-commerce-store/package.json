@@ -25,7 +25,8 @@
     "verify:parity": "tsx scripts/verify-loadproducts-parity.ts",
     "verify:inventory": "tsx scripts/verify-inventory-decrement.ts",
     "verify:lock": "tsx scripts/verify-lock-mutual-exclusion.ts",
-    "verify:entries": "tsx scripts/verify-raffle-entries.ts"
+    "verify:entries": "tsx scripts/verify-raffle-entries.ts",
+    "verify:draw-charging": "tsx scripts/verify-draw-charging-stripe.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.20.2",
