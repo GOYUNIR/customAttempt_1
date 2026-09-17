@@ -21,6 +21,7 @@
  * fires for admin-created products.
  */
 
+import { decrementForSale } from '@/lib/inventory';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   archiveEntry,
@@ -533,7 +534,10 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             }
 
             if (dryRun) {
-              // Simulated draw: report what WOULD happen, never charge/email.
+              // Simulated draw: report what WOULD happen, never charge/email
+              // and NEVER decrement real inventory. The local `live` object is
+              // mutated only to keep the simulation's own arithmetic honest;
+              // saveLiveState is skipped for a dry run.
               successfulPoolCaptures++;
               live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
               live.salesCompleted = (live.salesCompleted || 0) + 1;
@@ -565,6 +569,21 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
 
             grandRevenueChargesCount++;
             successfulPoolCaptures++;
+
+            // POSTGRES INVENTORY (H4). This engine charged winners and only
+            // decremented the KV live-state blob. Now that inventory_levels is
+            // authoritative -- the storefront reads it and checkout/direct
+            // GATES on it -- every cron draw left Postgres stock overstated,
+            // so a direct purchase could be accepted for a unit a raffle
+            // winner already owns. Post-charge, so it logs rather than throws:
+            // aborting here would leave winners charged but unprocessed.
+            await decrementForSale({
+              tenantId: await ensureDefaultTenant(),
+              externalProductId: String(product.id),
+              size: String(productSize),
+              context: 'auto-draw',
+            });
+
             live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
             live.salesCompleted = (live.salesCompleted || 0) + 1;
 

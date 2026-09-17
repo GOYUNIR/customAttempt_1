@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { decrementForSale } from '@/lib/inventory';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   createKvClient,
@@ -528,26 +527,24 @@ export async function POST(request: Request) {
             return inner;
           };
           const lockResult = await withRedisLock(redis, `inventory:${thisProduct.id}:${thisSize}`, decrementInventory);
-          // The customer is already charged at this point — never skip the
-          // decrement outright just because the lock was contended. Fall
-          // back to an unlocked (best-effort) decrement rather than leaving
-          // inventory silently wrong.
-          // KV live-state mirror ONLY; inventory_levels is authoritative via
-          // decrementForSale below. The old unlocked-decrement fallback is
-          // GONE -- now that the lock genuinely excludes, that branch would
-          // have turned real contention into a live oversell path.
+          // KV live-state mirror ONLY. inventory_levels is decremented by the
+          // pre-existing shadowDecrementInventory() call further down, which
+          // also records a platform audit on failure -- adding a second
+          // decrement here DOUBLE-DECREMENTED every cart order. Caught by
+          // counting decrements per path, not by any test.
+          //
+          // The old "if (!lockResult.ok) await decrementInventory()" unlocked
+          // fallback is GONE: with a lock that genuinely excludes, that branch
+          // would have turned real contention into a live oversell path.
+          //
+          // On contention the soldOutAt update is SKIPPED rather than guessed.
+          // Fabricating inventoryRemaining = 0 would mark a product sold out on
+          // a lock miss, and the storefront derives soldOut from Postgres
+          // inventory anyway.
           if (!lockResult.ok) {
-            console.error('[webhook] KV live-state mirror skipped (lock contended)', thisProduct.id, thisSize);
+            console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', thisProduct.id, thisSize);
           }
-          const live = lockResult.ok ? lockResult.value : { inventoryRemaining: 0 } as { inventoryRemaining: number };
-          const pgDec = await decrementForSale({
-            tenantId: await ensureDefaultTenant(),
-            externalProductId: String(thisProduct.id),
-            size: String(thisSize),
-            context: 'webhook/cart',
-          });
-          if (pgDec.ok && pgDec.remaining !== null) live.inventoryRemaining = pgDec.remaining;
-          if (live.inventoryRemaining <= 0) {
+          if (lockResult.ok && lockResult.value.inventoryRemaining <= 0) {
             thisProduct.soldOutAt = thisProduct.soldOutAt || new Date().toISOString();
             // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
             // the way the admin routes are: the customer is already charged
@@ -610,18 +607,24 @@ export async function POST(request: Request) {
             return inner;
           };
           const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
+          // KV live-state mirror ONLY. inventory_levels is decremented by the
+          // pre-existing shadowDecrementInventory() call further down, which
+          // also records a platform audit on failure -- adding a second
+          // decrement here DOUBLE-DECREMENTED every direct order. Caught by
+          // counting decrements per path, not by any test.
+          //
+          // The old "if (!lockResult.ok) await decrementInventory()" unlocked
+          // fallback is GONE: with a lock that genuinely excludes, that branch
+          // would have turned real contention into a live oversell path.
+          //
+          // On contention the soldOutAt update is SKIPPED rather than guessed.
+          // Fabricating inventoryRemaining = 0 would mark a product sold out on
+          // a lock miss, and the storefront derives soldOut from Postgres
+          // inventory anyway.
           if (!lockResult.ok) {
-            console.error('[webhook] KV live-state mirror skipped (lock contended)', product.id, size);
+            console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', product.id, size);
           }
-          const live = lockResult.ok ? lockResult.value : { inventoryRemaining: 0 } as { inventoryRemaining: number };
-          const pgDec = await decrementForSale({
-            tenantId: await ensureDefaultTenant(),
-            externalProductId: String(product.id),
-            size: String(size),
-            context: 'webhook/direct',
-          });
-          if (pgDec.ok && pgDec.remaining !== null) live.inventoryRemaining = pgDec.remaining;
-          if (live.inventoryRemaining <= 0) {
+          if (lockResult.ok && lockResult.value.inventoryRemaining <= 0) {
             product.soldOutAt = product.soldOutAt || new Date().toISOString();
             // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
             // the way the admin routes are: the customer is already charged

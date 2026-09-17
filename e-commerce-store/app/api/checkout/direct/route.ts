@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { decrementForSale } from '@/lib/inventory';
 import {
   createKvClient,
   getLiveProductState,
@@ -211,14 +210,13 @@ export async function POST(request: Request) {
       await saveLiveState(redis, inner);
       return inner;
     };
-    // AUTHORITATIVE: atomic decrement against inventory_levels (lock + CAS).
-    await decrementForSale({
-      tenantId: await ensureDefaultTenant(),
-      externalProductId: String(product.id),
-      size: String(size),
-      context: 'checkout/direct',
-    });
-
+    // NO Postgres decrement here. This route ALREADY decremented
+    // inventory_levels PRE-CHARGE (decrementPostgresInventory above), which is
+    // the correct place for it: it is the one path that can still refuse the
+    // sale. Adding decrementForSale here as well double-decremented every
+    // order -- caught by tracing the pre-charge gate, not by any test.
+    //
+    // The remaining write below is the KV live-state mirror only.
     const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
     // KV live-state mirror ONLY. The old "if (!lockResult.ok) await
     // decrementInventory()" unlocked fallback is GONE -- with a lock that
