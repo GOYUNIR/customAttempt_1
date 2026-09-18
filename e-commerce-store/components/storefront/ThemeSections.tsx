@@ -41,7 +41,7 @@ export default function ThemeSections({ sections }: { sections: ThemeSection[] }
   );
 }
 
-function Hero({ config }: { config: Record<string, unknown> }) {
+export function Hero({ config }: { config: Record<string, unknown> }) {
   const title = String(config.title || 'Welcome');
   const subtitle = String(config.subtitle || '');
   const imageUrl = String(config.imageUrl || '');
@@ -72,7 +72,7 @@ function Hero({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-function ProductGrid({ config }: { config: Record<string, unknown> }) {
+export function ProductGrid({ config }: { config: Record<string, unknown> }) {
   const heading = String(config.heading || 'Featured');
   const columns = Math.min(3, Math.max(1, Number(config.columns) || 2));
   const categoryFilter = String(config.categoryFilter || '').trim().toLowerCase();
@@ -120,7 +120,7 @@ function ProductGrid({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-function Banner({ config }: { config: Record<string, unknown> }) {
+export function Banner({ config }: { config: Record<string, unknown> }) {
   const text = String(config.text || '');
   const linkHref = String(config.linkHref || '');
   const color = String(config.color || '#111111');
@@ -137,7 +137,7 @@ function Banner({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-function Countdown({ config }: { config: Record<string, unknown> }) {
+export function Countdown({ config }: { config: Record<string, unknown> }) {
   const heading = String(config.heading || 'Next drop');
   return (
     <section style={{ padding: '24px', textAlign: 'center' }}>
@@ -149,7 +149,7 @@ function Countdown({ config }: { config: Record<string, unknown> }) {
   );
 }
 
-function Footer({ config }: { config: Record<string, unknown> }) {
+export function Footer({ config }: { config: Record<string, unknown> }) {
   const copy = String(config.copy || '');
   return (
     <footer style={{ padding: '24px', borderTop: '1px solid #24242a', textAlign: 'center', fontSize: 11, color: '#666' }}>

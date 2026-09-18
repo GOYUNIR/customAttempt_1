@@ -3,7 +3,8 @@ import test from 'node:test';
 import {
   STARTER_TEMPLATES, normalizeTheme, templateById, templatesForCommerceMode, validateTheme,
 } from '../lib/theme-templates.ts';
-import { THEME_PAGES, sectionAllowedOn } from '../lib/theme-schema.ts';
+import { readFileSync } from 'node:fs';
+import { THEME_PAGES, SECTION_TYPES, sectionAllowedOn } from '../lib/theme-schema.ts';
 
 test('every starter template is internally valid', () => {
   for (const t of STARTER_TEMPLATES) {
@@ -127,4 +128,14 @@ test('the modes with NO starter template are known and few', async () => {
   const covered = new Set(STARTER_TEMPLATES.flatMap((t) => t.commerceModes));
   const uncovered = (COMMERCE_MODES as readonly string[]).filter((m) => !covered.has(m));
   assert.deepEqual(uncovered.sort(), ['DUTCH_AUCTION', 'PAY_WHAT_YOU_WANT']);
+});
+
+test('EVERY section type has a renderer — no type can be added without one', () => {
+  // renderSection returns null for an unknown type rather than throwing (a
+  // storefront must not go blank over one unfamiliar section). That safety
+  // net would also hide a type nobody wrote a renderer for, so the coverage
+  // is asserted here instead of discovered as a missing block on a live page.
+  const src = readFileSync(new URL('../components/storefront/ThemeBlocks.tsx', import.meta.url), 'utf8');
+  const missing = SECTION_TYPES.filter((t) => !src.includes("case '" + t + "':"));
+  assert.deepEqual(missing, [], 'section types with no renderer: ' + missing.join(', '));
 });
