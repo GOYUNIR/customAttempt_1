@@ -64,3 +64,38 @@ test('an exhausted allowance says so plainly — sends stop, not a bill arrives'
   assert.match(msg, /3200\/3000/);
   assert.match(msg, /Upgrade or throttle now/);
 });
+
+test('computeHeadroom is the function the send path actually calls', () => {
+  // Exercised directly rather than only through its formatted message, because
+  // the send path branches on `exceeded`/`warn`, not on the sentence.
+  const under = computeHeadroom({
+    unit: 'email', provider: 'resend', used: 1200, includedUnits: 3000,
+    overageCostPerUnitMicros: 90_000,
+  });
+  assert.equal(under.warn, false);
+  assert.equal(under.exceeded, false);
+  assert.equal(under.remaining, 1800);
+
+  const warning = computeHeadroom({
+    unit: 'email', provider: 'resend', used: 2400, includedUnits: 3000,
+    overageCostPerUnitMicros: 90_000,
+  });
+  assert.equal(warning.warn, true, '80% is the threshold');
+  assert.equal(warning.exceeded, false);
+
+  const gone = computeHeadroom({
+    unit: 'email', provider: 'resend', used: 3000, includedUnits: 3000,
+    overageCostPerUnitMicros: 90_000,
+  });
+  assert.equal(gone.exceeded, true, 'at the limit the next unit is billable');
+  assert.equal(gone.remaining, 0);
+
+  // A provider with no free allowance is never "exceeded" — there was nothing
+  // to exceed, and flagging it every time would train everyone to ignore it.
+  const noAllowance = computeHeadroom({
+    unit: 'sms_segment', provider: 'twilio', used: 50, includedUnits: 0,
+    overageCostPerUnitMicros: 1_180_000,
+  });
+  assert.equal(noAllowance.exceeded, false);
+  assert.equal(noAllowance.warn, false);
+});
