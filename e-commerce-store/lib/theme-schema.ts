@@ -14,9 +14,66 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-export type SectionType = 'hero' | 'product_grid' | 'banner' | 'countdown' | 'footer';
+/**
+ * The section palette.
+ *
+ * The first five were homepage-only, which meant the "theme customizer" could
+ * restyle the front page and nothing else — while the product page and the
+ * catalog, which is most of what a shopper actually looks at, were hardcoded.
+ * The rest exist so a template can cover those pages too.
+ *
+ * Still a FIXED palette, not an open plugin system: every type here has a
+ * renderer, and a theme that references a type nothing can draw is a blank
+ * page a merchant cannot debug.
+ */
+export type SectionType =
+  // homepage
+  | 'hero' | 'product_grid' | 'banner' | 'countdown' | 'footer'
+  // product detail
+  | 'product_gallery' | 'product_summary' | 'product_details' | 'product_reviews'
+  // catalog
+  | 'catalog_header' | 'catalog_filters' | 'catalog_grid'
+  // shared
+  | 'rich_text' | 'trust_badges' | 'faq';
 
-export const SECTION_TYPES: SectionType[] = ['hero', 'product_grid', 'banner', 'countdown', 'footer'];
+export const SECTION_TYPES: SectionType[] = [
+  'hero', 'product_grid', 'banner', 'countdown', 'footer',
+  'product_gallery', 'product_summary', 'product_details', 'product_reviews',
+  'catalog_header', 'catalog_filters', 'catalog_grid',
+  'rich_text', 'trust_badges', 'faq',
+];
+
+/** Which page a section belongs on. A template is a set of pages. */
+export type ThemePage = 'home' | 'catalog' | 'product';
+export const THEME_PAGES: ThemePage[] = ['home', 'catalog', 'product'];
+
+/**
+ * Where each section type is allowed. A product_summary on the homepage has no
+ * product to summarise, so placement is part of the schema rather than
+ * something the renderer discovers at runtime and silently skips.
+ */
+export const SECTION_PLACEMENT: Record<SectionType, ThemePage[]> = {
+  hero: ['home'],
+  product_grid: ['home'],
+  banner: ['home', 'catalog', 'product'],
+  countdown: ['home', 'product'],
+  footer: ['home', 'catalog', 'product'],
+  product_gallery: ['product'],
+  product_summary: ['product'],
+  product_details: ['product'],
+  product_reviews: ['product'],
+  catalog_header: ['catalog'],
+  catalog_filters: ['catalog'],
+  catalog_grid: ['catalog'],
+  rich_text: ['home', 'catalog', 'product'],
+  trust_badges: ['home', 'catalog', 'product'],
+  faq: ['home', 'catalog', 'product'],
+};
+
+/** Whether a section type may appear on a page. */
+export function sectionAllowedOn(type: SectionType, page: ThemePage): boolean {
+  return (SECTION_PLACEMENT[type] || []).includes(page);
+}
 
 export type HeroConfig = { title: string; subtitle: string; imageUrl: string; ctaLabel: string; ctaHref: string };
 export type ProductGridConfig = { columns: 1 | 2 | 3; categoryFilter: string; heading: string };
@@ -45,6 +102,28 @@ export function defaultConfigFor(type: SectionType): Record<string, unknown> {
       return { heading: 'Next drop' } satisfies CountdownConfig;
     case 'footer':
       return { copy: '' } satisfies FooterConfig;
+    case 'product_gallery':
+      return { layout: 'stacked', showThumbnails: true, zoom: true };
+    case 'product_summary':
+      // showStock/showUrgency are separate because a drop wants scarcity shown
+      // and a B2B catalog very much does not.
+      return { showPrice: true, showStock: true, showUrgency: false, ctaLabel: 'Add to cart' };
+    case 'product_details':
+      return { heading: 'Details', showSpecs: true, showShipping: true };
+    case 'product_reviews':
+      return { heading: 'Reviews', minToDisplay: 1 };
+    case 'catalog_header':
+      return { heading: 'All products', showCount: true, blurb: '' };
+    case 'catalog_filters':
+      return { showCategories: true, showPriceRange: true, showAvailability: true };
+    case 'catalog_grid':
+      return { columns: 3, showPrice: true, showBadges: true };
+    case 'rich_text':
+      return { heading: '', body: '' };
+    case 'trust_badges':
+      return { items: [] as string[] };
+    case 'faq':
+      return { heading: 'Questions', items: [] as Array<{ q: string; a: string }> };
     default:
       return {};
   }

@@ -14,12 +14,25 @@ import { SECTION_TYPES, defaultConfigFor, sortSections, type SectionType, type T
  * nothing here is a preview divorced from what actually ships.
  */
 
+// Every SectionType needs a label here — the Record type enforces it, so a new
+// section can never reach the editor as a blank entry an operator cannot
+// identify.
 const SECTION_LABEL: Record<SectionType, string> = {
   hero: 'Hero Banner',
   product_grid: 'Product Grid',
   banner: 'Promo Banner',
   countdown: 'Countdown',
   footer: 'Footer',
+  product_gallery: 'Product Gallery',
+  product_summary: 'Product Summary & Buy Box',
+  product_details: 'Product Details',
+  product_reviews: 'Reviews',
+  catalog_header: 'Catalog Header',
+  catalog_filters: 'Catalog Filters',
+  catalog_grid: 'Catalog Grid',
+  rich_text: 'Rich Text',
+  trust_badges: 'Trust Badges',
+  faq: 'FAQ',
 };
 
 let idCounter = 0;
