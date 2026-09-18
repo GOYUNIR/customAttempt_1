@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { isPlatformSurface } from '@/lib/platform-surface';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -239,7 +241,21 @@ function pruneStaleCart(items: CartItem[], products: any[]): CartItem[] {
   });
 }
 
+/**
+ * The storefront shell: top bar, cart drawer, shopper footer.
+ *
+ * The platform's own marketing pages opt out entirely. They are not a shop, and
+ * wrapping them in shop chrome put a second brand mark on the page and linked
+ * our homepage into a tenant's catalog. Rendered as a plain pass-through so the
+ * marketing page owns its whole layout.
+ */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  if (isPlatformSurface(pathname)) return <>{children}</>;
+  return <StorefrontChrome>{children}</StorefrontChrome>;
+}
+
+function StorefrontChrome({ children }: { children: React.ReactNode }) {
   // Live /admin → Settings theme is baked into SSR via the root layout's
   // ThemeProvider, so the top bar and chrome render with the saved colors on
   // the first paint (no flash), then the /api/store fetch keeps them fresh.
