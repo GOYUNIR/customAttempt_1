@@ -32,21 +32,22 @@ export default function PlatformPage() {
       <MarketingHeader rootDomain={rootDomain} />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section style={{ ...SHELL, padding: '86px 20px 60px', maxWidth: 820 }}>
-        <h1 style={{ fontSize: 48, lineHeight: 1.08, margin: '0 0 20px', fontWeight: 800, letterSpacing: '-1.2px' }}>
+      {/* One headline, one sentence, one button. Everything else on this page
+          is second-visit content — the comparison table and the full
+          methodology are real substance, deliberately placed lower and behind
+          a "learn more" rather than led with, so a first-time visitor can
+          understand the pitch and act on it in seconds, not read a brochure. */}
+      <section style={{ ...SHELL, padding: '104px 20px 76px', maxWidth: 720 }}>
+        <h1 style={{ fontSize: 52, lineHeight: 1.08, margin: '0 0 22px', fontWeight: 800, letterSpacing: '-1.4px' }}>
           Sell the way your brand actually sells.
         </h1>
-        <p style={{ fontSize: 17.5, lineHeight: 1.65, color: INK.muted, margin: '0 0 30px' }}>
-          Timed drops, fair draws, waitlists, first-come-first-served and trade orders — in one
-          catalog, sharing one stock level and one customer record. Your own domain. Your own
-          Stripe account. Your data, exportable on any day you like.
+        <p style={{ fontSize: 19, lineHeight: 1.6, color: INK.muted, margin: '0 0 34px', maxWidth: 560 }}>
+          Drops, waitlists, everyday retail and trade orders — one catalog, one customer record,
+          your own domain.
         </p>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <a href="#start" style={{ background: INK.text, color: INK.bg, borderRadius: 999, padding: '15px 28px', fontWeight: 800, fontSize: 15.5, textDecoration: 'none' }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <a href="#start" style={{ background: INK.text, color: INK.bg, borderRadius: 999, padding: '16px 32px', fontWeight: 800, fontSize: 16, textDecoration: 'none' }}>
             Create your store
-          </a>
-          <a href="#pricing" style={{ border: `1px solid ${INK.border}`, color: INK.text, borderRadius: 999, padding: '15px 28px', fontWeight: 700, fontSize: 15.5, textDecoration: 'none' }}>
-            See pricing
           </a>
           <span style={{ color: INK.muted, fontSize: 13.5 }}>No card required</span>
         </div>
@@ -76,15 +77,9 @@ export default function PlatformPage() {
       <section style={{ ...SHELL, padding: '70px 20px 0' }}>
         <div style={{ background: INK.panel, border: `1px solid ${INK.border}`, borderRadius: 18, padding: '30px 28px' }}>
           <h2 style={{ ...SECTION_LABEL, margin: '0 0 14px' }}>Honest numbers</h2>
-          <p style={{ fontSize: 20, fontWeight: 700, margin: '0 0 12px', lineHeight: 1.4, maxWidth: 720 }}>
+          <p style={{ fontSize: 20, fontWeight: 700, margin: '0 0 20px', lineHeight: 1.4, maxWidth: 720 }}>
             Your marketing report will show a smaller number than the tool you use today. That is
             the point.
-          </p>
-          <p style={{ fontSize: 14.5, lineHeight: 1.7, color: INK.muted, margin: '0 0 20px', maxWidth: 720 }}>
-            Most tools count every sale that touched a campaign — including the customers who were
-            going to buy anyway. We hold back a small control group and report the difference: what
-            the campaign actually <em>added</em>. You see both figures side by side, with the method
-            written out, so you can check it and so can your accountant.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 14 }}>
             <div style={{ border: `1px solid ${INK.border}`, borderRadius: 12, padding: '16px 18px' }}>
@@ -98,38 +93,62 @@ export default function PlatformPage() {
               <div style={{ fontSize: 12.5, color: INK.muted, marginTop: 6 }}>Measured against a held-back control group</div>
             </div>
           </div>
+          {/* The full explanation is real substance, not filler — kept, not cut,
+              just not LED with. A native <details> disclosure costs zero JS and
+              stays honest: nothing here is hidden, it's just not the first
+              thing a visitor has to read to understand the pitch. */}
+          <details style={{ marginTop: 18 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: INK.text }}>
+              How we measure this
+            </summary>
+            <p style={{ fontSize: 14.5, lineHeight: 1.7, color: INK.muted, margin: '12px 0 0', maxWidth: 720 }}>
+              Most tools count every sale that touched a campaign — including the customers who were
+              going to buy anyway. We hold back a small control group and report the difference: what
+              the campaign actually <em>added</em>. You see both figures side by side, with the method
+              written out, so you can check it and so can your accountant.
+            </p>
+          </details>
         </div>
       </section>
 
       {/* ── Comparison ───────────────────────────────────────────────────── */}
-      <section id="comparison" style={{ ...SHELL, padding: '70px 20px 0' }}>
-        <h2 style={SECTION_LABEL}>Against what you use today</h2>
-        <div style={{ border: `1px solid ${INK.border}`, borderRadius: 16, overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr', background: INK.panel, padding: '13px 18px', fontSize: 11.5, letterSpacing: '1.4px', textTransform: 'uppercase', color: INK.muted, fontWeight: 700 }}>
-            <div />
-            <div>Typical setup</div>
-            <div style={{ color: INK.text }}>Here</div>
-          </div>
-          {COMPARISON.map((row, i) => (
-            <div
-              key={row.question}
-              style={{
-                display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
-                padding: '18px', borderTop: `1px solid ${INK.border}`,
-                background: i % 2 ? 'transparent' : 'rgba(255,255,255,0.012)',
-                fontSize: 14, lineHeight: 1.6,
-              }}
-            >
-              <div style={{ fontWeight: 600, paddingRight: 16 }}>{row.question}</div>
-              <div style={{ color: INK.muted, paddingRight: 16 }}>{row.today}</div>
-              <div>{row.here}</div>
+      {/* Real substance, second-visit content: collapsed by default so it
+          doesn't compete with the first-impression sections above it. The
+          header's "Comparison" nav link still works — modern browsers
+          auto-expand a <details> when it (or its contents) is the anchor
+          target, a standardized behavior, not a hack. */}
+      <section style={{ ...SHELL, padding: '70px 20px 0' }}>
+        <details id="comparison">
+          <summary style={{ ...SECTION_LABEL, cursor: 'pointer', listStyle: 'none' }}>
+            Against what you use today <span style={{ color: INK.text, textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}>— see the full comparison</span>
+          </summary>
+          <div style={{ border: `1px solid ${INK.border}`, borderRadius: 16, overflow: 'hidden', marginTop: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr', background: INK.panel, padding: '13px 18px', fontSize: 11.5, letterSpacing: '1.4px', textTransform: 'uppercase', color: INK.muted, fontWeight: 700 }}>
+              <div />
+              <div>Typical setup</div>
+              <div style={{ color: INK.text }}>Here</div>
             </div>
-          ))}
-        </div>
-        <p style={{ fontSize: 12.5, color: INK.muted, margin: '12px 2px 0' }}>
-          Compared against common setups rather than a named product: a competitor&apos;s feature
-          list changes weekly, and an out-of-date comparison is worse than none.
-        </p>
+            {COMPARISON.map((row, i) => (
+              <div
+                key={row.question}
+                style={{
+                  display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr',
+                  padding: '18px', borderTop: `1px solid ${INK.border}`,
+                  background: i % 2 ? 'transparent' : 'rgba(255,255,255,0.012)',
+                  fontSize: 14, lineHeight: 1.6,
+                }}
+              >
+                <div style={{ fontWeight: 600, paddingRight: 16 }}>{row.question}</div>
+                <div style={{ color: INK.muted, paddingRight: 16 }}>{row.today}</div>
+                <div>{row.here}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 12.5, color: INK.muted, margin: '12px 2px 0' }}>
+            Compared against common setups rather than a named product: a competitor&apos;s feature
+            list changes weekly, and an out-of-date comparison is worse than none.
+          </p>
+        </details>
       </section>
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
