@@ -1195,3 +1195,53 @@ specifically the PASSWORD GRANT that needs the anon key.
 `npm run verify:staff-auth` reports this as BLOCKED rather than skipping it,
 because a silent skip is how a gap like this reads as "auth works" right up
 until nobody can sign in.
+
+## SEV-2 audit: the filter-quoting bug
+
+`lib/db/query.ts` double-quoted any scalar filter value containing `, ( ) " :`
+or whitespace, then percent-encoded the quotes as well. PostgREST compared the
+quotes as part of the value, so the filter returned **nothing** — and nothing is
+indistinguishable from "no rows matched". It sat under every Postgres read in
+the system.
+
+### Blast radius, established against the live database
+
+| Column type | Quoted (the old behaviour) | Verdict |
+|---|---|---|
+| `timestamptz` | **matched** | Never affected — Postgres strips the quotes while casting |
+| `uuid` | matched | Never affected — no reserved characters to trigger quoting |
+| `text` | **zero rows** | **Affected** |
+
+That timestamps were safe is the finding that made this tractable: every
+date-range read in the system was correct throughout. The damage was confined to
+text columns holding a value with a reserved character.
+
+### Every affected call site
+
+An inventory of all scalar filters found two, both filtering a text column by
+free text:
+
+| Call site | Value | Effect |
+|---|---|---|
+| `lib/ai-assistant/tools.ts` | `'AI Assistant Discounts'` | The "does this price list exist" check never matched, so a duplicate would be created on every use |
+| `app/api/admin/theme/route.ts` | theme name, default `'Default Theme'` | Upsert-by-name never matched, so every save inserted a new row and left an orphaned inactive theme |
+
+Everything else filters on uuids, timestamps, enum tokens (`status`, `unit`,
+`role`), generated slugs, hex hashes or `cus_`/`prod_` identifiers — none of
+which can contain a reserved character. `product_variants.option_label` is
+merchant-entered and *could* ("8 oz"), which would have broken variant
+resolution on orders; production holds only `50ml` and `sample`, so it never
+did.
+
+### Damage
+
+**None.** Both affected tables were empty — neither feature had been used in
+production — so there was nothing to repair. Both lookups are proven working
+after the fix, and `tests/db-query.test.ts` pins the exact shapes.
+
+### Why it survived so long
+
+Nothing in the codebase had filtered a text column by a value with a reserved
+character until a `usage_events` lookup keyed `contact:<email>` did. A wrong
+filter that throws gets found immediately; one that returns an empty list looks
+like an ordinary "no results" and can outlive everyone who wrote it.

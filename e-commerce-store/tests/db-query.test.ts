@@ -234,3 +234,46 @@ test('order: a single column still works unchanged', () => {
 test('order: every column in a multi-column order is validated', () => {
   assert.throws(() => buildPostgrestQuery({ order: [{ column: 'ok' }, { column: 'bad,col' }] }), /Invalid order column/);
 });
+
+test('AUDIT: the real call sites that the quoting bug broke', () => {
+  // Audited after the bug was found. These are the two places in the codebase
+  // that filtered a TEXT column by a value containing a reserved character,
+  // and both were silently returning zero rows:
+  //
+  //   lib/ai-assistant/tools.ts   name = 'AI Assistant Discounts'  (spaces)
+  //     -> the "does this price list already exist" check never matched, so a
+  //        duplicate price list would be created on every use.
+  //   app/api/admin/theme/route.ts  name = the theme's name, default
+  //     'Default Theme' (space) -> upsert-by-name never matched, so every save
+  //        inserted a new row instead of updating, leaving orphaned themes.
+  //
+  // Neither feature had been used in production (both tables were empty), so
+  // there was no damage to repair. These assertions exist so the shapes cannot
+  // silently break again.
+  assert.equal(
+    buildPostgrestQuery({ where: { name: eq('AI Assistant Discounts') } }),
+    'name=eq.AI%20Assistant%20Discounts',
+  );
+  assert.equal(
+    buildPostgrestQuery({ where: { name: eq('Default Theme') } }),
+    'name=eq.Default%20Theme',
+  );
+});
+
+test('AUDIT: the column types that were NEVER affected', () => {
+  // Verified against the live database: Postgres strips the quotes while
+  // casting a quoted literal to a non-text type, so timestamptz and uuid
+  // filters matched correctly even while quoted. That is why no date-range
+  // read in the system was ever broken — the blast radius was text columns
+  // only, which is what made the audit tractable.
+  const iso = '2026-09-01T00:00:00.000Z';
+  assert.equal(
+    buildPostgrestQuery({ where: { occurred_at: gte(iso) } }),
+    'occurred_at=gte.2026-09-01T00%3A00%3A00.000Z',
+  );
+  // A uuid contains no reserved characters at all, so it never changed form.
+  assert.equal(
+    buildPostgrestQuery({ where: { id: eq('00000000-0000-4000-8000-000000000001') } }),
+    'id=eq.00000000-0000-4000-8000-000000000001',
+  );
+});
