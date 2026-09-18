@@ -167,15 +167,47 @@ test('select: an empty embed is rejected rather than rendering "rel()"', () => {
   assert.throws(() => buildPostgrestQuery({ select: [{ relation: 'products', columns: [] }] }), /needs at least one column/);
 });
 
-test('a STRING that reads as a PostgREST literal is quoted, a real one is not', () => {
-  // eq.null matches SQL NULL. Without quoting, the text 'null' would silently
-  // become a NULL comparison — a wrong-results bug, not a formatting one.
-  assert.equal(buildPostgrestQuery({ where: { v: eq('null') } }), 'v=eq.%22null%22');
-  assert.equal(buildPostgrestQuery({ where: { v: eq('true') } }), 'v=eq.%22true%22');
-  assert.equal(buildPostgrestQuery({ where: { v: eq('false') } }), 'v=eq.%22false%22');
-  // Real null / booleans stay bare, which is what actually means NULL/true.
+test('a SCALAR filter is never quoted — quoting it silently matches nothing', () => {
+  // This test previously asserted the opposite, on the belief that eq.null
+  // matches SQL NULL so the literal text 'null' had to be quoted. Checked
+  // against the live PostgREST, all three parts of that belief were wrong:
+  //
+  //   eq."null"                 -> 0 rows
+  //   eq.null                   -> MATCHED THE ROW WHOSE TEXT WAS 'null'
+  //   eq."contact:x@y"          -> 0 rows, while eq.contact%3Ax%40y matched
+  //
+  // Quoting a scalar makes the quotes part of the compared value, so the filter
+  // returns nothing — and "nothing" is indistinguishable from "no rows matched".
+  assert.equal(buildPostgrestQuery({ where: { v: eq('null') } }), 'v=eq.null');
+  assert.equal(buildPostgrestQuery({ where: { v: eq('true') } }), 'v=eq.true');
   assert.equal(buildPostgrestQuery({ where: { v: eq(null) } }), 'v=eq.null');
   assert.equal(buildPostgrestQuery({ where: { v: eq(true) } }), 'v=eq.true');
+});
+
+test('REGRESSION: a scalar value with reserved characters still matches', () => {
+  // The bug that surfaced this: usage_events keyed 'contact:<email>' returned
+  // zero rows for records that demonstrably existed, because the colon forced
+  // quoting. Percent-encoding alone is what the backend accepts.
+  assert.equal(
+    buildPostgrestQuery({ where: { reference: eq('contact:a@b.co') } }),
+    'reference=eq.contact%3Aa%40b.co',
+  );
+  assert.equal(buildPostgrestQuery({ where: { v: eq('a b') } }), 'v=eq.a%20b');
+  assert.equal(buildPostgrestQuery({ where: { v: eq('a(b)') } }), 'v=eq.a(b)');
+  // '&' must still be encoded or it would start a new filter clause.
+  assert.equal(
+    buildPostgrestQuery({ where: { v: eq('x&role=eq.admin') } }),
+    'v=eq.x%26role%3Deq.admin',
+  );
+});
+
+test('in.(...) KEEPS its quoting — there the commas are structural', () => {
+  // Verified live: in.("a,b") matched, in.(a%2Cb) did not. The comma inside an
+  // in-list separates values, so a value containing one must be quoted.
+  assert.equal(
+    buildPostgrestQuery({ where: { v: inList(['a,b', 'c']) } }),
+    'v=in.(%22a%2Cb%22,c)',
+  );
 });
 
 test("select: '*' is allowed as the select-everything wildcard", () => {

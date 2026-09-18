@@ -11,6 +11,7 @@ import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { recordDrawRun } from '@/lib/draw-runs';
+import { notifyDeclinedWinners } from '@/lib/growth/modules/dunning';
 import { executeDrawWithCharging } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
@@ -293,6 +294,36 @@ export async function POST(request: Request) {
       orderRef: r.orderRef,
       promoCode: r.promoCode,
     }));
+    // DUNNING, same as the cron engine: a declined winner keeps their entry in
+    // the pool, so telling them their card failed turns a lost allocation into
+    // a future sale. Wired in both engines because an operator-triggered draw
+    // declines cards exactly like an automatic one, and a customer should not
+    // get a different experience depending on which button ran.
+    const declinedWinners = processedWinners.filter(
+      (w: any) => typeof w.status === 'string' && w.status !== 'SUCCESS_CHARGED',
+    );
+    if (declinedWinners.length > 0) {
+      const declineDay = new Date().toISOString().slice(0, 10);
+      try {
+        const dunningTenantId = await ensureDefaultTenant().catch(() => null);
+        if (dunningTenantId) {
+          const outcome = await notifyDeclinedWinners(
+            dunningTenantId,
+            declinedWinners.map((w: any) => ({
+              email: String(w.email || ''),
+              productName: String(w.product || ''),
+              size: String(w.size || ''),
+              declineRef: String(w.product || '') + ':' + String(w.size || '') + ':' + declineDay,
+              reason: String(w.status || ''),
+            })),
+          );
+          console.log('[trigger-drop] dunning: notified ' + outcome.sent + '/' + declinedWinners.length + ' declined winner(s)');
+        }
+      } catch (dunningErr) {
+        console.error('[trigger-drop] dunning failed', (dunningErr as Error)?.message || dunningErr);
+      }
+    }
+
     const drawSummary = {
       executionTime: new Date().toLocaleString(),
       processedWinners,

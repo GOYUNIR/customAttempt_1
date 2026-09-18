@@ -35,6 +35,7 @@
     "verify:invites": "tsx scripts/verify-staff-invites.ts",
     "verify:orders": "tsx scripts/verify-order-write.ts",
     "verify:draw-runs": "tsx scripts/verify-draw-runs.ts",
+    "verify:dunning": "tsx scripts/verify-dunning.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",
     "backfill:profiles": "tsx scripts/backfill-customer-profiles.ts"
   },

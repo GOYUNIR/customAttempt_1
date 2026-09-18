@@ -75,6 +75,7 @@ import { resolveStripeClient } from '@/services/payment/factory';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { recordDrawRun } from '@/lib/draw-runs';
+import { notifyDeclinedWinners } from '@/lib/growth/modules/dunning';
 import { resolveVariantId } from '@/lib/inventory';
 import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
@@ -826,6 +827,43 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
   const totalRevenueCents = processedWinners
     .filter((w) => w.status === 'SUCCESS_CHARGED' || w.status === 'SUCCESS_CHARGED (dry-run)')
     .reduce((sum, w) => sum + (Number(w.amountCents) || 0), 0);
+
+  // DUNNING. A declined winner keeps their entry in the pool, so telling them
+  // their card failed converts a lost allocation into a future sale. Before
+  // this, the decline path archived the entry and told the customer nothing.
+  //
+  // Skipped entirely on a dry run: a rehearsal must not email real customers.
+  if (!dryRun) {
+    const declined = processedWinners.filter(
+      (w) => typeof w.status === 'string' && (w.status === 'MISSING_PAYMENT_METHOD' || w.status.startsWith('DECLINED')),
+    );
+    if (declined.length > 0) {
+      // Dedupe scope: this person, this product, TODAY. A draw re-run minutes
+      // later must not mail twice; a genuine second decline tomorrow should
+      // notify again, because that is new information about their card.
+      const declineDay = new Date().toISOString().slice(0, 10);
+      try {
+        const dunningTenantId = await ensureDefaultTenant().catch(() => null);
+        if (dunningTenantId) {
+          const outcome = await notifyDeclinedWinners(
+            dunningTenantId,
+            declined.map((w) => ({
+              email: String(w.email || ''),
+              productName: String(w.product || ''),
+              size: String(w.size || ''),
+              // Ties the notice to THIS draw, so a re-run does not mail again.
+              declineRef: String(w.product || '') + ':' + String(w.size || '') + ':' + declineDay,
+              reason: String(w.status || ''),
+            })),
+          );
+          console.log('[auto-draw] dunning: notified ' + outcome.sent + '/' + declined.length + ' declined winner(s)');
+        }
+      } catch (dunningErr) {
+        // A draw must never fail because a notification could not go out.
+        console.error('[auto-draw] dunning failed', (dunningErr as Error)?.message || dunningErr);
+      }
+    }
+  }
 
   if (drewPools.length > 0 && !dryRun) {
     const tz = GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles';

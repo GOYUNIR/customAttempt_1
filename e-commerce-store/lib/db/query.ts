@@ -112,14 +112,43 @@ function urlEncodeValue(token: string): string {
   return encodeURIComponent(token);
 }
 
+/**
+ * QUOTING IS FOR `in.(...)` ONLY, and applying it to a scalar filter BREAKS it.
+ *
+ * Established against the live PostgREST rather than from the docs, because the
+ * behaviour is not what this file previously assumed:
+ *
+ *   eq, value "contact:x@y"   quoted -> 0 rows      unquoted -> MATCH
+ *   in, value "a,b"           quoted -> MATCH       unquoted -> 0 rows
+ *   eq, literal text 'null'   quoted -> 0 rows      eq.null  -> MATCHED THE TEXT
+ *
+ * So the comma that made quoting necessary is a property of the `in` LIST — its
+ * commas are structural separators — and nothing else. On a scalar filter the
+ * percent-encoding already protects every character the URL layer cares about,
+ * and the added quotes are matched literally, so the filter silently returns
+ * nothing.
+ *
+ * SILENTLY is the dangerous part: a mangled filter looks exactly like "no rows
+ * matched". Every scalar filter whose value contained a comma, colon, bracket,
+ * quote or space had been matching nothing. Found when a usage_events lookup
+ * keyed `contact:<email>` returned zero rows for records that existed.
+ *
+ * The third line above also corrects this file's previous claim that eq.null
+ * matches SQL NULL: on this backend it matched the literal text. Matching a
+ * real NULL is what `is.null` (the `isNull()` helper) is for, and that is
+ * unaffected.
+ */
 function renderFilter(filter: FilterOp): string {
   switch (filter.op) {
     case 'in':
+      // Structural commas: values containing one must be quoted or the list
+      // splits. Verified to match with the quotes percent-encoded.
       return `in.(${filter.values.map((v) => urlEncodeValue(encodeFilterValue(v))).join(',')})`;
     case 'is':
       return `is.${filter.value === null ? 'null' : String(filter.value)}`;
     default:
-      return `${filter.op}.${urlEncodeValue(encodeFilterValue(filter.value))}`;
+      // Scalar: percent-encode, never quote.
+      return `${filter.op}.${urlEncodeValue(filter.value === null ? 'null' : String(filter.value))}`;
   }
 }
 
