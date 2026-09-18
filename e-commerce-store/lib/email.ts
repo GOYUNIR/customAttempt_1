@@ -55,7 +55,10 @@ function getResend() {
           html: emailLogoHtml() + payload.html,
           text: payload.text,
         });
-        if (result.ok) return { data: { id: result.id }, error: null };
+        if (result.ok) {
+          await recordPlatformEmail(payload.to);
+          return { data: { id: result.id }, error: null };
+        }
         console.error('[email] send failed via driver', result.error);
         return { data: null, error: result.error ?? new Error('Email send failed') };
       },
@@ -67,6 +70,46 @@ function getResend() {
  * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and falls back to a neutral 'Store' so
  * template buyers can rename the brand without touching email markup. Set
  * BRAND_NAME in the platform for production sends. */
+/**
+ * Count a platform email against the free tier.
+ *
+ * THE ALLOWANCE IS ONE POOL. Resend's 3,000/month is per account, not per
+ * feature, but until now only Growth modules wrote to `usage_events` — so
+ * `usageHeadroom('email')` reported the tier as almost untouched while
+ * verification codes, order confirmations and password resets quietly consumed
+ * it. Back-in-stock stops sending when that check says the allowance is gone,
+ * which meant it was making its most important decision on a number that
+ * excluded most of our email. Every send is counted here, at the single point
+ * they all pass through.
+ *
+ * `platform` is not a registry module and is not meant to be: these are sends
+ * the store makes to do its job, not a growth feature anybody enables. It is a
+ * bucket in the cost rollup so the total is honest.
+ *
+ * Best-effort, and deliberately after a successful send: a missing cost record
+ * is a reporting problem, while a password reset that failed because the ledger
+ * was unreachable is a person locked out of their account.
+ */
+async function recordPlatformEmail(to: string): Promise<void> {
+  try {
+    const { recordUsage } = await import('@/lib/growth/ledger');
+    const { DEFAULT_TENANT_ID } = await import('@/lib/tenant-context');
+    await recordUsage({
+      tenantId: DEFAULT_TENANT_ID,
+      moduleId: 'platform',
+      unit: 'email',
+      quantity: 1,
+      // Same `contact:` shape the Growth modules use, so these rows are
+      // traceable and removable per person. It does NOT feed a module's
+      // frequency cap — `canSend` filters those by module_id, and a password
+      // reset should not use up somebody's back-in-stock allowance.
+      reference: 'contact:' + String(to || '').trim().toLowerCase(),
+    });
+  } catch (err) {
+    console.error('[email] send not recorded in the cost ledger', (err as Error)?.message || err);
+  }
+}
+
 function emailBrandName(): string {
   return getBrandName() || 'Store';
 }

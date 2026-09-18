@@ -67,8 +67,21 @@ type RateRow = {
  * cost we do not know, and recording it as zero would make an unknown cost look
  * like a solved one — the exact failure this ledger exists to prevent.
  */
+/**
+ * Rates are a provider price list — they change when Resend changes its pricing,
+ * which is a quarterly event, not a per-request one. Re-reading the row on every
+ * send would put a database round trip in front of every transactional email in
+ * the platform, and the ledger has to be cheap enough that nobody is ever
+ * tempted to switch it off to save latency. A minute of staleness on a number
+ * that moves four times a year costs nothing.
+ */
+const RATE_CACHE_MS = 60_000;
+const rateCache = new Map<string, { at: number; rate: ProviderRate | null }>();
+
 export async function readRate(unit: string): Promise<ProviderRate | null> {
   if (!unit) return null;
+  const cached = rateCache.get(unit);
+  if (cached && Date.now() - cached.at < RATE_CACHE_MS) return cached.rate;
   try {
     const rows = (await getDb().select<RateRow>('provider_rates', {
       where: { unit: eq(unit) },
@@ -77,19 +90,29 @@ export async function readRate(unit: string): Promise<ProviderRate | null> {
       limit: 1,
     })) as RateRow[];
     const row = rows?.[0];
-    if (!row) return null;
-    return {
-      provider: row.provider,
-      unit: row.unit,
-      unitCostMicros: Math.max(0, Math.floor(Number(row.unit_cost_micros) || 0)),
-      includedUnits: Math.max(0, Math.floor(Number(row.included_units) || 0)),
-      period: row.period,
-      sourceUrl: row.source_url,
-    };
+    const rate: ProviderRate | null = row
+      ? {
+          provider: row.provider,
+          unit: row.unit,
+          unitCostMicros: Math.max(0, Math.floor(Number(row.unit_cost_micros) || 0)),
+          includedUnits: Math.max(0, Math.floor(Number(row.included_units) || 0)),
+          period: row.period,
+          sourceUrl: row.source_url,
+        }
+      : null;
+    rateCache.set(unit, { at: Date.now(), rate });
+    return rate;
   } catch (err) {
     console.error('[growth-ledger] rate lookup failed for ' + unit, (err as Error)?.message || err);
+    // A failed lookup is NOT cached. Caching it would turn one transient
+    // outage into a minute of silently unpriced usage.
     return null;
   }
+}
+
+/** Drop the memo. For tests and for an admin who has just edited a rate. */
+export function clearRateCache(): void {
+  rateCache.clear();
 }
 
 export type RecordUsageInput = {

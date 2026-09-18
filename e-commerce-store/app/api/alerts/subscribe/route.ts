@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { createKvClient } from '@/lib/server-config';
 import { subscribe } from '@/lib/alert-subscribers';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
@@ -10,9 +9,11 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const redis = createKvClient();
-    if (!redis) return NextResponse.json({ error: 'Redis offline' }, { status: 500 });
-
+    // No KV check here any more. The list moved to Postgres in H8 (00023), but
+    // this route kept opening a Redis client it never used and refusing the
+    // request when it was absent — so the only way onto the back-in-stock list
+    // would have 500'd the moment KV was switched off, for a service it does
+    // not touch.
     let body: any = {};
     try {
       body = await request.json();

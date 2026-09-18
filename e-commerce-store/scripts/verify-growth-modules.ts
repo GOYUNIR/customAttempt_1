@@ -74,6 +74,7 @@ async function main() {
   const { assignHoldout, isHeldOut, computeIncremental } = await import('../lib/growth/holdout');
   const { canSend } = await import('../lib/growth/consent');
   const { isWithinQuietHours } = await import('../lib/growth/quiet-hours');
+  const { usageHeadroom, recordUsage, costByModule } = await import('../lib/growth/ledger');
   const { setProfileFields } = await import('../lib/customer-profile');
   const { EmailFactory } = await import('../services/email/factory');
   const { subscribe, readSubscriber, removeSubscriber } = await import('../lib/alert-subscribers');
@@ -243,6 +244,28 @@ async function main() {
   check((await stockUsageCount()) === usageBefore, 'a top-up (5 -> 10) announces nothing');
   await notifyIfBackInStock(tenantId, NO_SUCH_VARIANT, 0, 0);
   check((await stockUsageCount()) === usageBefore, 'a restock to zero announces nothing');
+
+  // 6. the free tier is one pool, and the headroom check has to see all of it
+  console.log('\n6. Platform email counts against the same allowance');
+  const headroomBefore = await usageHeadroom('email');
+  check(headroomBefore !== null, 'an email rate is configured to measure against');
+
+  // This is the row lib/email.ts now writes for every transactional send.
+  await recordUsage({
+    tenantId, moduleId: 'platform', unit: 'email', quantity: 1,
+    reference: 'contact:' + EMAIL,
+  });
+  const headroomAfter = await usageHeadroom('email');
+  check((headroomAfter?.usedThisPeriod ?? 0) === (headroomBefore?.usedThisPeriod ?? 0) + 1,
+    'a platform email moves the free-tier headroom',
+    'used went ' + headroomBefore?.usedThisPeriod + ' -> ' + headroomAfter?.usedThisPeriod);
+
+  const rollup = await costByModule(tenantId);
+  check(rollup.some((m) => m.moduleId === 'platform'),
+    'platform sends appear in the cost rollup',
+    JSON.stringify(rollup));
+  console.log('     ' + (headroomAfter?.usedThisPeriod ?? 0) + '/' + (headroomAfter?.includedUnits ?? 0) +
+    ' of the ' + (headroomAfter?.provider ?? '?') + ' free allowance used this period');
 
   // cleanup
   console.log('\nCleaning up');
