@@ -50,9 +50,13 @@ const ProductionEnvSchema = z.object({
   RESEND_API_KEY: optionalFormat(/^re_[A-Za-z0-9_]+$/, 'must start with re_'),
   SUPABASE_URL: optionalFormat(/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i, 'must be a full https://<project>.supabase.co URL'),
   NEXT_PUBLIC_SUPABASE_URL: optionalFormat(/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i, 'must be a full https://<project>.supabase.co URL'),
-  SUPABASE_SERVICE_ROLE_KEY: optionalFormat(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'must be a JWT (three dot-separated segments) — check for a truncated copy-paste'),
-  SUPABASE_ANON_KEY: optionalFormat(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'must be a JWT (three dot-separated segments)'),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: optionalFormat(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'must be a JWT (three dot-separated segments)'),
+  // TWO KEY FORMATS, both current. Legacy Supabase keys are JWTs; projects
+  // created or rotated since the API-key change use sb_secret_/sb_publishable_,
+  // which are not JWTs at all. A JWT-only rule called a working key malformed
+  // and failed the production readiness gate -- found exactly that way.
+  SUPABASE_SERVICE_ROLE_KEY: optionalFormat(/^(?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|sb_(?:secret|publishable)_[A-Za-z0-9_-]+)$/, 'must be a Supabase key: a JWT (three dot-separated segments) or the newer sb_secret_/sb_publishable_ form -- check for a truncated copy-paste'),
+  SUPABASE_ANON_KEY: optionalFormat(/^(?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|sb_(?:secret|publishable)_[A-Za-z0-9_-]+)$/, 'must be a Supabase key: a JWT (three dot-separated segments) or the newer sb_secret_/sb_publishable_ form -- check for a truncated copy-paste'),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: optionalFormat(/^(?:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|sb_(?:secret|publishable)_[A-Za-z0-9_-]+)$/, 'must be a Supabase key: a JWT (three dot-separated segments) or the newer sb_secret_/sb_publishable_ form -- check for a truncated copy-paste'),
   UPSTASH_REDIS_REST_URL: optionalFormat(/^https:\/\/.+\.upstash\.io\/?$/i, 'must be a full https://….upstash.io REST URL'),
   KV_REST_API_URL: optionalFormat(/^https:\/\/.+\.upstash\.io\/?$/i, 'must be a full https://….upstash.io REST URL'),
   UPSTASH_REDIS_REST_TOKEN: optionalFormat(/^\S+$/, 'must not contain whitespace (check for a copy-paste including a trailing newline/space)'),

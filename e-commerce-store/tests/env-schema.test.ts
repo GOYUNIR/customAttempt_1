@@ -95,3 +95,34 @@ test('productionEnvHasBlockingIssues mirrors validateProductionEnv().ok', () => 
   assert.equal(productionEnvHasBlockingIssues({}), false);
   assert.equal(productionEnvHasBlockingIssues({ STRIPE_SECRET_KEY: 'nope' }), true);
 });
+
+test('BOTH Supabase key formats validate — legacy JWT and the newer sb_ form', () => {
+  // A JWT-only rule called a working sb_publishable_ key malformed and failed
+  // the production readiness gate. Both formats are current.
+  const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.abc-_123';
+  // Synthetic fixtures. An earlier version of this test built them from the
+  // real project key's suffix, which GitHub's push protection correctly
+  // flagged as a Supabase secret. Test data must never be derived from a live
+  // credential, even a publishable one.
+  const sbSecret = 'sb_secret_EXAMPLEONLY0000000000000000';
+  const sbPublishable = 'sb_publishable_EXAMPLEONLY0000000000000';
+
+  for (const value of [jwt, sbSecret, sbPublishable]) {
+    const { errors } = validateProductionEnv({ SUPABASE_SERVICE_ROLE_KEY: value });
+    assert.equal(
+      errors.some((e) => e.field === 'SUPABASE_SERVICE_ROLE_KEY'), false,
+      value.slice(0, 18) + ' should be accepted, got ' + JSON.stringify(errors),
+    );
+  }
+  for (const value of [jwt, sbPublishable]) {
+    assert.equal(validateProductionEnv({ SUPABASE_ANON_KEY: value }).errors.some((e) => e.field === 'SUPABASE_ANON_KEY'), false);
+    assert.equal(validateProductionEnv({ NEXT_PUBLIC_SUPABASE_ANON_KEY: value }).errors.some((e) => e.field === 'NEXT_PUBLIC_SUPABASE_ANON_KEY'), false);
+  }
+});
+
+test('a truncated Supabase key is still caught — the point of the check', () => {
+  for (const bad of ['eyJhbGciOiJIUzI1NiIs', 'sb_secret_', 'not a key at all', 'sb_wrongprefix_abc']) {
+    const { errors } = validateProductionEnv({ SUPABASE_ANON_KEY: bad });
+    assert.equal(errors.some((e) => e.field === 'SUPABASE_ANON_KEY'), true, bad + ' should be rejected');
+  }
+});
