@@ -129,6 +129,23 @@ export function isStaffInvitePath(pathname: string): boolean {
   return STAFF_INVITE_PATHS.some((base) => p === base || p.startsWith(base + '/'));
 }
 
+/**
+ * The absolute URL of a realm's sign-in page, for a link FOLLOWED FROM ANOTHER
+ * HOST — the platform marketing site, or an email.
+ *
+ * A relative /app/login from the marketing root 404s: the portal fence gives
+ * consumer-facing hosts no staff-auth exemption, on purpose. So a cross-host
+ * link has to name the host. Without a configured root domain there are no
+ * portal subdomains to address and the relative path is the correct answer.
+ */
+export function staffLoginUrl(realm: StaffRealmKey, rootDomain?: string | null): string {
+  const path = STAFF_REALMS[realm].loginPath;
+  const root = String(rootDomain || '').trim().toLowerCase().replace(/\.$/, '');
+  if (!root) return path;
+  const subdomain = realm === 'merchant' ? 'app' : realm === 'sales' ? 'sales' : 'admin';
+  return 'https://' + subdomain + '.' + root + path;
+}
+
 /** Every staff login path — what the path fence must keep reachable. */
 export const STAFF_LOGIN_PATHS: readonly string[] = [
   STAFF_REALMS.admin.loginPath,

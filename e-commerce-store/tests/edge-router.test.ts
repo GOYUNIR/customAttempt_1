@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, isStrayStorefrontPath, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
-import { STAFF_REALMS, isStaffLoginPath, loginPathForPortal } from '../lib/staff-realms.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
+import { STAFF_REALMS, isStaffLoginPath, loginPathForPortal, staffLoginUrl } from '../lib/staff-realms.ts';
 
 const ROOT = 'site.com';
 
@@ -360,4 +360,48 @@ test('a staff host keeps its OWN tree, the shared auth paths and the APIs', () =
   // Tab icon / share image generators.
   assert.equal(isStrayStorefrontPath('/og', 'admin'), false);
   assert.equal(isStrayStorefrontPath('/icon', 'admin'), false);
+});
+
+// ── The marketing root (platform site vs tenant storefront) ─────────────────
+
+test('the marketing root ships INERT — off by default, so a live store keeps its homepage', () => {
+  assert.equal(marketingRootEnabled({}), false);
+  assert.equal(marketingRootEnabled({ PLATFORM_MARKETING_ROOT: 'false' }), false);
+  assert.equal(marketingRootEnabled({ PLATFORM_MARKETING_ROOT: 'true' }), true);
+});
+
+test('storefrontHostFor normalises whatever form the host is configured in', () => {
+  assert.equal(storefrontHostFor({ PLATFORM_STOREFRONT_HOST: 'https://shop.site.com/' }), 'shop.site.com');
+  assert.equal(storefrontHostFor({ PLATFORM_STOREFRONT_HOST: 'shop.site.com' }), 'shop.site.com');
+  assert.equal(storefrontHostFor({ PLATFORM_STOREFRONT_HOST: '  SHOP.SITE.COM  ' }), 'shop.site.com');
+  // No host configured means nothing is redirected — guessing one would send
+  // customers to an address that may not exist.
+  assert.equal(storefrontHostFor({}), null);
+});
+
+test('on the marketing root, storefront paths are stray but platform/legal/api are not', () => {
+  for (const p of ['/catalog', '/story', '/some-product-slug', '/account']) {
+    assert.equal(isStrayMarketingPath(p, 'marketing'), true, `${p} belongs on the shop host`);
+  }
+  for (const p of ['/', '/platform', '/platform/pricing', '/terms', '/privacy', '/api/store', '/og', '/icon']) {
+    assert.equal(isStrayMarketingPath(p, 'marketing'), false, `${p} must stay on the platform host`);
+  }
+});
+
+test('the marketing stray check never touches any other portal', () => {
+  for (const portal of ['storefront', 'admin', 'merchant', 'sales'] as const) {
+    assert.equal(isStrayMarketingPath('/catalog', portal), false, `${portal} must be untouched`);
+  }
+});
+
+test('REGRESSION: a staff sign-in link on the marketing page must name the portal HOST', () => {
+  // A relative /app/login from the marketing root 404s — consumer-facing hosts
+  // get no staff-auth exemption (asserted above), so a relative link on the
+  // platform homepage would dead-end. Found by requesting it, not by reading.
+  assert.equal(isPortalPathAllowed('/app/login', 'marketing', ROOT), false);
+  assert.equal(staffLoginUrl('merchant', ROOT), 'https://app.site.com/app/login');
+  assert.equal(staffLoginUrl('sales', ROOT), 'https://sales.site.com/sales/login');
+  assert.equal(staffLoginUrl('admin', ROOT), 'https://admin.site.com/admin/login');
+  // Single-domain: no portal subdomains exist, so the relative path is right.
+  assert.equal(staffLoginUrl('merchant', null), '/app/login');
 });

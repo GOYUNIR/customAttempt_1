@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 
 
@@ -323,6 +323,27 @@ export async function middleware(request: NextRequest) {
   // Sending the person where they meant to go beats telling them the page does
   // not exist. Only reached when platformRootDomain is set, so single-domain
   // deployments never see it.
+  // THE MARKETING ROOT. Opt-in (PLATFORM_MARKETING_ROOT) so this ships inert:
+  // flipping the apex to a marketing page on deploy would take a live
+  // storefront off its own homepage before its replacement address exists.
+  //
+  // Storefront paths on the root REDIRECT to the shop's new host, because
+  // existing links, bookmarks and search results point here. Without
+  // PLATFORM_STOREFRONT_HOST nothing is redirected — guessing a hostname would
+  // send customers nowhere at all.
+  if (platformRootDomain && portal === 'marketing' && marketingRootEnabled()) {
+    if (isStrayMarketingPath(pathname, portal)) {
+      const shopHost = storefrontHostFor();
+      if (shopHost) {
+        const shopUrl = new URL(request.url);
+        shopUrl.host = shopHost;
+        shopUrl.port = '';
+        shopUrl.protocol = 'https:';
+        return NextResponse.redirect(shopUrl, { headers: { 'Cache-Control': 'no-store' } });
+      }
+    }
+  }
+
   if (platformRootDomain && isStrayStorefrontPath(pathname, portal)) {
     const portalHome = portalHomeRewrite('/', portal);
     if (portalHome) {
@@ -646,6 +667,15 @@ export async function middleware(request: NextRequest) {
   // this is the standard way to thread it through.
   const forwardedHeaders = new Headers(request.headers);
   forwardedHeaders.set('x-pathname', effectivePathname);
+
+  // The apex serves the PLATFORM's own site once the switch is thrown. Done as
+  // a rewrite (not a redirect) so the marketing page lives at the bare domain,
+  // which is what a prospect types and what gets linked to.
+  if (platformRootDomain && portal === 'marketing' && marketingRootEnabled() && pathname === '/') {
+    const marketingUrl = request.nextUrl.clone();
+    marketingUrl.pathname = '/platform';
+    return NextResponse.rewrite(marketingUrl, { request: { headers: forwardedHeaders } });
+  }
   if (portalRewriteTarget) {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = portalRewriteTarget;

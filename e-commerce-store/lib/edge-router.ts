@@ -302,3 +302,70 @@ export function resolveRequestHost(
   const direct = String(headers.host || '').trim();
   return (forwarded || direct || fallback).toLowerCase().replace(/:\d+$/, '');
 }
+
+/**
+ * THE MARKETING ROOT.
+ *
+ * `classifyHost` has always returned 'marketing' for the bare root domain, and
+ * nothing has ever consumed it: `app/page.tsx` renders the tenant storefront,
+ * so the platform's own site sits nowhere and a test store occupies the address
+ * a prospect would type.
+ *
+ * This is OPT-IN via PLATFORM_MARKETING_ROOT, and deliberately so. Flipping the
+ * root to a marketing page the moment this code deploys would take a live
+ * storefront off its own homepage before its replacement address exists. The
+ * env var is the switch to throw once the store's own subdomain is pointed —
+ * the code ships inert.
+ *
+ * `/platform` is reachable on every host regardless, so the marketing site can
+ * be built and reviewed before it is switched on.
+ */
+export function marketingRootEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.PLATFORM_MARKETING_ROOT || '').trim().toLowerCase() === 'true';
+}
+
+/**
+ * Where a storefront path should go when the root has become the marketing
+ * site — the host the shop now lives on, or null to leave it alone.
+ *
+ * Existing links, bookmarks and search results point at the root. Once the
+ * marketing site owns it, those paths must REDIRECT to the store's new address
+ * rather than 404 or silently render a shop under a marketing domain.
+ * PLATFORM_STOREFRONT_HOST names that address; without it nothing is
+ * redirected, because guessing a hostname would send customers nowhere.
+ */
+export function storefrontHostFor(env: Record<string, string | undefined> = process.env): string | null {
+  const raw = String(env.PLATFORM_STOREFRONT_HOST || '').trim().toLowerCase();
+  const withoutScheme = raw.replace(/^https?:/, '').replace(/^\/\//, '');
+  const withoutTrailingSlash = withoutScheme.replace(/\/+$/, '');
+  return withoutTrailingSlash || null;
+}
+
+/**
+ * On the marketing root, is this a storefront path that belongs on the shop's
+ * own host now?
+ *
+ * The inverse of `isStrayStorefrontPath`: there, storefront paths were being
+ * served on a STAFF host; here they are on the PLATFORM host. Same principle —
+ * a path served from the wrong address — with a different destination.
+ */
+export function isStrayMarketingPath(pathname: string, portal: Portal): boolean {
+  if (portal !== 'marketing') return false;
+  if (pathname === '/') return false;
+  if (pathname.startsWith('/platform')) return false;
+  if (pathname.startsWith('/api/')) return false;
+  if (pathname === '/og' || pathname.startsWith('/og/')) return false;
+  if (pathname === '/icon' || pathname.startsWith('/icon/')) return false;
+  // Staff paths are left alone here, but NOT because they are reachable — the
+  // portal fence above already 404s them on a marketing host, deliberately
+  // (consumer-facing hosts get no staff-auth exemption). Redirecting them to
+  // the SHOP as well would be doubly wrong, so they are simply not this
+  // function's business. A marketing page linking to a staff portal must link
+  // to that portal's own HOST; see lib/staff-realms.ts's staffLoginUrl.
+  if (isSharedStaffAuthPath(pathname)) return false;
+  if (pathname.startsWith('/admin') || pathname.startsWith('/sales')) return false;
+  if (isMerchantPath(pathname)) return false;
+  // Legal pages belong to the platform as much as to the shop.
+  if (pathname === '/privacy' || pathname === '/terms') return false;
+  return true;
+}
