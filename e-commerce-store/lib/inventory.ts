@@ -20,6 +20,7 @@
 import { createKvClient } from '@/lib/server-config';
 import { withRedisLock } from '@/lib/redis-lock';
 import { getDb } from '@/lib/db/client';
+import { notifyIfBackInStock } from '@/lib/growth/modules/back-in-stock';
 import { eq } from '@/lib/db/query';
 
 export type InventoryLevel = {
@@ -177,7 +178,18 @@ export async function restockInventory(tenantId: string, variantId: string, quan
     { quantity_available: current.quantityAvailable + qty },
   );
   const row = updated[0];
-  return { variantId: row.variant_id, quantityAvailable: Number(row.quantity_available) || 0, quantityReserved: Number(row.quantity_reserved) || 0 };
+  const level = {
+    variantId: row.variant_id,
+    quantityAvailable: Number(row.quantity_available) || 0,
+    quantityReserved: Number(row.quantity_reserved) || 0,
+  };
+
+  // Somebody may have asked to be told when this came back. Awaited so a
+  // serverless runtime cannot freeze before the sends go out, but it never
+  // throws — a restock must not fail because an announcement could not be sent.
+  await notifyIfBackInStock(tenantId, variantId, current.quantityAvailable, level.quantityAvailable);
+
+  return level;
 }
 
 /**

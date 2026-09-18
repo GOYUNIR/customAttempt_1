@@ -47,6 +47,29 @@ export type SendDecision =
       retryAfter?: string;
     };
 
+/**
+ * Consent given by joining a list, rather than by ticking the box on an account.
+ *
+ * SOME AUDIENCES ARE NOT CUSTOMERS. Someone who submits "tell me when this is
+ * back" from a product page has consented explicitly and in writing — they just
+ * have no `customers` row, because they have never bought anything. Reading
+ * only `customers.email_opt_in` refuses those people, which is not a stricter
+ * privacy posture: it is looking in the wrong drawer and calling the silence a
+ * no. Back-in-stock could not reach a single one of its own subscribers until
+ * this existed.
+ *
+ * It is EVIDENCE, not an assertion. The caller hands over the stored row's own
+ * status and timestamp and the gate judges them; a handler cannot simply claim
+ * the person opted in. See `validListConsent`.
+ */
+export type ListConsent = {
+  /** The table the consent is recorded in, e.g. 'alert_subscribers'. */
+  source: string;
+  status: 'active' | 'unsubscribed';
+  /** When the person joined. An undatable consent is not a consent. */
+  recordedAt: string;
+};
+
 export type SendContext = {
   tenantId: string;
   module: GrowthModule;
@@ -54,7 +77,16 @@ export type SendContext = {
   /** IANA zone for quiet hours. Falls back to the store's own when unknown. */
   timezone?: string | null;
   now?: Date;
+  /** Consent held somewhere other than the customer record. See ListConsent. */
+  listConsent?: ListConsent | null;
 };
+
+/** Whether a list record is real consent, or just a row somebody passed in. */
+function validListConsent(consent: ListConsent | null | undefined): boolean {
+  if (!consent || consent.status !== 'active') return false;
+  if (!String(consent.source || '').trim()) return false;
+  return Number.isFinite(Date.parse(String(consent.recordedAt || '')));
+}
 
 const isMarketing = (channels: ConsentChannel[]): boolean =>
   channels.includes('email_marketing') || channels.includes('sms_marketing');
@@ -81,21 +113,30 @@ export async function canSend(ctx: SendContext): Promise<SendDecision> {
     // ── 1. consent ────────────────────────────────────────────────────────
     if (marketing) {
       const profile = await readProfile(ctx.tenantId, email);
-      if (!profile) {
+
+      // A DECLINE OUTRANKS EVERYTHING. Someone who has unticked the box on
+      // their account has said no, and a mailing-list row signed up before that
+      // must not resurrect them. Checked first, deliberately: the ordering is
+      // the whole safety property.
+      if (profile?.emailOptIn === false) {
         return {
           allowed: false,
           reason: 'no_consent',
-          detail: 'No customer record, so no marketing consent can be demonstrated for ' + email + '.',
+          detail: 'Marketing consent for ' + email + ' is declined on their customer record.',
         };
       }
-      // NULL is "never asked". An unanswered question is not a yes.
-      if (profile.emailOptIn !== true) {
+
+      // NULL is "never asked". An unanswered question is not a yes — but a list
+      // they explicitly joined is one, even without a customer record.
+      const optedIn = profile?.emailOptIn === true;
+      const onList = validListConsent(ctx.listConsent);
+      if (!optedIn && !onList) {
         return {
           allowed: false,
           reason: 'no_consent',
-          detail:
-            'Marketing consent for ' + email + ' is ' +
-            (profile.emailOptIn === null ? 'NEVER ASKED' : 'declined') + '.',
+          detail: profile
+            ? 'Marketing consent for ' + email + ' was NEVER ASKED, and they are on no relevant list.'
+            : 'No customer record and no list membership, so no marketing consent can be demonstrated for ' + email + '.',
         };
       }
     }

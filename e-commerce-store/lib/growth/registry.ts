@@ -128,6 +128,10 @@ export const GROWTH_MODULES: GrowthModule[] = [
     name: 'Abandoned cart recovery',
     problem: 'Customers fill a cart and leave without buying.',
     outcome: 'earn_more',
+    // BUILT, DELIBERATELY NOT LIVE. Three emails per abandoned cart means one
+    // merchant at ~2,000 orders/month consumes the entire free allowance alone.
+    // Flip to 'live' when a paying plan covers the $20/month Pro tier; the
+    // handler and its tests are ready.
     status: 'planned',
     channels: ['email'],
     metric: { id: 'recovered_cents', unit: 'cents', label: 'Recovered revenue' },
@@ -146,7 +150,11 @@ export const GROWTH_MODULES: GrowthModule[] = [
     name: 'Back-in-stock alerts',
     problem: 'People want something that is sold out and there is no way to tell them when it returns.',
     outcome: 'earn_more',
-    status: 'planned',
+    // LIVE. One email per person per product, to somebody who explicitly asked
+    // to be told, at roughly 500 sends a month — comfortably inside the free
+    // allowance. It earns before it costs, which is the rule that set the
+    // build order.
+    status: 'live',
     channels: ['email'],
     metric: { id: 'recovered_cents', unit: 'cents', label: 'Recovered demand' },
     attribution: { mode: 'holdout', holdoutPercent: 10, windowHours: 168, touchRule: 'last_touch' },
