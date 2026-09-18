@@ -248,12 +248,38 @@ function pruneStaleCart(items: CartItem[], products: any[]): CartItem[] {
  * wrapping them in shop chrome put a second brand mark on the page and linked
  * our homepage into a tenant's catalog. Rendered as a plain pass-through so the
  * marketing page owns its whole layout.
+ *
+ * `forceHide` exists because of ONE case `usePathname()` cannot see: the bare
+ * apex is served by REWRITING "/" to "/platform" (middleware.ts), specifically
+ * so the marketing page lives at the domain a prospect actually types. A
+ * rewrite is transparent to the browser — the address bar still reads "/", and
+ * `usePathname()` reports exactly that, forever, no matter what actually
+ * rendered. So the pathname-only check below silently failed on the single
+ * highest-traffic page on the whole site: the homepage rendered full shop
+ * chrome (cart, account icon, Instagram/TikTok footer) around the platform's
+ * own marketing content, live in production, until this was caught by a
+ * screenshot rather than by this code.
+ *
+ * The root layout DOES know the truth — middleware forwards the REWRITTEN path
+ * via the `x-pathname` header precisely so a Server Component can tell — so it
+ * computes the correct answer once and passes it down as `forceHide`. A
+ * missing prop (any other caller, any test) falls back to the pathname check,
+ * which stays exactly right for every case that isn't a rewrite: the three
+ * staff logins are real navigations (redirects, not rewrites), so
+ * `usePathname()` already reports their true path correctly.
  */
-export default function SiteChrome({ children }: { children: React.ReactNode }) {
+export default function SiteChrome({
+  children,
+  forceHide,
+}: {
+  children: React.ReactNode;
+  /** Server-computed override for paths a client-side pathname check cannot see. */
+  forceHide?: boolean;
+}) {
   const pathname = usePathname();
   // Marketing AND the three staff portals. A sign-in page for sales reps must
   // not carry a shop's cart nav and social links; see lib/platform-surface.ts.
-  if (hidesStorefrontChrome(pathname)) return <>{children}</>;
+  if (forceHide ?? hidesStorefrontChrome(pathname)) return <>{children}</>;
   return <StorefrontChrome>{children}</StorefrontChrome>;
 }
 

@@ -674,7 +674,17 @@ export async function middleware(request: NextRequest) {
   if (platformRootDomain && portal === 'marketing' && marketingRootEnabled() && pathname === '/') {
     const marketingUrl = request.nextUrl.clone();
     marketingUrl.pathname = '/platform';
-    return NextResponse.rewrite(marketingUrl, { request: { headers: forwardedHeaders } });
+    // x-pathname must say '/platform' here, NOT the '/' set above. A rewrite is
+    // invisible to the browser — the address bar keeps reading '/' forever — so
+    // this header is the ONLY place the true rendered path exists for anything
+    // downstream to read. Forwarding '/' here is exactly what let the homepage
+    // render full shop chrome (cart, Instagram, TikTok) around the platform's
+    // own marketing page: app/layout.tsx's isPlatformSurface check read the
+    // stale '/' and never detected the marketing surface. See SiteChrome.tsx's
+    // `forceHide` doc for the client-side half of this same bug.
+    const marketingHeaders = new Headers(forwardedHeaders);
+    marketingHeaders.set('x-pathname', '/platform');
+    return NextResponse.rewrite(marketingUrl, { request: { headers: marketingHeaders } });
   }
   if (portalRewriteTarget) {
     const rewriteUrl = request.nextUrl.clone();

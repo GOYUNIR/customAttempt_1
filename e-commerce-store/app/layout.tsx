@@ -14,7 +14,7 @@ import { contentSpacingScale } from '@/lib/storefront-config';
 import { GOOGLE_FONTS_HREF } from '@/lib/font-catalog';
 import { MapFactory } from '@/services/maps/factory';
 import { headers } from 'next/headers';
-import { isPlatformSurface } from '@/lib/platform-surface';
+import { isPlatformSurface, hidesStorefrontChrome } from '@/lib/platform-surface';
 
 /**
  * Bump this constant ANY time the share-card code changes (markup, colors,
@@ -34,9 +34,24 @@ const CARD_REVISION = 8;
 // cheap via the 30s TTL cache (loadStoreConfigCached).
 export const dynamic = 'force-dynamic';
 
-/** Build the live theme blob shared by the layout inline script + ThemeProvider. */
+/**
+ * Build the live theme blob shared by the layout inline script + ThemeProvider.
+ *
+ * `redis === null` must mean "use defaults", full stop — NOT "read the cache
+ * and hope it's empty". `loadStoreConfigCached` memoizes under a single fixed
+ * key with a 30s TTL; it takes `redis` as an argument but does not fold it into
+ * the cache key, so a request that primed the cache with real merchant config
+ * (any ordinary storefront page load) leaves that data readable to a request
+ * that passed `redis: null` specifically to avoid it, for up to 30 seconds.
+ * That is how the platform's support email and social links ended up
+ * serialized into the marketing homepage's hydration payload even after the
+ * page correctly stopped RENDERING shop chrome — invisible on screen, but
+ * still a tenant's config riding along on a page about the software. Skipping
+ * the call entirely when there is no redis client closes that gap regardless
+ * of what the shared cache currently holds.
+ */
 async function buildLiveTheme(redis: ReturnType<typeof createKvClient>) {
-  const config = await loadStoreConfigCached(redis);
+  const config = redis ? await loadStoreConfigCached(redis) : {};
   const defaults = GOYUNIR_STORE_SUITE as any;
   const themeColors = { ...(defaults.themeColors || {}), ...(config.themeColors || {}) };
   // Legacy heroContent (written before the story fields existed) is stale text
@@ -169,6 +184,14 @@ export default async function RootLayout({
   // layout's own auth check, so this costs nothing extra to know.
   const requestPathname = (await headers()).get('x-pathname') || '';
   const platformSurface = isPlatformSurface(requestPathname);
+  // Marketing AND the three staff portals — passed to SiteChrome so it can hide
+  // shop chrome even where usePathname() cannot see the truth (the marketing
+  // apex is served by rewriting '/' to '/platform', which is invisible to the
+  // browser; see SiteChrome's `forceHide` doc). Deliberately NOT the same value
+  // as `platformSurface` above: staff portals still need the theme DATA fetched
+  // below (the admin Settings screen previews a merchant's live colors) even
+  // though they must not wear the shop's CHROME.
+  const hideStorefrontChrome = hidesStorefrontChrome(requestPathname);
 
   const redis = platformSurface ? null : createKvClient();
   const liveValue = await buildLiveTheme(redis);
@@ -239,7 +262,7 @@ export default async function RootLayout({
           }}
         />}
         <ThemeProvider value={liveValue}>
-          <SiteChrome>{children}</SiteChrome>
+          <SiteChrome forceHide={hideStorefrontChrome}>{children}</SiteChrome>
         </ThemeProvider>
       </body>
     </html>
