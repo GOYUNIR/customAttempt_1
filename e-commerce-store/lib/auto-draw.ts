@@ -42,7 +42,6 @@ import {
   POOL_KEY_PREFIX,
   POOL_STATS_KEY,
   poolStatField,
-  PRODUCTS_KEY,
   PROMO_CODES_KEY,
   resolveCustomerId,
   safeParseKvItem,
