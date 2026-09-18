@@ -1,4 +1,5 @@
 import StaffLoginForm from '@/components/staff/StaffLoginForm';
+import { platformHomeUrl, platformHomeLabel } from '@/lib/staff-realms';
 
 /**
  * /app/login — sign-in for the MERCHANT hub (app.<root>).
@@ -9,5 +10,13 @@ import StaffLoginForm from '@/components/staff/StaffLoginForm';
  * should not be told they are signing in as one.
  */
 export default function MerchantLoginPage() {
-  return <StaffLoginForm realm="merchant" />;
+  // A bare "/" here is the PORTAL root, which bounces an unauthenticated
+  // visitor straight back to this page. See platformHomeUrl.
+  return (
+    <StaffLoginForm
+      realm="merchant"
+      backUrl={platformHomeUrl(process.env.PLATFORM_ROOT_DOMAIN)}
+      backLabel={platformHomeLabel(process.env.PLATFORM_ROOT_DOMAIN)}
+    />
+  );
 }

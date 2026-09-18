@@ -2,6 +2,7 @@ import MerchantSignupForm from '@/components/platform/MerchantSignupForm';
 import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/components/platform/MarketingChrome';
 import CheckoutModeShowcase from '@/components/platform/CheckoutModeShowcase';
 import { CAPABILITIES, COMPARISON, PLANS, FAQS } from '@/lib/platform-marketing';
+import { getSupportEmail } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -135,7 +136,19 @@ export default function PlatformPage() {
       <section id="pricing" style={{ ...SHELL, padding: '70px 20px 0' }}>
         <h2 style={SECTION_LABEL}>Pricing</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 18 }}>
-          {PLANS.map((plan) => (
+          {PLANS.map((plan) => {
+            // 'Contact us' used to point at #start — the self-signup form. A buyer
+            // asking for a conversation was handed a create-your-own-store wizard.
+            // Until the lead form ships this at least opens a real email; with no
+            // inbox configured the button says where it actually goes instead of
+            // promising a conversation nobody receives.
+            const quoteTier = plan.monthlyUsd === null;
+            const inbox = getSupportEmail();
+            const ctaHref = quoteTier && inbox
+              ? 'mailto:' + inbox + '?subject=' + encodeURIComponent('Scale plan enquiry')
+              : '#start';
+            const ctaLabel = quoteTier ? (inbox ? 'Email us' : 'Start a store') : 'Start here';
+            return (
             <div
               key={plan.id}
               style={{
@@ -165,7 +178,7 @@ export default function PlatformPage() {
                 ))}
               </ul>
               <a
-                href="#start"
+                href={ctaHref}
                 style={{
                   textAlign: 'center', textDecoration: 'none', borderRadius: 999, padding: '12px 18px',
                   fontWeight: 800, fontSize: 14,
@@ -174,10 +187,11 @@ export default function PlatformPage() {
                   border: plan.featured ? 'none' : `1px solid ${INK.border}`,
                 }}
               >
-                {plan.monthlyUsd === null ? 'Contact us' : 'Start here'}
+                {ctaLabel}
               </a>
             </div>
-          ))}
+            );
+          })}
         </div>
         <p style={{ fontSize: 12.5, color: INK.muted, margin: '14px 2px 0', maxWidth: 760, lineHeight: 1.6 }}>
           Flat monthly pricing, billed through Stripe. We do not charge a percentage of the revenue

@@ -146,6 +146,35 @@ export function staffLoginUrl(realm: StaffRealmKey, rootDomain?: string | null):
   return 'https://' + subdomain + '.' + root + path;
 }
 
+/**
+ * Where "leave this sign-in page" should actually go.
+ *
+ * THE DEAD END THIS FIXES. The link was a bare `/`, which on a staff host is
+ * not the store — it is the portal root, and the portal root redirects an
+ * unauthenticated visitor straight back to the sign-in page they are looking
+ * at. "← Back to store" was a circle.
+ *
+ * With a root domain configured the honest destination is the platform's own
+ * site: it is the one address that exists for every realm, and a sales rep or
+ * platform admin has no particular merchant storefront to be returned to.
+ * Without one there are no portal subdomains, `/` really is the shop, and the
+ * old behaviour is correct — which is why that fallback stays.
+ */
+export function platformHomeUrl(rootDomain?: string | null): string {
+  const root = normalizeRoot(rootDomain);
+  return root ? 'https://' + root + '/' : '/';
+}
+
+/** The words on that link, matching wherever `platformHomeUrl` actually goes. */
+export function platformHomeLabel(rootDomain?: string | null): string {
+  const root = normalizeRoot(rootDomain);
+  return root ? 'Back to ' + root : 'Back to store';
+}
+
+function normalizeRoot(rootDomain?: string | null): string {
+  return String(rootDomain || '').trim().toLowerCase().replace(/\.$/, '');
+}
+
 /** Every staff login path — what the path fence must keep reachable. */
 export const STAFF_LOGIN_PATHS: readonly string[] = [
   STAFF_REALMS.admin.loginPath,

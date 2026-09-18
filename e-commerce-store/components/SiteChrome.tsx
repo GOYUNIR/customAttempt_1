@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { isPlatformSurface } from '@/lib/platform-surface';
+import { hidesStorefrontChrome } from '@/lib/platform-surface';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
@@ -251,7 +251,9 @@ function pruneStaleCart(items: CartItem[], products: any[]): CartItem[] {
  */
 export default function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (isPlatformSurface(pathname)) return <>{children}</>;
+  // Marketing AND the three staff portals. A sign-in page for sales reps must
+  // not carry a shop's cart nav and social links; see lib/platform-surface.ts.
+  if (hidesStorefrontChrome(pathname)) return <>{children}</>;
   return <StorefrontChrome>{children}</StorefrontChrome>;
 }
 

@@ -21,8 +21,40 @@
 export const PLATFORM_SURFACE_PREFIXES = ['/platform'] as const;
 
 export function isPlatformSurface(pathname: string | null | undefined): boolean {
+  return matchesPrefix(pathname, PLATFORM_SURFACE_PREFIXES);
+}
+
+/**
+ * The staff portals: merchant, sales and platform admin.
+ *
+ * SEPARATE FROM `isPlatformSurface` on purpose, because the two surfaces want
+ * different things from the layout. The marketing site wants NO tenant theme at
+ * all — it is not a shop and the theme blob is most of its weight. The staff
+ * portals still want the theme DATA (the admin Settings screen previews a
+ * merchant's live colours, and cutting it off would break the editor) but must
+ * not wear the shopper CHROME.
+ *
+ * What that chrome looked like on a sign-in page, before this existed: the
+ * sales portal's login carried the store's cart nav, its Instagram and TikTok
+ * links, "Manage My Entry", "Keep scrolling ↓" and a shop copyright line —
+ * beneath a form that says "For sales representatives." It read as unfinished
+ * because it was the wrong page's furniture, not because anything was broken.
+ *
+ * `/auth/*` is deliberately ABSENT. That is the customer signing in to the
+ * shop, and shop chrome is exactly right there.
+ */
+export const STAFF_SURFACE_PREFIXES = ['/admin', '/sales', '/app'] as const;
+
+export function isStaffSurface(pathname: string | null | undefined): boolean {
+  return matchesPrefix(pathname, STAFF_SURFACE_PREFIXES);
+}
+
+/** True when the page should render without the storefront's shopper chrome. */
+export function hidesStorefrontChrome(pathname: string | null | undefined): boolean {
+  return isPlatformSurface(pathname) || isStaffSurface(pathname);
+}
+
+function matchesPrefix(pathname: string | null | undefined, prefixes: readonly string[]): boolean {
   const path = String(pathname || '');
-  return PLATFORM_SURFACE_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(prefix + '/'),
-  );
+  return prefixes.some((prefix) => path === prefix || path.startsWith(prefix + '/'));
 }

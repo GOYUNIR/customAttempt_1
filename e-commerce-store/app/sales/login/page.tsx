@@ -1,4 +1,5 @@
 import StaffLoginForm from '@/components/staff/StaffLoginForm';
+import { platformHomeUrl, platformHomeLabel } from '@/lib/staff-realms';
 
 /**
  * /sales/login — sign-in for the SALES portal (sales.<root>).
@@ -8,5 +9,13 @@ import StaffLoginForm from '@/components/staff/StaffLoginForm';
  * which the path fence 404s on the sales host. See lib/staff-realms.ts.
  */
 export default function SalesLoginPage() {
-  return <StaffLoginForm realm="sales" />;
+  // A bare "/" here is the PORTAL root, which bounces an unauthenticated
+  // visitor straight back to this page. See platformHomeUrl.
+  return (
+    <StaffLoginForm
+      realm="sales"
+      backUrl={platformHomeUrl(process.env.PLATFORM_ROOT_DOMAIN)}
+      backLabel={platformHomeLabel(process.env.PLATFORM_ROOT_DOMAIN)}
+    />
+  );
 }

@@ -23,7 +23,12 @@ const inputStyle = { padding: '13px 14px', borderRadius: 12, border: '1px solid 
 const labelStyle = { fontSize: 13, fontWeight: 700, color: '#374151' } as const;
 const hintStyle = { fontSize: 12.5, color: '#6b7280', margin: 0, lineHeight: 1.55 } as const;
 
-export default function StaffLoginForm({ realm: realmKey }: { realm: StaffRealmKey }) {
+export default function StaffLoginForm({ realm: realmKey, backUrl = '/', backLabel = 'Back to store' }: {
+  realm: StaffRealmKey;
+  /** Where leaving this page goes. A bare '/' on a staff host loops back here. */
+  backUrl?: string;
+  backLabel?: string;
+}) {
   const realm = STAFF_REALMS[realmKey];
 
   const [email, setEmail] = useState('');
@@ -138,7 +143,7 @@ export default function StaffLoginForm({ realm: realmKey }: { realm: StaffRealmK
           </div>
 
           <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', margin: 0 }}>
-            <Link href="/" prefetch={false} style={{ color: '#6b7280', textDecoration: 'underline' }}>← Back to store</Link>
+            <Link href={backUrl} prefetch={false} style={{ color: '#6b7280', textDecoration: 'underline' }}>← {backLabel}</Link>
           </p>
         </form>
       </div>

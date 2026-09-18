@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { redirect } from 'next/navigation';
+import { isStaffInvitePath } from '@/lib/staff-realms';
 import { headers } from 'next/headers';
 import { resolveAdminActorForPage } from '@/lib/admin-actor-from-headers';
 import { actorHasPlatformAdminAccess, actorHasMerchantAccess } from '@/lib/admin-actor';
@@ -34,7 +35,18 @@ function isAuthExemptPath(pathname: string): boolean {
   return (
     pathname.startsWith('/admin/login') ||
     pathname.startsWith('/admin/setup') ||
-    pathname.startsWith('/admin/setup-status')
+    pathname.startsWith('/admin/setup-status') ||
+    // INVITE ACCEPTANCE. This list had drifted from middleware's: middleware
+    // exempts invite paths (they are credential-ESTABLISHING, like the login
+    // form), this layout did not, and the layout runs second — so every
+    // invited staff member who clicked the link in their email was redirected
+    // to a sign-in page for the account they had not created yet. The invite
+    // flow was unreachable on all three staff hosts.
+    //
+    // Sharing middleware's own predicate rather than adding a fourth string,
+    // because the reason this broke is that two lists of the same thing were
+    // maintained in two places.
+    isStaffInvitePath(pathname)
   );
 }
 

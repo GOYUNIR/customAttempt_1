@@ -8,11 +8,17 @@ import Link from 'next/link';
  */
 
 import { neutralBrandName } from '@/lib/env';
+import { staffLoginUrl } from '@/lib/staff-realms';
 
 export const dynamic = 'force-dynamic';
 
 export default function MaintenancePage() {
   const brand = neutralBrandName();
+  // /admin 404s here: this page is served on the SHOP host, and the portal fence
+  // gives consumer hosts no admin route. The operator link has to name the
+  // merchant portal's own host or it is a dead button on a page whose entire
+  // job is to be reassuring.
+  const operatorHref = staffLoginUrl('merchant', process.env.PLATFORM_ROOT_DOMAIN);
   return (
     <main
       style={{
@@ -51,7 +57,7 @@ export default function MaintenancePage() {
           We&apos;re making improvements. Please check back shortly — the store will be right back up.
         </p>
         <Link
-          href="/admin"
+          href={operatorHref}
           style={{
             display: 'inline-block',
             padding: '12px 24px',
