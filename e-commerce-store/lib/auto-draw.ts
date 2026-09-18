@@ -74,6 +74,7 @@ import { dropTimestampToMs, formatStoreWallClock, splitEntriesByCycleEnd } from 
 import { resolveStripeClient } from '@/services/payment/factory';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { recordDrawRun } from '@/lib/draw-runs';
 import { resolveVariantId } from '@/lib/inventory';
 import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
@@ -840,6 +841,24 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
       totalSuccessfulCharges: grandRevenueChargesCount,
       totalRevenueCents,
     };
+    // DEFERRED-7: the run is recorded in Postgres (drop_draw_runs, 00025).
+    // The KV pair stays as a display mirror for the admin screens that still
+    // read it — same bridge shape as the loyalty balance.
+    try {
+      const drawTenantId = await ensureDefaultTenant().catch(() => null);
+      if (drawTenantId) {
+        await recordDrawRun({
+          tenantId: drawTenantId,
+          timezone: tz,
+          triggerSource: 'auto',
+          winners: processedWinners,
+          totalCharges: grandRevenueChargesCount,
+          totalRevenueCents: totalRevenueCents,
+        });
+      }
+    } catch (runErr) {
+      console.error('[auto-draw] draw run record failed', (runErr as Error)?.message || runErr);
+    }
     try {
       await redis.set(LAST_DRAW_KEY, JSON.stringify(drawSummary));
       await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({ ...drawSummary, timestamp: new Date().toISOString() }));

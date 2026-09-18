@@ -10,6 +10,7 @@ import { appendAudit } from '@/app/api/admin/audit/route';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { recordDrawRun } from '@/lib/draw-runs';
 import { executeDrawWithCharging } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
@@ -299,6 +300,24 @@ export async function POST(request: Request) {
       totalRevenueCents,
     };
 
+    // DEFERRED-7: recorded in Postgres first, then mirrored to KV for the
+    // admin screens still reading it. trigger_source distinguishes this from
+    // the cron engine — telling an operator-pressed draw apart from an
+    // automatic one is most of what an incident review needs.
+    try {
+      const drawTenantId = await ensureDefaultTenant().catch(() => null);
+      if (drawTenantId) {
+        await recordDrawRun({
+          tenantId: drawTenantId,
+          triggerSource: 'manual',
+          winners: processedWinners,
+          totalCharges: totalCharged,
+          totalRevenueCents: totalRevenueCents,
+        });
+      }
+    } catch (runErr) {
+      console.error('[trigger-drop] draw run record failed', (runErr as Error)?.message || runErr);
+    }
     try {
       await redis.rpush(DRAW_HISTORY_KEY, JSON.stringify({ ...drawSummary, timestamp: new Date().toISOString() }));
       const historyLen = await redis.llen(DRAW_HISTORY_KEY);

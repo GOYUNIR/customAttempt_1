@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createKvClient, safeParseKvItem, LAST_DRAW_KEY, DRAW_HISTORY_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
+import { listDrawRuns } from '@/lib/draw-runs';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { getDb } from '@/lib/db/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,8 +14,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // DEFERRED-7: runs come from drop_draw_runs (00025). The KV list is capped at
+  // 100 entries and is erased by `wipe`, so it was never an adequate record of
+  // the moment this store takes money from people.
+  //
+  // It falls back to KV only when Postgres is unconfigured — NOT when Postgres
+  // merely returns nothing. An empty result there means "no draws have run",
+  // which is a real answer; quietly reaching for a second store on a legitimate
+  // empty is how two sources of truth start disagreeing.
+  let degraded: string | null = null;
+  if (getDb().configured) {
+    try {
+      const tenantId = await ensureDefaultTenant();
+      const runs = await listDrawRuns(tenantId, 50);
+      return NextResponse.json({
+        draws: runs.map((run, i) => ({
+          drawNumber: runs.length - i,
+          executionTime: run.executedAt,
+          timezone: run.timezone,
+          triggerSource: run.triggerSource,
+          processedWinners: run.winners,
+          totalSuccessfulCharges: run.totalCharges,
+          totalRevenueCents: run.totalRevenueCents,
+          timestamp: run.executedAt,
+        })),
+        source: 'postgres',
+      });
+    } catch (err) {
+      // A genuine read FAILURE (not an empty result) falls back to the KV
+      // mirror, and says so in the payload. The alternative — returning an
+      // empty history — would tell an operator that no draw has ever run.
+      console.error('[draw-history] Postgres read failed, falling back to the KV mirror', (err as Error)?.message || err);
+      degraded = String((err as Error)?.message || err);
+    }
+  }
+
   const redis = createKvClient();
-  if (!redis) return NextResponse.json({ draws: [] });
+  if (!redis) return NextResponse.json({ draws: [], source: 'none', degraded });
 
   // Get the most recent draw summary
   const lastDrawRaw = await redis.get(LAST_DRAW_KEY);
