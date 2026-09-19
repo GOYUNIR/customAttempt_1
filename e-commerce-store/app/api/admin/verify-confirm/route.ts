@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { consumeAdminCode, issueAdminDevice, adminLoginAuthorized, resolveAdminLoginEmail } from '@/lib/admin-verify';
 import { rateLimitedResponse } from '@/lib/rate-limit';
-import { portalCookieAttrs } from '@/lib/portal-cookies';
+import { portalCookieAttrs, requestPortal } from '@/lib/portal-cookies';
 import { readStaffIdentity, deviceMetaFor } from '@/lib/staff-identity';
 
 export const dynamic = 'force-dynamic';
@@ -69,7 +69,10 @@ export async function POST(request: Request) {
     const { token, maxAgeSeconds } = await issueAdminDevice(redis, adminEmail, remember, meta);
 
     const response = NextResponse.json({ ok: true, verified: true, remember });
-    response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, 'admin', maxAgeSeconds));
+    // Same fix as app/api/admin/login/route.ts — the real portal, not a
+    // hardcoded 'admin'. See requestPortal's doc for why the hardcoded
+    // version silently dropped the device cookie on every non-admin host.
+    response.cookies.set(ADMIN_DEVICE_COOKIE, token, portalCookieAttrs(request, requestPortal(request), maxAgeSeconds));
     return response;
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Verification failed' }, { status: 500 });
