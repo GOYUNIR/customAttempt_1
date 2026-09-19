@@ -186,6 +186,14 @@ export async function POST(request: Request) {
           currency: 'usd',
           customer: stripeCustomerId,
           payment_method: paymentMethodId,
+          // Restricted to card rather than left to Stripe's "automatic payment
+          // methods" default. This is a server-side confirm with no browser
+          // round trip available — several of the automatic methods redirect
+          // off-page, and Stripe refuses to confirm at all unless either a
+          // `return_url` is given or the method set is narrowed to ones that
+          // never redirect. A card never redirects, so narrowing is correct
+          // here, not just a workaround.
+          payment_method_types: ['card'],
           off_session: false,
           confirm: true,
           receipt_email: email,
