@@ -7,7 +7,7 @@ import { appendAudit } from '@/app/api/admin/audit/route';
 import { createKvClient } from '@/lib/server-config';
 import { createInvite, listInvites, revokeInvite, INVITE_TTL_DAYS } from '@/lib/staff-invites';
 import { sendStaffInviteEmail } from '@/lib/email';
-import { getSiteUrl } from '@/lib/env';
+import { acceptInviteUrl } from '@/lib/staff-realms';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const dynamic = 'force-dynamic';
@@ -110,8 +110,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: result.message, reason: result.reason }, { status });
     }
 
-    // The token exists in exactly one place from here on: this link.
-    const acceptUrl = `${getSiteUrl().replace(/\/$/, '')}/admin/accept-invite?token=${encodeURIComponent(result.token)}`;
+    // The token exists in exactly one place from here on: this link. Absolute,
+    // staff-host URL — see acceptInviteUrl's doc for why getSiteUrl() shipped a
+    // bare relative path here (DNS_PROBE_FINISHED_NXDOMAIN on click).
+    const acceptUrl = acceptInviteUrl(role, result.token, process.env.PLATFORM_ROOT_DOMAIN);
     const sent = await sendStaffInviteEmail({
       to: email,
       role: result.invite.role,

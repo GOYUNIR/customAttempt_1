@@ -147,6 +147,53 @@ export function staffLoginUrl(realm: StaffRealmKey, rootDomain?: string | null):
 }
 
 /**
+ * The realm a staff ROLE (not a portal) belongs to. Mirrors the mapping
+ * app/api/admin/accept-invite/route.ts already uses to pick `signInAt` after
+ * acceptance — kept in one place here so the invite EMAIL and the post-accept
+ * redirect can never point an invitee at two different realms.
+ */
+function realmForRole(role: string): StaffRealmKey {
+  const r = String(role || '');
+  if (r === 'sales' || r.startsWith('sales_') || r === 'deal_desk') return 'sales';
+  if (r === 'super_admin') return 'admin';
+  return 'merchant'; // owner, staff
+}
+
+/**
+ * The absolute URL for a staff invite email's accept link.
+ *
+ * THE BUG THIS FIXES. Every invite email built this link as
+ * `getSiteUrl() + '/admin/accept-invite?token=...'`. `getSiteUrl()` checks for
+ * a configured NEXT_PUBLIC_URL, then falls back to platform-injected vars for
+ * Vercel, Netlify and Cloudflare PAGES — this deployment is a git-integrated
+ * Cloudflare WORKER, which none of those cover, so it returned '' and the
+ * email shipped a bare relative path: "/admin/accept-invite?token=...". A
+ * browser resolves that against nothing (no page context — it's a link inside
+ * an email client), so "admin" gets treated as a literal hostname and fails
+ * DNS. Every invite was unusable.
+ *
+ * It was also going to be the WRONG host even fixed naively: `getSiteUrl()`
+ * resolves to the marketing/storefront root, not the staff subdomain the
+ * accept-invite page actually needs to be reached on (the path fence in
+ * middleware.ts only exempts /admin/accept-invite on the staff hosts). Built
+ * from PLATFORM_ROOT_DOMAIN + the role's own realm instead — the same input
+ * `staffLoginUrl` uses, and reliably set (unlike NEXT_PUBLIC_URL, which
+ * required a build-time value this deploy path never provided).
+ *
+ * Falls back to a relative path only when no root domain is configured at
+ * all (single-domain/local-dev, where a relative path IS correct — see
+ * staffLoginUrl's identical fallback).
+ */
+export function acceptInviteUrl(role: string, token: string, rootDomain?: string | null): string {
+  const realm = realmForRole(role);
+  const root = String(rootDomain || '').trim().toLowerCase().replace(/\.$/, '');
+  const path = '/admin/accept-invite?token=' + encodeURIComponent(token);
+  if (!root) return path;
+  const subdomain = realm === 'merchant' ? 'app' : realm === 'sales' ? 'sales' : 'admin';
+  return 'https://' + subdomain + '.' + root + path;
+}
+
+/**
  * Where "leave this sign-in page" should actually go.
  *
  * THE DEAD END THIS FIXES. The link was a bare `/`, which on a staff host is

@@ -6,7 +6,7 @@ import { isValidEmail } from '@/lib/validation';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 import { createInvite, INVITE_TTL_DAYS } from '@/lib/staff-invites';
 import { sendStaffInviteEmail } from '@/lib/email';
-import { getSiteUrl } from '@/lib/env';
+import { acceptInviteUrl } from '@/lib/staff-realms';
 
 export const dynamic = 'force-dynamic';
 
@@ -147,7 +147,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const acceptUrl = getSiteUrl().replace(/\/$/, '') + '/admin/accept-invite?token=' + encodeURIComponent(invite.token);
+    // Absolute, staff-host URL — see acceptInviteUrl's doc for why getSiteUrl()
+    // shipped a bare relative path here (DNS_PROBE_FINISHED_NXDOMAIN on click).
+    const acceptUrl = acceptInviteUrl('owner', invite.token, process.env.PLATFORM_ROOT_DOMAIN);
     const sent = await sendStaffInviteEmail({
       to: email,
       role: 'owner',
