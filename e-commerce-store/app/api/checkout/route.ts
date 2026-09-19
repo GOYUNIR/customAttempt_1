@@ -295,7 +295,8 @@ export async function POST(request: Request) {
       } else {
         customer = await stripe.customers.create({
           email,
-          metadata: { initialShippingAddress: address },
+          // Stripe metadata values must be strings — see app/api/checkout/direct/route.ts.
+          metadata: { initialShippingAddress: JSON.stringify(address) },
         });
       }
     }

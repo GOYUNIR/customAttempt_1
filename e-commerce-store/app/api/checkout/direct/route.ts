@@ -164,7 +164,12 @@ export async function POST(request: Request) {
       if (!stripeCustomerId) {
         const customer = await stripe.customers.create({
           email,
-          metadata: { initialShippingAddress: shippingAddress },
+          // Stripe metadata values must be strings — passing the raw address
+          // object here failed on every checkout, string or not: Stripe's
+          // validator rejects a non-string value before the charge itself is
+          // ever attempted. Found by actually running a checkout, not by
+          // reading the code.
+          metadata: { initialShippingAddress: JSON.stringify(shippingAddress) },
         });
         stripeCustomerId = customer.id;
       }
