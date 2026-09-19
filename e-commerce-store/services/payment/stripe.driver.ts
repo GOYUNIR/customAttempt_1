@@ -31,7 +31,17 @@ export class StripeDriver implements PaymentDriver {
     this.webhookSecret = String(options.webhookSecret || '').trim();
     if (this.configured) {
       try {
-        this.stripeClient = new Stripe(this.apiKey);
+        // MUST use the fetch-based HTTP client. The SDK's default is
+        // Stripe.createNodeHttpClient(), built on Node's native `https` module —
+        // Cloudflare Workers does not run real Node sockets even under
+        // nodejs_compat, and the result is not a clean failure but a silent,
+        // repeated connection failure: "An error occurred with our connection
+        // to Stripe. Request was retried 2 times." That message reads like a
+        // transient network blip. It is not — it fires on every single call,
+        // in production, which means every checkout was failing at the exact
+        // moment a customer tried to pay. `createFetchHttpClient()` routes
+        // through the platform's real `fetch()`, which Workers does support.
+        this.stripeClient = new Stripe(this.apiKey, { httpClient: Stripe.createFetchHttpClient() });
       } catch {
         this.stripeClient = null;
       }
