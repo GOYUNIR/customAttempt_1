@@ -343,7 +343,16 @@ export async function POST(request: Request) {
       const returnSlug = summaryItems[0]?.variant
         ? (allProducts[summaryItems[0].productId]?.slug || Object.values(allProducts)[0]?.slug || 'catalog')
         : (Object.values(allProducts)[0]?.slug || 'catalog');
-      const orderRef = buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size, refPrefix);
+      // Nonce for the same reason checkout/direct carries one: a cart purchase
+      // is repeatable, and orders are idempotent on (tenant_id, order_ref), so
+      // a stable ref makes a customer's second order overwrite their first
+      // rather than record a new sale. This ref is written into the session
+      // metadata below and read back by the webhook, so whatever is generated
+      // here is what the order is recorded under — the two cannot drift.
+      // Generated per checkout ATTEMPT rather than per session id because the
+      // session does not exist yet at this point.
+      const cartRefNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const orderRef = buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size, refPrefix, cartRefNonce);
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         customer: customer.id,

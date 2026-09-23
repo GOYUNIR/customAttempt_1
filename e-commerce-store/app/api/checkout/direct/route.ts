@@ -254,7 +254,12 @@ export async function POST(request: Request) {
       type: 'WINNER_CHARGED',
       shippingStatus: 'PENDING_FULFILLMENT',
       amountCents: priceCents,
-      orderRef: buildOrderRef(email, String(productId), String(size), refPrefix),
+      // The PaymentIntent id is folded in so each purchase gets its own ref.
+      // Instant buy is repeatable — the same person can buy the same size
+      // again — and orders are idempotent on (tenant_id, order_ref), so a
+      // stable ref here silently overwrote the previous order instead of
+      // recording a second sale. See buildOrderRef's doc.
+      orderRef: buildOrderRef(email, String(productId), String(size), refPrefix, paymentIntent.id),
       promoCode: promoCode || undefined,
     };
     await archiveEntry(redis, archiveRecord);

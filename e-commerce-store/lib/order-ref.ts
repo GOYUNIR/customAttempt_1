@@ -20,8 +20,29 @@ export function normalizeRefPrefix(value: unknown): string {
   return raw || 'GU';
 }
 
-export function buildOrderRef(email: string, productId: string, size: string, prefix?: string): string {
-  const seed = `${String(email || 'anon').trim().toLowerCase()}|${String(productId || 'product').trim()}|${String(size || 'standard').trim().toLowerCase()}`;
+/**
+ * A customer-facing order reference.
+ *
+ * WITHOUT `nonce` THIS IS DELIBERATELY STABLE: the same buyer, product and
+ * size always produce the same ref. The raffle flow depends on that — an entry
+ * stores its ref at signup and the draw reuses it weeks later to correlate the
+ * charge with the entry, and one person gets one allocation, so a collision is
+ * not possible there.
+ *
+ * PASS `nonce` ANYWHERE A CUSTOMER CAN BUY THE SAME THING TWICE. Orders are
+ * idempotent on (tenant_id, order_ref) (lib/order-write.ts), so a stable ref on
+ * a repeatable purchase does not create a second order — it OVERWRITES the
+ * first. Measured on production before this parameter existed: one buyer, two
+ * separate charges thirty-five seconds apart, two units of stock sold, and a
+ * single order row whose payment intent id was the second charge. The first
+ * payment existed in Stripe and nowhere in our database. The Stripe
+ * PaymentIntent id is the natural nonce — it is unique per charge, and folding
+ * it in keeps the ref the same short shape a customer can read out over the
+ * phone.
+ */
+export function buildOrderRef(email: string, productId: string, size: string, prefix?: string, nonce?: string): string {
+  const base = `${String(email || 'anon').trim().toLowerCase()}|${String(productId || 'product').trim()}|${String(size || 'standard').trim().toLowerCase()}`;
+  const seed = nonce ? `${base}|${String(nonce).trim()}` : base;
   const token = hashSeed(seed).slice(0, 8);
   return `${normalizeRefPrefix(prefix)}-${token}`;
 }
