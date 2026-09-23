@@ -13,6 +13,7 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { recordDrawRun } from '@/lib/draw-runs';
 import { notifyDeclinedWinners } from '@/lib/growth/modules/dunning';
 import { executeDrawWithCharging } from '@/lib/raffle';
+import { recordOrder } from '@/lib/order-write';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 export const dynamic = 'force-dynamic';
@@ -161,7 +162,7 @@ export async function POST(request: Request) {
           // double-clicked button or an immediate client retry replaying the
           // same charge. A deliberate re-draw minutes later gets a new key.
           const idempotencyKey = boundIdempotencyKey(`trigger-drop:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
-          await stripe.paymentIntents.create(
+          const winnerIntent = await stripe.paymentIntents.create(
             {
               amount: priceCents,
               currency: 'usd',
@@ -174,6 +175,29 @@ export async function POST(request: Request) {
             },
             { idempotencyKey },
           );
+
+          // RECORD THE SALE. This route charges real cards from the admin
+          // panel and has never written an order — the same gap the auto-draw
+          // engine had. Straight after the charge, before the winner email and
+          // the rest of the best-effort work below, so the record of the sale
+          // is not what a tight subrequest budget drops.
+          const recorded = await recordOrder({
+            tenantId: await ensureDefaultTenant(),
+            orderRef,
+            email: String(entry.email),
+            externalProductId: String(product.id),
+            productName: String(product.name),
+            size: String(size),
+            quantity: 1,
+            amountCents: priceCents,
+            checkoutMode: 'raffle',
+            stripeCustomerId: customerId,
+            stripePaymentIntentId: winnerIntent.id,
+          });
+          if (!recorded.ok) {
+            console.error('[trigger-drop] CHARGED BUT NOT RECORDED — ref=' + orderRef +
+              ' pi=' + winnerIntent.id + ': ' + recorded.message);
+          }
 
           live.inventoryRemaining -= 1;
           live.salesCompleted = (live.salesCompleted || 0) + 1;
@@ -233,7 +257,7 @@ export async function POST(request: Request) {
             // separately so a waitlist conversion and a draw win for the same
             // email+variant can never collide onto one key.
             const idempotencyKey = boundIdempotencyKey(`trigger-drop-waitlist:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
-            await stripe.paymentIntents.create(
+            const waitlistIntent = await stripe.paymentIntents.create(
               {
                 amount: basePriceCents,
                 currency: 'usd',
@@ -246,6 +270,33 @@ export async function POST(request: Request) {
               },
               { idempotencyKey },
             );
+
+            // A waitlist conversion is a sale too, and it also wrote no order.
+            // The PaymentIntent id is the nonce: unlike a raffle entry, the
+            // same person can come off the waitlist for the same variant more
+            // than once, and a stable ref would make the second purchase
+            // overwrite the first rather than record a new sale.
+            const waitlistRef = buildOrderRef(
+              String(entry.email), String(product.id), String(size), refPrefix, waitlistIntent.id,
+            );
+            const recordedWaitlist = await recordOrder({
+              tenantId: await ensureDefaultTenant(),
+              orderRef: waitlistRef,
+              email: String(entry.email),
+              externalProductId: String(product.id),
+              productName: String(product.name),
+              size: String(size),
+              quantity: 1,
+              amountCents: basePriceCents,
+              checkoutMode: 'waitlist',
+              stripeCustomerId: customerId,
+              stripePaymentIntentId: waitlistIntent.id,
+            });
+            if (!recordedWaitlist.ok) {
+              console.error('[trigger-drop] WAITLIST CHARGED BUT NOT RECORDED — ref=' + waitlistRef +
+                ' pi=' + waitlistIntent.id + ': ' + recordedWaitlist.message);
+            }
+
             live.inventoryRemaining -= 1;
             live.salesCompleted = (live.salesCompleted || 0) + 1;
             totalCharged++;

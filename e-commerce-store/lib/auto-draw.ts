@@ -21,6 +21,7 @@
  * fires for admin-created products.
  */
 
+import { recordOrder } from '@/lib/order-write';
 import { decrementForSale } from '@/lib/inventory';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
@@ -559,7 +560,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             // incremented after it), so the NEXT cycle of a recurring raffle
             // legitimately produces a new key and can charge again.
             const idempotencyKey = boundIdempotencyKey(`autodraw:${product.id}:${productSize}:${live.drawsCompleted || 0}:${winnerEmail}`);
-            await stripe.paymentIntents.create(
+            const winnerIntent = await stripe.paymentIntents.create(
               {
                 amount: priceCents, currency: 'usd', customer: customerId, payment_method: paymentMethod,
                 off_session: true, confirm: true, receipt_email: winnerEmail,
@@ -578,12 +579,61 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             // so a direct purchase could be accepted for a unit a raffle
             // winner already owns. Post-charge, so it logs rather than throws:
             // aborting here would leave winners charged but unprocessed.
+            // Captured once and reused by the order write below, rather than
+            // calling ensureDefaultTenant() twice per winner on the hot path of
+            // a draw that may charge many of them.
+            const drawTenantId = await ensureDefaultTenant();
             await decrementForSale({
-              tenantId: await ensureDefaultTenant(),
+              tenantId: drawTenantId,
               externalProductId: String(product.id),
               size: String(productSize),
               context: 'auto-draw',
             });
+
+            // RECORD THE SALE. THIS ENGINE HAS NEVER WRITTEN AN ORDER.
+            //
+            // A raffle winner's charge is the moment a raffle becomes a sale,
+            // and until now it produced only the KV archive entry below. The
+            // Stripe webhook does not cover it either: the winner's card was
+            // saved by a `mode: 'setup'` session, so the only
+            // checkout.session.completed for this buyer fired when nothing had
+            // been charged. The money moves HERE, off-session, with no session
+            // behind it.
+            //
+            // A previous pass added this to lib/draw.ts instead. That module
+            // exports runDropDraw and NOTHING IN THE REPOSITORY IMPORTS IT —
+            // it is dead code that mirrors this engine closely enough to be
+            // mistaken for it. The fix landed in the file nobody runs, and
+            // every real winner kept going unrecorded. Checking which module a
+            // route actually reaches would have caught that in a minute.
+            //
+            // Placed immediately after the charge and the authoritative stock
+            // write, ahead of the best-effort promo bookkeeping and emails
+            // below, because a Worker has a finite subrequest budget and the
+            // record of the sale must not be what runs out of it.
+            //
+            // Idempotent on (tenant_id, order_ref), which matters here more
+            // than anywhere: the Stripe idempotency key above means a
+            // re-triggered draw replays the SAME charge, so the order write
+            // must update one order rather than invent a second sale for it.
+            const recordedWinner = await recordOrder({
+              tenantId: drawTenantId,
+              orderRef,
+              email: winnerEmail,
+              externalProductId: String(product.id),
+              productName: String(productName),
+              size: String(productSize),
+              quantity: 1,
+              amountCents: priceCents,
+              checkoutMode: 'raffle',
+              promoCode: promoCode || null,
+              stripeCustomerId: customerId,
+              stripePaymentIntentId: winnerIntent.id,
+            });
+            if (!recordedWinner.ok) {
+              console.error('[auto-draw] CHARGED BUT NOT RECORDED — ref=' + orderRef +
+                ' pi=' + winnerIntent.id + ': ' + recordedWinner.message);
+            }
 
             live.inventoryRemaining = Math.max(0, live.inventoryRemaining - 1);
             live.salesCompleted = (live.salesCompleted || 0) + 1;

@@ -1,3 +1,18 @@
+/**
+ * ⚠️ DEAD CODE. NOTHING IN THIS REPOSITORY IMPORTS `runDropDraw`.
+ *
+ * The live draw engine is `lib/auto-draw.ts` (`runAutoDraws`), reached through
+ * /api/checkout/auto-draw and /api/checkout/cron-draw, plus the admin panel's
+ * own charging path in /api/admin/trigger-drop. This module mirrors that
+ * engine closely enough to be mistaken for it, and it was: a pass to make
+ * every charge write an order added `recordOrder` HERE, reported the raffle
+ * path fixed, and left every real winner unrecorded. The fix landed in the
+ * file nobody runs.
+ *
+ * Do not "fix" bugs here expecting production to change. Either delete this
+ * file or wire it up — leaving it as a convincing decoy is what cost the
+ * money path a release.
+ */
 import { recordOrder } from '@/lib/order-write';
 import type { NextRequest } from 'next/server';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
