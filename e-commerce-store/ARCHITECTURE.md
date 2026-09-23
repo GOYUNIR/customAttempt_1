@@ -463,6 +463,29 @@ bytes per hit are not.
 
 ## Deferred work register
 
+**DEFERRED-7: sold-out auto-archiving has been dead since the catalog moved to Postgres.**
+Condition to pick up: when sold-out products visibly pile up on the
+storefront, or when the merchant panel grows a catalog-lifecycle screen.
+
+`app/api/store/route.ts` and `app/api/catalog/status/route.ts` both archive a
+product once `now >= soldOutAt + soldOutArchiveDelayHours`. Under
+`STORAGE_PROVIDER=supabase` that never fires, because `soldOutAt` is always
+empty: there is no `sold_out_at` column, `lib/catalog-write.ts` does not write
+the field, `lib/postgres-catalog-read.ts` does not read it, and there is no
+jsonb passthrough carrying it.
+
+Found while cutting subrequests: the checkout webhook was calling
+`writeProductToPostgres` on every sold-out sale — three PostgREST calls plus a
+per-variant insert loop, on the most budget-starved path in the system — to
+persist exactly one field, which the write then dropped. That call is gone.
+Nothing persisted changed, because nothing was being persisted.
+
+Reviving the feature needs a real `sold_out_at` column plus a decision about
+what to backfill for products that already sold out (almost certainly
+nothing — inventing a sold-out timestamp would archive live products on
+deploy). Do it deliberately, with the live schema checked first; do NOT
+restore it by putting a catalog write back on the checkout path.
+
 **DEFERRED-6: the homepage promises no percentage fee; the new tiers charge one.**
 Condition to pick up: BEFORE the graduated pricing tiers ship publicly. Not
 urgent on its own, but it must not be live at the same time as the new plans.

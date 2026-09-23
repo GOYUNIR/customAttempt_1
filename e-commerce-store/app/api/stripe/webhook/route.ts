@@ -2,10 +2,10 @@ import { ensureCustomer } from '@/lib/customers';
 import { adjustRewards, readProfile } from '@/lib/customer-profile';
 import { mirrorRewardsToKv } from '@/lib/customer-profile-bridge';
 import { NextResponse } from 'next/server';
-import { writeProductToPostgres } from '@/lib/catalog-write';
 import {
   createKvClient,
   archiveEntry,
+  archiveEntries,
   cleanupMatchingIntent,
   emailBlockKey,
   cardBlockKey,
@@ -623,6 +623,11 @@ export async function POST(request: Request) {
         // Everything below is a KV mirror of state Postgres already holds, or
         // a ledger entry. Losing one to an exhausted budget is recoverable;
         // losing the order above is not, which is why it no longer runs here.
+        // One ledger write for the whole cart. `archiveUnitIndex` runs across
+        // the ENTIRE order rather than restarting per line, which also fixes a
+        // duplicate: two lines of quantity 1 both produced `<ref>-1`.
+        const cartArchiveRecords: any[] = [];
+        let archiveUnitIndex = 0;
         for (const l of cartLines) {
           const thisProduct = l.product;
           const thisSize = l.size;
@@ -657,26 +662,37 @@ export async function POST(request: Request) {
           if (!lockResult.ok) {
             console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', thisProduct.id, thisSize);
           }
-          if (lockResult.ok && lockResult.value.inventoryRemaining <= 0) {
-            thisProduct.soldOutAt = thisProduct.soldOutAt || new Date().toISOString();
-            // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
-            // the way the admin routes are: the customer is already charged
-            // by the time this runs, and throwing would return non-2xx, which
-            // makes Stripe RETRY an event that already succeeded. A stale
-            // soldOutAt is a display problem; a retried webhook is a money
-            // problem. So it logs loudly and returns, matching this handler's
-            // existing "never fail the webhook response" contract.
-            try {
-              const soldOutTenant = cartTenantId || await ensureDefaultTenant();
-              const r = await writeProductToPostgres(soldOutTenant, thisProduct);
-              if (!r.ok) console.error('[webhook] soldOutAt write failed (cart) — catalog may show this as in stock', thisProduct.id, r.error);
-            } catch (err) {
-              console.error('[webhook] soldOutAt write threw (cart)', thisProduct.id, (err as Error)?.message || err);
-            }
-          }
+          // THE SOLD-OUT CATALOG WRITE IS GONE, AND IT NEVER DID ANYTHING.
+          //
+          // This block set `soldOutAt` on the in-memory product and then called
+          // writeProductToPostgres to persist it — three PostgREST calls plus a
+          // per-variant insert loop, on the most budget-starved path in the
+          // system. But `sold_out_at` IS NOT A COLUMN: neither
+          // lib/catalog-write.ts nor lib/postgres-catalog-read.ts mentions the
+          // field, and there is no jsonb passthrough carrying it. The only
+          // field this code mutated was one the write ignores, and
+          // statusFromFlags() does not read it either, so the call rewrote
+          // unchanged data at full price.
+          //
+          // Removing it changes no persisted state. It also does not make
+          // anything worse: the storefront derives sold-out from Postgres
+          // inventory, which shadowDecrementInventory has already written
+          // above, so the display is driven by the authoritative number rather
+          // than a timestamp that was never stored.
+          //
+          // What IS lost is a feature that was already dead — sold-out products
+          // auto-archiving after `soldOutArchiveDelayHours` (app/api/store
+          // and app/api/catalog/status both read `soldOutAt` to decide it) has
+          // not worked since the catalog moved to Postgres, because the value
+          // they read is always empty. Reviving it needs a real column and a
+          // backfill decision; see DEFERRED-7. It is not something to smuggle
+          // back in from the checkout webhook.
 
+          // Collected across every line and unit, written once below. One
+          // rpush carries the whole cart for the same two HTTP calls a single
+          // entry used to cost.
           for (let i = 0; i < qty; i += 1) {
-            await archiveEntry(redis, {
+            cartArchiveRecords.push({
               email,
               variant: thisProduct.name,
               size: thisSize,
@@ -687,10 +703,12 @@ export async function POST(request: Request) {
               shippingStatus: 'PENDING_FULFILLMENT',
               amountCents: priceCents,
               promoCode: appliedPromo || undefined,
-              orderRef: orderRef ? `${orderRef}-${i + 1}` : `DIRECT-${session.id}-${i + 1}`,
+              orderRef: orderRef ? `${orderRef}-${archiveUnitIndex + 1}` : `DIRECT-${session.id}-${archiveUnitIndex + 1}`,
             } as any);
+            archiveUnitIndex += 1;
           }
         }
+        await archiveEntries(redis, cartArchiveRecords);
         // ONCE for the cart, not once per line. Called per item this repeated a
         // config read, a tenant lookup, a balance read/write and a KV mirror
         // for every product in the basket, to arrive at a single total.
@@ -723,22 +741,10 @@ export async function POST(request: Request) {
           if (!lockResult.ok) {
             console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', product.id, size);
           }
-          if (lockResult.ok && lockResult.value.inventoryRemaining <= 0) {
-            product.soldOutAt = product.soldOutAt || new Date().toISOString();
-            // H3: the catalog is Postgres now. DELIBERATELY NOT fail-loud in
-            // the way the admin routes are: the customer is already charged
-            // by the time this runs, and throwing would return non-2xx, which
-            // makes Stripe RETRY an event that already succeeded. A stale
-            // soldOutAt is a display problem; a retried webhook is a money
-            // problem. So it logs loudly and returns, matching this handler's
-            // existing "never fail the webhook response" contract.
-            try {
-              const r = await writeProductToPostgres(await ensureDefaultTenant(), product);
-              if (!r.ok) console.error('[webhook] soldOutAt write failed (direct) — catalog may show this as in stock', product.id, r.error);
-            } catch (err) {
-              console.error('[webhook] soldOutAt write threw (direct)', product.id, (err as Error)?.message || err);
-            }
-          }
+          // Removed for the same reason as the cart branch above: `sold_out_at`
+          // is not a column, so this rewrote the whole product and all its
+          // variants to persist a field that is silently dropped. See the
+          // longer note there and DEFERRED-7.
 
           await archiveEntry(redis, {
             email,

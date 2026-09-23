@@ -110,6 +110,29 @@ export async function archiveEntry(redis: StorageClient, record: ArchiveRecord) 
   } catch {}
 }
 
+/**
+ * Append several ledger records in ONE round trip.
+ *
+ * `rpush` is variadic and the Supabase-backed store implements it as a single
+ * read-modify-write of one jsonb blob, so the cost is two HTTP calls whether
+ * it carries one record or fifty. Called per record instead, a cart of three
+ * units spent six; a quantity-five line spent ten. On the checkout webhook,
+ * which measured 52 subrequests against a free-plan ceiling of 50, that was
+ * real money: the calls that fell off the end were the order write.
+ *
+ * Same swallow-and-continue contract as archiveEntry — the ledger is a
+ * best-effort mirror and must never fail a request that has already charged a
+ * card. The difference is that a failure now loses the whole batch rather
+ * than one entry, which is the correct trade: a partially-written ledger for
+ * one order is harder to reconcile than an absent one.
+ */
+export async function archiveEntries(redis: StorageClient, records: ArchiveRecord[]) {
+  if (!records.length) return;
+  try {
+    await redis.rpush(ARCHIVE_LEDGER_KEY, ...records.map((r) => JSON.stringify(r)));
+  } catch {}
+}
+
 export async function loadStoreConfig(redis: StorageClient | null | undefined): Promise<Record<string, any>> {
   if (!redis) return {};
   try {
