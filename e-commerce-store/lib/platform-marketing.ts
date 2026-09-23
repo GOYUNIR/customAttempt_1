@@ -112,6 +112,29 @@ export type Plan = {
   tagline: string;
   points: string[];
   featured?: boolean;
+  /**
+   * The line under the price. Free-to-start is the answer to "you are new, why
+   * would I risk it", so the terms of the risk-removal are data: the sentence
+   * that removes the objection changes far more often than the layout does.
+   */
+  priceNote?: string;
+  /** Days of full access before the first charge. 0/undefined means none. */
+  trialDays?: number;
+  /**
+   * What the button says. Here rather than in app/platform/page.tsx because
+   * "Start free" and "Talk to us" are different promises, and which promise a
+   * tier makes is a pricing decision, not a layout one.
+   */
+  ctaLabel?: string;
+  /**
+   * The honest ceiling on a free plan, in the merchant's own terms.
+   *
+   * A free tier with no stated limit is either a lie or a bill we cannot pay.
+   * Ours is bounded by the thing that actually costs us money per tenant —
+   * transactional email (see lib/growth/ledger.ts: one shared provider
+   * allowance across every tenant on the platform), not storage or pageviews.
+   */
+  limitNote?: string;
 };
 
 /**
@@ -128,9 +151,30 @@ export type Plan = {
  */
 export const PLANS: Plan[] = [
   {
+    id: 'free',
+    name: 'Free',
+    monthlyUsd: 0,
+    tagline: 'Open a real store and sell. No card, no clock.',
+    priceNote: 'Free while you are finding your first customers.',
+    ctaLabel: 'Start free',
+    // The ceiling is stated in orders because that is the unit a merchant
+    // thinks in. It maps to our real constraint — every order sends
+    // transactional mail out of one shared provider allowance.
+    limitNote: 'Up to 50 orders a month. Everything else is the same product.',
+    points: [
+      'A real storefront on your own domain',
+      'Oversell protection from the first sale',
+      'Your own Stripe account — the money is yours',
+      'Move to a paid plan only when the limit starts costing you sales',
+    ],
+  },
+  {
     id: 'starter',
     name: 'Starter',
     monthlyUsd: 29,
+    trialDays: 14,
+    priceNote: '14 days free. Cancel before the first charge and pay nothing.',
+    ctaLabel: 'Start free trial',
     tagline: 'One store, everything that stops you losing sales.',
     points: [
       'Unlimited products and drops',
@@ -144,6 +188,9 @@ export const PLANS: Plan[] = [
     name: 'Growth',
     monthlyUsd: 99,
     featured: true,
+    trialDays: 14,
+    priceNote: '14 days free. Cancel before the first charge and pay nothing.',
+    ctaLabel: 'Start free trial',
     tagline: 'For stores where the growth modules pay for themselves.',
     points: [
       'Everything in Starter',
@@ -157,6 +204,7 @@ export const PLANS: Plan[] = [
     id: 'scale',
     name: 'Scale',
     monthlyUsd: null,
+    ctaLabel: 'Talk to us',
     tagline: 'Multiple stores, or volume that needs its own conversation.',
     points: [
       'Everything in Growth',

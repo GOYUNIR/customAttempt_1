@@ -154,7 +154,9 @@ export default function PlatformPage() {
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section id="pricing" style={{ ...SHELL, padding: '70px 20px 0' }}>
         <h2 style={SECTION_LABEL}>Pricing</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 18 }}>
+        {/* 240px min so four tiers fit one row inside the 1100px shell; below
+            that they wrap in pairs rather than stranding a single card. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18 }}>
           {PLANS.map((plan) => {
             // 'Contact us' used to point at #start — the self-signup form. A buyer
             // asking for a conversation was handed a create-your-own-store wizard.
@@ -166,7 +168,12 @@ export default function PlatformPage() {
             const ctaHref = quoteTier && inbox
               ? 'mailto:' + inbox + '?subject=' + encodeURIComponent('Scale plan enquiry')
               : '#start';
-            const ctaLabel = quoteTier ? (inbox ? 'Email us' : 'Start a store') : 'Start here';
+            // The label is the plan's own promise (lib/platform-marketing.ts).
+            // Only the quote tier overrides it, and only to stay honest about
+            // where the button actually goes when no inbox is configured.
+            const ctaLabel = quoteTier && !inbox
+              ? 'Start a store'
+              : (plan.ctaLabel || 'Start here');
             return (
             <div
               key={plan.id}
@@ -181,12 +188,22 @@ export default function PlatformPage() {
                   {plan.name}
                 </div>
                 <div style={{ fontSize: 34, fontWeight: 800, marginTop: 10, letterSpacing: '-1px' }}>
-                  {plan.monthlyUsd === null ? 'Let’s talk' : `$${plan.monthlyUsd}`}
-                  {plan.monthlyUsd !== null && (
+                  {plan.monthlyUsd === null ? 'Let’s talk' : plan.monthlyUsd === 0 ? 'Free' : `$${plan.monthlyUsd}`}
+                  {plan.monthlyUsd !== null && plan.monthlyUsd > 0 && (
                     <span style={{ fontSize: 14, fontWeight: 600, color: INK.muted }}> /month</span>
                   )}
                 </div>
+                {plan.priceNote && (
+                  <p style={{ fontSize: 12.5, lineHeight: 1.5, color: INK.text, margin: '7px 0 0', fontWeight: 600 }}>
+                    {plan.priceNote}
+                  </p>
+                )}
                 <p style={{ fontSize: 13.5, lineHeight: 1.6, color: INK.muted, margin: '10px 0 0' }}>{plan.tagline}</p>
+                {plan.limitNote && (
+                  <p style={{ fontSize: 12.5, lineHeight: 1.55, color: INK.muted, margin: '8px 0 0' }}>
+                    {plan.limitNote}
+                  </p>
+                )}
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 9, flex: '1 1 auto' }}>
                 {plan.points.map((point) => (
@@ -213,9 +230,10 @@ export default function PlatformPage() {
           })}
         </div>
         <p style={{ fontSize: 12.5, color: INK.muted, margin: '14px 2px 0', maxWidth: 760, lineHeight: 1.6 }}>
-          Flat monthly pricing, billed through Stripe. We do not charge a percentage of the revenue
-          our own tools claim to have generated — that is only fair once the measurement has been
-          proven over time, and we would rather earn it than assume it.
+          Start free and stay free until the limit starts costing you sales. Paid plans are flat and
+          monthly, billed through Stripe. We do not charge a percentage of the revenue our own tools
+          claim to have generated — that is only fair once the measurement has been proven over
+          time, and we would rather earn it than assume it.
         </p>
       </section>
 
