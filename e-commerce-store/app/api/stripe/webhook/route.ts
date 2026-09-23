@@ -521,13 +521,99 @@ export async function POST(request: Request) {
           const rawCart = String(meta.cartItems || '[]');
           if (rawCart.length <= 50_000) cartItems = JSON.parse(rawCart);
         } catch {}
-        const cartOrderLines: RecordOrderLine[] = [];
+
+        // Resolve the cart from metadata and the already-loaded catalog. This
+        // costs NO subrequests, which is the whole point of doing it here.
+        const cartLines: Array<{ product: any; size: string; qty: number; priceCents: number }> = [];
         for (const item of cartItems) {
           const thisProduct = allProducts[String(item.productId || '')] as any;
           if (!thisProduct) continue;
-          const thisSize = String(item.size || 'Standard');
-          const qty = Math.max(1, Number(item.quantity || 1));
-          const priceCents = Math.max(0, Number(item.priceCents || 0));
+          cartLines.push({
+            product: thisProduct,
+            size: String(item.size || 'Standard'),
+            qty: Math.max(1, Number(item.quantity || 1)),
+            priceCents: Math.max(0, Number(item.priceCents || 0)),
+          });
+        }
+        const cartTotalCents = cartLines.reduce((sum, l) => sum + l.priceCents * l.qty, 0);
+
+        // ── AUTHORITATIVE WRITES FIRST ──────────────────────────────────────
+        //
+        // THE ORDER USED TO BE WRITTEN LAST, AND THAT IS WHY NO CART ORDER HAS
+        // EVER EXISTED. A Cloudflare Worker gets a fixed budget of subrequests
+        // per invocation, and every Redis and PostgREST call spends one. The
+        // per-item KV mirroring, archive entries, sold-out catalog writes and
+        // reward points ahead of it burned the whole budget, so on a two-item
+        // cart the run reached this point with nothing left. Measured on
+        // production against a real $57.00 charge:
+        //
+        //   [redis-lock] atomic acquire failed cache:lock:inventory:...
+        //   Too many subrequests by single Worker invocation.   (x23)
+        //
+        // The handler then returned 200, Stripe considered the event
+        // delivered, the session was marked processed, and the customer had
+        // paid for two products that no order row mentions.
+        //
+        // So the ordering is now deliberate: the sale and the authoritative
+        // stock count are written before anything best-effort is allowed to
+        // spend the budget. A cart big enough to exhaust it now loses a KV
+        // mirror, which self-heals, instead of losing the record of the sale,
+        // which does not.
+        let cartTenantId: string | null = null;
+        if (cartLines.length > 0 && isPostgresPrimaryEnabled()) {
+          cartTenantId = await ensureDefaultTenant().catch((err) => {
+            // NEVER SILENT. This used to be `.catch(() => null)` followed by
+            // `if (orderTenantId)`, so when the tenant lookup failed the order
+            // was skipped without a single line of log — the one failure on
+            // this path that must be loud was the one that said nothing.
+            console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+              ' ref=' + String(orderRef || session.id) + ': tenant lookup failed: ' +
+              ((err as Error)?.message || String(err)));
+            return null;
+          });
+          if (cartTenantId) {
+            // ONE PAYMENT, ONE ORDER, EVERY LINE. recordOrder was previously
+            // called once per cart item with the single order_ref from the
+            // session metadata; orders upsert on (tenant_id, order_ref) and
+            // their line items are replaced rather than appended, so each item
+            // erased the one before it and a two-item cart recorded only its
+            // last line.
+            const recorded = await recordOrder({
+              tenantId: cartTenantId,
+              orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
+              email,
+              lines: cartLines.map((l) => ({
+                externalProductId: String(l.product.id),
+                productName: String(l.product.name),
+                size: l.size,
+                quantity: l.qty,
+                amountCents: l.priceCents * l.qty,
+              })),
+              checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
+              promoCode: appliedPromo,
+              stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+            });
+            if (!recorded.ok) {
+              console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+                ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
+            }
+            // Authoritative stock, straight after the sale and before any
+            // best-effort work can spend what is left of the budget.
+            for (const l of cartLines) {
+              await shadowDecrementInventory(cartTenantId, String(l.product.id), l.size, l.qty);
+            }
+          }
+        }
+
+        // ── BEST-EFFORT MIRRORS ─────────────────────────────────────────────
+        // Everything below is a KV mirror of state Postgres already holds, or
+        // a ledger entry. Losing one to an exhausted budget is recoverable;
+        // losing the order above is not, which is why it no longer runs here.
+        for (const l of cartLines) {
+          const thisProduct = l.product;
+          const thisSize = l.size;
+          const qty = l.qty;
+          const priceCents = l.priceCents;
           // Atomic-ish: serialize concurrent decrements for this product+size
           // so two paid orders can never both read the same stock count and
           // both write back a decrement — that's how you oversell the last
@@ -540,11 +626,11 @@ export async function POST(request: Request) {
             return inner;
           };
           const lockResult = await withRedisLock(redis, `inventory:${thisProduct.id}:${thisSize}`, decrementInventory);
-          // KV live-state mirror ONLY. inventory_levels is decremented by the
-          // pre-existing shadowDecrementInventory() call further down, which
-          // also records a platform audit on failure -- adding a second
-          // decrement here DOUBLE-DECREMENTED every cart order. Caught by
-          // counting decrements per path, not by any test.
+          // KV live-state mirror ONLY. inventory_levels is decremented by
+          // shadowDecrementInventory above, which also records a platform
+          // audit on failure -- adding a second decrement here
+          // DOUBLE-DECREMENTED every cart order. Caught by counting decrements
+          // per path, not by any test.
           //
           // The old "if (!lockResult.ok) await decrementInventory()" unlocked
           // fallback is GONE: with a lock that genuinely excludes, that branch
@@ -567,7 +653,8 @@ export async function POST(request: Request) {
             // problem. So it logs loudly and returns, matching this handler's
             // existing "never fail the webhook response" contract.
             try {
-              const r = await writeProductToPostgres(await ensureDefaultTenant(), thisProduct);
+              const soldOutTenant = cartTenantId || await ensureDefaultTenant();
+              const r = await writeProductToPostgres(soldOutTenant, thisProduct);
               if (!r.ok) console.error('[webhook] soldOutAt write failed (cart) — catalog may show this as in stock', thisProduct.id, r.error);
             } catch (err) {
               console.error('[webhook] soldOutAt write threw (cart)', thisProduct.id, (err as Error)?.message || err);
@@ -589,55 +676,11 @@ export async function POST(request: Request) {
               orderRef: orderRef ? `${orderRef}-${i + 1}` : `DIRECT-${session.id}-${i + 1}`,
             } as any);
           }
-          await awardPurchasePoints(redis, email, priceCents * qty);
-
-          if (isPostgresPrimaryEnabled()) {
-            const orderTenantId = await ensureDefaultTenant().catch(() => null);
-            if (orderTenantId) {
-              await shadowDecrementInventory(orderTenantId, String(thisProduct.id), thisSize, qty);
-            }
-          }
-
-          // Collected, not written, until every line is known. See below.
-          cartOrderLines.push({
-            externalProductId: String(thisProduct.id),
-            productName: String(thisProduct.name),
-            size: thisSize,
-            quantity: qty,
-            amountCents: priceCents * qty,
-          });
         }
-
-        // ONE PAYMENT, ONE ORDER, EVERY LINE. This used to run INSIDE the loop
-        // above, once per cart item, with the single orderRef taken from the
-        // session metadata. Orders upsert on (tenant_id, order_ref) and their
-        // line items are replaced rather than appended, so each item erased the
-        // one before it: a two-item cart charged for both and recorded only the
-        // last, with the earlier product missing from the order entirely — not
-        // as revenue, and not as anything fulfilment could see to ship.
-        //
-        // The card is already charged by the time this runs. A failed order
-        // write is money taken with no order behind it, so it is logged as the
-        // defect it is rather than warned about — the KV archive entries
-        // written above are what make it recoverable.
-        if (cartOrderLines.length > 0 && isPostgresPrimaryEnabled()) {
-          const orderTenantId = await ensureDefaultTenant().catch(() => null);
-          if (orderTenantId) {
-            const recorded = await recordOrder({
-              tenantId: orderTenantId,
-              orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
-              email,
-              lines: cartOrderLines,
-              checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
-              promoCode: appliedPromo,
-              stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
-            });
-            if (!recorded.ok) {
-              console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
-                ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
-            }
-          }
-        }
+        // ONCE for the cart, not once per line. Called per item this repeated a
+        // config read, a tenant lookup, a balance read/write and a KV mirror
+        // for every product in the basket, to arrive at a single total.
+        await awardPurchasePoints(redis, email, cartTotalCents);
       } else {
         const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
         if (product && email) {
@@ -699,7 +742,15 @@ export async function POST(request: Request) {
           await awardPurchasePoints(redis, email, Number(session.amount_total || 0));
 
           if (isPostgresPrimaryEnabled()) {
-            const orderTenantId = await ensureDefaultTenant().catch(() => null);
+            // Loud for the same reason as the cart branch above: a swallowed
+            // tenant lookup skipped the order write without logging anything,
+            // so money taken with no order behind it looked like a clean run.
+            const orderTenantId = await ensureDefaultTenant().catch((err) => {
+              console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+                ' ref=' + String(orderRef || session.id) + ': tenant lookup failed: ' +
+                ((err as Error)?.message || String(err)));
+              return null;
+            });
             if (orderTenantId) {
               const recorded = await recordOrder({
                 tenantId: orderTenantId,
