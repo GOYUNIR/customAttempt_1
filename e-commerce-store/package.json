@@ -34,6 +34,7 @@
     "verify:staff-auth": "tsx scripts/verify-staff-auth.ts",
     "verify:invites": "tsx scripts/verify-staff-invites.ts",
     "verify:orders": "tsx scripts/verify-order-write.ts",
+    "verify:cart-orders": "tsx scripts/verify-cart-order-write.ts",
     "verify:draw-runs": "tsx scripts/verify-draw-runs.ts",
     "verify:dunning": "tsx scripts/verify-dunning.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",

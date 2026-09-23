@@ -29,7 +29,7 @@ import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/pay
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
-import { recordOrder } from '@/lib/order-write';
+import { recordOrder, type RecordOrderLine } from '@/lib/order-write';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory } from '@/lib/inventory';
@@ -521,6 +521,7 @@ export async function POST(request: Request) {
           const rawCart = String(meta.cartItems || '[]');
           if (rawCart.length <= 50_000) cartItems = JSON.parse(rawCart);
         } catch {}
+        const cartOrderLines: RecordOrderLine[] = [];
         for (const item of cartItems) {
           const thisProduct = allProducts[String(item.productId || '')] as any;
           if (!thisProduct) continue;
@@ -593,28 +594,47 @@ export async function POST(request: Request) {
           if (isPostgresPrimaryEnabled()) {
             const orderTenantId = await ensureDefaultTenant().catch(() => null);
             if (orderTenantId) {
-              // The card is already charged at this point. A failed order write
-              // is money taken with no order behind it, so it is logged as the
-              // defect it is rather than warned about — the KV archive entry
-              // written above is what makes it recoverable.
-              const recorded = await recordOrder({
-                tenantId: orderTenantId,
-                orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
-                email,
-                externalProductId: String(thisProduct.id),
-                productName: thisProduct.name,
-                size: thisSize,
-                quantity: qty,
-                amountCents: priceCents * qty,
-                checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
-                promoCode: appliedPromo,
-                stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
-              });
-              if (!recorded.ok) {
-                console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
-                  ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
-              }
               await shadowDecrementInventory(orderTenantId, String(thisProduct.id), thisSize, qty);
+            }
+          }
+
+          // Collected, not written, until every line is known. See below.
+          cartOrderLines.push({
+            externalProductId: String(thisProduct.id),
+            productName: String(thisProduct.name),
+            size: thisSize,
+            quantity: qty,
+            amountCents: priceCents * qty,
+          });
+        }
+
+        // ONE PAYMENT, ONE ORDER, EVERY LINE. This used to run INSIDE the loop
+        // above, once per cart item, with the single orderRef taken from the
+        // session metadata. Orders upsert on (tenant_id, order_ref) and their
+        // line items are replaced rather than appended, so each item erased the
+        // one before it: a two-item cart charged for both and recorded only the
+        // last, with the earlier product missing from the order entirely — not
+        // as revenue, and not as anything fulfilment could see to ship.
+        //
+        // The card is already charged by the time this runs. A failed order
+        // write is money taken with no order behind it, so it is logged as the
+        // defect it is rather than warned about — the KV archive entries
+        // written above are what make it recoverable.
+        if (cartOrderLines.length > 0 && isPostgresPrimaryEnabled()) {
+          const orderTenantId = await ensureDefaultTenant().catch(() => null);
+          if (orderTenantId) {
+            const recorded = await recordOrder({
+              tenantId: orderTenantId,
+              orderRef: orderRef ? `${orderRef}` : `DIRECT-${session.id}`,
+              email,
+              lines: cartOrderLines,
+              checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
+              promoCode: appliedPromo,
+              stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+            });
+            if (!recorded.ok) {
+              console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
+                ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
             }
           }
         }
