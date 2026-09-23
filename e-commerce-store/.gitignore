@@ -66,3 +66,4 @@ next-env.d.ts
 .mapbox-*
 files_list.txt
 *.pid
+scripts/tmp-*
