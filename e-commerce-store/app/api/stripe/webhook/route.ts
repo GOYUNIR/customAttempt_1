@@ -589,7 +589,15 @@ export async function POST(request: Request) {
                 quantity: l.qty,
                 amountCents: l.priceCents * l.qty,
               })),
-              checkoutMode: String((meta as Record<string, unknown>).checkoutMode || ''),
+              // A `checkoutType: 'cart'` session is ALWAYS first-come-first-served:
+              // app/api/checkout/cart/route.ts partitions the basket and sends
+              // raffle lines to a separate `mode: 'setup'` session under
+              // `raffle_cart`, so nothing raffle-shaped reaches this branch.
+              // The metadata has no `checkoutMode` key at all, so reading it
+              // produced '' and every cart order was stored with a NULL
+              // checkout_mode — invisible to per-mode revenue reporting, and
+              // ambiguous for the per-payment fee attribution Connect needs.
+              checkoutMode: 'fcfs',
               promoCode: appliedPromo,
               stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
             });
