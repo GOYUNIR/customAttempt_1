@@ -21,6 +21,7 @@ import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory, restockInventory } from '@/lib/inventory';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
+import { recordOrder } from '@/lib/order-write';
 
 /** Same anti-scalping check `checkout/route.ts` enforces before creating a
  * Stripe Checkout Session — this direct-charge path was missing it entirely,
@@ -257,6 +258,44 @@ export async function POST(request: Request) {
       promoCode: promoCode || undefined,
     };
     await archiveEntry(redis, archiveRecord);
+
+    // RECORD THE SALE IN POSTGRES. Until now this route charged the card and
+    // wrote only the Redis archive entry above, so public.orders had zero rows
+    // after real production charges. The webhook is not a fallback here: it
+    // only handles `checkout.session.completed`, and this route never creates a
+    // Checkout Session — it confirms a PaymentIntent directly, so no such event
+    // ever exists for these sales.
+    //
+    // Written here rather than by teaching the webhook `payment_intent.succeeded`
+    // because this route already holds every field the order needs. Routing it
+    // through Stripe and back would mean stuffing product, size, tenant and ref
+    // into PaymentIntent metadata purely to read them again seconds later.
+    //
+    // recordOrder is idempotent on (tenant_id, order_ref), so a client retry of
+    // the same attempt updates one order instead of creating a second.
+    if (pgTenantId) {
+      const recorded = await recordOrder({
+        tenantId: pgTenantId,
+        orderRef: archiveRecord.orderRef!,
+        email: normalizedEmail,
+        externalProductId: String(productId),
+        productName: product.name,
+        size: String(size),
+        quantity: 1,
+        amountCents: priceCents,
+        checkoutMode: 'fcfs',
+        promoCode: promoCode || null,
+        stripeCustomerId: stripeCustomerId || null,
+        stripePaymentIntentId: paymentIntent.id,
+      });
+      if (!recorded.ok) {
+        // The card is already charged. An unrecorded order is money taken with
+        // nothing behind it, so this is an error, not a warning — the archive
+        // entry above is what makes it recoverable by hand.
+        console.error('[checkout/direct] CHARGED BUT NOT RECORDED — ref=' +
+          archiveRecord.orderRef + ' pi=' + paymentIntent.id + ': ' + recorded.message);
+      }
+    }
 
     return NextResponse.json({
       success: true,

@@ -1,3 +1,4 @@
+import { recordOrder } from '@/lib/order-write';
 import type { NextRequest } from 'next/server';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { decrementForSale } from '@/lib/inventory';
@@ -129,8 +130,12 @@ export async function runDropDraw(request: Request | NextRequest) {
               await saveLiveState(redis, inner);
               return inner;
             };
+            // Captured once and reused by the order write below.
+            // ensureDefaultTenant() upserts on every call, so calling it twice
+            // per winner is a needless write on the hot path of a draw run.
+            const drawTenantId = await ensureDefaultTenant();
             await decrementForSale({
-              tenantId: await ensureDefaultTenant(),
+              tenantId: drawTenantId,
               externalProductId: String(product.id),
               size: String(size),
               context: 'draw',
@@ -152,6 +157,37 @@ export async function runDropDraw(request: Request | NextRequest) {
               orderRef: winnerOrderRef,
               amountCents: priceCents,
             });
+
+            // RECORD THE SALE IN POSTGRES. A raffle winner's charge is the
+            // moment a raffle becomes a sale, and until now it produced only
+            // the Redis archive entry above. The Stripe webhook does not cover
+            // it either: the winner's card was saved by a `mode: 'setup'`
+            // session weeks earlier, so the only `checkout.session.completed`
+            // for this buyer fired when nothing had been charged yet. The
+            // actual money moves here, off-session, with no session behind it.
+            //
+            // Idempotent on (tenant_id, order_ref), which matters more here
+            // than anywhere else: a re-triggered draw run reuses the same
+            // winnerOrderRef, so a retry updates one order rather than
+            // inventing a second sale for one charge.
+            const recordedWinner = await recordOrder({
+              tenantId: drawTenantId,
+              orderRef: winnerOrderRef,
+              email,
+              externalProductId: String(product.id),
+              productName: product.name,
+              size: String(size),
+              quantity: 1,
+              amountCents: priceCents,
+              checkoutMode: 'raffle',
+              promoCode: promoCode || null,
+              stripeCustomerId: customerId,
+              stripePaymentIntentId: paymentIntent.id,
+            });
+            if (!recordedWinner.ok) {
+              console.error('[draw] CHARGED BUT NOT RECORDED — ref=' + winnerOrderRef +
+                ' pi=' + paymentIntent.id + ': ' + recordedWinner.message);
+            }
           } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Charge failed.';
             resultsSummary.push({ email, scent: product.name, size, status: 'skipped', message: `Auto-charge failed: ${message}` });
