@@ -30,6 +30,7 @@ import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-r
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { isValidEmail, clampLength, maskEmail } from '@/lib/validation';
 import { recordOrder, type RecordOrderLine } from '@/lib/order-write';
+import { subrequestCount, reportSubrequests } from '@/lib/subrequest-meter';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory } from '@/lib/inventory';
@@ -164,6 +165,11 @@ async function resolvePromo(
 }
 
 export async function POST(request: Request) {
+  // How much of the Worker's subrequest budget this delivery spends. A
+  // one-item cart used the whole free-plan ceiling and silently dropped the
+  // order write; nothing counted the calls, so the only symptom was whichever
+  // call happened to be the one over the line. See lib/subrequest-meter.ts.
+  const subrequestsAtStart = subrequestCount();
   const redis = createKvClient();
   // Resolve the Stripe client + webhook secret through the payment driver
   // engine (Setup Wizard settings → legacy env fallback).
@@ -802,5 +808,6 @@ export async function POST(request: Request) {
     }
   }
 
+  reportSubrequests('webhook ' + String(event.type || 'unknown'), subrequestsAtStart);
   return NextResponse.json({ received: true });
 }

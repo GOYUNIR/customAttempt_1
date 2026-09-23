@@ -1,3 +1,4 @@
+import { meteredFetch } from '@/lib/subrequest-meter';
 /**
  * SUPABASE STORAGE ADAPTER — implements the `StorageClient` contract on top of
  * a PostgREST `store_kv` table so Supabase can be the PRIMARY data store.
@@ -66,7 +67,7 @@ class SupabaseKvStore implements KvStore {
 
   async get(key: string): Promise<string | null> {
     const url = `${this.base()}?key=eq.${encodeURIComponent(key)}&select=value,expires_at&limit=1`;
-    const res = await fetch(url, { method: 'GET', headers: this.headers() });
+    const res = await meteredFetch(url, { method: 'GET', headers: this.headers() });
     if (!res.ok) return null;
     const rows = (await res.json().catch(() => [])) as Array<{ value?: string; expires_at?: string | null }>;
     const row = rows[0];
@@ -82,7 +83,7 @@ class SupabaseKvStore implements KvStore {
     let expiresAt: string | null = null;
     if (options?.expiration) expiresAt = new Date(options.expiration).toISOString();
     else if (options?.expirationTtl) expiresAt = new Date(Date.now() + options.expirationTtl * 1000).toISOString();
-    const res = await fetch(this.base(), {
+    const res = await meteredFetch(this.base(), {
       method: 'POST',
       headers: { ...this.headers(), Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ key, value, expires_at: expiresAt }),
@@ -113,7 +114,7 @@ class SupabaseKvStore implements KvStore {
    */
   async putIfAbsent(key: string, value: string, ttlSeconds: number): Promise<boolean> {
     const attempt = async (): Promise<number> => {
-      const res = await fetch(this.base(), {
+      const res = await meteredFetch(this.base(), {
         method: 'POST',
         headers: { ...this.headers(), Prefer: 'return=minimal' },
         body: JSON.stringify({
@@ -134,7 +135,7 @@ class SupabaseKvStore implements KvStore {
     }
 
     // Conflict: is the occupant simply stale?
-    const check = await fetch(
+    const check = await meteredFetch(
       `${this.base()}?key=eq.${encodeURIComponent(key)}&select=expires_at`,
       { headers: this.headers() },
     );
@@ -149,7 +150,7 @@ class SupabaseKvStore implements KvStore {
   }
 
   async delete(key: string): Promise<void> {
-    const res = await fetch(`${this.base()}?key=eq.${encodeURIComponent(key)}`, {
+    const res = await meteredFetch(`${this.base()}?key=eq.${encodeURIComponent(key)}`, {
       method: 'DELETE',
       headers: this.headers(),
     });
@@ -171,7 +172,7 @@ class SupabaseKvStore implements KvStore {
     const prefix = options?.prefix || '';
     const limit = options?.limit || 1000;
     const url = `${this.base()}?select=key&limit=${limit}${prefix ? `&key=like.${encodeURIComponent(prefix)}*` : ''}`;
-    const res = await fetch(url, { method: 'GET', headers: this.headers() });
+    const res = await meteredFetch(url, { method: 'GET', headers: this.headers() });
     if (!res.ok) return { keys: [], list_complete: true, cursor: '' };
     const rows = (await res.json().catch(() => [])) as Array<{ key?: string }>;
     return { keys: rows.filter((r) => typeof r.key === 'string').map((r) => ({ name: r.key as string })), list_complete: true, cursor: '' };
@@ -210,7 +211,7 @@ export async function pruneExpiredSupabaseKv(): Promise<boolean> {
   const { url, key } = readSupabaseStorageEnv();
   if (!url || !key) return false;
   try {
-    const res = await fetch(
+    const res = await meteredFetch(
       `${url}/rest/v1/store_kv?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&select=key`,
       {
         method: 'DELETE',

@@ -463,6 +463,35 @@ bytes per hit are not.
 
 ## Deferred work register
 
+**DEFERRED-6: the homepage promises no percentage fee; the new tiers charge one.**
+Condition to pick up: BEFORE the graduated pricing tiers ship publicly. Not
+urgent on its own, but it must not be live at the same time as the new plans.
+
+`app/platform/page.tsx` (the pricing footnote) currently reads:
+
+> Paid plans are flat and monthly, billed through Stripe. We do not charge a
+> percentage of the revenue our own tools claim to have generated — that is
+> only fair once the measurement has been proven over time, and we would
+> rather earn it than assume it.
+
+That sentence is about ATTRIBUTION HONESTY: we will not bill a share of
+revenue our growth tooling *claims credit for*, because gross attribution
+overstates incremental lift. It is not a statement about the billing model.
+
+The decided tier structure is a percentage-of-sale platform fee — free 2%,
+$29 0.5%, $99 0%. The distinction is real but nobody reads a pricing page
+that closely: seeing "no percentage fees" and then a 2% fee at signup reads
+as a broken promise, and that is a trust cost paid at exactly the wrong
+moment.
+
+Fix the copy to separate the two claims — the platform fee is what it is and
+should be stated plainly, while the attribution promise keeps its own
+sentence and stops sounding like a billing guarantee. Owner has said the
+showcase copy nearby (Timed drop / Everyday retail / Trade order, the
+"Midnight Oud" example in `components/platform/CheckoutModeShowcase.tsx`) is
+worth reusing if convenient but is explicitly not worth protecting: drop it
+rather than bend anything functional around it.
+
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
 

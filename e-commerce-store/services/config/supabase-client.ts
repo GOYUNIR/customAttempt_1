@@ -1,3 +1,4 @@
+import { meteredFetch } from '@/lib/subrequest-meter';
 /**
  * SERVICES / CONFIG — Supabase REST client (fetch only, zero SDK).
  *
@@ -215,7 +216,7 @@ export async function supabaseRestFetch(
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= MAX_DB_ATTEMPTS; attempt++) {
     try {
-      res = await fetch(`${url}/rest/v1${path}`, {
+      res = await meteredFetch(`${url}/rest/v1${path}`, {
         method,
         headers: headers(options.key, prefer ? { Prefer: prefer } : undefined, options.bearer),
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -263,7 +264,7 @@ export async function supabaseAuthFetch(
 ): Promise<unknown> {
   const { url } = readSupabaseEnv();
   if (!url || !options.key) throw new Error('Supabase is not configured (SUPABASE_URL / key missing).');
-  const res = await fetch(`${url}/auth/v1${path}`, {
+  const res = await meteredFetch(`${url}/auth/v1${path}`, {
     method: options.method || 'GET',
     headers: headers(options.key),
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
