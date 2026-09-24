@@ -515,6 +515,12 @@ showcase copy nearby (Timed drop / Everyday retail / Trade order, the
 worth reusing if convenient but is explicitly not worth protecting: drop it
 rather than bend anything functional around it.
 
+SECOND FALSE CLAIM on the same page, found 2026-09-24: the Starter plan lists
+"Oversell protection and shared stock pools". Shared pools are refused at
+checkout (B1, lib/stock-gate.ts) because Postgres stock ignores
+`shared_pool_id`. Remove the claim in the same copy pass, or build real pool
+support first. PRICING.md §8 carries the full pricing-page change list.
+
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
 

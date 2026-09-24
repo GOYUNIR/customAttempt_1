@@ -76,7 +76,8 @@ and the honesty in §5.
 | Scale | custom | custom | |
 
 - **Pricing is data, not code.** Plans, fees (the tier-to-basis-points mapping),
-  limits and copy live in `lib/platform-marketing.ts`.
+  limits and copy live in `lib/platform-marketing.ts`; the graduated mechanism
+  is designed in `PRICING.md`.
 - **Graduated pricing (in progress).** As a free-tier merchant's volume grows,
   their effective percentage should move smoothly toward flat pricing. Show it
   to them as an approaching milestone, not a sales push. It should feel
@@ -205,7 +206,9 @@ evidence, and write the evidence next to it.
   *Deferred work register* holds everything consciously postponed, each entry
   with the condition for picking it up. Check the highest existing
   `DEFERRED-n` before numbering a new one; IDs have collided before.
-- **Pricing, plans, marketing copy:** `lib/platform-marketing.ts`.
+- **Pricing, plans, marketing copy:** `lib/platform-marketing.ts` (the data);
+  `PRICING.md` (the graduated-fee design and its open decisions);
+  `lib/pricing/graduated-fee.ts` (the engine).
 - **Production deploys:** push to `main`. Cloudflare's git integration builds
   the `customattempt-1` worker. Never `wrangler deploy` locally: the `name` in
   `wrangler.jsonc` is stale and would claim the domain for the wrong worker.

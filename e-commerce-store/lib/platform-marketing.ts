@@ -135,25 +135,41 @@ export type Plan = {
    * allowance across every tenant on the platform), not storage or pageviews.
    */
   limitNote?: string;
+  /**
+   * Platform fee on each sale, in basis points (200 = 2%), collected through
+   * Stripe Connect. Decided by the owner 2026-09-24: Free 2%, $29 0.5%,
+   * $99 0%. Undefined = negotiated (Scale). These rates, together with the
+   * monthly prices above, are the ONLY inputs to the graduated fee
+   * (lib/pricing/graduated-fee.ts): its breakpoints are derived from them, so
+   * changing a price here moves the breakpoints, with nothing to keep in sync.
+   */
+  platformFeeBps?: number;
 };
 
 /**
- * PRICES ARE A STARTING PROPOSAL, and deliberately simple.
+ * PRICING, as decided 2026-09-24 (STRATEGY.md §5, PRICING.md).
  *
- * They are flat and per-month because performance pricing — a share of proven
- * incremental revenue — is only defensible once we have measured our own
- * cohorts. Charging a percentage of a number we cannot yet stand behind would
- * undercut the one thing that differentiates the attribution model.
+ * Two things are charged, and they are different claims:
+ *   - a PLATFORM FEE on each sale — a plain percentage of the transaction,
+ *     graduated so a month never costs more than the cheapest plan would have
+ *     for the volume actually done (PRICING.md);
+ *   - NOT a share of revenue our growth tools claim to have generated. That is
+ *     the attribution-honesty promise (holdout-measured incremental impact),
+ *     and it stays: we never bill on a gross-attributed number.
+ * The pricing page must keep those two statements visibly separate —
+ * DEFERRED-9 exists because the current copy blurs them.
  *
- * The real plan rows live in `public.plans` (migration 00027) so packaging can
- * change without a deploy. What is here is the shop window; that table is the
- * contract.
+ * The real plan rows belong in `public.plans` (migration 00027) so packaging
+ * can change without a deploy; those rows carry no fee column yet (PRICING.md
+ * has the migration). Until they do, this is both the shop window and the
+ * only place the rates live.
  */
 export const PLANS: Plan[] = [
   {
     id: 'free',
     name: 'Free',
     monthlyUsd: 0,
+    platformFeeBps: 200,
     tagline: 'Open a real store and sell. No card, no clock.',
     priceNote: 'Free while you are finding your first customers.',
     ctaLabel: 'Start free',
@@ -172,6 +188,7 @@ export const PLANS: Plan[] = [
     id: 'starter',
     name: 'Starter',
     monthlyUsd: 29,
+    platformFeeBps: 50,
     trialDays: 14,
     priceNote: '14 days free. Cancel before the first charge and pay nothing.',
     ctaLabel: 'Start free trial',
@@ -187,6 +204,7 @@ export const PLANS: Plan[] = [
     id: 'growth',
     name: 'Growth',
     monthlyUsd: 99,
+    platformFeeBps: 0,
     featured: true,
     trialDays: 14,
     priceNote: '14 days free. Cancel before the first charge and pay nothing.',
