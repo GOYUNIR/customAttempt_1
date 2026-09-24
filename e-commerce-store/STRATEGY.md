@@ -166,6 +166,17 @@ missing.
 - [ ] **No shared-inventory pool** can be sold through a path that ignores it
   (see ARCHITECTURE.md; Postgres stock is per-variant today).
 - [ ] **The homepage copy doesn't contradict the fee model** (DEFERRED-9).
+- [ ] **A merchant can actually set stock.** Today they can't. For any variant
+  that already has an `inventory_levels` row, the product editor's per-size
+  inventory field is saved into config and then ignored (`catalog-write` only
+  creates missing rows). `/api/admin/inventory` writes only the KV mirror, and
+  no UI calls it. `inventory-matrix` is read-only. Production logs show it
+  happening: "configured inventory 15 differs from live stock 1". A merchant
+  can't restock, and can't zero out a product to pull it from sale. The fix is
+  an explicit stock-set / stock-adjust operation that is safe against
+  in-flight sales. Build it with the reservation-hold work, since both need
+  stock movements recorded as events rather than overwritten numbers.
+  Found 2026-09-24.
 
 Add to this list whenever a gap is found that must be closed before real money
 moves. Tick items only with evidence.

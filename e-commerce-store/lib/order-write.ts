@@ -27,7 +27,7 @@
  * the same payment.
  */
 import { getDb } from '@/lib/db/client';
-import { eq } from '@/lib/db/query';
+import { eq, inList } from '@/lib/db/query';
 import { ensureCustomer } from '@/lib/customers';
 import { resolveVariantId } from '@/lib/inventory';
 
@@ -226,4 +226,63 @@ export async function findOrderByRef(tenantId: string, orderRef: string) {
     console.error('[order-write] lookup failed', orderRef, (err as Error)?.message || err);
     return null;
   }
+}
+
+/**
+ * Units sold per (product external id, size), counted from ORDERS — the record
+ * every charge path writes — for the admin overview's "N sold".
+ *
+ * That number used to be `salesCompleted` on the KV live-state mirror,
+ * incremented by each charge path's mirror write. The webhook's mirror write
+ * was the first casualty whenever it ran out of subrequests, so the count
+ * silently undercounted exactly the multi-item carts; B2 removes that write
+ * altogether. An order row either exists or it does not.
+ *
+ * Counts lines on orders that are 'confirmed' or 'fulfilled' — a sale that
+ * stands. Pending, awaiting-approval, cancelled and refunded orders do not.
+ *
+ * Aggregated in code from four plain reads; fine at today's volume, and a SQL
+ * view with GROUP BY is the right shape once it is not. Rather than silently
+ * undercount when a read hits its row cap, it says so.
+ *
+ * Keyed `${externalProductId}::${size lowercased}`.
+ */
+export async function unitsSoldBySize(tenantId: string): Promise<Map<string, number>> {
+  const db = getDb();
+  const CAP = 50000;
+  const warnIfCapped = (what: string, n: number) => {
+    if (n >= CAP) console.error('[order-write] unitsSoldBySize: ' + what + ' hit the ' + CAP + '-row cap — sold counts are UNDERSTATED');
+  };
+  const orders = (await db.select<{ id: string }>('orders', {
+    where: { tenant_id: eq(tenantId), status: inList(['confirmed', 'fulfilled']) }, select: ['id'], limit: CAP,
+  })) as Array<{ id: string }>;
+  warnIfCapped('orders', orders.length);
+  const standing = new Set(orders.map((o) => String(o.id)));
+  const sold = new Map<string, number>();
+  if (standing.size === 0) return sold;
+
+  const [lines, variants, products] = await Promise.all([
+    db.select<{ order_id: string; variant_id: string | null; quantity: number }>('order_line_items', {
+      where: { tenant_id: eq(tenantId) }, select: ['order_id', 'variant_id', 'quantity'], limit: CAP,
+    }),
+    db.select<{ id: string; product_id: string; option_label: string }>('product_variants', {
+      where: { tenant_id: eq(tenantId) }, select: ['id', 'product_id', 'option_label'], limit: CAP,
+    }),
+    db.select<{ id: string; external_id: string | null }>('products', {
+      where: { tenant_id: eq(tenantId) }, select: ['id', 'external_id'], limit: CAP,
+    }),
+  ]);
+  warnIfCapped('order_line_items', lines.length);
+  const externalByProduct = new Map((products as any[]).map((p) => [String(p.id), String(p.external_id || p.id)]));
+  const keyByVariant = new Map((variants as any[]).map((v) => [
+    String(v.id),
+    externalByProduct.get(String(v.product_id)) + '::' + String(v.option_label || '').trim().toLowerCase(),
+  ]));
+  for (const line of lines as any[]) {
+    if (!standing.has(String(line.order_id)) || !line.variant_id) continue;
+    const key = keyByVariant.get(String(line.variant_id));
+    if (!key) continue;
+    sold.set(key, (sold.get(key) || 0) + Math.max(0, Number(line.quantity) || 0));
+  }
+  return sold;
 }

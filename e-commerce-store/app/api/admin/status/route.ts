@@ -16,6 +16,10 @@ import { adminAuthorized } from '@/lib/admin-verify';
 import { detectStorageProvider, dataStoreSummary } from '@/lib/env-discovery';
 import { getPlatformSettings } from '@/services/config/platform-settings';
 import { toPublicSummary } from '@/services/config/types';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { unitsSoldBySize } from '@/lib/order-write';
+import { readLiveStock } from '@/lib/stock-gate';
 
 function parseWinnerTier(value: unknown): number {
   if (Array.isArray(value)) {
@@ -187,6 +191,23 @@ export async function GET(request: Request) {
       const allProducts = await loadProducts(redis);
       const productsList = Object.values(allProducts);
 
+      // "N sold · M left" on the Overview. Both numbers used to come straight
+      // off the KV live-state mirror with no Postgres overlay, so they showed
+      // whatever the mirror said — and the mirror was the write the checkout
+      // webhook dropped when it ran out of subrequests. B2 removes that write
+      // entirely, so both now come from the records that cannot drift:
+      //   left — inventory_levels, via liveStock on the catalog loaded above
+      //   sold — the orders table (confirmed/fulfilled lines)
+      // In legacy (non-Postgres) mode, or if the orders read fails, they fall
+      // back to the mirror, and a failure says so in the log.
+      const postgres = isPostgresPrimaryEnabled();
+      let soldBySize: Map<string, number> | null = null;
+      if (postgres) {
+        soldBySize = await unitsSoldBySize(await ensureDefaultTenant()).catch((err) => {
+          console.error('[admin/status] sold counts unavailable — showing the KV mirror instead', (err as Error)?.message || err);
+          return null;
+        });
+      }
       for (const product of productsList) {
         const cats = product.priceCategories || [];
         for (const cat of cats) {
@@ -195,14 +216,16 @@ export async function GET(request: Request) {
           const live = await getOrSeedLiveState(redis, product, size, winnersPerDraw);
           const intCount = Number(statsHash?.[`int:${product.name}:${size}`] ?? 0);
           const subCount = Number(statsHash?.[`sub:${product.name}:${size}`] ?? 0);
+          const stock = postgres ? readLiveStock(product, size) : null;
+          const soldKey = String(product.id) + '::' + String(size || '').trim().toLowerCase();
           status.pools.push({
             product: product.name,
             productId: product.id,
             size,
             intCount,
             subCount,
-            salesCount: live.salesCompleted || 0,
-            maxLimit: live.inventoryRemaining || 0,
+            salesCount: soldBySize ? (soldBySize.get(soldKey) || 0) : (live.salesCompleted || 0),
+            maxLimit: stock?.ok ? stock.stock : (live.inventoryRemaining || 0),
             totalInventory: live.totalInventory || 0,
             winnersPerDraw: live.winnersPerDraw || 0,
             drawsCompleted: live.drawsCompleted || 0,

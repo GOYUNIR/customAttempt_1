@@ -13,8 +13,6 @@ import {
   POOL_STATS_KEY,
   safeParseKvItem,
   loadProducts,
-  getLiveProductState,
-  saveLiveState,
   STORE_CONFIG_KEY,
   loadStoreConfigCached,
   PRODUCTS_KEY,
@@ -24,7 +22,6 @@ import {
   poolKey,
 } from '@/lib/server-config';
 import { markProcessedSession, claimProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
-import { withRedisLock } from '@/lib/redis-lock';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -629,35 +626,17 @@ export async function POST(request: Request) {
           const thisSize = l.size;
           const qty = l.qty;
           const priceCents = l.priceCents;
-          // Atomic-ish: serialize concurrent decrements for this product+size
-          // so two paid orders can never both read the same stock count and
-          // both write back a decrement — that's how you oversell the last
-          // unit (charged customer, no inventory to ship).
-          const decrementInventory = async () => {
-            const inner = await getLiveProductState(redis, thisProduct, thisSize);
-            inner.inventoryRemaining = Math.max(0, Number(inner.inventoryRemaining || 0) - qty);
-            inner.salesCompleted = (inner.salesCompleted || 0) + qty;
-            await saveLiveState(redis, inner);
-            return inner;
-          };
-          const lockResult = await withRedisLock(redis, `inventory:${thisProduct.id}:${thisSize}`, decrementInventory);
-          // KV live-state mirror ONLY. inventory_levels is decremented by
-          // shadowDecrementInventory above, which also records a platform
-          // audit on failure -- adding a second decrement here
-          // DOUBLE-DECREMENTED every cart order. Caught by counting decrements
-          // per path, not by any test.
+          // NO KV STOCK MIRROR (B2). This used to take a KV lock per line, read
+          // the live-state blob, decrement it and write it back — about eight
+          // PostgREST round trips per product, on the invocation that measured
+          // 51 subrequests against a free-plan ceiling of 50. It was the thing
+          // dropped when the budget ran out, and a gate reading the drifted
+          // mirror is how you oversell.
           //
-          // The old "if (!lockResult.ok) await decrementInventory()" unlocked
-          // fallback is GONE: with a lock that genuinely excludes, that branch
-          // would have turned real contention into a live oversell path.
-          //
-          // On contention the soldOutAt update is SKIPPED rather than guessed.
-          // Fabricating inventoryRemaining = 0 would mark a product sold out on
-          // a lock miss, and the storefront derives soldOut from Postgres
-          // inventory anyway.
-          if (!lockResult.ok) {
-            console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', thisProduct.id, thisSize);
-          }
+          // Nothing that decides a sale reads that number any more (B1,
+          // lib/stock-gate.ts): the gates, the storefront and the admin
+          // overview all read inventory_levels, which shadowDecrementInventory
+          // has already decremented above.
           // THE SOLD-OUT CATALOG WRITE IS GONE, AND IT NEVER DID ANYTHING.
           //
           // This block set `soldOutAt` on the in-memory product and then called
@@ -712,31 +691,9 @@ export async function POST(request: Request) {
       } else {
         const product = (allProducts[productId] || Object.values(allProducts).find((item: any) => item.name === variant)) as any;
         if (product && email) {
-          const decrementInventory = async () => {
-            const inner = await getLiveProductState(redis, product, size);
-            if (inner.inventoryRemaining > 0) inner.inventoryRemaining -= 1;
-            inner.salesCompleted = (inner.salesCompleted || 0) + 1;
-            await saveLiveState(redis, inner);
-            return inner;
-          };
-          const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
-          // KV live-state mirror ONLY. inventory_levels is decremented by the
-          // pre-existing shadowDecrementInventory() call further down, which
-          // also records a platform audit on failure -- adding a second
-          // decrement here DOUBLE-DECREMENTED every direct order. Caught by
-          // counting decrements per path, not by any test.
-          //
-          // The old "if (!lockResult.ok) await decrementInventory()" unlocked
-          // fallback is GONE: with a lock that genuinely excludes, that branch
-          // would have turned real contention into a live oversell path.
-          //
-          // On contention the soldOutAt update is SKIPPED rather than guessed.
-          // Fabricating inventoryRemaining = 0 would mark a product sold out on
-          // a lock miss, and the storefront derives soldOut from Postgres
-          // inventory anyway.
-          if (!lockResult.ok) {
-            console.error('[webhook] KV live-state mirror skipped (lock contended); Postgres remains authoritative', product.id, size);
-          }
+          // No KV stock mirror (B2) — same reasoning as the cart branch above.
+          // inventory_levels is decremented by shadowDecrementInventory() below,
+          // and nothing that decides a sale reads the KV number any more.
           // Removed for the same reason as the cart branch above: `sold_out_at`
           // is not a column, so this rewrote the whole product and all its
           // variants to persist a field that is silently dropped. See the
