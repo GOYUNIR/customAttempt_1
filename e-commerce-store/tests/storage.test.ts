@@ -92,6 +92,22 @@ test('lists: rpush/lrange/lset/llen/ltrim/lrem', async () => {
   assert.equal(await c.type('store:list'), 'list');
 });
 
+// Redis semantics: LREM with count 0 removes EVERY occurrence. This adapter
+// used to treat 0 as "remove zero" — a silent no-op — while the Upstash
+// provider (real Redis) removed them all, so the same call did different
+// things depending on STORAGE_PROVIDER. Found when a cleanup matched 18 ledger
+// entries and removed none.
+test('lists: lrem count 0 removes all occurrences, negative counts from the tail', async () => {
+  const c = kv();
+  await c.rpush('store:lrem', 'a', 'x', 'a', 'y', 'a');
+  assert.equal(await c.lrem('store:lrem', 0, 'a'), 3);
+  assert.deepEqual(await c.lrange('store:lrem', 0, -1), ['x', 'y']);
+
+  await c.rpush('store:lrem2', 'a', 'x', 'a', 'y', 'a');
+  assert.equal(await c.lrem('store:lrem2', -1, 'a'), 1);
+  assert.deepEqual(await c.lrange('store:lrem2', 0, -1), ['a', 'x', 'a', 'y']);
+});
+
 test('sets: sadd/srem/sismember/smembers', async () => {
   const c = kv();
   assert.equal(await c.sadd('store:set', 'x', 'y', 'x'), 2); // duplicate ignored

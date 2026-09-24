@@ -339,7 +339,10 @@ export class CloudflareKvStorageClient implements StorageClient {
       if (!current || current.t !== 'list' || !Array.isArray(current.v)) return current;
       const list = [...(current.v as string[])];
       const next: string[] = [];
-      const wanted = Math.abs(count);
+      // Redis semantics: count 0 removes EVERY occurrence. This was
+      // Math.abs(count), which made 0 mean "remove none" — a silent no-op
+      // here while the Upstash provider (real Redis) removed them all.
+      const wanted = count === 0 ? Number.POSITIVE_INFINITY : Math.abs(count);
       if (count >= 0) {
         for (const item of list) {
           if (removed < wanted && item === value) removed++;
