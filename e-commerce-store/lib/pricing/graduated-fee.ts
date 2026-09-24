@@ -65,16 +65,16 @@ function linesOf(plans: FeePlan[]): Line[] {
     .map((p) => ({
       id: p.id,
       // Scaled by 10,000 so price and rate × volume share one integer unit.
-      m10k: BigInt(Math.round(Number(p.monthlyCents))) * 10000n,
+      m10k: BigInt(Math.round(Number(p.monthlyCents))) * BigInt(10000),
       bps: BigInt(Math.round(p.feeBps)),
     }));
   if (lines.length === 0) throw new Error('graduated fee: no priced plans');
-  if (!lines.some((l) => l.m10k === 0n)) {
+  if (!lines.some((l) => l.m10k === BigInt(0))) {
     // A per-sale fee cannot collect a fixed monthly charge: with no free plan
     // the envelope does not start at zero and the whole scheme stops adding up.
     throw new Error('graduated fee: needs a plan with a monthly price of 0');
   }
-  if (lines.some((l) => l.bps < 0n || l.m10k < 0n)) throw new Error('graduated fee: negative price or rate');
+  if (lines.some((l) => l.bps < BigInt(0) || l.m10k < BigInt(0))) throw new Error('graduated fee: negative price or rate');
   return lines;
 }
 
@@ -90,7 +90,7 @@ function envelope10k(lines: Line[], volumeCents: bigint): bigint {
 
 /** Round a cents×10,000 amount to whole cents, half up (amounts are never negative). */
 function toCents(v10k: bigint): number {
-  return Number((v10k + 5000n) / 10000n);
+  return Number((v10k + BigInt(5000)) / BigInt(10000));
 }
 
 /** The whole month's graduated fee at a given month-to-date volume, in cents. */
@@ -123,15 +123,15 @@ export function graduatedSchedule(plans: FeePlan[]): FeeTier[] {
   // Start on the cheapest line at zero volume; among ties, the higher rate
   // (it is cheapest just above zero only if nothing lower-rate ties at 0).
   let current = lines
-    .filter((l) => l.m10k === 0n)
+    .filter((l) => l.m10k === BigInt(0))
     .sort((a, b) => (a.bps < b.bps ? -1 : a.bps > b.bps ? 1 : 0))[0];
-  let fromNum = 0n; // breakpoint as an exact fraction num/den (cents)
-  let fromDen = 1n;
+  let fromNum = BigInt(0); // breakpoint as an exact fraction num/den (cents)
+  let fromDen = BigInt(1);
   for (let guard = 0; guard < lines.length + 1; guard += 1) {
     // Next line: lower rate, intersecting soonest after the current start.
     let next: Line | null = null;
-    let bestNum = 0n;
-    let bestDen = 1n;
+    let bestNum = BigInt(0);
+    let bestDen = BigInt(1);
     for (const l of lines) {
       if (l.bps >= current.bps) continue;
       // m_c + b_c V = m_l + b_l V  ->  V = (m_l - m_c) / (b_c - b_l)
@@ -144,12 +144,12 @@ export function graduatedSchedule(plans: FeePlan[]): FeeTier[] {
         bestDen = den;
       }
     }
-    const fromCents = Number((fromNum + fromDen - 1n) / fromDen);
+    const fromCents = Number((fromNum + fromDen - BigInt(1)) / fromDen);
     if (!next) {
       tiers.push({ fromCents, toCents: null, bps: Number(current.bps), planId: current.id });
       break;
     }
-    const toCents = Number((bestNum + bestDen - 1n) / bestDen);
+    const toCents = Number((bestNum + bestDen - BigInt(1)) / bestDen);
     if (toCents > fromCents) tiers.push({ fromCents, toCents, bps: Number(current.bps), planId: current.id });
     current = next;
     fromNum = bestNum;
