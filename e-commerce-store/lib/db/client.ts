@@ -49,13 +49,24 @@ export interface InsertOptions extends WriteOptions {
   onConflict?: string;
   /** Send `resolution=merge-duplicates` without an on_conflict query param. */
   mergeDuplicates?: boolean;
+  /**
+   * On conflict, keep the EXISTING row and return nothing for it
+   * (`resolution=ignore-duplicates`). With `returning: 'representation'` the
+   * result then contains only rows this call actually created — which makes a
+   * single insert an atomic "claim": non-empty means you won, empty means
+   * someone already had it. Requires `onConflict`. Wins over merge.
+   */
+  ignoreDuplicates?: boolean;
 }
 
+type Resolution = 'merge' | 'ignore' | null;
+
 /** Build the Prefer header value, or undefined to send none at all. */
-function preferHeader(returning: ReturningMode, merge: boolean): string | undefined {
+function preferHeader(returning: ReturningMode, resolution: Resolution): string | undefined {
   const parts: string[] = [];
   if (returning !== 'default') parts.push(`return=${returning}`);
-  if (merge) parts.push('resolution=merge-duplicates');
+  if (resolution === 'merge') parts.push('resolution=merge-duplicates');
+  if (resolution === 'ignore') parts.push('resolution=ignore-duplicates');
   return parts.length > 0 ? parts.join(',') : undefined;
 }
 
@@ -116,7 +127,7 @@ class SupabaseDbClient implements DbClient {
       : '';
     const prefer = preferHeader(
       opts.returning ?? 'representation',
-      Boolean(opts.onConflict || opts.mergeDuplicates),
+      opts.ignoreDuplicates ? 'ignore' : (opts.onConflict || opts.mergeDuplicates) ? 'merge' : null,
     );
     const result = await supabaseRestFetch(`/${assertTable(table)}${conflict}`, {
       key: this.key(),
@@ -134,7 +145,7 @@ class SupabaseDbClient implements DbClient {
       key: this.key(),
       method: 'PATCH',
       body: patch,
-      prefer: preferHeader(opts.returning ?? 'representation', false),
+      prefer: preferHeader(opts.returning ?? 'representation', null),
       tier: opts.tier,
     });
     return (result as T[]) ?? [];

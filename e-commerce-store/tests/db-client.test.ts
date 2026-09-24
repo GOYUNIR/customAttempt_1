@@ -72,6 +72,19 @@ test('insert: onConflict produces an upsert with merge-duplicates', async () => 
   });
 });
 
+// The atomic-claim primitive behind webhook dedupe: on conflict keep the
+// existing row, and never ask for merge — a merge would let a second claimer
+// overwrite the first and "win" too.
+test('insert: ignoreDuplicates sends ignore-duplicates, never merge', async () => {
+  await withFakePostgrest(async (cap) => {
+    await getDb().insert('webhook_dedupe', { scope: 's', dedupe_key: 'k' }, { onConflict: 'scope,dedupe_key', ignoreDuplicates: true });
+    assert.match(pathOf(cap[0]), /on_conflict=scope,dedupe_key/);
+    assert.match(cap[0].prefer, /resolution=ignore-duplicates/);
+    assert.doesNotMatch(cap[0].prefer, /merge-duplicates/);
+    assert.match(cap[0].prefer, /return=representation/);
+  });
+});
+
 test('update: PATCHes only the matching rows', async () => {
   await withFakePostgrest(async (cap) => {
     await getDb().update('raffle_entries', { where: { id: inList(['a', 'b']) } }, { status: 'winner' });
