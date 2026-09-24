@@ -685,7 +685,7 @@ export async function POST(request: Request) {
           // and app/api/catalog/status both read `soldOutAt` to decide it) has
           // not worked since the catalog moved to Postgres, because the value
           // they read is always empty. Reviving it needs a real column and a
-          // backfill decision; see DEFERRED-7. It is not something to smuggle
+          // backfill decision; see DEFERRED-8. It is not something to smuggle
           // back in from the checkout webhook.
 
           // Collected across every line and unit, written once below. One
@@ -744,7 +744,7 @@ export async function POST(request: Request) {
           // Removed for the same reason as the cart branch above: `sold_out_at`
           // is not a column, so this rewrote the whole product and all its
           // variants to persist a field that is silently dropped. See the
-          // longer note there and DEFERRED-7.
+          // longer note there and DEFERRED-8.
 
           await archiveEntry(redis, {
             email,
