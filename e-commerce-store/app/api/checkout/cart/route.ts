@@ -20,6 +20,8 @@ import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { readLiveStock } from '@/lib/stock-gate';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -167,8 +169,28 @@ export async function POST(request: Request) {
         if (priorCharges + item.quantity > maxPerEmail) {
           return NextResponse.json({ error: `${product.name} limit reached for this email.` }, { status: 409 });
         }
-        const live = await getLiveProductState(redis, product, item.size);
-        if (!live || live.inventoryRemaining < item.quantity) {
+        // Authoritative stock (lib/stock-gate.ts): the inventory_levels count
+        // riding on the catalog loaded above — the number the shopper was
+        // shown, at no extra cost. This read the KV live-state mirror, which
+        // drifts whenever a mirror write is dropped. Unreadable stock (a
+        // shared pool, a KV-fallback catalog) refuses the sale: fail closed.
+        //
+        // Still a CHECK, not a hold: stock is decremented only after payment,
+        // so two buyers can both pass this for the last unit. Real reservation
+        // holds are a go-live requirement (STRATEGY.md §9), not this change.
+        let enoughStock: boolean;
+        if (isPostgresPrimaryEnabled()) {
+          const stock = readLiveStock(product, item.size);
+          if (!stock.ok) {
+            console.error('[checkout/cart] stock for ' + product.id + '/' + item.size + ' is ' + stock.reason +
+              ' — refusing the sale (fail closed)');
+          }
+          enoughStock = stock.ok && stock.stock >= item.quantity;
+        } else {
+          const live = await getLiveProductState(redis, product, item.size);
+          enoughStock = Boolean(live) && live.inventoryRemaining >= item.quantity;
+        }
+        if (!enoughStock) {
           return NextResponse.json({ error: `${product.name} (${item.size}) does not have enough inventory.` }, { status: 409 });
         }
         const priceCents = Math.round(Number(category.price || 0) * 100);

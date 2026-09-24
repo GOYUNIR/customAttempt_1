@@ -79,6 +79,7 @@ import { notifyDeclinedWinners } from '@/lib/growth/modules/dunning';
 import { resolveVariantId } from '@/lib/inventory';
 import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
+import { rebaseLiveStock } from '@/lib/stock-gate';
 
 
 export { productNameFromPoolKey };
@@ -413,6 +414,16 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
 
       const winnersPerDraw = getWinnerCount(GOYUNIR_STORE_SUITE, productSize);
       const live = await getOrSeedLiveState(redis, product, productSize, winnersPerDraw);
+      // THE WINNER CAP READS POSTGRES. The KV live state is still loaded for
+      // its draw counters (drawsCompleted feeds the Stripe idempotency key
+      // below), but its STOCK is re-based on inventory_levels before anything
+      // uses it: the sold-out skip here, the cap on winners, the per-winner
+      // decrements and the post-draw sold-out logic all work from the truth,
+      // and saveLiveState writes the corrected number back to the mirror.
+      // Charging more winners than real stock is an oversell; a drifted
+      // mirror is exactly how that happens. Unreadable stock = 0: no draw
+      // this cycle, entries kept for the next (lib/stock-gate.ts).
+      rebaseLiveStock(live, product, productSize, 'auto-draw');
       if (live.inventoryRemaining <= 0) continue;
 
       // ── Cycle-aware eligibility ────────────────────────────────────────────

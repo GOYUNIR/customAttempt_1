@@ -14,6 +14,7 @@ import { recordDrawRun } from '@/lib/draw-runs';
 import { notifyDeclinedWinners } from '@/lib/growth/modules/dunning';
 import { executeDrawWithCharging } from '@/lib/raffle';
 import { recordOrder } from '@/lib/order-write';
+import { rebaseLiveStock } from '@/lib/stock-gate';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 
 export const dynamic = 'force-dynamic';
@@ -124,6 +125,12 @@ export async function POST(request: Request) {
 
       const shuffled = entries.sort(() => Math.random() - 0.5);
       const live = await getLiveProductState(redis, product, size);
+      // Stock re-based on Postgres before it caps anything: the winner count
+      // below, and the waitlist allowance computed from the same record after
+      // the winners are charged. Same reasoning as lib/auto-draw.ts — an admin
+      // pressing Trigger Drop against a drifted KV count charges winners for
+      // units that do not exist. Fail closed (lib/stock-gate.ts).
+      if (live) rebaseLiveStock(live, product, size, 'trigger-drop');
       if (!live || live.inventoryRemaining <= 0) continue;
 
       const liveWinnerCount = Math.max(1, Number(live.winnersPerDraw || 1));

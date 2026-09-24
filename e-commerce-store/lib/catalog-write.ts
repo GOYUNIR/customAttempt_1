@@ -26,8 +26,14 @@ const COLUMN_FIELDS = new Set([
   'priceCategories', 'sizeConfigs',
 ]);
 
-/** Per-variant fields with their own column, excluded from a variant's config. */
-const VARIANT_COLUMN_FIELDS = new Set(['size', 'price', 'checkoutMode', 'inventorySyncSlug', 'inventoryPoolId']);
+/** Per-variant fields excluded from a variant's config: the ones with their own
+ *  column, plus `liveStock`/`sharedPool`, which postgres-catalog-read DERIVES
+ *  from inventory_levels on every read. An admin saving a loaded product would
+ *  otherwise persist a stale stock snapshot into the jsonb blob. */
+const VARIANT_COLUMN_FIELDS = new Set([
+  'size', 'price', 'checkoutMode', 'inventorySyncSlug', 'inventoryPoolId',
+  'liveStock', 'sharedPool',
+]);
 
 export interface CatalogWriteResult {
   ok: boolean;

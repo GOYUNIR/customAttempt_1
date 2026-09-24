@@ -1019,7 +1019,7 @@ export async function trackPromoClick(redis: StorageClient, code: string) {
   return true;
 }
 
-function normalizePriceCategory(category: any, fallbackSize: string) {
+function normalizePriceCategory(category: any, fallbackSize: string, fromPostgres = false) {
   const size = typeof category?.size === 'string' && category.size.trim() ? category.size.trim() : fallbackSize;
   const price = typeof category?.price === 'number' ? category.price : Number(category?.price ?? 0);
   const rawStripeId = typeof category?.stripeId === 'string' && category.stripeId.trim()
@@ -1092,6 +1092,23 @@ function normalizePriceCategory(category: any, fallbackSize: string) {
   if (category?.samplerConfig && typeof category.samplerConfig === 'object' && !Array.isArray(category.samplerConfig)) {
     out.samplerConfig = category.samplerConfig;
   }
+  // The AUTHORITATIVE per-size stock (postgres-catalog-read.ts) that every
+  // oversell gate reads (lib/stock-gate.ts). This whitelist dropped it, so
+  // every gate saw "unknown" and would have failed closed on every sale —
+  // caught by a before/after drift test on production before it shipped.
+  //
+  // ONLY from a Postgres-sourced catalog. loadProducts falls back to the KV
+  // blob when Postgres fails; if a liveStock value were ever persisted into
+  // that blob, keeping it here would make the gate trust a stale number —
+  // fail OPEN. Without it the gate reads "unknown" and fails closed.
+  // null is meaningful (a pooled variant: no trustworthy count) and survives.
+  if (fromPostgres) {
+    if (category?.liveStock === null) out.liveStock = null;
+    else if (category?.liveStock !== undefined && Number.isFinite(Number(category.liveStock))) {
+      out.liveStock = Math.max(0, Math.floor(Number(category.liveStock)));
+    }
+    if (category?.sharedPool === true) out.sharedPool = true;
+  }
   return out;
 }
 
@@ -1155,6 +1172,9 @@ export function getFallbackStoreProducts(): Record<string, any> {
 export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgres' }): Promise<Record<string, any>> {
   const forced = opts?.source;
   let raw: Record<string, any> | null = null;
+  // Whether `raw` is the Postgres catalog. Only then may the authoritative
+  // liveStock survive normalization -- see normalizePriceCategory.
+  let sourcePostgres = false;
 
   if (forced !== 'kv') {
     try {
@@ -1166,10 +1186,12 @@ export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgre
       if (pg) {
         raw = {};
         for (const item of pg.productsRaw) raw[String(item.id)] = item;
+        sourcePostgres = true;
       }
     } catch (err) {
       console.error('[loadProducts] Postgres read threw', (err as Error)?.message || err);
       raw = null;
+      sourcePostgres = false;
     }
   }
 
@@ -1197,7 +1219,7 @@ export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgre
         const normalized = {
           ...parsed,
           priceCategories: Array.isArray(parsed.priceCategories) && parsed.priceCategories.length > 0
-            ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard'))
+            ? parsed.priceCategories.map((category: any) => normalizePriceCategory(category, 'Standard', sourcePostgres))
             : [{ size: 'Standard', price: UNCONFIGURED_PRICE_SENTINEL, stripeId: defaultStripePriceId(), winnerTiers: '0' }],
         };
         out[k] = normalized;

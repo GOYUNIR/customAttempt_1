@@ -10,6 +10,8 @@ import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config'
 import { isSyncedSourceReleased } from '@/lib/checkout-mode';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { readLiveStock } from '@/lib/stock-gate';
+import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -247,8 +249,20 @@ export async function POST(request: Request) {
     }
 
     if (checkoutMode === 'FCFS' && !usesWaitlist) {
-      const live = await getLiveProductState(redis, product, String(size));
-      if (!live || live.inventoryRemaining <= 0) {
+      // Authoritative stock (lib/stock-gate.ts), not the KV mirror — fail
+      // closed when it cannot be read.
+      let inStock: boolean;
+      if (isPostgresPrimaryEnabled()) {
+        const stock = readLiveStock(product, String(size));
+        if (!stock.ok) {
+          console.error('[checkout] stock for ' + product.id + '/' + size + ' is ' + stock.reason + ' — refusing (fail closed)');
+        }
+        inStock = stock.ok && stock.stock > 0;
+      } else {
+        const live = await getLiveProductState(redis, product, String(size));
+        inStock = Boolean(live) && live.inventoryRemaining > 0;
+      }
+      if (!inStock) {
         return NextResponse.json({ error: 'Sold out for this size.' }, { status: 409 });
       }
       const chargedCount = await countChargedByEmail(redis, normalizedEmail, variant, String(size));

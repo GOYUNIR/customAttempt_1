@@ -225,6 +225,23 @@ export async function readProductsFromPostgres(
             price: Math.max(0, Number(v.price_cents) || 0) / 100,
             checkoutMode: String(v.checkout_mode || '').toUpperCase() === 'RAFFLE' ? 'RAFFLE' : 'FCFS',
             inventorySyncSlug: v.shared_pool_id ? poolById.get(v.shared_pool_id)?.slug : undefined,
+            // AUTHORITATIVE per-size stock, straight from inventory_levels — the
+            // number every oversell gate reads (lib/stock-gate.ts), and the same
+            // one the storefront shows. Derived on read, never persisted
+            // (catalog-write excludes it). Deliberately NOT named `inventory`:
+            // that key already means the admin's CONFIGURED seed stock, which
+            // resolveSizeLimits reads, and conflating the two is how a gate
+            // ends up checking a number nobody decrements.
+            //
+            // A variant with no inventory_levels row has 0, matching
+            // decrementInventory, which refuses such a variant outright.
+            // A pooled variant gets null: Postgres decrements are strictly
+            // per-variant and ignore shared_pool_id, so its stock is not
+            // something a gate can safely trust (see stock-gate.ts).
+            liveStock: v.shared_pool_id
+              ? null
+              : Math.max(0, Number(inventoryByVariant.get(v.id)?.quantity_available) || 0),
+            sharedPool: Boolean(v.shared_pool_id),
           };
         }),
       };
