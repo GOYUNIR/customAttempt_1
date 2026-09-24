@@ -70,8 +70,8 @@ and the honesty in §5.
 
 | Plan | Monthly | Platform fee | Notes |
 |---|---|---|---|
-| Free | $0 | 2% | Up to 50 orders/month. Removes "pay before you've made money". |
-| Starter | $29 | 0.5% | |
+| Free | $0 | 2%, graduated | Removes "pay before you've made money". The rate falls to 0.5% and then 0% as the month grows, and a month never costs more than $99 (PRICING.md). No order cap (D1). A 1,000-orders-a-month abuse review alerts a human and never blocks a sale by itself. |
+| Starter | $29 | 0.5% | **Not sold** (D2). Its rate is the middle band of Free's graduated schedule. |
 | Growth | $99 | 0% | Growth modules included. |
 | Scale | custom | custom | |
 
@@ -177,9 +177,13 @@ evidence, and write the evidence next to it.
   Stripe session is created and decrements only after payment, so two buyers
   can both pay for the last unit. §4 requires a real hold. Same design pass as
   the item above.
-- [ ] **🛑 Stripe Connect.** A per-merchant connected account, with the
-  platform fee collected. Until then every tenant shares one Stripe key, which
-  is what makes multi-merchant legal.
+- [ ] **🛑 Stripe Connect.** Each merchant sells through their own connected
+  account (Accounts v2 with direct charges), with the platform fee collected as
+  an application fee. Today every tenant shares one Stripe account, so a second
+  merchant's customers would be paying the platform. Connect is what makes
+  multi-merchant selling legal. Design: `CONNECT.md`. **Owner action first:**
+  enable Connect in the Stripe dashboard. Stripe refuses to create connected
+  accounts until you do (probed 2026-09-24).
 - [ ] **🛑 Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
   invocation. The checkout webhook measured 51 on a one-item cart before B
   (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading
@@ -207,7 +211,7 @@ evidence, and write the evidence next to it.
   with the condition for picking it up. Check the highest existing
   `DEFERRED-n` before numbering a new one; IDs have collided before.
 - **Pricing, plans, marketing copy:** `lib/platform-marketing.ts` (the data);
-  `PRICING.md` (the graduated-fee design and its open decisions);
+  `PRICING.md` (the graduated-fee design and decisions D1–D5); `CONNECT.md` (Connect);
   `lib/pricing/graduated-fee.ts` (the engine).
 - **Production deploys:** push to `main`. Cloudflare's git integration builds
   the `customattempt-1` worker. Never `wrangler deploy` locally: the `name` in

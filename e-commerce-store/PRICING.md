@@ -7,7 +7,8 @@ Design for STRATEGY.md §5's graduated model. Status (2026-09-24):
   `lib/platform-marketing.ts`).
 - **Not built:** collection. The fee is taken through Stripe Connect, so it
   ships with Connect.
-- **Needs the owner:** the five decisions in §5 below.
+- **Decided:** D1–D5 in §5, all as recommended (owner, 2026-09-24).
+- **Schema:** migration `00032` and `lib/billing.ts`.
 
 ---
 
@@ -102,10 +103,11 @@ already returns every number in it.
 Tone: plain numbers, no upsell language. The only prompt ever shown is one
 that's in the merchant's interest (see D3).
 
-## 5. Decisions for the owner
+## 5. Decisions — all made by the owner on 2026-09-24, as recommended below
 
-These are product judgment calls where reasonable people would disagree, so I
-haven't made them. Each has a recommendation.
+These were product judgment calls, so they went to the owner, who took every
+recommendation below. D3's prompt is to keep exactly that tone:
+*"You're already paying Growth's price — want the modules too?"*
 
 **D1. The Free plan's 50-orders-a-month cap works against graduation.**
 
