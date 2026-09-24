@@ -36,6 +36,7 @@
     "verify:orders": "tsx scripts/verify-order-write.ts",
     "verify:cart-orders": "tsx scripts/verify-cart-order-write.ts",
     "verify:webhook-dedupe": "tsx scripts/verify-webhook-dedupe.ts",
+    "verify:billing": "tsx scripts/verify-plans-billing.ts",
     "verify:draw-runs": "tsx scripts/verify-draw-runs.ts",
     "verify:dunning": "tsx scripts/verify-dunning.ts",
     "backfill:alerts": "tsx scripts/backfill-alert-subscribers.ts",
