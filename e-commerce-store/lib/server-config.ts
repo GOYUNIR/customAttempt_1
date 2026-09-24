@@ -149,7 +149,16 @@ export async function loadStoreConfig(redis: StorageClient | null | undefined): 
  * from every request on warm instances.
  */
 export function loadStoreConfigCached(redis: StorageClient | null | undefined): Promise<Record<string, any>> {
-  return withTtlCache(STORE_CONFIG_KEY, 30_000, () => loadStoreConfig(redis));
+  // A FAILED read must not be cached. loadStoreConfig() turns any error into
+  // `{}`, and withTtlCache stores whatever it is handed — so one storage
+  // hiccup used to pin the empty config for 30 seconds for every caller: the
+  // default order-ref prefix on real orders, the default rewards rate on real
+  // purchases. withTtlCache stores nothing when the fetcher throws, so the
+  // read throws inside the cache and the `{}` fallback is applied outside it.
+  return withTtlCache(STORE_CONFIG_KEY, 30_000, async () => {
+    if (!redis) return {};
+    return safeParseKvItem<any>(await redis.get(STORE_CONFIG_KEY)) || {};
+  }).catch(() => ({}));
 }
 
 export function liveStateField(productId: string, slug: string, size: string) {

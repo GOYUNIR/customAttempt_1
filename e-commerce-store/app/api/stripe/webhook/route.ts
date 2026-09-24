@@ -16,6 +16,7 @@ import {
   getLiveProductState,
   saveLiveState,
   STORE_CONFIG_KEY,
+  loadStoreConfigCached,
   PRODUCTS_KEY,
   PROMO_CODES_KEY,
   promoUsedKey,
@@ -86,8 +87,10 @@ function siteUrlFromEnv() {
 async function awardPurchasePoints(redis: any, email: string, amountCents: number) {
   try {
     if (!email || Number(amountCents) <= 0) return;
-    const rawConfig = await redis.get(STORE_CONFIG_KEY);
-    const config = safeParseKvItem<any>(rawConfig) || {};
+    // Cached: this handler reads store:config up to three times per delivery
+    // (ref prefix, entry email, points), each a PostgREST round trip against
+    // the free-plan subrequest ceiling. One read serves all three.
+    const config = await loadStoreConfigCached(redis);
     const rate = Math.max(0, Number(config?.rewards?.purchasePointsPerDollar) || 10);
     if (rate <= 0) return;
     const pointsEarned = Math.floor((Number(amountCents) / 100) * rate);
@@ -181,14 +184,8 @@ export async function POST(request: Request) {
   // Admin-configured order-ref prefix (store:config.refPrefix, fallback 'GU').
   // Every ref built/normalized below uses it so legacy GY-/GOY- refs are
   // re-labelled to the NEW prefix and new refs are born with it.
-  let refPrefix = 'GU';
-  try {
-    const rawCfg = await redis.get(STORE_CONFIG_KEY);
-    const cfg = safeParseKvItem<any>(rawCfg) || {};
-    refPrefix = normalizeRefPrefix(cfg?.refPrefix || 'GU');
-  } catch {
-    refPrefix = 'GU';
-  }
+  // Cached — the same read serves the points and entry-email lookups below.
+  const refPrefix = normalizeRefPrefix((await loadStoreConfigCached(redis))?.refPrefix || 'GU');
 
   const sig = request.headers.get('stripe-signature');
   const secret = webhookSecret;
@@ -453,8 +450,7 @@ export async function POST(request: Request) {
               const category = (product as any)?.priceCategories?.find((item: any) => item.size === size);
               const listPrice = category?.price;
               const userRewards = await lookupUserRewards(redis, email);
-              const rawStoreConfig = await redis.get(STORE_CONFIG_KEY);
-              const storeConfig = safeParseKvItem<any>(rawStoreConfig) || {};
+              const storeConfig = await loadStoreConfigCached(redis);
               const purchasePointsPerDollar = Math.max(0, Number(storeConfig?.rewards?.purchasePointsPerDollar) || 10);
               const emailResult = await sendEntryConfirmedEmail({
                 to: email,
