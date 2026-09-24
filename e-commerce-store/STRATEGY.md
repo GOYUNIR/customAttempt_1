@@ -150,36 +150,54 @@ architecture doesn't rule it out.
 Real customer transactions must not be possible until **every** item below is
 true. The trigger is the moment real traffic *becomes possible*, not a calendar
 date. Each item is here because it has already failed or been shown to be
-missing.
+missing. Add to this list whenever such a gap is found. Tick an item only with
+evidence, and write the evidence next to it.
 
-- [ ] **Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
-  invocation, and the checkout webhook measured **51 on a one-item cart**.
-  Staying on Free until go-live is deliberate (owner, 2026-09-24). Upgrading is
-  the first go-live action.
-- [ ] **Stripe Connect.** A per-merchant connected account and the platform fee
-  collected. Until then all tenants share one Stripe key.
-- [ ] **Inventory reservation holds.** The cart path currently checks stock at
-  session creation and decrements after payment, so two buyers can both pay for
-  the last unit. §4 requires a real hold.
+### Hard blockers — without these it is not a usable or safe store
+
+- [ ] **🛑 A MERCHANT CAN SET STOCK. Today they cannot.** A merchant who can't
+  restock, or can't mark something sold out, is not running a store. That
+  makes this a hard blocker, not a polish item (owner, 2026-09-24).
+  - For any variant that already has an `inventory_levels` row, the product
+    editor's per-size inventory field is saved into config and then ignored:
+    `catalog-write` only creates missing rows.
+  - `/api/admin/inventory` writes only the KV mirror, and no UI calls it.
+  - `inventory-matrix` is read-only.
+  - Production logs show it happening: "configured inventory 15 differs from
+    live stock 1."
+  - A merchant can't restock, and can't set a product to 0 to pull it from
+    sale.
+  - The fix is an explicit stock-set / stock-adjust operation that is safe
+    against in-flight sales. **Design it together with reservation holds, in
+    one pass.** Both need stock changes recorded as movements rather than
+    overwritten numbers, and two separate patches would disagree with each
+    other.
+- [ ] **🛑 Inventory reservation holds.** The cart path checks stock when the
+  Stripe session is created and decrements only after payment, so two buyers
+  can both pay for the last unit. §4 requires a real hold. Same design pass as
+  the item above.
+- [ ] **🛑 Stripe Connect.** A per-merchant connected account, with the
+  platform fee collected. Until then every tenant shares one Stripe key, which
+  is what makes multi-merchant legal.
+- [ ] **🛑 Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
+  invocation. The checkout webhook measured 51 on a one-item cart before B
+  (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading
+  is the first go-live action.
+
+### Must also be true
+
 - [ ] **Every charge path writes an order**, proven by a real charge on each
-  path: direct, cart, raffle draw, admin trigger-drop, waitlist conversion.
-- [ ] **No shared-inventory pool** can be sold through a path that ignores it
-  (see ARCHITECTURE.md; Postgres stock is per-variant today).
+  path.
+  - Proven with real test-mode charges: direct checkout, cart (the webhook), and
+    the auto-draw winner charge.
+  - Not yet proven with a real charge: admin trigger-drop, and waitlist
+    conversion.
+- [x] **No shared-inventory pool can be sold through a path that ignores it.**
+  Postgres stock is per-variant and ignores `shared_pool_id`, so every stock
+  gate refuses a pooled variant (`lib/stock-gate.ts`, B1). Evidence: unit tests
+  in `tests/stock-gate.test.ts`. Not exercised live, because no production
+  variant uses a pool. Real pool support is a separate feature.
 - [ ] **The homepage copy doesn't contradict the fee model** (DEFERRED-9).
-- [ ] **A merchant can actually set stock.** Today they can't. For any variant
-  that already has an `inventory_levels` row, the product editor's per-size
-  inventory field is saved into config and then ignored (`catalog-write` only
-  creates missing rows). `/api/admin/inventory` writes only the KV mirror, and
-  no UI calls it. `inventory-matrix` is read-only. Production logs show it
-  happening: "configured inventory 15 differs from live stock 1". A merchant
-  can't restock, and can't zero out a product to pull it from sale. The fix is
-  an explicit stock-set / stock-adjust operation that is safe against
-  in-flight sales. Build it with the reservation-hold work, since both need
-  stock movements recorded as events rather than overwritten numbers.
-  Found 2026-09-24.
-
-Add to this list whenever a gap is found that must be closed before real money
-moves. Tick items only with evidence.
 
 ## 10. Where things live
 
