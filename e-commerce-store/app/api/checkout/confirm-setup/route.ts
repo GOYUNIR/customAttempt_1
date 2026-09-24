@@ -21,7 +21,8 @@ import {
   waitlistPoolKey,
 } from '@/lib/server-config';
 import { resolveStripeClient } from '@/services/payment/factory';
-import { markProcessedSession, claimProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { claimStripeSession, completeStripeSession, releaseStripeSession } from '@/lib/webhook-dedupe';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -408,6 +409,9 @@ async function lockOneEntry(opts: {
   }
 
 export async function POST(request: Request) {
+  // Set once this run OWNS the session's dedupe claim. Released in `finally`
+  // on every exit — see there for why that is safe on the success path too.
+  let ownedClaim: string | null = null;
   try {
     const redis = createKvClient();
     const stripe = await resolveStripeClient();
@@ -433,8 +437,22 @@ export async function POST(request: Request) {
 
     // Atomic claim — closes the race where this endpoint (client polling
     // after payment) and the Stripe webhook both fulfill the same setup
-    // session because they both saw isProcessedSession()===false at once.
-    const claimed = await claimProcessedSession(redis, sessionId);
+    // session. Decided by the database in one INSERT (lib/webhook-dedupe).
+    let claim: Awaited<ReturnType<typeof claimStripeSession>>;
+    try {
+      claim = await claimStripeSession(sessionId);
+    } catch (err) {
+      // Unknown is not "already entered". The webhook is the authoritative
+      // processor and will still create the entry; tell the shopper to wait
+      // rather than claiming success we cannot confirm.
+      console.error('[confirm-setup] dedupe unavailable for ' + sessionId, (err as Error)?.message || err);
+      return NextResponse.json(
+        { error: 'We could not confirm your entry just yet. It is being processed — please refresh in a minute.' },
+        { status: 503 },
+      );
+    }
+    if (claim !== 'duplicate') ownedClaim = sessionId;
+    const claimed = claim !== 'duplicate';
     if (!claimed) {
       let existingPromo = null;
       let existingDiscount = 0;
@@ -583,7 +601,8 @@ export async function POST(request: Request) {
         }
       }
 
-      await markProcessedSession(redis, sessionId);
+      await completeStripeSession(sessionId);
+      ownedClaim = null; // the work is done: never give this claim back
 
       let message = '🎉 Your entries are locked in!';
       if (locked.length > 0) message = `🎉 ${locked.length} entr${locked.length === 1 ? 'y' : 'ies'} locked in for the allocation. Good luck!`;
@@ -635,7 +654,8 @@ export async function POST(request: Request) {
     });
 
     if (result.duplicate) {
-      await markProcessedSession(redis, sessionId);
+      await completeStripeSession(sessionId);
+      ownedClaim = null; // the work is done: never give this claim back
       return NextResponse.json({
         success: true,
         entryCreated: false,
@@ -644,7 +664,8 @@ export async function POST(request: Request) {
       });
     }
 
-    await markProcessedSession(redis, sessionId);
+    await completeStripeSession(sessionId);
+    ownedClaim = null; // the work is done: never give this claim back
 
     let successMessage = "🎉 You're in! Your entry is locked for the allocation. Good luck!";
     if (result.appliedPromo) {
@@ -667,5 +688,16 @@ export async function POST(request: Request) {
   } catch (err: any) {
     console.error('confirm-setup', err?.message || err);
     return NextResponse.json({ error: 'Could not confirm your entry. Please try again.' }, { status: 500 });
+  } finally {
+    // Give the claim back on EVERY exit. This path returned early — incomplete
+    // session, missing metadata, a thrown error — while still holding the
+    // claim, and the Stripe webhook arriving seconds later then answered
+    // "already processed": the raffle entry was never created by anyone.
+    //
+    // Never on the success path: ownership is dropped the moment completion
+    // is attempted, so finished work is never handed to the webhook again —
+    // even if the completion write itself failed. (Release would be a no-op
+    // on a 'done' row anyway; this also covers the row that never became one.)
+    if (ownedClaim) await releaseStripeSession(ownedClaim);
   }
 }

@@ -141,9 +141,18 @@ export function markProcessedSession(redis: StorageClient, sessionId: string): P
 export function isProcessedSession(redis: StorageClient, sessionId: string): Promise<boolean> {
   return isDedupeMember(redis, PROCESSED_SESSIONS_KEY, sessionId);
 }
-/** Atomic version of the isProcessedSession+markProcessedSession pair — use
- *  this at the top of a webhook/session handler instead of the two-step
- *  check-then-mark, which is racy under concurrent/redelivered requests. */
+/**
+ * @deprecated for Stripe session dedupe — use claimStripeSession /
+ * completeStripeSession / releaseStripeSession in lib/webhook-dedupe.ts.
+ *
+ * Documented as atomic, and it is not: isMember, incr, expire and zadd are
+ * each a read-then-write of a KV blob with no compare-and-swap. A lost update
+ * in this path was observed in production (a claim row left at v=2 with its
+ * expiry erased by a stale concurrent write). It also caught every storage
+ * error and returned false — "already processed" — so an outage silently
+ * dropped paid orders. Kept only so the KV maintenance and its tests still
+ * compile; no request path should call it.
+ */
 export function claimProcessedSession(redis: StorageClient, sessionId: string): Promise<boolean> {
   return claimDedupeMember(redis, PROCESSED_SESSIONS_KEY, sessionId, DEDUPE_PROCESSED_WINDOW_MS);
 }

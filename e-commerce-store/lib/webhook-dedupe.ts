@@ -98,3 +98,44 @@ export async function completeWebhookKey(scope: string, key: string, now: number
       (err as Error)?.message || err);
   }
 }
+
+/** The one scope in use today: a Stripe Checkout Session id. */
+export const STRIPE_SESSION_SCOPE = 'stripe_checkout_session';
+
+export function claimStripeSession(sessionId: string): Promise<ClaimOutcome> {
+  return claimWebhookKey(STRIPE_SESSION_SCOPE, sessionId);
+}
+
+export function completeStripeSession(sessionId: string): Promise<void> {
+  return completeWebhookKey(STRIPE_SESSION_SCOPE, sessionId);
+}
+
+/**
+ * Give back a claim this run took but did not finish, so another path (the
+ * Stripe webhook, or a retry) can do the work. Only a row still 'claimed' is
+ * removed — never a 'done' one, so a release racing a completion cannot undo
+ * finished work. Never throws: a failed release leaves a claim that becomes
+ * reclaimable after STALE_CLAIM_MS, which is the fallback, not a loss.
+ *
+ * Exists because confirm-setup claimed a session and then returned early on
+ * validation errors without releasing it; the webhook arriving seconds later
+ * saw the claim, answered "already processed", and the raffle entry was never
+ * created. The KV claim had the same flaw and never expired at all.
+ */
+export async function releaseWebhookKey(scope: string, key: string): Promise<void> {
+  try {
+    const db = getDb();
+    if (!db.configured) return;
+    await db.remove(TABLE, {
+      where: { scope: eq(scope), dedupe_key: eq(String(key || '').trim()), status: eq('claimed') },
+    });
+  } catch (err) {
+    console.error('[webhook-dedupe] could not release ' + scope + '/' + key +
+      ' — it becomes reclaimable after ' + STALE_CLAIM_MS / 60000 + ' minutes',
+      (err as Error)?.message || err);
+  }
+}
+
+export function releaseStripeSession(sessionId: string): Promise<void> {
+  return releaseWebhookKey(STRIPE_SESSION_SCOPE, sessionId);
+}

@@ -21,7 +21,8 @@ import {
   promoPendingKey,
   poolKey,
 } from '@/lib/server-config';
-import { markProcessedSession, claimProcessedSession, markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
+import { claimStripeSession, completeStripeSession } from '@/lib/webhook-dedupe';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -219,13 +220,27 @@ export async function POST(request: Request) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const sessionId = session.id;
-    // Atomic claim: closes the window where a Stripe redelivery arriving
-    // while the first delivery is still mid-flight could double-fulfill an
-    // order (double inventory decrement, double reward points, etc).
-    const claimed = await claimProcessedSession(redis, sessionId);
-
-    if (!claimed) {
+    // Atomic claim, decided by the database in one INSERT (lib/webhook-dedupe,
+    // 00031): closes the window where a Stripe redelivery arriving while the
+    // first delivery is still mid-flight could double-fulfill an order. The
+    // KV claim this replaced was documented as atomic and was not.
+    let claim: Awaited<ReturnType<typeof claimStripeSession>>;
+    try {
+      claim = await claimStripeSession(sessionId);
+    } catch (err) {
+      // NOT "already processed". The KV version answered 200 here on any
+      // storage error, so an outage dropped paid orders for good. A 503
+      // makes Stripe retry, and the retry is the recovery.
+      console.error('[webhook] dedupe unavailable for ' + sessionId + ' — answering 503 so Stripe retries',
+        (err as Error)?.message || err);
+      return NextResponse.json({ error: 'Temporarily unable to process' }, { status: 503 });
+    }
+    if (claim === 'duplicate') {
       return NextResponse.json({ received: true, skipped: 'already_processed' });
+    }
+    if (claim === 'reclaimed') {
+      console.warn('[webhook] took over an abandoned claim for ' + sessionId +
+        ' — a previous run started and never finished; completing it now');
     }
 
     if (session.mode === 'setup' && session.status === 'complete') {
@@ -242,7 +257,7 @@ export async function POST(request: Request) {
       // the pools/ledger, even though signature verification is now mandatory.
       if (!isValidEmail(email)) {
         console.warn('[webhook] setup session rejected: invalid email', maskEmail(email));
-        await markProcessedSession(redis, sessionId);
+        await completeStripeSession(sessionId);
         return NextResponse.json({ received: true, skipped: 'invalid_payload' });
       }
 
@@ -298,7 +313,7 @@ export async function POST(request: Request) {
         } catch {}
         if (cartItems.length === 0) {
           console.warn('[webhook] raffle_cart setup session rejected: empty cartItems', maskEmail(email));
-          await markProcessedSession(redis, sessionId);
+          await completeStripeSession(sessionId);
           return NextResponse.json({ received: true, skipped: 'invalid_payload' });
         }
         let orderRefIndex = 0;
@@ -326,7 +341,7 @@ export async function POST(request: Request) {
         const size = clampLength(meta.size || 'Standard', 50).trim();
         if (!variant || !size) {
           console.warn('[webhook] setup session rejected: invalid variant/size', maskEmail(email));
-          await markProcessedSession(redis, sessionId);
+          await completeStripeSession(sessionId);
           return NextResponse.json({ received: true, skipped: 'invalid_payload' });
         }
         const maxPerEmail = Math.max(1, Number(meta.maxPerEmail || 1));
@@ -491,7 +506,7 @@ export async function POST(request: Request) {
         }
       }
 
-      await markProcessedSession(redis, sessionId);
+      await completeStripeSession(sessionId);
     }
 
     if (session.mode === 'payment' && session.status === 'complete') {
@@ -509,7 +524,7 @@ export async function POST(request: Request) {
       // ledger/inventory accounting.
       if (!isValidEmail(email)) {
         console.warn('[webhook] payment session rejected: invalid email', maskEmail(email));
-        await markProcessedSession(redis, sessionId);
+        await completeStripeSession(sessionId);
         return NextResponse.json({ received: true, skipped: 'invalid_payload' });
       }
 
@@ -763,7 +778,7 @@ export async function POST(request: Request) {
         }
       }
 
-      await markProcessedSession(redis, sessionId);
+      await completeStripeSession(sessionId);
     }
   }
 
