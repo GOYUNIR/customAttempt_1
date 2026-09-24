@@ -1,4 +1,6 @@
-import { meteredFetch } from '@/lib/subrequest-meter';
+// Relative, not '@/': plain `node --test` does not resolve the path alias,
+// and every test that loads this module failed to import when it was '@/'.
+import { meteredFetch } from '../../lib/subrequest-meter.ts';
 /**
  * SERVICES / CONFIG — Supabase REST client (fetch only, zero SDK).
  *
