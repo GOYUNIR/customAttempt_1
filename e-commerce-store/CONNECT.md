@@ -1,5 +1,42 @@
 # CONNECT — every merchant gets their own Stripe account
 
+> ## ▶ RESUME HERE (end of session, 2026-09-24)
+>
+> **State of the migrations** (read-only probe against the live database,
+> end of session):
+> - **00033 is live.** The tenant Connect columns exist on every tenant.
+> - **00032 has NOT landed.** The owner's first attempt failed with a
+>   deadlock (`40P01`), and the whole transaction rolled back cleanly:
+>   `plans` is still empty, and `plans.platform_fee_bps`, `tenants.plan_id`,
+>   `tenant_billing_charges` and `orders.platform_fee_cents` do not exist.
+>   Nothing is half-applied. Every statement in 00032 is re-runnable, so a
+>   retry is safe. Run it **on its own**: 00032 and 00033 both alter
+>   `public.tenants`, and running them concurrently is the likely cause of the
+>   deadlock (not investigated further, per owner instruction). Whoever runs
+>   the retry must be able to execute DDL. This environment only has
+>   PostgREST, so it is the owner's action.
+> - After 00032 lands, run `npm run verify:billing` and make sure it passes
+>   before anything uses `lib/billing.ts`.
+>
+> **Connect is NOT enabled** on the platform's Stripe account. The owner will
+> enable it at the start of next session, with full attention. It is a real
+> change to the live Stripe account and was deliberately not rushed. Do not
+> enable it, and do not register any webhook endpoint, without the owner.
+> The approved shape (owner, 2026-09-24) is Accounts v2, direct charges,
+> `losses_collector` and `fees_collector` both `stripe`, `dashboard: express`
+> (§2).
+>
+> **Next step once Connect is enabled: §8 step 3.** Build the Connect
+> webhook:
+> - `account.updated` calls `syncConnectedAccount`;
+> - the tenant is resolved from `event.account`, and the handler refuses when
+>   the session metadata names a different tenant.
+>
+> Then create a test v2 account with `ensureConnectedAccount` (called twice
+> concurrently, expecting one account) and onboard it with test data (§7
+> steps 1–2). Registering the Connect webhook endpoint changes the live Stripe
+> account, so confirm with the owner first.
+
 Status (2026-09-24): **groundwork only.**
 
 - **Built:** migration `00033`; the routing rule and status mapping
