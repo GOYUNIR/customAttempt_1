@@ -5,18 +5,13 @@
 > **State of the migrations** (read-only probe against the live database,
 > end of session):
 > - **00033 is live.** The tenant Connect columns exist on every tenant.
-> - **00032 has NOT landed.** The owner's first attempt failed with a
->   deadlock (`40P01`), and the whole transaction rolled back cleanly:
->   `plans` is still empty, and `plans.platform_fee_bps`, `tenants.plan_id`,
->   `tenant_billing_charges` and `orders.platform_fee_cents` do not exist.
->   Nothing is half-applied. Every statement in 00032 is re-runnable, so a
->   retry is safe. Run it **on its own**: 00032 and 00033 both alter
->   `public.tenants`, and running them concurrently is the likely cause of the
->   deadlock (not investigated further, per owner instruction). Whoever runs
->   the retry must be able to execute DDL. This environment only has
->   PostgREST, so it is the owner's action.
-> - After 00032 lands, run `npm run verify:billing` and make sure it passes
->   before anything uses `lib/billing.ts`.
+> - **00032 is live and verified.** The first attempt deadlocked (`40P01`) and
+>   rolled back cleanly. The owner's retry succeeded. `npm run verify:billing`
+>   passed every check against the real tables, including:
+>   - the database fee curve equals the published one, with Scale excluded;
+>   - 10 concurrent deliveries of one charge are recorded exactly once;
+>   - refunds are idempotent;
+>   - the public anon key is refused (401).
 >
 > **Connect is NOT enabled** on the platform's Stripe account. The owner will
 > enable it at the start of next session, with full attention. It is a real
