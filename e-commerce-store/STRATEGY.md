@@ -181,9 +181,13 @@ evidence, and write the evidence next to it.
   account (Accounts v2 with direct charges), with the platform fee collected as
   an application fee. Today every tenant shares one Stripe account, so a second
   merchant's customers would be paying the platform. Connect is what makes
-  multi-merchant selling legal. Design: `CONNECT.md`. **Owner action first:**
-  enable Connect in the Stripe dashboard. Stripe refuses to create connected
-  accounts until you do (probed 2026-09-24).
+  multi-merchant selling legal. Design: `CONNECT.md`.
+  - Connect and Accounts v2 are enabled (verified through the API on
+    2026-09-25). The first test connected account exists.
+  - Also part of this blocker, found 2026-09-25: **the storefront is
+    single-tenant.** Every checkout route resolves to the default tenant, so no
+    second merchant's customer can reach a checkout at all. How that gets
+    solved is an owner decision (CONNECT.md, "RESUME HERE").
 - [ ] **🛑 Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
   invocation. The checkout webhook measured 51 on a one-item cart before B
   (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading

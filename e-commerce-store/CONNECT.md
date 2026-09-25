@@ -1,55 +1,59 @@
 # CONNECT — every merchant gets their own Stripe account
 
-> ## ▶ RESUME HERE (updated 2026-09-25)
+> ## ▶ RESUME HERE (updated 2026-09-25, afternoon)
 >
-> **Connect is still NOT enabled on the Stripe account this app uses.**
-> Probed 2026-09-25 against `acct_1ToixCPIsR6ijfBZ` (the account behind the
-> configured key). With valid parameters, Stripe answers: *"You can only
-> create new accounts if you've signed up for Connect."* The owner believed
-> Connect was on, so it was most likely enabled in a different sandbox, or
-> the platform-setup flow wasn't finished. **Re-probed later the same day,
-> after the mobile work: unchanged** (`verify-connect-account.ts` returned
-> "Accounts v2 is not enabled" on both concurrent calls, 0 accounts created).
-> Stripe's error also offers enabling Connect from the Stripe CLI/MCP. Not
-> done here: it changes the owner's Stripe account. Owner actions, both on
-> `acct_1ToixCPIsR6ijfBZ`:
-> 1. Finish Connect platform setup:
->    <https://dashboard.stripe.com/acct_1ToixCPIsR6ijfBZ/settings/connect/platform-setup>
->    (the link from Stripe's own error message).
-> 2. Enable **Accounts v2**. The v2 create returned *"Accounts v2 is not
->    enabled for your sandbox merchant"*, pointing to
->    <https://docs.stripe.com/accounts-v2/use-accounts-as-customers>.
+> **Connect and Accounts v2 are ON** for `acct_1ToixCPIsR6ijfBZ` (verified
+> through the API, not the dashboard). **test4 → `acct_1UJWFxPIsRXBZjvC`**
+> (test mode). Stripe accepted our configuration and reads it back as:
+> `dashboard: full`, `fees_collector: stripe`, `losses_collector: stripe`,
+> `requirements_collector: stripe`.
+> - The dashboard shows "fees_collector: account". The API value is `stripe`,
+>   and the SDK has no `account` value. Both describe the same thing: Stripe
+>   charges the merchant its processing fee directly.
+> - `losses_collector: stripe` means **Stripe** covers a merchant's negative
+>   balance, not the platform and not the merchant. A chargeback on a direct
+>   charge still comes out of the merchant's balance first (§7 step 5 proves
+>   this).
+> - `acct_1UJWA1PIsRkxVPbf` (`testaccount@example.com`) was created by
+>   Stripe's own setup guide. No tenant uses it. Leave it alone.
 >
-> **The approved shape changed on one field.** `dashboard: express` is
-> refused with merchant liability. Stripe: *"When
-> stripe_dashboard[type]=express, your platform must collect fees and be
-> liable for negative balances."* The default is now `dashboard: full`: the
-> merchant's own full Stripe Dashboard, matching the pricing-page promise
-> "Your own Stripe account". Liability stays on the merchant. **Not yet
-> proven:** that Stripe accepts full + `fees_collector: stripe` +
-> `losses_collector: stripe`. The probe for it hit the Connect-not-enabled
-> wall. Confirm it first, once Connect is on.
+> **Learned from the real calls:**
+> - Stripe needs `identity.country` before a merchant configuration or a
+>   default currency. It derives the currency from the country, so the
+>   hardcoded `usd` is gone, and `ensureConnectedAccount` now requires the
+>   merchant's stated country. The onboarding panel must ask for it.
+> - Two concurrent creates: the second is refused ("concurrent access limit")
+>   while the first holds the idempotency key. It now retries and replays that
+>   key. Re-proven: both calls return the same account, and Stripe's list shows
+>   no second one.
+> - The platform may not accept Stripe's terms of service for a merchant
+>   (requirements_collector: stripe), so onboarding has to go through Stripe's
+>   UI. The hosted page shows an **hCaptcha**, so a person completes it; it
+>   was not automated.
 >
-> **Built and deployed (2026-09-25), not registered:**
-> - `app/api/stripe/connect-webhook` handles `account.updated` by syncing
->   from Stripe, with the cross-tenant guard (5 tests). Payment events answer
->   500 and are released until their handler exists.
-> - Migration `00034` adds `payment_connect_webhook_secret` to
->   `global_platform_settings` (owner applies).
-> - With no secret configured the route answers **503** to everything, so
->   nothing is accepted unsigned and Stripe retries once the secret is set.
+> **Found: the storefront is single-tenant.** Every checkout route, and
+> `/api/store`, resolves its tenant with `ensureDefaultTenant()`. No request
+> can sell for test4 or any other merchant. §4 assumed the routes know their
+> tenant. They don't. Wiring the fee into the routes is therefore blocked on
+> an owner decision:
+>   A. cut the legacy store over to its own connected account;
+>   B. build host → tenant resolution for storefronts first;
+>   C. prove only the Stripe side against test4 until then.
+> `scripts/verify-connect-charges.ts` is C. It is written and typechecked, and
+> exits 2 until test4 can take charges. Its body has never run.
 >
 > **Next, in order:**
-> 1. The owner does the two actions above and applies `00034`.
-> 2. Run `npx tsx scripts/verify-connect-account.ts` (`test4`, two concurrent calls,
->    expect one account).
-> 3. With owner confirmation, register the Connect endpoint
+> 1. **Owner:** onboard test4. Run
+>    `PLATFORM_ROOT_DOMAIN=goyunir.com npx tsx scripts/connect-onboarding-link.ts`,
+>    open the link at once (single use), and use Stripe's test values (listed
+>    in the script header). Then run it again with `--sync`.
+> 2. Run `npx tsx scripts/verify-connect-charges.ts`: direct charge plus fee,
+>    refund returns the fee, dispute card lands on the merchant.
+> 3. **Owner confirms**, then register the Connect endpoint
 >    (`https://goyunir.com/api/stripe/connect-webhook`, `connect: true`,
->    event `account.updated`), then store its signing secret in
->    `global_platform_settings.payment_connect_webhook_secret`.
-> 4. Onboard `test4` (embedded component, or Stripe's test data). Expect
->    `account.updated` to flip `connect_charges_enabled`.
-> 5. CONNECT.md §8 step 4: the fee wired into each charge path.
+>    `account.updated`) and store its secret (apply `00034` first).
+> 4. **Owner decides A, B or C.** Then wire the fee into the charge paths, one
+>    path per change, each proven with a real charge per §7.
 
 Status (2026-09-24): **groundwork only.**
 
