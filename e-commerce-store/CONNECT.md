@@ -7,7 +7,11 @@
 > configured key). With valid parameters, Stripe answers: *"You can only
 > create new accounts if you've signed up for Connect."* The owner believed
 > Connect was on, so it was most likely enabled in a different sandbox, or
-> the platform-setup flow wasn't finished. Owner actions, both on
+> the platform-setup flow wasn't finished. **Re-probed later the same day,
+> after the mobile work: unchanged** (`verify-connect-account.ts` returned
+> "Accounts v2 is not enabled" on both concurrent calls, 0 accounts created).
+> Stripe's error also offers enabling Connect from the Stripe CLI/MCP. Not
+> done here: it changes the owner's Stripe account. Owner actions, both on
 > `acct_1ToixCPIsR6ijfBZ`:
 > 1. Finish Connect platform setup:
 >    <https://dashboard.stripe.com/acct_1ToixCPIsR6ijfBZ/settings/connect/platform-setup>
