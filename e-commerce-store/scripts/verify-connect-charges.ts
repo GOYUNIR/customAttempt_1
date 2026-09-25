@@ -30,6 +30,17 @@ const AMOUNT = 1900; // test amount, minor units
 let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The fee object Stripe links to a charge. It is created a few seconds after
+ *  the charge (right after confirm, charge.application_fee is still null), so
+ *  wait for the link rather than read it once. */
+async function feeOfCharge(stripe: any, chargeId: string, on: { stripeAccount: string }) {
+  for (let i = 0; i < 20; i++) {
+    const ch = await stripe.charges.retrieve(chargeId, {}, on);
+    if (ch.application_fee) return stripe.applicationFees.retrieve(String(ch.application_fee));
+    await sleep(1000);
+  }
+  return null;
+}
 
 (async () => {
   const { chargeRouteForTenant, syncConnectedAccount } = await import('../lib/connect');
@@ -52,7 +63,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   }
   const acct = route.stripeAccount;
   const on = { stripeAccount: acct };
-  const v2 = await stripe.v2.core.accounts.retrieve(acct);
+  const v2 = await stripe.v2.core.accounts.retrieve(acct, { include: ['defaults'] });
   const currency = String(v2.defaults?.currency || '');
   if (!currency) throw new Error('connected account has no default currency');
   const runId = Date.now().toString(36);
@@ -76,7 +87,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   check((charge.application_fee_amount || 0) === fee.feeCents, 'charge.application_fee_amount = ' + charge.application_fee_amount + ' (expected ' + fee.feeCents + ')');
   let appFee: any = null;
   if (fee.feeCents > 0) {
-    appFee = (await stripe.applicationFees.list({ charge: charge.id, limit: 1 })).data[0];
+    // Follow the charge's own link to its fee. Listing fees by charge came back
+    // empty seconds after the charge (search lag, seen 2026-09-25) though the
+    // fee existed; the link is authoritative.
+    appFee = await feeOfCharge(stripe, charge.id, on);
     check(Boolean(appFee) && appFee.amount === fee.feeCents && appFee.account === acct,
       'platform received application fee ' + (appFee ? appFee.id + ' ' + appFee.amount + ' from ' + appFee.account : '(none)'));
   }
@@ -94,7 +108,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // ── 3. the dispute test card: whose balance pays ───────────────────────────
   console.log('\n3. dispute test card (4000 0000 0000 0259)');
-  const acctBefore = await stripe.balance.retrieve(on);
+  const acctBefore = await stripe.balance.retrieve({}, on);
   const dpi = await stripe.paymentIntents.create({
     amount: AMOUNT, currency, payment_method: 'pm_card_createDispute', payment_method_types: ['card'], confirm: true,
     description: 'Connect dispute verification ' + runId, metadata: { tenant_id: TENANT, verify_run: runId }, ...feeParam,
@@ -115,11 +129,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const platTx = await stripe.balanceTransactions.list({ created: { gte: startedAt }, limit: 100 });
     const platDisputeTx = platTx.data.filter((t: any) => /dispute|adjustment/.test(String(t.type)) || String(t.source || '') === dispute.id);
     check(platDisputeTx.length === 0, 'no dispute/adjustment on the platform balance since this run started (' + platDisputeTx.map((t: any) => t.id + ' ' + t.type + ' ' + t.net).join(', ') + ')');
-    const acctAfter = await stripe.balance.retrieve(on);
+    const acctAfter = await stripe.balance.retrieve({}, on);
     const sum = (b: any) => [...(b.available || []), ...(b.pending || [])].filter((x: any) => x.currency === currency).reduce((s: number, x: any) => s + x.amount, 0);
     console.log('  merchant balance (' + currency + ', available+pending): ' + sum(acctBefore) + ' -> ' + sum(acctAfter));
     if (appFee || fee.feeCents > 0) {
-      const dfee = (await stripe.applicationFees.list({ charge: String(dpi.latest_charge), limit: 1 })).data[0];
+      const dfee = await feeOfCharge(stripe, String(dpi.latest_charge), on);
       console.log('  platform fee on the disputed charge: ' + (dfee ? dfee.amount + ', refunded ' + dfee.amount_refunded : 'none') + ' (Stripe does not return it automatically on a dispute)');
     }
   }

@@ -34,26 +34,44 @@
 > **Found: the storefront is single-tenant.** Every checkout route, and
 > `/api/store`, resolves its tenant with `ensureDefaultTenant()`. No request
 > can sell for test4 or any other merchant. §4 assumed the routes know their
-> tenant. They don't. Wiring the fee into the routes is therefore blocked on
-> an owner decision:
->   A. cut the legacy store over to its own connected account;
->   B. build host → tenant resolution for storefronts first;
->   C. prove only the Stripe side against test4 until then.
-> `scripts/verify-connect-charges.ts` is C. It is written and typechecked, and
-> exits 2 until test4 can take charges. Its body has never run.
+> tenant. They don't. **Owner chose C, then B** (2026-09-25): prove the Stripe
+> side against test4 now, then build per-merchant storefront resolution.
+>
+> **C is done: the Stripe side passes** (`scripts/verify-connect-charges.ts`,
+> 2026-09-25, run `mugw4hya`). test4 was onboarded by the owner through
+> Stripe's hosted page. Stripe's v2 status lagged v1 by about a minute, then
+> both showed active. After `--sync`: `connect_charges_enabled` true,
+> `connect_payouts_enabled` true, routing `connected`. Results:
+> - **Direct charge on the merchant's account:** `pi_3UJXVVPIsRXBZjvC2AW5Zkqg`
+>   is on `acct_1UJWFxPIsRXBZjvC`, and does not exist on the platform.
+> - **Fee:** `application_fee_amount` 38 = `platformFeeForCharge` (graduated,
+>   Free, $0 month to date, $19.00 sale). The platform received
+>   `fee_1UJXVYPIsRXBZjvC146nxL3t`, 38 from test4.
+> - **Refund** with `refund_application_fee`: the fee came back exactly, 38 of
+>   38.
+> - **Dispute card:** `du_1UJXVcPIsRXBZjvCeTnzUoBs` is on test4, and debited
+>   test4's balance by -3400 (the $19.00 sale plus Stripe's $15.00 dispute
+>   fee). It does not exist on the platform, and no dispute or adjustment
+>   touched the platform balance.
+> - **Open (owner):** the platform KEEPS its fee on a disputed sale (38,
+>   refunded 0). Stripe doesn't return application fees on disputes. D5 covers
+>   refunds only. Should a lost dispute also return our fee?
+> - The first runs failed on script bugs, not on Stripe: a missing
+>   `include: ['defaults']`, a wrong `balance.retrieve` signature, and reading
+>   the fee link before Stripe had written it (about 2s after the charge). All
+>   fixed. The fee existed on every run.
 >
 > **Next, in order:**
-> 1. **Owner:** onboard test4. Run
->    `PLATFORM_ROOT_DOMAIN=goyunir.com npx tsx scripts/connect-onboarding-link.ts`,
->    open the link at once (single use), and use Stripe's test values (listed
->    in the script header). Then run it again with `--sync`.
-> 2. Run `npx tsx scripts/verify-connect-charges.ts`: direct charge plus fee,
->    refund returns the fee, dispute card lands on the merchant.
-> 3. **Owner confirms**, then register the Connect endpoint
+> 1. **Owner confirms**, then register the Connect endpoint
 >    (`https://goyunir.com/api/stripe/connect-webhook`, `connect: true`,
->    `account.updated`) and store its secret (apply `00034` first).
-> 4. **Owner decides A, B or C.** Then wire the fee into the charge paths, one
->    path per change, each proven with a real charge per §7.
+>    `account.updated`) and store its secret (apply `00034` first). Until then,
+>    `scripts/connect-onboarding-link.ts --sync` does what `account.updated`
+>    will do.
+> 2. **B:** per-merchant storefront resolution (host → tenant), so a
+>    connected merchant's customers can reach a checkout.
+> 3. Then wire the fee into the charge paths, one per change, each proven
+>    with a real charge through the real route (§7 step 3 onward, including
+>    the order row and `tenant_billing_charges`).
 
 Status (2026-09-24): **groundwork only.**
 
