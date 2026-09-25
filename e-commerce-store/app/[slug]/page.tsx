@@ -48,10 +48,21 @@ export default async function ProductPage({
     }
   }
 
+  // Storefront asks for `/api/store?slug=…` only after it hydrates; start that
+  // request with the HTML instead (lib/client-store-cache.ts picks it up by
+  // the exact URL). JSON.stringify + the '<' escape keep the slug inert.
+  const productUrl = JSON.stringify(`/api/store?slug=${slug}`).replace(/</g, '\\u003c');
   return (
-    <Suspense fallback={null}>
-      <Storefront initialSlug={slug} />
-    </Suspense>
+    <>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `try{var u=${productUrl};var m=window.__GOYUNIR_STORE_PREFETCHES__=window.__GOYUNIR_STORE_PREFETCHES__||{};m[u]=fetch(u).then(function(r){return r.ok?r.json():null}).catch(function(){return null})}catch(e){}`,
+        }}
+      />
+      <Suspense fallback={null}>
+        <Storefront initialSlug={slug} />
+      </Suspense>
+    </>
   );
 }
 

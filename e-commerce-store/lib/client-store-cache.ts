@@ -64,12 +64,27 @@ async function fetchWithRetry(url: string, attempt = 0): Promise<unknown> {
 
 const PREFETCH_URL = '/api/store';
 
+/**
+ * A request an inline script already started for this URL: `/api/store` from
+ * the document head (app/layout.tsx), and `/api/store?slug=…` from the product
+ * page's server HTML (app/[slug]/page.tsx), keyed by the exact URL the
+ * component will ask for.
+ */
 function takePrefetch(url: string, options?: { force?: boolean }): Promise<unknown> | null {
-  if (url !== PREFETCH_URL || options?.force || typeof window === 'undefined') return null;
-  const w = window as unknown as { __GOYUNIR_STORE_PREFETCH__?: Promise<unknown> };
-  const p = w.__GOYUNIR_STORE_PREFETCH__;
+  if (options?.force || typeof window === 'undefined') return null;
+  const w = window as unknown as {
+    __GOYUNIR_STORE_PREFETCH__?: Promise<unknown>;
+    __GOYUNIR_STORE_PREFETCHES__?: Record<string, Promise<unknown> | undefined>;
+  };
+  let p: Promise<unknown> | undefined;
+  if (url === PREFETCH_URL) {
+    p = w.__GOYUNIR_STORE_PREFETCH__;
+    w.__GOYUNIR_STORE_PREFETCH__ = undefined; // one use: later loads must be fresh
+  } else if (w.__GOYUNIR_STORE_PREFETCHES__) {
+    p = w.__GOYUNIR_STORE_PREFETCHES__[url];
+    delete w.__GOYUNIR_STORE_PREFETCHES__[url];
+  }
   if (!p) return null;
-  w.__GOYUNIR_STORE_PREFETCH__ = undefined; // one use: later loads must be fresh
   // The same cap as any other attempt: a hung prefetch falls back to a
   // normal request instead of holding the page on its loading state.
   return Promise.race([
