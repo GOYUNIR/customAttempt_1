@@ -427,3 +427,9 @@ textarea {
   0%, 100% { background-position: 0% 0%; }
   50% { background-position: 100% 100%; }
 }
+
+/* Marketing header on a phone: the section links pushed Sign in and the
+   "Create your store" CTA off the right edge (MarketingChrome.tsx). */
+@media (max-width: 639px) {
+  .goyunir-mkt-nav { display: none !important; }
+}

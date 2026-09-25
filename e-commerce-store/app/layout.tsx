@@ -239,6 +239,18 @@ export default async function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+        {/* Every storefront page renders from /api/store, but the components
+            only ask for it once the JS has downloaded and hydrated — on a phone
+            on 4G that put the first real content ~2s behind the HTML. Start the
+            request here, in parallel with the JS; lib/client-store-cache.ts
+            picks the promise up instead of making its own first request. */}
+        {!hideStorefrontChrome && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `try{window.__GOYUNIR_STORE_PREFETCH__=fetch('/api/store').then(function(r){return r.ok?r.json():null}).catch(function(){return null})}catch(e){}`,
+            }}
+          />
+        )}
       </head>
       <body
         suppressHydrationWarning

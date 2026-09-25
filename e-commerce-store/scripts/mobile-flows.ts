@@ -50,9 +50,11 @@ async function flow(page: Page, out: string, w: number): Promise<Step[]> {
 
   await step('01-product', async () => { await page.goto(PRODUCT, { waitUntil: 'load', timeout: 90_000 }); return 'loaded'; });
 
-  await step('02-menu-open', async () => {
-    await page.getByRole('link', { name: /more/i }).first().tap({ timeout: 8000 });
-    return 'tapped MORE';
+  await step('02-more', async () => {
+    // 'More' is the header link to the full catalog, not a menu.
+    await page.locator('a:has-text("More")').first().tap({ timeout: 8000 });
+    await page.waitForURL(/catalog/, { timeout: 10_000 });
+    return 'tapped More -> ' + new URL(page.url()).pathname;
   });
   await step('03-menu-close', async () => {
     await page.keyboard.press('Escape').catch(() => {});
@@ -96,7 +98,7 @@ async function flow(page: Page, out: string, w: number): Promise<Step[]> {
 
   await step('09-address-pick', async () => {
     const option = page.locator('[role=option]').first();
-    const label = (await option.innerText().catch(() => '')).replace(/s+/g, ' ').slice(0, 60);
+    const label = (await option.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 60);
     await option.tap({ timeout: 8000 });
     await page.waitForTimeout(1200);
     const value = await page.locator('input[placeholder*=address i], input[autocomplete*=address i]').first().inputValue();

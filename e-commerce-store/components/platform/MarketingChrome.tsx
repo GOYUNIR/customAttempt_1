@@ -52,24 +52,27 @@ export function MarketingHeader({ rootDomain }: { rootDomain: string | null }) {
           GOYUNIR
         </Link>
 
-        <nav style={{ display: 'flex', gap: 22, marginLeft: 12, flex: '1 1 auto' }}>
+        {/* On a phone the section links do not fit beside Sign in and the CTA
+            (they pushed both off the right edge at 375px); the sections are one
+            scroll away, so below 640px the nav hides (globals.css). */}
+        <nav className="goyunir-mkt-nav" style={{ display: 'flex', gap: 22, marginLeft: 12, flex: '1 1 auto' }}>
           {NAV.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              style={{ color: INK.muted, textDecoration: 'none', fontSize: 13.5, whiteSpace: 'nowrap' }}
+              style={{ color: INK.muted, textDecoration: 'none', fontSize: 13.5, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', minHeight: 44 }}
             >
               {item.label}
             </a>
           ))}
         </nav>
 
-        <a href={signIn} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
+        <a href={signIn} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, minWidth: 44, marginLeft: 'auto' }}>
           Sign in
         </a>
         <a
           href="#start"
-          style={{ background: INK.text, color: INK.bg, textDecoration: 'none', borderRadius: 999, padding: '9px 18px', fontSize: 13.5, fontWeight: 800, whiteSpace: 'nowrap' }}
+          style={{ background: INK.text, color: INK.bg, textDecoration: 'none', borderRadius: 999, padding: '0 18px', minHeight: 44, display: 'inline-flex', alignItems: 'center', fontSize: 13.5, fontWeight: 800, whiteSpace: 'nowrap' }}
         >
           Create your store
         </a>

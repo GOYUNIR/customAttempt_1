@@ -62,6 +62,22 @@ async function fetchWithRetry(url: string, attempt = 0): Promise<unknown> {
   }
 }
 
+const PREFETCH_URL = '/api/store';
+
+function takePrefetch(url: string, options?: { force?: boolean }): Promise<unknown> | null {
+  if (url !== PREFETCH_URL || options?.force || typeof window === 'undefined') return null;
+  const w = window as unknown as { __GOYUNIR_STORE_PREFETCH__?: Promise<unknown> };
+  const p = w.__GOYUNIR_STORE_PREFETCH__;
+  if (!p) return null;
+  w.__GOYUNIR_STORE_PREFETCH__ = undefined; // one use: later loads must be fresh
+  // The same cap as any other attempt: a hung prefetch falls back to a
+  // normal request instead of holding the page on its loading state.
+  return Promise.race([
+    p,
+    new Promise<null>((resolve) => window.setTimeout(() => resolve(null), FETCH_TIMEOUT_MS)),
+  ]);
+}
+
 export function fetchStoreJson<T = any>(url: string, options?: { force?: boolean }): Promise<T> {
   const existing = inflight.get(url);
   if (existing) return existing as Promise<T>;
@@ -87,10 +103,17 @@ export function fetchStoreJson<T = any>(url: string, options?: { force?: boolean
     }
   }
 
+  // The first /api/store request of a page load was already started by an
+  // inline script in the document head (app/layout.tsx). Use it once; if it
+  // failed (null), fall back to the normal request with its retry.
+  const prefetched = takePrefetch(url, options);
+
   // `force` bypasses the fresh/stale fast-paths entirely (used when a countdown
   // hit zero and the page needs to see the product's POST-draw state right away,
   // not a 10s-old snapshot).
-  const promise = fetchWithRetry(url)
+  const promise = (prefetched
+    ? prefetched.then((data) => (data == null ? fetchWithRetry(url) : data))
+    : fetchWithRetry(url))
     .then((data: unknown) => {
       cache.set(url, { data, at: Date.now() });
       return data;

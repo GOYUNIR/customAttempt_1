@@ -1179,7 +1179,7 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
             prefetch={false}
             aria-label="Catalog & search"
             title="Catalog & search"
-            style={{ height: 42, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${headerText === '#0a0a0c' ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
+            style={{ height: 44, padding: '0 14px', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', border: `1px solid ${headerText === '#0a0a0c' ? 'rgba(10,10,12,0.18)' : 'rgba(255,255,255,0.12)'}`, color: headerText, textDecoration: 'none', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', fontSize: 11, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             MORE
@@ -1222,8 +1222,8 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
             aria-label={signedIn ? 'Your account (signed in)' : 'Account'}
             title={signedIn ? 'Your account (signed in)' : 'Account'}
             style={{
-              width: 42,
-              height: 42,
+              width: 44,
+              height: 44,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1243,7 +1243,7 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
             onClick={() => setCartOpen(true)}
             aria-label={actionTitle}
             title={actionTitle}
-            style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: headerText === '#0a0a0c' ? '1px solid rgba(10,10,12,0.18)' : '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : headerText, cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
+            style={{ width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: headerText === '#0a0a0c' ? '1px solid rgba(10,10,12,0.18)' : '1px solid rgba(255,255,255,0.12)', background: hasItems ? '#f3f4f6' : 'rgba(255,255,255,0.07)', color: hasItems ? '#09090b' : headerText, cursor: 'pointer', boxShadow: '0 10px 24px rgba(0,0,0,0.16)', position: 'relative' }}
           >
             {headerActionMode === 'bag' ? (
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8h12l1 12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1L6 8Z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
@@ -1276,7 +1276,7 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
             ] as const).map(([href, label], index) => (
               <span key={href} style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
                 {index > 0 && <span aria-hidden="true" style={{ opacity: 0.4, fontSize: 10 }}>·</span>}
-                <Link href={href} prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none' }}>{label}</Link>
+                <Link href={href} prefetch={false} style={{ color: liveTheme.textMuted || '#71717a', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>{label}</Link>
               </span>
             ))}
           </div>
@@ -1285,7 +1285,7 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
               const ig = String(footerSettings?.instagramLink || '').trim();
               const tt = String(footerSettings?.tiktokLink || '').trim();
               const mail = String(copySettings.supportEmail || footerSettings?.supportEmail || '').trim();
-              const linkStyle = { color: liveTheme.textMuted || '#71717a', textDecoration: 'none' } as const;
+              const linkStyle = { color: liveTheme.textMuted || '#71717a', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', minHeight: 44 } as const;
               return (
                 <>
                   {ig ? <a href={ig} target="_blank" rel="noreferrer" style={linkStyle}>Instagram</a> : null}

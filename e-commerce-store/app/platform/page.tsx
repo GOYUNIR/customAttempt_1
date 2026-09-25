@@ -98,7 +98,7 @@ export default function PlatformPage() {
               stays honest: nothing here is hidden, it's just not the first
               thing a visitor has to read to understand the pitch. */}
           <details style={{ marginTop: 18 }}>
-            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: INK.text }}>
+            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: INK.text, padding: '12px 0' }}>
               How we measure this
             </summary>
             <p style={{ fontSize: 14.5, lineHeight: 1.7, color: INK.muted, margin: '12px 0 0', maxWidth: 720 }}>
@@ -119,7 +119,7 @@ export default function PlatformPage() {
           target, a standardized behavior, not a hack. */}
       <section style={{ ...SHELL, padding: '70px 20px 0' }}>
         <details id="comparison">
-          <summary style={{ ...SECTION_LABEL, cursor: 'pointer', listStyle: 'none' }}>
+          <summary style={{ ...SECTION_LABEL, cursor: 'pointer', listStyle: 'none', paddingBlock: 12 }}>
             Against what you use today <span style={{ color: INK.text, textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}>— see the full comparison</span>
           </summary>
           <div style={{ border: `1px solid ${INK.border}`, borderRadius: 16, overflow: 'hidden', marginTop: 8 }}>
@@ -260,9 +260,9 @@ export default function PlatformPage() {
         <h2 style={SECTION_LABEL}>Questions</h2>
         <div style={{ display: 'grid', gap: 10 }}>
           {FAQS.map((item) => (
-            <details key={item.q} style={{ background: INK.panel, border: `1px solid ${INK.border}`, borderRadius: 14, padding: '15px 19px' }}>
-              <summary style={{ fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{item.q}</summary>
-              <p style={{ fontSize: 14, lineHeight: 1.7, color: INK.muted, margin: '11px 0 0' }}>{item.a}</p>
+            <details key={item.q} style={{ background: INK.panel, border: `1px solid ${INK.border}`, borderRadius: 14, padding: '0 19px' }}>
+              <summary style={{ fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: '15px 0' }}>{item.q}</summary>
+              <p style={{ fontSize: 14, lineHeight: 1.7, color: INK.muted, margin: '0 0 15px' }}>{item.a}</p>
             </details>
           ))}
         </div>
