@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofillWhenIdle, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, surfaceBackground, themeRadius, cardShadowStyle, contentSpacingScale, cardSheen, getCategoryCheckoutMode, hasMixedCheckoutModes, sizeCheckoutModes, resolveCategoryLimits, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
@@ -527,7 +527,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // is safe; the SDK only loads when a token is configured.
   useEffect(() => {
     if (!product) return;
-    ensureMapboxAutofill();
+    ensureMapboxAutofillWhenIdle();
   }, [product]);
 
   // Elegant auto-advancing gallery: slowly cycles through the product photos
@@ -1786,7 +1786,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 </button>
               </div>
             ) : (
-              <button onClick={() => setShowPromoField(true)} style={{ padding: '9px 0', border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
+              <button onClick={() => setShowPromoField(true)} style={{ padding: '0', minHeight: 44, border: 'none', background: 'transparent', color: configPalette.cardTextMuted, fontSize: 12, cursor: 'pointer' }}>Add promo or promoter credit</button>
             )}
           </div>
           {promoMsg && <div style={{ marginBottom: 8, fontSize: 11, color: promoValid === false ? '#fca5a5' : '#86efac' }}>{promoMsg}</div>}

@@ -134,13 +134,13 @@ export function MarketingFooter({ rootDomain }: { rootDomain: string | null }) {
               <div style={{ fontSize: 11.5, letterSpacing: '1.6px', textTransform: 'uppercase', color: INK.muted, fontWeight: 700, marginBottom: 12 }}>
                 {col.heading}
               </div>
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 9 }}>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 0 }}>
                 {col.links.map((link) => (
                   <li key={link.label}>
                     {link.external || link.href.startsWith('#') ? (
-                      <a href={link.href} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5 }}>{link.label}</a>
+                      <a href={link.href} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5, display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>{link.label}</a>
                     ) : (
-                      <Link href={link.href} prefetch={false} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5 }}>
+                      <Link href={link.href} prefetch={false} style={{ color: INK.text, textDecoration: 'none', fontSize: 13.5, display: 'inline-flex', alignItems: 'center', minHeight: 44 }}>
                         {link.label}
                       </Link>
                     )}

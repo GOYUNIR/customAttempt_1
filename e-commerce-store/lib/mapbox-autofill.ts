@@ -1036,6 +1036,44 @@ function startAttachLoop(): void {
 }
 
 /**
+ * ensureMapboxAutofill(), but not in the way of the first paint. The SDK is
+ * ~100KB+ from another origin; loading it at mount competed with the hero
+ * image on a phone (the page's largest paint). It starts once the page has
+ * loaded and the browser is idle — or at once if the shopper touches a form
+ * field first, so autofill is never late for someone typing.
+ */
+let idleScheduled = false;
+let idleStarted = false;
+export function ensureMapboxAutofillWhenIdle(): void {
+  if (typeof window === 'undefined') return;
+  // Already started: behave exactly like ensureMapboxAutofill (it picks up
+  // inputs mounted since).
+  if (idleStarted) { void ensureMapboxAutofill(); return; }
+  if (idleScheduled) return;
+  idleScheduled = true;
+  const start = () => {
+    if (idleStarted) return;
+    idleStarted = true;
+    document.removeEventListener('focusin', onField, true);
+    document.removeEventListener('pointerdown', onField, true);
+    void ensureMapboxAutofill();
+  };
+  const onField = (event: Event) => {
+    const t = event.target as Element | null;
+    if (t && t.closest && t.closest('input, textarea, select, button')) start();
+  };
+  document.addEventListener('focusin', onField, true);
+  document.addEventListener('pointerdown', onField, true);
+  const idle = () => {
+    const ric = (window as any).requestIdleCallback as undefined | ((cb: () => void, o?: { timeout: number }) => void);
+    if (ric) ric(start, { timeout: 2500 });
+    else window.setTimeout(start, 1200);
+  };
+  if (document.readyState === 'complete') idle();
+  else window.addEventListener('load', idle, { once: true });
+}
+
+/**
  * Attach Mapbox address autofill to the page. Safe to call from multiple
  * components and on every mount: the SDK + collection are created only once,
  * and our identity-based MutationObserver attaches to inputs rendered later.

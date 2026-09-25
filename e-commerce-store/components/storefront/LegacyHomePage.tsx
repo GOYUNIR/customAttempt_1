@@ -473,19 +473,19 @@ export default function LegacyHomePage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {heroContent.showCta !== false && (
               primaryProduct?.slug ? (
-                <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                <button onClick={() => document.getElementById('goyunir-priority-drops')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ padding: '0 18px', minHeight: 44, borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
                   {heroContent.ctaLabel || 'Browse drops'}
                 </button>
               ) : (
                 activeProducts.length > 0 && (
-                  <Link href="/catalog" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+                  <Link href="/catalog" prefetch={false} style={{ padding: '0 18px', minHeight: 44, display: 'inline-flex', alignItems: 'center', borderRadius: 999, background: configPalette.cardTextMain, color: configPalette.cardBackground, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
                     Browse catalog
                   </Link>
                 )
               )
             )}
             {heroContent.showStory !== false && (
-              <Link href="/story" prefetch={false} style={{ padding: '10px 16px', borderRadius: 999, border: `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 32%, transparent)`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
+              <Link href="/story" prefetch={false} style={{ padding: '0 18px', minHeight: 44, display: 'inline-flex', alignItems: 'center', boxSizing: 'border-box', borderRadius: 999, border: `1px solid color-mix(in srgb, ${configPalette.cardTextMain} 32%, transparent)`, background: 'transparent', color: configPalette.cardTextMain, textDecoration: 'none', fontWeight: 700, fontSize: 13 }}>
                 {heroContent.storyHeadline || 'Our Story'}
               </Link>
             )}
@@ -620,7 +620,7 @@ export default function LegacyHomePage() {
             {authUser ? (
               <Link href="/account" prefetch={false} style={{ padding: '10px 14px', borderRadius: 999, background: configPalette.accentBlue, color: '#04101f', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>My account</Link>
             ) : (
-              <Link href="/auth/signup" prefetch={false} style={{ padding: '10px 14px', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
+              <Link href="/auth/signup" prefetch={false} style={{ padding: '0 16px', minHeight: 44, display: 'inline-flex', alignItems: 'center', borderRadius: 999, background: '#f5f5f5', color: '#060606', textDecoration: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Create account</Link>
             )}
           </div>
         </section>

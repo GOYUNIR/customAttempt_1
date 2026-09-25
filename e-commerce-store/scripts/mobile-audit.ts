@@ -10,6 +10,8 @@
  *
  * Per page and width it reports what a shopper actually hits:
  *   overflow     the page is wider than the screen (sideways scrolling)
+ *   clipped      a control partly off-screen WITHOUT page overflow — a header
+ *                with overflow:hidden cuts it off, so nothing scrolls to it
  *   tapTargets   buttons/links smaller than 44x44 CSS px (Apple's minimum)
  *   inputZoom    form fields under 16px text — iOS zooms the whole page on tap
  *   tinyText     readable text under 12px
@@ -93,6 +95,21 @@ export async function auditInPage(page: Page) {
       }
     }
 
+    // Off-screen controls the page does not scroll to: a clipping parent hides
+    // the overflow, so `overflow` above stays clean while the control is gone.
+    // Carousels (a scrollable ancestor) are meant to extend past the edge.
+    const clipped: string[] = [];
+    for (const el of interactive) {
+      const r = el.getBoundingClientRect();
+      if (r.right <= vw + 1 && r.left >= -1) continue;
+      let scroller = false;
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        const ox = getComputedStyle(p).overflowX;
+        if ((ox === 'auto' || ox === 'scroll') && p.scrollWidth > p.clientWidth) { scroller = true; break; }
+      }
+      if (!scroller) clipped.push(label(el) + ' x=' + Math.round(r.left) + '..' + Math.round(r.right));
+    }
+
     const zoomers: string[] = [];
     for (const el of Array.from(document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea')).filter(visible)) {
       const fs = parseFloat(getComputedStyle(el).fontSize);
@@ -125,6 +142,7 @@ export async function auditInPage(page: Page) {
       viewportMeta: meta,
       docWidth, vw,
       overflow: overflowers,
+      clipped,
       tapTargets: { total: interactive.length, tooSmall: small.length, samples: small.slice(0, 12), blocked },
       inputZoom: zoomers,
       tinyText: { count: tiny, samples: tinySamples },
@@ -204,7 +222,7 @@ async function main() {
           (error ? ' ERROR ' + error :
             ' overflow=' + (a!.docWidth > a!.vw + 1 ? a!.docWidth + 'px' : 'no') +
             ' smallTaps=' + a!.tapTargets.tooSmall + '/' + a!.tapTargets.total +
-            ' blockedTaps=' + a!.tapTargets.blocked.length + ' inputZoom=' + a!.inputZoom.length + ' tinyText=' + a!.tinyText.count + ' overlays=' + a!.overlays.length +
+            ' clipped=' + a!.clipped.length + ' blockedTaps=' + a!.tapTargets.blocked.length + ' inputZoom=' + a!.inputZoom.length + ' tinyText=' + a!.tinyText.count + ' overlays=' + a!.overlays.length +
             (timing ? '  | TTFB ' + timing.ttfbMs + ' FCP ' + timing.fcpMs + ' LCP ' + timing.lcpMs + ' load ' + timing.loadMs + 'ms, ' + timing.transferKB + 'KB (' + timing.jsKB + 'KB JS)' : '')),
         );
         await context.close();

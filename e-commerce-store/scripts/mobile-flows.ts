@@ -18,7 +18,7 @@ import { chromium, type Page } from 'playwright-core';
 import { auditInPage, CHROME, IPHONE_UA } from './mobile-audit';
 
 const PRODUCT = process.env.FLOW_PRODUCT || 'https://shop.goyunir.com/roccstar';
-const WIDTHS = [375, 390];
+const WIDTHS = [375, 390, 414];
 
 type Step = { name: string; ok: boolean; note: string; shot?: string; audit?: any };
 
@@ -31,7 +31,7 @@ async function snap(page: Page, out: string, name: string) {
 function summarize(a: any) {
   if (!a) return '';
   return 'overflow=' + (a.docWidth > a.vw + 1 ? a.docWidth + 'px' : 'no') +
-    ' blockedTaps=' + a.tapTargets.blocked.length + ' smallTaps=' + a.tapTargets.tooSmall + '/' + a.tapTargets.total +
+    ' clipped=' + (a.clipped || []).length + ' blockedTaps=' + a.tapTargets.blocked.length + ' smallTaps=' + a.tapTargets.tooSmall + '/' + a.tapTargets.total +
     ' inputZoom=' + a.inputZoom.length;
 }
 
@@ -128,7 +128,7 @@ async function main() {
   try {
     for (const w of WIDTHS) {
       const context = await browser.newContext({
-        viewport: { width: w, height: w === 375 ? 667 : 844 }, deviceScaleFactor: 3,
+        viewport: { width: w, height: w === 375 ? 667 : w === 414 ? 896 : 844 }, deviceScaleFactor: 3,
         isMobile: true, hasTouch: true, userAgent: IPHONE_UA,
       });
       await context.addInitScript('window.__name = function (f) { return f; };');

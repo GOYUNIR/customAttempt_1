@@ -7,7 +7,7 @@ import { hidesStorefrontChrome } from '@/lib/platform-surface';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { useLiveTheme } from '@/components/ThemeProvider';
-import { ensureMapboxAutofill, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
+import { ensureMapboxAutofillWhenIdle, getAutofillAddressValue, getMapboxStatus } from '@/lib/mapbox-autofill';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { neutralBrandName } from '@/lib/env';
 import { themeRadius, glassSurfaceStyle, cardShadowStyle } from '@/lib/storefront-config';
@@ -418,7 +418,7 @@ function StorefrontChrome({ children }: { children: React.ReactNode }) {
   // helper is a singleton and its collection observes the document for inputs
   // added later (the drawer only mounts when opened), so this call is enough.
   useEffect(() => {
-    ensureMapboxAutofill();
+    ensureMapboxAutofillWhenIdle();
   }, []);
 
   // Live Mapbox autofill hint (drives the small status line in the cart drawer).

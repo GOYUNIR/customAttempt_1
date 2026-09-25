@@ -243,11 +243,16 @@ export default async function RootLayout({
             only ask for it once the JS has downloaded and hydrated — on a phone
             on 4G that put the first real content ~2s behind the HTML. Start the
             request here, in parallel with the JS; lib/client-store-cache.ts
-            picks the promise up instead of making its own first request. */}
+            picks the promise up instead of making its own first request.
+            The page's largest paint is a product photo drawn as a CSS
+            background, which the browser cannot discover until React renders;
+            so the moment the data lands, the photo starts downloading too —
+            this product's on a product page, the first two on the homepage
+            (both are drawn there). Same URL, so the render reuses it. */}
         {!hideStorefrontChrome && (
           <script
             dangerouslySetInnerHTML={{
-              __html: `try{window.__GOYUNIR_STORE_PREFETCH__=fetch('/api/store').then(function(r){return r.ok?r.json():null}).catch(function(){return null})}catch(e){}`,
+              __html: `try{var P=fetch('/api/store').then(function(r){return r.ok?r.json():null}).catch(function(){return null});window.__GOYUNIR_STORE_PREFETCH__=P;P.then(function(d){try{var ps=(d&&d.allProducts)||[],path=location.pathname,slug=path.split('/')[1]||'',pick=[];for(var i=0;i<ps.length;i++){if(ps[i]&&slug&&ps[i].slug===slug){pick=[ps[i]];break}}if(!pick.length&&path==='/')pick=ps.slice(0,2);for(var j=0;j<pick.length;j++){var u=pick[j].images&&pick[j].images[0];if(typeof u==='string'&&/^(https?:\\/\\/|\\/)/.test(u)){var im=new Image();im.src=u}}}catch(e){}})}catch(e){}`,
             }}
           />
         )}
