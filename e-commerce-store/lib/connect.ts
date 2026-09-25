@@ -40,7 +40,6 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const CONNECT_ACCOUNT_DEFAULTS = {
   dashboard: 'full' as const,
-  currency: 'usd' as const,
   responsibilities: { fees_collector: 'stripe' as const, losses_collector: 'stripe' as const },
 };
 
@@ -89,16 +88,28 @@ export async function chargeRouteForTenant(tenantId: string): Promise<ChargeRout
  * tenant, and the tenant row is only written while it has no account, so two
  * concurrent calls converge on ONE account instead of orphaning a second.
  */
-export async function ensureConnectedAccount(tenantId: string, contactEmail: string): Promise<string> {
+export async function ensureConnectedAccount(
+  tenantId: string,
+  contactEmail: string,
+  /** The merchant's country, ISO 3166-1 alpha-2, as THEY state it. Stripe
+   *  refuses a merchant configuration without it ("identity.country is
+   *  required before setting configuration.merchant", 2026-09-25), and it
+   *  cannot be guessed: it decides which KYC Stripe asks for and the account's
+   *  default currency, so the connect screen must ask. */
+  country: string,
+): Promise<string> {
+  const cc = /^[A-Za-z]{2}$/.test(String(country || '')) ? String(country).toUpperCase() : '';
+  if (!cc) throw new Error('[connect] a two-letter merchant country is required to create a connected account');
   const tenant = await readTenant(tenantId);
   if (tenant.stripe_account_id) return tenant.stripe_account_id;
 
   const stripe = await stripeOrThrow();
-  const account = await stripe.v2.core.accounts.create(
+  const account = await retryOnStripeLock(() => stripe.v2.core.accounts.create(
     {
       contact_email: contactEmail,
       display_name: tenant.name || undefined,
       dashboard: CONNECT_ACCOUNT_DEFAULTS.dashboard,
+      identity: { country: cc },
       configuration: {
         merchant: {
           // Payouts are not requestable here in API 2026-06-24.dahlia —
@@ -112,13 +123,12 @@ export async function ensureConnectedAccount(tenantId: string, contactEmail: str
         },
       },
       defaults: {
-        currency: CONNECT_ACCOUNT_DEFAULTS.currency,
         responsibilities: CONNECT_ACCOUNT_DEFAULTS.responsibilities,
       },
       include: [...ACCOUNT_INCLUDE],
     },
     { idempotencyKey: 'connect-account:' + tenantId },
-  );
+  ));
 
   const status = connectStatusFromAccount(account);
   const written = (await getDb().update<any>(
@@ -143,6 +153,28 @@ export async function ensureConnectedAccount(tenantId: string, contactEmail: str
     return String(again.stripe_account_id);
   }
   return account.id;
+}
+
+/**
+ * Stripe serialises requests that share an idempotency key: while the first
+ * create is running, a concurrent twin is refused with "This request would
+ * exceed the concurrent access limit on this account" (seen 2026-09-25 with
+ * two simultaneous calls). No second account is made, but the second caller
+ * would see an error. Waiting and replaying the SAME keyed request returns
+ * the first call's account. Only that refusal is retried; anything else is
+ * thrown as-is.
+ */
+async function retryOnStripeLock<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const msg = String(err?.raw?.message || err?.message || '');
+      const locked = err?.type === 'StripeRateLimitError' || err?.code === 'lock_timeout' || /concurrent access/i.test(msg);
+      if (!locked || attempt >= 4) throw err;
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
 }
 
 /**

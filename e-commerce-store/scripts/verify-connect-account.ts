@@ -14,13 +14,19 @@ const TENANT = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
   const { resolveStripeClient } = await import('../services/payment/factory');
   const stripe: any = await resolveStripeClient();
   console.log('route before: ' + JSON.stringify(await chargeRouteForTenant(TENANT)));
+  // Test data: the test merchant is placed in the platform account's own
+  // country (read from Stripe, not assumed). A real merchant states theirs.
+  const platform = await stripe.accounts.retrieve();
+  const country = String(platform.country || '');
+  console.log('platform ' + platform.id + ' country=' + country);
   const results = await Promise.allSettled([
-    ensureConnectedAccount(TENANT, 'merchant-test4@example.com'),
-    ensureConnectedAccount(TENANT, 'merchant-test4@example.com'),
+    ensureConnectedAccount(TENANT, 'merchant-test4@example.com', country),
+    ensureConnectedAccount(TENANT, 'merchant-test4@example.com', country),
   ]);
   for (const r of results) console.log(r.status === 'fulfilled' ? 'call -> ' + r.value : 'call FAILED -> ' + (r.reason?.raw?.message || r.reason?.message || r.reason));
   const ids = new Set(results.filter((r) => r.status === 'fulfilled').map((r: any) => r.value));
-  console.log(ids.size === 1 ? 'PASS two concurrent calls -> ONE account' : '*** ' + ids.size + ' distinct accounts ***');
+  const bothOk = results.every((r) => r.status === 'fulfilled');
+  console.log(bothOk && ids.size === 1 ? 'PASS both concurrent calls -> the SAME one account' : '*** FAIL: ' + results.filter((r) => r.status === 'rejected').length + ' call(s) failed, ' + ids.size + ' distinct account(s) ***');
   const acct = [...ids][0];
   if (acct) {
     const a = await stripe.v2.core.accounts.retrieve(acct, { include: ['configuration.merchant', 'requirements', 'defaults'] });
