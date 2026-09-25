@@ -65,3 +65,38 @@ export function connectStatusFromAccount(account: any): {
     },
   };
 }
+
+/**
+ * WHICH TENANT A CONNECT EVENT BELONGS TO — and the guard that stops one
+ * merchant's event from ever touching another merchant's orders or stock.
+ *
+ * A Connect event carries `account` (the connected account it happened on).
+ * That is the ONLY trustworthy source of the tenant: metadata is written by
+ * our own code at charge creation and is corroboration, not authority. So:
+ *   - no `account`, or an account attached to no tenant  -> refuse
+ *   - metadata names a tenant, and it is a DIFFERENT one  -> refuse
+ *   - requireMetadata and metadata names no tenant        -> refuse
+ *     (every Connect-era charge we create carries tenant_id; one that does
+ *      not was not created by this platform, or was created wrongly)
+ * Refusing means doing nothing to any order or stock and logging it loudly.
+ */
+export type ConnectEventTenant =
+  | { ok: true; tenantId: string }
+  | { ok: false; reason: 'no_account' | 'unknown_account' | 'tenant_mismatch' | 'missing_tenant_metadata' };
+
+export function resolveConnectEventTenant(input: {
+  eventAccount: string | null | undefined;
+  /** The tenant whose stripe_account_id equals eventAccount, or null. */
+  tenantForAccount: string | null;
+  metadataTenantId?: string | null;
+  requireMetadata: boolean;
+}): ConnectEventTenant {
+  if (!input.eventAccount) return { ok: false, reason: 'no_account' };
+  if (!input.tenantForAccount) return { ok: false, reason: 'unknown_account' };
+  const meta = String(input.metadataTenantId || '').trim();
+  if (!meta) {
+    return input.requireMetadata ? { ok: false, reason: 'missing_tenant_metadata' } : { ok: true, tenantId: input.tenantForAccount };
+  }
+  if (meta !== input.tenantForAccount) return { ok: false, reason: 'tenant_mismatch' };
+  return { ok: true, tenantId: input.tenantForAccount };
+}

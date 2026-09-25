@@ -1,36 +1,51 @@
 # CONNECT — every merchant gets their own Stripe account
 
-> ## ▶ RESUME HERE (end of session, 2026-09-24)
+> ## ▶ RESUME HERE (updated 2026-09-25)
 >
-> **State of the migrations** (read-only probe against the live database,
-> end of session):
-> - **00033 is live.** The tenant Connect columns exist on every tenant.
-> - **00032 is live and verified.** The first attempt deadlocked (`40P01`) and
->   rolled back cleanly. The owner's retry succeeded. `npm run verify:billing`
->   passed every check against the real tables, including:
->   - the database fee curve equals the published one, with Scale excluded;
->   - 10 concurrent deliveries of one charge are recorded exactly once;
->   - refunds are idempotent;
->   - the public anon key is refused (401).
+> **Connect is still NOT enabled on the Stripe account this app uses.**
+> Probed 2026-09-25 against `acct_1ToixCPIsR6ijfBZ` (the account behind the
+> configured key). With valid parameters, Stripe answers: *"You can only
+> create new accounts if you've signed up for Connect."* The owner believed
+> Connect was on, so it was most likely enabled in a different sandbox, or
+> the platform-setup flow wasn't finished. Owner actions, both on
+> `acct_1ToixCPIsR6ijfBZ`:
+> 1. Finish Connect platform setup:
+>    <https://dashboard.stripe.com/acct_1ToixCPIsR6ijfBZ/settings/connect/platform-setup>
+>    (the link from Stripe's own error message).
+> 2. Enable **Accounts v2**. The v2 create returned *"Accounts v2 is not
+>    enabled for your sandbox merchant"*, pointing to
+>    <https://docs.stripe.com/accounts-v2/use-accounts-as-customers>.
 >
-> **Connect is NOT enabled** on the platform's Stripe account. The owner will
-> enable it at the start of next session, with full attention. It is a real
-> change to the live Stripe account and was deliberately not rushed. Do not
-> enable it, and do not register any webhook endpoint, without the owner.
-> The approved shape (owner, 2026-09-24) is Accounts v2, direct charges,
-> `losses_collector` and `fees_collector` both `stripe`, `dashboard: express`
-> (§2).
+> **The approved shape changed on one field.** `dashboard: express` is
+> refused with merchant liability. Stripe: *"When
+> stripe_dashboard[type]=express, your platform must collect fees and be
+> liable for negative balances."* The default is now `dashboard: full`: the
+> merchant's own full Stripe Dashboard, matching the pricing-page promise
+> "Your own Stripe account". Liability stays on the merchant. **Not yet
+> proven:** that Stripe accepts full + `fees_collector: stripe` +
+> `losses_collector: stripe`. The probe for it hit the Connect-not-enabled
+> wall. Confirm it first, once Connect is on.
 >
-> **Next step once Connect is enabled: §8 step 3.** Build the Connect
-> webhook:
-> - `account.updated` calls `syncConnectedAccount`;
-> - the tenant is resolved from `event.account`, and the handler refuses when
->   the session metadata names a different tenant.
+> **Built and deployed (2026-09-25), not registered:**
+> - `app/api/stripe/connect-webhook` handles `account.updated` by syncing
+>   from Stripe, with the cross-tenant guard (5 tests). Payment events answer
+>   500 and are released until their handler exists.
+> - Migration `00034` adds `payment_connect_webhook_secret` to
+>   `global_platform_settings` (owner applies).
+> - With no secret configured the route answers **503** to everything, so
+>   nothing is accepted unsigned and Stripe retries once the secret is set.
 >
-> Then create a test v2 account with `ensureConnectedAccount` (called twice
-> concurrently, expecting one account) and onboard it with test data (§7
-> steps 1–2). Registering the Connect webhook endpoint changes the live Stripe
-> account, so confirm with the owner first.
+> **Next, in order:**
+> 1. The owner does the two actions above and applies `00034`.
+> 2. Run `npx tsx scripts/verify-connect-account.ts` (`test4`, two concurrent calls,
+>    expect one account).
+> 3. With owner confirmation, register the Connect endpoint
+>    (`https://goyunir.com/api/stripe/connect-webhook`, `connect: true`,
+>    event `account.updated`), then store its signing secret in
+>    `global_platform_settings.payment_connect_webhook_secret`.
+> 4. Onboard `test4` (embedded component, or Stripe's test data). Expect
+>    `account.updated` to flip `connect_charges_enabled`.
+> 5. CONNECT.md §8 step 4: the fee wired into each charge path.
 
 Status (2026-09-24): **groundwork only.**
 
@@ -85,7 +100,7 @@ as the example:
 | `fees_collector` | **`stripe`** | Stripe bills the merchant its processing fee directly, so `application_fee_amount` is **only our fee**: exactly what `lib/pricing/graduated-fee.ts` computes. |
 | Platform cost | **$0** | With Stripe handling pricing there are "no additional account, payout volume, tax reporting, or per-payout fees". The alternative is $2 per active merchant per month plus 0.25% + 25¢ per payout, which would take about a third of what we earn from a $500-a-month Free merchant. |
 | KYC | **Stripe collects it** | Automatic with `losses_collector: stripe`. We carry no identity-verification compliance burden. |
-| `dashboard` | **`express`** | A limited, platform-branded Stripe dashboard for payouts. Onboarding itself is embedded in the merchant app. |
+| `dashboard` | **`full`** (changed 2026-09-25) | The merchant's own full Stripe Dashboard, matching the pricing-page promise "Your own Stripe account". **Not `express`:** Stripe refuses Express unless the platform collects fees and carries losses. Onboarding stays embedded in the merchant app. |
 
 **Irreversible per account:** Stripe says responsibilities "can't be updated
 later". Every account created from `CONNECT_ACCOUNT_DEFAULTS` carries these

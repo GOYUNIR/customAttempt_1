@@ -10,9 +10,16 @@
  *                               the platform fee — and the platform pays Stripe
  *                               nothing for Connect (no $2/active account, no
  *                               payout fees).
- *   dashboard:        'express' a limited, platform-branded Stripe dashboard
- *                               for payouts; onboarding itself is embedded in
- *                               the merchant app.
+ *   dashboard:        'full'    the merchant's own full Stripe Dashboard —
+ *                               matching the promise on the pricing page,
+ *                               "Your own Stripe account — the money is yours".
+ *                               NOT 'express': Stripe refuses it with these
+ *                               responsibilities (probed 2026-09-25: "When
+ *                               stripe_dashboard[type]=express, your platform
+ *                               must collect fees and be liable for negative
+ *                               balances"). 'none' would mean rebuilding
+ *                               payouts and disputes UI ourselves. Onboarding
+ *                               itself stays embedded in the merchant app.
  *   charges:          DIRECT    made on the merchant's account, so refunds and
  *                               disputes reduce THEIR balance. (Destination
  *                               charges debit the platform for both, "with or
@@ -32,7 +39,7 @@ import { chargeRouteFor, connectStatusFromAccount, type ChargeRoute } from '@/li
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 
 export const CONNECT_ACCOUNT_DEFAULTS = {
-  dashboard: 'express' as const,
+  dashboard: 'full' as const,
   currency: 'usd' as const,
   responsibilities: { fees_collector: 'stripe' as const, losses_collector: 'stripe' as const },
 };
@@ -178,4 +185,34 @@ export async function syncConnectedAccount(accountId: string): Promise<{ tenantI
     return { tenantId: null, chargesEnabled: status.chargesEnabled };
   }
   return { tenantId: String(rows[0].id), chargesEnabled: status.chargesEnabled };
+}
+
+/** The tenant a connected account belongs to, or null. */
+export async function tenantIdForAccount(accountId: string): Promise<string | null> {
+  if (!/^acct_[A-Za-z0-9]+$/.test(String(accountId || ''))) return null;
+  const row = ((await getDb().select<any>('tenants', {
+    where: { stripe_account_id: eq(accountId) }, select: ['id'], limit: 1,
+  })) as any[])[0];
+  return row ? String(row.id) : null;
+}
+
+/**
+ * The Connect endpoint's signing secret (00034): platform settings first, the
+ * STRIPE_CONNECT_WEBHOOK_SECRET env var second. Empty when neither is set, and
+ * the route then rejects everything rather than accepting unsigned events. A
+ * read failure (including the column not existing yet) also yields empty:
+ * fail closed.
+ */
+export async function resolveConnectWebhookSecret(): Promise<string> {
+  try {
+    const { GLOBAL_PLATFORM_SETTINGS_ROW_ID } = await import('@/services/config/types');
+    const row = ((await getDb().select<any>('global_platform_settings', {
+      where: { id: eq(GLOBAL_PLATFORM_SETTINGS_ROW_ID) }, select: ['payment_connect_webhook_secret'], limit: 1,
+    })) as any[])[0];
+    const fromSettings = String(row?.payment_connect_webhook_secret || '').trim();
+    if (fromSettings) return fromSettings;
+  } catch (err) {
+    console.error('[connect] could not read the Connect webhook secret from settings', (err as Error)?.message || err);
+  }
+  return String(process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '').trim();
 }

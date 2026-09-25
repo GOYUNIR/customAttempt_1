@@ -55,3 +55,35 @@ test('status mapping: only an ACTIVE capability counts as enabled; missing reads
   assert.equal(connectStatusFromAccount({ configuration: null }).chargesEnabled, false);
   assert.equal(connectStatusFromAccount(null).chargesEnabled, false);
 });
+
+import { resolveConnectEventTenant } from '../lib/connect-routing.ts';
+
+test('GUARD: a Connect event only ever resolves to the tenant that owns its account', () => {
+  const ok = resolveConnectEventTenant({ eventAccount: 'acct_A', tenantForAccount: 'tenant-A', metadataTenantId: 'tenant-A', requireMetadata: true });
+  assert.deepEqual(ok, { ok: true, tenantId: 'tenant-A' });
+
+  // Merchant A's event claiming to be about merchant B's order: refused.
+  assert.deepEqual(
+    resolveConnectEventTenant({ eventAccount: 'acct_A', tenantForAccount: 'tenant-A', metadataTenantId: 'tenant-B', requireMetadata: true }),
+    { ok: false, reason: 'tenant_mismatch' },
+  );
+  // A payment event we did not stamp: refused, not guessed.
+  assert.deepEqual(
+    resolveConnectEventTenant({ eventAccount: 'acct_A', tenantForAccount: 'tenant-A', metadataTenantId: '', requireMetadata: true }),
+    { ok: false, reason: 'missing_tenant_metadata' },
+  );
+  // An account we have never attached to a tenant: refused.
+  assert.deepEqual(
+    resolveConnectEventTenant({ eventAccount: 'acct_X', tenantForAccount: null, metadataTenantId: 'tenant-A', requireMetadata: true }),
+    { ok: false, reason: 'unknown_account' },
+  );
+  assert.deepEqual(
+    resolveConnectEventTenant({ eventAccount: null, tenantForAccount: 'tenant-A', requireMetadata: false }),
+    { ok: false, reason: 'no_account' },
+  );
+  // account.updated carries no metadata; the account alone decides.
+  assert.deepEqual(
+    resolveConnectEventTenant({ eventAccount: 'acct_A', tenantForAccount: 'tenant-A', requireMetadata: false }),
+    { ok: true, tenantId: 'tenant-A' },
+  );
+});
