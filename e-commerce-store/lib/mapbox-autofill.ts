@@ -663,8 +663,59 @@ async function retrieveAndFillStreetSuggestion(
     // for the window in case anything else truncates it.
     writeReactInputValue(input, composed);
     defendFullAddress(input, composed);
+    suppressSuggestionsAfterPick(input);
   } catch {
     /* network blip — the SDK's street-only fill stays; the customer can retype */
+  }
+}
+
+/**
+ * CLOSE THE DROPDOWN ONCE AN ADDRESS IS CHOSEN — and keep it closed.
+ *
+ * Found on a phone (scripts/mobile-flows.ts, 390px, production): after the
+ * shopper picked a suggestion, the field filled correctly but the suggestion
+ * list stayed OPEN on top of the sticky buy bar. defendFullAddress() re-writes
+ * the full address ~16 times over ~8s (it must — the SDK truncates it to the
+ * street line otherwise), and every write fires an `input` event the SDK reads
+ * as fresh typing, so it re-opened the list with new suggestions each time. A
+ * thumb aimed at "buy" landed on another suggestion ("Pennsylvania Avenue",
+ * street only), which replaced the full address and made the store refuse the
+ * order with "select your full address" — at the exact moment of purchase.
+ *
+ * So after a pick:
+ *   - blur the field: the list closes, and on a phone the keyboard drops,
+ *     uncovering the buy button;
+ *   - hide THIS field's list (matched by the SDK's own `.input` link) until
+ *     the shopper deliberately interacts with the field again — a tap or a
+ *     keystroke. The defence's own writes can then fire as many `input` events
+ *     as they need without surfacing a dropdown nobody asked for.
+ */
+function suppressSuggestionsAfterPick(input: HTMLInputElement): void {
+  try {
+    const hide = () => {
+      for (const lb of listboxElements()) {
+        if ((lb as Element & { input?: HTMLInputElement }).input === input) {
+          (lb as HTMLElement).style.setProperty('display', 'none', 'important');
+        }
+      }
+    };
+    const show = () => {
+      for (const lb of listboxElements()) {
+        if ((lb as Element & { input?: HTMLInputElement }).input === input) {
+          (lb as HTMLElement).style.removeProperty('display');
+        }
+      }
+      input.removeEventListener('pointerdown', show);
+      input.removeEventListener('keydown', show);
+    };
+    hide();
+    // The SDK may (re)create or re-show its list during the defence window.
+    for (const ms of [50, 200, 600, 1500]) setTimeout(hide, ms);
+    input.addEventListener('pointerdown', show);
+    input.addEventListener('keydown', show);
+    if (typeof document !== 'undefined' && document.activeElement === input) input.blur();
+  } catch {
+    /* never let a cosmetic fix break the address fill */
   }
 }
 
@@ -695,6 +746,7 @@ function handleRetrieve(event: any): void {
   const composed = composeFullAddress(props);
   if (!composed || !input) return;
   defendFullAddress(input, composed);
+  suppressSuggestionsAfterPick(input);
 }
 
 /**

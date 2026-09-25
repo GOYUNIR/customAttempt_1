@@ -357,6 +357,17 @@ textarea {
     display: none;
   }
 }
+/* While the shopper is TYPING, the bar steps aside. On a phone that is the
+   moment the keyboard is up, and a fixed bottom bar rides on top of it —
+   covering the field being typed into and its address suggestions, so a thumb
+   aimed at a suggestion hits "buy" or vice versa. It returns the moment the
+   field loses focus (picking an address blurs the field — see
+   lib/mapbox-autofill.ts, suppressSuggestionsAfterPick). */
+@media (max-width: 767px) {
+  body:has(:is(input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select):focus) .goyunir-pdp-cta-bar {
+    display: none;
+  }
+}
 
 /* When the mobile sticky CTA bar is active on a product page, the global
    "Keep scrolling" cue (SiteChrome) is completely suppressed so its text can

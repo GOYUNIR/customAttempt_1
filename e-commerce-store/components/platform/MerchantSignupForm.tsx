@@ -21,7 +21,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 const PALETTE = { panel: '#131317', border: '#26262d', text: '#f4f4f5', muted: '#a1a1aa' };
 const inputStyle = {
   padding: '13px 14px', borderRadius: 12, border: `1px solid ${PALETTE.border}`,
-  background: '#0a0a0c', color: PALETTE.text, fontSize: 15, width: '100%', boxSizing: 'border-box',
+  // 16px, not 15: below 16 iOS zooms the whole page when the field is tapped.
+  background: '#0a0a0c', color: PALETTE.text, fontSize: 16, width: '100%', boxSizing: 'border-box',
 } as const;
 
 export default function MerchantSignupForm() {

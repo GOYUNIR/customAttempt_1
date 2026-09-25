@@ -1554,26 +1554,30 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => { e.stopPropagation(); prevImage(); }}
                   aria-label="Previous photo"
-                  style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
+                  style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
                 >&#8249;</button>
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => { e.stopPropagation(); nextImage(); }}
                   aria-label="Next photo"
-                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 32, height: 32, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: 999, border: '1px solid rgba(255,255,255,0.22)', background: 'rgba(0,0,0,0.35)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, zIndex: 2, lineHeight: 1 }}
                 >&#8250;</button>
               </>
             )}
             {galleryImages.length > 1 && autoPlayOn && (
-              <div style={{ position: 'absolute', left: 12, bottom: 12, display: 'flex', gap: 5, alignItems: 'center' }}>
+              <div style={{ position: 'absolute', left: 4, bottom: 0, display: 'flex', gap: 0, alignItems: 'center' }}>
                 {galleryImages.map((_img: string, index: number) => (
                   <button
                     key={`dot-${index}`}
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); setSelectedImageIndex(index); }}
                     aria-label={`View photo ${index + 1}`}
-                    style={{ width: 7, height: 7, borderRadius: 999, border: 'none', padding: 0, cursor: 'pointer', background: index === selectedImageIndex ? '#ffffff' : 'rgba(255,255,255,0.4)' }}
-                  />
+                    // 24x44 hit area around a 7px dot: the dot is the look, the
+                    // button is what a thumb has to land on (Apple's 44px minimum).
+                    style={{ width: 24, height: 44, border: 'none', padding: 0, cursor: 'pointer', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <span aria-hidden style={{ width: 7, height: 7, borderRadius: 999, background: index === selectedImageIndex ? '#ffffff' : 'rgba(255,255,255,0.4)' }} />
+                  </button>
                 ))}
               </div>
             )}
@@ -1657,7 +1661,7 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
                 const chipSelected = activeVariantIndex === index;
                 const sizeLabel = variantSizeLabel(cat, index);
                 return (
-                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 10px', borderRadius: 999, boxSizing: 'border-box', border: `1px solid ${chipSelected ? accent : (chipIsSample ? trialColors.chipBorder : configPalette.cardBorder)}`, background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: 600, boxShadow: chipSelected ? `inset 0 0 0 1px ${accent}` : 'none', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                  <button key={`${index}-${String(cat.size)}-${Number(cat.price)}`} type="button" onClick={() => setSelectedVariantIndex(index)} style={{ padding: '7px 12px', minHeight: 44, borderRadius: 999, boxSizing: 'border-box', border: `1px solid ${chipSelected ? accent : (chipIsSample ? trialColors.chipBorder : configPalette.cardBorder)}`, background: chipSelected ? accent : (chipIsSample ? trialColors.chipBg : 'transparent'), color: chipSelected ? '#ffffff' : (configPalette.cardTextMain || '#fff'), cursor: 'pointer', fontSize: 12, fontWeight: 600, boxShadow: chipSelected ? `inset 0 0 0 1px ${accent}` : 'none', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
                     {sizeLabel}
                     <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', padding: '2px 6px', borderRadius: 999, background: chipSelected ? 'rgba(255,255,255,0.22)' : (chipMode === 'FCFS' ? modePill.fcfsBg : modePill.raffleBg), border: chipSelected ? '1px solid rgba(255,255,255,0.4)' : (chipMode === 'FCFS' ? modePill.fcfsBorder : modePill.raffleBorder), color: chipSelected ? '#ffffff' : (chipMode === 'FCFS' ? modePill.fcfsText : modePill.raffleText) }}>
                       {chipMode === 'FCFS' ? 'buy' : 'raffle'}
