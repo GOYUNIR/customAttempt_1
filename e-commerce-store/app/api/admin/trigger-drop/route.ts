@@ -16,6 +16,7 @@ import { executeDrawWithCharging } from '@/lib/raffle';
 import { recordOrder } from '@/lib/order-write';
 import { rebaseLiveStock } from '@/lib/stock-gate';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
+import { savedCardChargeRoute } from '@/lib/saved-card-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -168,6 +169,15 @@ export async function POST(request: Request) {
           // so the window is what protects against the real failure mode: a
           // double-clicked button or an immediate client retry replaying the
           // same charge. A deliberate re-draw minutes later gets a new key.
+          // CUTOVER RULE (lib/saved-card-route.ts, CONNECT.md §4): the charge follows
+          // the CARD's recorded account. Every entry today has none (= the platform),
+          // so this is exactly the old call; one recorded on a connected account is
+          // refused into the decline path rather than charged on the wrong account.
+          const cardRoute = savedCardChargeRoute({ entryAccount: entry.stripeAccount, isDefaultStore: true, storeAccount: null });
+          if (!cardRoute.ok) {
+            console.error('[trigger-drop] SAVED CARD NOT CHARGED — ' + cardRoute.reason + ' (recorded account ' + String(entry.stripeAccount) + ')');
+            throw new Error('saved card cannot be charged here: ' + cardRoute.reason);
+          }
           const idempotencyKey = boundIdempotencyKey(`trigger-drop:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
           const winnerIntent = await stripe.paymentIntents.create(
             {
@@ -263,6 +273,15 @@ export async function POST(request: Request) {
             // Same 60s-window reasoning as the winner charge above, namespaced
             // separately so a waitlist conversion and a draw win for the same
             // email+variant can never collide onto one key.
+            // CUTOVER RULE (lib/saved-card-route.ts, CONNECT.md §4): the charge follows
+            // the CARD's recorded account. Every entry today has none (= the platform),
+            // so this is exactly the old call; one recorded on a connected account is
+            // refused into the decline path rather than charged on the wrong account.
+            const waitlistCardRoute = savedCardChargeRoute({ entryAccount: entry.stripeAccount, isDefaultStore: true, storeAccount: null });
+            if (!waitlistCardRoute.ok) {
+              console.error('[trigger-drop waitlist] SAVED CARD NOT CHARGED — ' + waitlistCardRoute.reason + ' (recorded account ' + String(entry.stripeAccount) + ')');
+              throw new Error('saved card cannot be charged here: ' + waitlistCardRoute.reason);
+            }
             const idempotencyKey = boundIdempotencyKey(`trigger-drop-waitlist:${product.id}:${size}:${entry.email}:${Math.floor(Date.now() / 60_000)}`);
             const waitlistIntent = await stripe.paymentIntents.create(
               {

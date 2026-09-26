@@ -29,7 +29,8 @@ import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-r
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { maskEmail, isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
-import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
+import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
+import { confirmTenantEntry } from '@/lib/tenant-drops';
 import { requestOriginOf } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
@@ -408,11 +409,24 @@ async function lockOneEntry(opts: {
   }
 
 export async function POST(request: Request) {
-  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
-  // address may use it. From another store's address it would act on the
-  // default store's data (or charge its account).
-  const refusedForStore = await refuseUnlessDefaultStore(request);
-  if (refusedForStore) return refusedForStore as any;
+  // Whose store (TENANCY.md): the default store keeps the path below,
+  // unchanged; a connected merchant confirms its own entry (phase 4).
+  const who = await storefrontTenantForRequest(request);
+  if (who.kind === 'none') return NextResponse.json({ error: 'Store not found.' }, { status: 404 });
+  if (who.kind === 'unavailable') return NextResponse.json({ error: 'Please try again shortly.' }, { status: 503 });
+  if (!who.isDefault) {
+    try {
+      const limited = await rateLimitedResponse('checkout_confirm_setup', request, 20, 60);
+      if (limited) return limited;
+      const body = await request.json().catch(() => ({}));
+      const sessionId = String(body?.sessionId || '');
+      if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(sessionId)) return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
+      return (await confirmTenantEntry(who.tenantId, sessionId)) as any;
+    } catch (err: any) {
+      console.error('[confirm-setup] tenant ' + who.tenantId + ' failed', err?.raw?.message || err?.message || err);
+      return NextResponse.json({ success: false, error: 'We could not confirm the entry yet. It will still be recorded.' }, { status: 500 });
+    }
+  }
   // Set once this run OWNS the session's dedupe claim. Released in `finally`
   // on every exit — see there for why that is safe on the success path too.
   let ownedClaim: string | null = null;

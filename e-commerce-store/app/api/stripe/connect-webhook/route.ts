@@ -5,6 +5,7 @@ import { resolveConnectEventTenant } from '@/lib/connect-routing';
 import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
 import { subrequestCount, reportSubrequests } from '@/lib/subrequest-meter';
 import { handleConnectCheckoutCompleted, handleConnectChargeRefunded } from '@/lib/tenant-checkout';
+import { recordTenantEntryFromSetupSession } from '@/lib/tenant-drops';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,8 @@ export const dynamic = 'force-dynamic';
  *                       payload) and refresh the tenant's cached status. This
  *                       is what flips connect_charges_enabled when a merchant
  *                       finishes onboarding.
+ *   checkout.session.completed (mode setup) -> the raffle/waitlist entry,
+ *                       with the card's account (lib/tenant-drops.ts).
  *   checkout.session.completed -> the order, the fee record, the stock
  *                       decrement (lib/tenant-checkout.ts). A failure before
  *                       the order is written is a 500 + released claim, so
@@ -122,7 +125,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ received: true, refused: who.reason });
       }
       let result: { handled: boolean; note: string } = { handled: false, note: 'acknowledged' };
-      if (event.type === 'checkout.session.completed') {
+      if (event.type === 'checkout.session.completed' && object?.mode === 'setup') {
+        // A raffle/waitlist entry's card was saved (phase 4). Throws until it
+        // can be recorded, so Stripe retries: an entry is never dropped.
+        result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount));
+      } else if (event.type === 'checkout.session.completed') {
         result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount));
       } else if (event.type === 'charge.refunded') {
         result = await handleConnectChargeRefunded(object, String(eventAccount));

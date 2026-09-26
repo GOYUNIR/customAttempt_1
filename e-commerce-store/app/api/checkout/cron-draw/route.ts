@@ -3,6 +3,7 @@ import { getAdminPassword } from '@/lib/server-config';
 import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth';
 import { runAutoDraws } from '@/lib/auto-draw';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { connectedTenantIds, runTenantDueDrops } from '@/lib/tenant-drops';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -52,7 +53,24 @@ async function runAutoDraw(request: Request) {
     onlyProductName: url.searchParams.get('productName') || undefined,
   });
 
-  return NextResponse.json(result);
+  // Connected merchants' due raffle draws and waitlist conversions (TENANCY.md
+  // phase 4): the scheduler's safety net behind each store's countdown trigger.
+  // One store failing never stops the others, or the original store's run.
+  const tenantDrops: any[] = [];
+  try {
+    for (const t of await connectedTenantIds()) {
+      try {
+        tenantDrops.push(await runTenantDueDrops(t.id, t.slug));
+      } catch (err) {
+        console.error('[cron-draw] tenant ' + t.id + ' drops failed', (err as Error)?.message || err);
+        tenantDrops.push({ tenantId: t.id, error: (err as Error)?.message || String(err) });
+      }
+    }
+  } catch (err) {
+    console.error('[cron-draw] could not list connected tenants', (err as Error)?.message || err);
+  }
+
+  return NextResponse.json({ ...result, tenantDrops });
 }
 
 export async function GET(request: Request) {

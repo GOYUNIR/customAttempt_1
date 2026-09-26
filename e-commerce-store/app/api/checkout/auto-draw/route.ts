@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { runAutoDraws } from '@/lib/auto-draw';
 import { createKvClient, autoDrawRateLimitKey } from '@/lib/server-config';
 import { clientIpFromHeaders } from '@/lib/edge-router';
+import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
+import { runTenantDueDrops } from '@/lib/tenant-drops';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -48,6 +50,34 @@ async function rateLimited(request: Request): Promise<boolean> {
   }
 }
 
+/**
+ * A connected merchant's address (TENANCY.md phase 4): run THAT store's due
+ * raffle draws and waitlist conversions (lib/tenant-drops.ts) — only work that
+ * is due runs, each draw and each charge once, so a public trigger is safe.
+ * Public, so the answer is counts only: no entry or payment ids. Returns null
+ * for the original store, whose engine below is unchanged.
+ */
+async function merchantDrops(request: Request, productId: string | undefined): Promise<Response | null> {
+  const who = await storefrontTenantForRequest(request);
+  if (who.kind === 'none') return NextResponse.json({ success: false, error: 'Store not found.' }, { status: 404 });
+  if (who.kind === 'unavailable') return NextResponse.json({ success: false, error: 'Please try again shortly.' }, { status: 503 });
+  if (who.isDefault) return null;
+  try {
+    const r = await runTenantDueDrops(who.tenantId, who.slug, { onlyProductId: productId });
+    const all = [...r.draws, ...r.waitlist];
+    return NextResponse.json({
+      success: true,
+      skipped: r.skipped,
+      draws: r.draws.filter((d: any) => d.drawId).length,
+      charged: all.filter((d: any) => d.status === 'charged').length,
+      declined: all.filter((d: any) => d.status === 'declined').length,
+    });
+  } catch (err: any) {
+    console.error('[auto-draw] merchant ' + who.tenantId + ' drops failed', err?.message || err);
+    return NextResponse.json({ success: false, error: 'Draw trigger failed' }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   if (await rateLimited(request)) {
     return NextResponse.json(
@@ -57,6 +87,8 @@ export async function POST(request: Request) {
   }
   try {
     const body = await request.json().catch(() => ({}));
+    const merchant = await merchantDrops(request, String(body?.productId || '').trim() || undefined);
+    if (merchant) return merchant;
     const result = await runAutoDraws({
       request,
       onlyProductId: String(body?.productId || '').trim() || undefined,
@@ -79,6 +111,8 @@ export async function GET(request: Request) {
     );
   }
   const url = new URL(request.url);
+  const merchant = await merchantDrops(request, url.searchParams.get('productId') || undefined);
+  if (merchant) return merchant;
   const result = await runAutoDraws({
     request,
     onlyProductId: url.searchParams.get('productId') || undefined,

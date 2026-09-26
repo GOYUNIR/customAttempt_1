@@ -80,6 +80,7 @@ import { resolveVariantId } from '@/lib/inventory';
 import { findPendingEntryId, markRaffleEntryOutcome } from '@/lib/raffle';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 import { rebaseLiveStock } from '@/lib/stock-gate';
+import { savedCardChargeRoute } from '@/lib/saved-card-route';
 
 
 export { productNameFromPoolKey };
@@ -570,6 +571,15 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
             // `live.drawsCompleted` is stable for this whole loop (it is only
             // incremented after it), so the NEXT cycle of a recurring raffle
             // legitimately produces a new key and can charge again.
+            // CUTOVER RULE (lib/saved-card-route.ts, CONNECT.md §4): the charge follows
+            // the CARD's recorded account. Every entry today has none (= the platform),
+            // so this is exactly the old call; one recorded on a connected account is
+            // refused into the decline path rather than charged on the wrong account.
+            const cardRoute = savedCardChargeRoute({ entryAccount: winnerData.stripeAccount, isDefaultStore: true, storeAccount: null });
+            if (!cardRoute.ok) {
+              console.error('[auto-draw] SAVED CARD NOT CHARGED — ' + cardRoute.reason + ' (recorded account ' + String(winnerData.stripeAccount) + ')');
+              throw new Error('saved card cannot be charged here: ' + cardRoute.reason);
+            }
             const idempotencyKey = boundIdempotencyKey(`autodraw:${product.id}:${productSize}:${live.drawsCompleted || 0}:${winnerEmail}`);
             const winnerIntent = await stripe.paymentIntents.create(
               {

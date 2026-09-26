@@ -33,6 +33,7 @@ import { boundIdempotencyKey } from '@/lib/idempotency-key';
 import { isValidEmail } from '@/lib/validation';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { encodeCartMetadata, decodeCartMetadata } from '@/lib/cart-metadata';
+import { startTenantEntry } from '@/lib/tenant-drops';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -93,13 +94,23 @@ export async function startTenantCheckout(input: {
   if (String(promoCode || ref || '').trim()) {
     return json({ error: "Promo codes aren't available in this store yet." }, 409);
   }
-  if (String(body?.mode || '').toLowerCase() === 'waitlist') {
-    return json({ error: "Waitlists aren't available in this store yet." }, 409);
-  }
-
   const products = await loadProducts(null, { tenantId });
   const product = products[String(productId)];
   if (!product) return json({ error: 'Product not found' }, 404);
+
+  // Raffle sizes, and instant-buy sizes whose product isn't on sale yet, are
+  // ENTRIES: the card is saved on the merchant's account now and charged by a
+  // draw or the waitlist later (lib/tenant-drops.ts, phase 4).
+  const sizeMode = getSizeCheckoutMode(product, String(size));
+  const waitlist = sizeMode === 'FCFS' && (String(body?.mode || '').toLowerCase() === 'waitlist' || product.isUpcoming === true);
+  if (sizeMode === 'RAFFLE' || waitlist) {
+    const priceCatForEntry = (product.priceCategories || []).find((c: any) => c.size === size);
+    if (!priceCatForEntry || !isConfiguredPrice(priceCatForEntry.price)) return json({ error: 'Price not set for this size' }, 400);
+    return startTenantEntry({
+      tenantId, stripeAccount: route.stripeAccount, origin, product, size: String(size),
+      email: String(email).trim().toLowerCase(), address: String(address), kind: sizeMode === 'RAFFLE' ? 'raffle' : 'waitlist',
+    });
+  }
   if (product.isActive !== true || product.isArchived === true || product.isUpcoming === true) {
     return json({ error: 'This product is not on sale.' }, 409);
   }

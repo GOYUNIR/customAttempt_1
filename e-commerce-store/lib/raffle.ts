@@ -21,6 +21,7 @@ import { resolveStripeClient } from '@/services/payment/factory';
 import { deliverWinnerEmail } from '@/lib/notifications';
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
+import { savedCardChargeRoute } from '@/lib/saved-card-route';
 
 function assertSupabase(): void {
   if (!getDb().configured) {
@@ -39,6 +40,11 @@ export type RaffleEntryInput = {
   promoCode?: string | null;
   discountPercent?: number | null;
   shippingAddress?: string | null;
+  /** The account the saved card lives on (00035). Omitted = not sent at all,
+   *  so callers from before 00035 insert exactly what they always did. */
+  stripeAccount?: string | null;
+  /** 'raffle' | 'waitlist' (00035). Omitted = the column default, 'raffle'. */
+  entryType?: 'raffle' | 'waitlist';
 };
 
 export type CreateRaffleEntryResult =
@@ -61,6 +67,8 @@ export async function createRaffleEntry(input: RaffleEntryInput): Promise<Create
         promo_code: input.promoCode ?? null,
         discount_percent: input.discountPercent ?? null,
         shipping_address: input.shippingAddress ?? null,
+        ...(input.stripeAccount !== undefined ? { stripe_account: input.stripeAccount } : {}),
+        ...(input.entryType !== undefined ? { entry_type: input.entryType } : {}),
       status: 'pending',
     });
     const entryId = rows?.[0]?.id;
@@ -75,9 +83,10 @@ export async function createRaffleEntry(input: RaffleEntryInput): Promise<Create
   }
 }
 
-async function listPendingEntries(tenantId: string, variantId: string) {
+async function listPendingEntries(tenantId: string, variantId: string, entryType?: 'raffle' | 'waitlist') {
   return getDb().select<Record<string, unknown>>('raffle_entries', {
-    where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('pending') },
+    // entryType omitted: no filter (the original store's draws, unchanged).
+    where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('pending'), ...(entryType ? { entry_type: eq(entryType) } : {}) },
     select: ['*'],
   });
 }
@@ -104,9 +113,9 @@ export type DrawExecutionResult = {
  * existing Redis draw engine (lib/draw.ts) keeps: selecting a winner and
  * charging their card are two distinct steps.
  */
-export async function executeDraw(tenantId: string, variantId: string, winnerCount: number): Promise<DrawExecutionResult> {
+export async function executeDraw(tenantId: string, variantId: string, winnerCount: number, opts?: { entryType?: 'raffle' }): Promise<DrawExecutionResult> {
   assertSupabase();
-  const entries = await listPendingEntries(tenantId, variantId);
+  const entries = await listPendingEntries(tenantId, variantId, opts?.entryType);
   const { winners, notSelected } = selectWinners(entries, winnerCount);
 
   const nowIso = new Date().toISOString();
@@ -200,7 +209,7 @@ export async function findPendingEntryId(tenantId: string, variantId: string, em
  * KV engines already do. Retry-on-decline belongs with the per-drop
  * commerce-mode settings.
  */
-async function rollDeclinedEntryBackToPool(tenantId: string, entryId: string): Promise<void> {
+export async function rollDeclinedEntryBackToPool(tenantId: string, entryId: string): Promise<void> {
   try {
     await getDb().update(
       'raffle_entries',
@@ -300,6 +309,14 @@ export async function executeDrawWithCharging(
       // the original charge rather than billing the winner twice, while a
       // genuinely new draw of the same variant gets a new drawId and can
       // charge again.
+      // CUTOVER RULE (lib/saved-card-route.ts): this engine serves the original
+      // store; a card recorded on a connected account (00035) is refused into
+      // the decline path. Rows without the column read as the platform, as today.
+      const cardRoute = savedCardChargeRoute({ entryAccount: entry.stripe_account as string | null, isDefaultStore: true, storeAccount: null });
+      if (!cardRoute.ok) {
+        console.error('[raffle] SAVED CARD NOT CHARGED — ' + cardRoute.reason + ' (entry ' + entryId + ')');
+        throw new Error('saved card cannot be charged here: ' + cardRoute.reason);
+      }
       const idempotencyKey = boundIdempotencyKey(`raffle-draw:${draw.drawId}:${entryId}`);
       await stripe.paymentIntents.create(
         {
