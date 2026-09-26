@@ -11,6 +11,7 @@ import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readProfile } from '@/lib/customer-profile';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,11 @@ function createSessionCookie(response: NextResponse, token: string) {
 
 /** Confirm the emailed code, then unlock the account + welcome rewards + session. */
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const body = await request.json().catch(() => ({}));
     const email = String(body?.email || '').trim().toLowerCase();

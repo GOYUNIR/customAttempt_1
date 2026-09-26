@@ -7,6 +7,7 @@ import { recordPlatformAudit } from '@/lib/platform-audit';
 import { createInvite, INVITE_TTL_DAYS } from '@/lib/staff-invites';
 import { sendStaffInviteEmail } from '@/lib/email';
 import { acceptInviteUrl } from '@/lib/staff-realms';
+import { isReservedStoreSlug, parseLegacyHosts } from '@/lib/storefront-host';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,10 +45,13 @@ function slugify(input: string): string {
 }
 
 /** Slugs that would collide with a portal host or a reserved surface. */
-const RESERVED_SLUGS = new Set([
-  'admin', 'app', 'sales', 'www', 'api', 'mail', 'media', 'static', 'assets',
-  'status', 'help', 'support', 'docs', 'blog', 'shop', 'store', 'account',
-]);
+/** A slug is its store's subdomain (TENANCY.md T1), so the platform's own
+ *  labels and the legacy store's hosts can't be taken: one rule, shared with
+ *  the host resolver (lib/storefront-host.ts), so the two can't drift. */
+function slugIsReserved(slug: string): boolean {
+  const root = process.env.PLATFORM_ROOT_DOMAIN;
+  return isReservedStoreSlug(slug, parseLegacyHosts(process.env.STOREFRONT_LEGACY_HOSTS, root), root);
+}
 
 export async function GET() {
   // So a signup page can render "closed" honestly instead of failing on submit.
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (RESERVED_SLUGS.has(requestedSlug)) {
+    if (slugIsReserved(requestedSlug)) {
       return NextResponse.json(
         { error: 'That address is reserved. Choose a different store name.' },
         { status: 409 },

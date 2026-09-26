@@ -7,6 +7,7 @@ import { getSessionUser } from '@/lib/session-auth';
 import { sendWelcomeEmail } from '@/lib/email';
 import { getSiteUrl } from '@/lib/env';
 import { randomBytes } from 'crypto';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,11 @@ function generateWelcomeCode(email: string) {
  * as-is, never re-issued or changed.
  */
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) return NextResponse.json({ error: 'Login required.' }, { status: 401 });

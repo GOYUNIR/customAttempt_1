@@ -15,6 +15,9 @@ import { GOOGLE_FONTS_HREF } from '@/lib/font-catalog';
 import { MapFactory } from '@/services/maps/factory';
 import { headers } from 'next/headers';
 import { isPlatformSurface, hidesStorefrontChrome } from '@/lib/platform-surface';
+import { storefrontTenantFromHeaders, type StorefrontTenant } from '@/lib/storefront-tenant';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 /**
  * Bump this constant ANY time the share-card code changes (markup, colors,
@@ -50,8 +53,29 @@ export const dynamic = 'force-dynamic';
  * the call entirely when there is no redis client closes that gap regardless
  * of what the shared cache currently holds.
  */
-async function buildLiveTheme(redis: ReturnType<typeof createKvClient>) {
-  const config = redis ? await loadStoreConfigCached(redis) : {};
+/**
+ * The store config this request's look comes from (TENANCY.md). The default
+ * store: the KV config, exactly as before. Another store: ITS OWN
+ * tenant_store_config row (template defaults with its name when it has none).
+ * No store at this host: the neutral template — never the default store's
+ * colours, logo or copy on someone else's address.
+ */
+async function storeConfigFor(who: StorefrontTenant, redis: ReturnType<typeof createKvClient>): Promise<Record<string, any>> {
+  if (who.kind === 'store' && who.isDefault) return redis ? await loadStoreConfigCached(redis) : {};
+  if (who.kind !== 'store') return {};
+  try {
+    const row = ((await getDb().select<any>('tenant_store_config', {
+      where: { tenant_id: eq(who.tenantId) }, select: ['config'], limit: 1,
+    })) as any[])[0];
+    const config = (row?.config || {}) as Record<string, any>;
+    return { ...config, branding: { ...(config.branding || {}), brandName: config.branding?.brandName || who.name || undefined } };
+  } catch (err) {
+    console.error('[layout] store config read failed for ' + who.tenantId, (err as Error)?.message || err);
+    return { branding: { brandName: who.name || undefined } };
+  }
+}
+
+async function buildLiveTheme(config: Record<string, any>) {
   const defaults = GOYUNIR_STORE_SUITE as any;
   const themeColors = { ...(defaults.themeColors || {}), ...(config.themeColors || {}) };
   // Legacy heroContent (written before the story fields existed) is stale text
@@ -85,6 +109,20 @@ async function buildLiveTheme(redis: ReturnType<typeof createKvClient>) {
 }
 
 export async function generateMetadata(): Promise<Metadata> {
+  const who = await storefrontTenantFromHeaders();
+  if (!(who.kind === 'store' && who.isDefault)) {
+    // Another store (or none): its own name on its own address. The site URL
+    // env and the /og share card belong to the default store, so neither is
+    // used here (a per-store share card is later work, TENANCY.md).
+    const config = await storeConfigFor(who, null);
+    const name = String(config.branding?.brandName || neutralBrandName());
+    const requestBase = normalizeSiteBase((await getRequestSiteUrl()) || '');
+    return {
+      metadataBase: new URL(requestBase),
+      title: { default: name, template: `%s | ${name}` },
+      description: String(config.branding?.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || ''),
+    };
+  }
   const redis = createKvClient();
   const config = await loadStoreConfigCached(redis);
   const branding = config.branding || {};
@@ -194,7 +232,10 @@ export default async function RootLayout({
   const hideStorefrontChrome = hidesStorefrontChrome(requestPathname);
 
   const redis = platformSurface ? null : createKvClient();
-  const liveValue = await buildLiveTheme(redis);
+  const who: StorefrontTenant = platformSurface
+    ? { kind: 'none' }
+    : await storefrontTenantFromHeaders();
+  const liveValue = await buildLiveTheme(platformSurface ? {} : await storeConfigFor(who, redis));
   // Resolve the ACTIVE map provider token through the driver engine (Setup
   // Wizard → env fallback). The token rides in the theme blob and the inline
   // script writes it to window.ENV_MAPBOX_TOKEN — the address-autofill module

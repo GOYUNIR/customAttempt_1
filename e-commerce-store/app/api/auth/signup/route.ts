@@ -8,6 +8,7 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { EmailFactory } from '@/services/email/factory';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 function hashPassword(password: string, salt: string): string {
   return scryptSync(password, salt, 64).toString('hex');
@@ -51,6 +52,11 @@ async function requireSignup2FA(redis: any): Promise<boolean> {
  *   The customer is never held hostage behind a code that cannot arrive.
  */
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   let body: any = {};
   try {
     body = await request.json();

@@ -5,6 +5,7 @@ import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readProfile } from '@/lib/customer-profile';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 const SESSION_DURATION = 7 * 24 * 60 * 60; // 7 days in seconds
 
@@ -21,6 +22,11 @@ function safeEqualHex(a: string, b: string): boolean {
 }
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   let body: any = {};
   try {
     body = await request.json();

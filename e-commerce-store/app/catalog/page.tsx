@@ -2,6 +2,8 @@ import LegacyCatalogPage from '@/components/storefront/LegacyCatalogPage';
 import ThemePageSections from '@/components/storefront/ThemeBlocks';
 import { readThemePage } from '@/lib/theme-page-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { storefrontTenantFromHeaders } from '@/lib/storefront-tenant';
+import { notFound } from 'next/navigation';
 import { createKvClient, loadProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +21,14 @@ export const dynamic = 'force-dynamic';
  * and catalog_grid can render without each block fetching for itself.
  */
 export default async function CatalogPage() {
-  const tenantId = await ensureDefaultTenant().catch(() => null);
+  // Whose store (TENANCY.md). Unknown address: 404, never the default store.
+  // Themed layouts load products from the DEFAULT catalog, so only the default
+  // store gets them until they are tenant-aware; other stores render the
+  // standard catalog, which reads the tenant-aware /api/store.
+  const who = await storefrontTenantFromHeaders();
+  if (who.kind === 'none') notFound();
+  if (who.kind === 'unavailable') throw new Error('[storefront] store lookup unavailable');
+  const tenantId = who.isDefault ? await ensureDefaultTenant().catch(() => null) : null;
   const sections = tenantId ? await readThemePage(tenantId, 'catalog') : [];
 
   if (sections.length > 0) {

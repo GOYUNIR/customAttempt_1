@@ -133,6 +133,13 @@
     // 522 -> 200 once it was applied). Do not enable this without that route.
     "PLATFORM_ROOT_DOMAIN": "goyunir.com",
 
+    // TENANCY.md T2 — the hosts that ARE the original (default) store, checked
+    // before any merchant slug. A bare label means <label>.<PLATFORM_ROOT_DOMAIN>.
+    // With this set, an unknown subdomain is a 404 instead of the default store.
+    // Removing it restores the old behaviour (every subdomain = default store)
+    // rather than taking the store offline.
+    "STOREFRONT_LEGACY_HOSTS": "shop,www,api",
+
     // PHASE G — Postgres is the authoritative catalog store.
     // The relational schema (00009 -> 00019) is applied; lib/catalog-write.ts
     // writes the full product, lib/postgres-catalog-read.ts reconstructs it.

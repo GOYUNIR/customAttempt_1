@@ -13,6 +13,7 @@ import {
 import { getSessionUser } from '@/lib/session-auth';
 import { readProfile } from '@/lib/customer-profile';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,11 @@ const TERMINAL_TYPES = ['WINNER_CHARGED', 'WINNER_DECLINED', 'NOT_SELECTED', 'CA
 const SKIP_TYPES = ['INTENT_STARTED', 'INTENT_EXPIRED', 'DUPLICATE_BLOCKED', 'ADMIN_NOTE', 'ADDRESS_UPDATED'];
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) {

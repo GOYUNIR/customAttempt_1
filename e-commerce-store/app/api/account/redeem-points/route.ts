@@ -7,6 +7,7 @@ import { withRedisLock } from '@/lib/redis-lock';
 import { readProfile, adjustRewards } from '@/lib/customer-profile';
 import { mirrorRewardsToKv } from '@/lib/customer-profile-bridge';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,11 @@ async function loadRewardsConfig(redis: any) {
 }
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const sessionUser = await getSessionUser(request);
     if (!sessionUser) {

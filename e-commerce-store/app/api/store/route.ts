@@ -21,7 +21,10 @@ import { brandLogoRef, publicMediaRef } from '@/lib/media';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { readCatalogFromPostgres } from '@/lib/postgres-catalog-read';
+import { readCatalogFromPostgres, readProductsFromPostgres } from '@/lib/postgres-catalog-read';
+import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
 
 export const dynamic = 'force-dynamic';
 
@@ -394,7 +397,16 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requestedSlug = String(url.searchParams.get('slug') || '').trim();
 
-    const payload = await withTtlCache(`store:${requestedSlug || '*'}:v2`, 10_000, () => buildStorePayload(requestedSlug));
+    // Whose store (TENANCY.md): from the Host header, never from the client.
+    // An unknown address is a 404, not the default store.
+    const who = await storefrontTenantForRequest(request);
+    if (who.kind === 'none') return NextResponse.json({ error: 'Store not found.' }, { status: 404 });
+    if (who.kind === 'unavailable') return NextResponse.json({ error: 'Store unavailable. Please try again.' }, { status: 503 });
+
+    // The tenant is IN the cache key: one isolate serves every host, and a
+    // key without it would hand one store's catalog to another's customers.
+    const payload = await withTtlCache(`store:${who.tenantId}:${requestedSlug || '*'}:v3`, 10_000, () =>
+      who.isDefault ? buildStorePayload(requestedSlug) : buildTenantStorePayload(who.tenantId, who.name, requestedSlug));
 
     // Slim the product-page payload: a slug request only needs the ONE product
     // + config (the page never reads the other products). Before this change a
@@ -473,6 +485,49 @@ async function tryBuildStorePayloadFromPostgres(
     console.error('[store] Postgres catalog read failed, falling back to Redis', (err as Error)?.message || err);
     return null;
   }
+}
+
+/**
+ * A store other than the default one (TENANCY.md T7/T8): its own Postgres
+ * catalog and its own store-config row, and NOTHING from KV. The KV catalog,
+ * config and live states are the default store's; falling back to them here
+ * would show another merchant's products and branding.
+ *
+ * No config row yet is a new store's normal state (the SEV-2 guard in
+ * readCatalogFromPostgres exists for the default store, whose config lived in
+ * KV first): it gets the template defaults with its own name.
+ */
+async function buildTenantStorePayload(tenantId: string, tenantName: string | null, requestedSlug: string): Promise<StorePayload> {
+  const sortProducts = (items: PublicStoreProduct[]) =>
+    [...items].sort(
+      (a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.name).localeCompare(String(b.name)),
+    );
+  const [base, configRows] = await Promise.all([
+    readProductsFromPostgres(tenantId),
+    getDb().select<any>('tenant_store_config', {
+      where: { tenant_id: eq(tenantId) }, select: ['config', 'schedule_override', 'social_override'], limit: 1,
+    }),
+  ]);
+  const row = (configRows as any[])[0] || {};
+  const stored = (row.config || {}) as Record<string, any>;
+  const withName = {
+    ...stored,
+    branding: { ...(stored.branding || {}), brandName: stored.branding?.brandName || tenantName || undefined },
+  };
+  const config = mergePublicConfig(withName);
+  const scheduleOverride = (row.schedule_override || {}) as Record<string, unknown>;
+  const globalSchedule = { ...GOYUNIR_STORE_SUITE.dropSchedule, ...(config?.dropSchedule || {}), ...scheduleOverride };
+  const allProducts = sortProducts((base?.productsRaw || []).map((raw) => sanitizeProduct(raw)));
+  const storeTimezone = String(config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles');
+  const lifecycleProducts = applyLifecycle(allProducts, base?.liveStates || [], storeTimezone, globalSchedule);
+  return {
+    config,
+    allProducts: lifecycleProducts,
+    product: requestedSlug ? lifecycleProducts.find((item) => item.slug === requestedSlug) || null : null,
+    scheduleOverride,
+    socialOverride: (row.social_override || {}) as Record<string, unknown>,
+    timestamp: Date.now(),
+  };
 }
 
 async function buildStorePayload(requestedSlug: string): Promise<StorePayload> {

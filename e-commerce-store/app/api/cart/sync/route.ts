@@ -6,6 +6,7 @@ import { readCartItemsFromPostgres } from '@/lib/postgres-read-fallback';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { writeCartToPostgres, type CartItemInput } from '@/lib/cart-write';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +55,11 @@ function sanitizeItems(input: unknown): Array<Record<string, string | number>> {
 }
 
 export async function GET(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const user = await getSessionUser(request);
     if (!user?.userId) return NextResponse.json({ items: [] });
@@ -87,6 +93,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const user = await getSessionUser(request);
     if (!user?.userId) {

@@ -4,10 +4,16 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { sendWaitlistConfirmationEmail } from '@/lib/email';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     // No KV check here any more. The list moved to Postgres in H8 (00023), but
     // this route kept opening a Redis client it never used and refusing the

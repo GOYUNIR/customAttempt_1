@@ -2,6 +2,8 @@ import LegacyHomePage from '@/components/storefront/LegacyHomePage';
 import ThemeSections from '@/components/storefront/ThemeSections';
 import { readActiveTheme } from '@/lib/theme-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
+import { storefrontTenantFromHeaders } from '@/lib/storefront-tenant';
+import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +17,14 @@ export const dynamic = 'force-dynamic';
  * every Postgres-backed feature this session uses.
  */
 export default async function HomePage() {
-  const tenantId = await ensureDefaultTenant().catch(() => null);
+  // Whose store (TENANCY.md). Unknown address: 404, never the default store.
+  // Themed layouts load products from the DEFAULT catalog, so only the default
+  // store gets them until they are tenant-aware; other stores render the
+  // standard homepage, which reads the tenant-aware /api/store.
+  const who = await storefrontTenantFromHeaders();
+  if (who.kind === 'none') notFound();
+  if (who.kind === 'unavailable') throw new Error('[storefront] store lookup unavailable');
+  const tenantId = who.isDefault ? await ensureDefaultTenant().catch(() => null) : null;
   const theme = tenantId ? await readActiveTheme(tenantId) : null;
 
   if (theme && theme.sections.length > 0) {

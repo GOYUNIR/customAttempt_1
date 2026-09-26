@@ -29,6 +29,7 @@ import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-r
 import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { maskEmail, isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -409,6 +410,11 @@ async function lockOneEntry(opts: {
   }
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   // Set once this run OWNS the session's dedupe claim. Released in `finally`
   // on every exit — see there for why that is safe on the success path too.
   let ownedClaim: string | null = null;

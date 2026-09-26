@@ -22,6 +22,7 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { resolveVariantId, decrementInventory as decrementPostgresInventory, restockInventory } from '@/lib/inventory';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 import { recordOrder } from '@/lib/order-write';
+import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
 
 /** Same anti-scalping check `checkout/route.ts` enforces before creating a
  * Stripe Checkout Session — this direct-charge path was missing it entirely,
@@ -60,6 +61,11 @@ async function getRefPrefix(redis: any): Promise<string> {
 }
 
 export async function POST(request: Request) {
+  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
+  // address may use it. From another store's address it would act on the
+  // default store's data (or charge its account).
+  const refusedForStore = await refuseUnlessDefaultStore(request);
+  if (refusedForStore) return refusedForStore as any;
   try {
     const redis = createKvClient();
     const stripe = await resolveStripeClient();
