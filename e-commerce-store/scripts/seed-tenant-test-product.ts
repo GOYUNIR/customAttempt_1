@@ -32,6 +32,22 @@ const TENANT = process.argv[2] || '13591c9e-82e4-4c23-8d94-249cef6fa775'; // tes
     notes: [], images: [], categories: [],
   });
   console.log(JSON.stringify(res));
+  // A second product with two sizes, so a cart can hold several lines (phase 3).
+  const res2 = await writeProductToPostgres(TENANT, {
+    id: 'prod_tenant_test_2',
+    name: 'Connect Test Pair',
+    slug: 'connect-test-pair',
+    tagline: 'Second test product for verifying cart checkout on this store (test mode).',
+    desc: 'Second test product for verifying cart checkout on this store (test mode).',
+    isActive: true, isArchived: false, isUpcoming: false,
+    checkoutMode: 'FCFS', productType: 'fcfs', isRaffle: false,
+    maxPerEmail: 5, maxPerCart: 5,
+    totalInventory: 20,
+    inventoryPerSize: { Small: 10, Large: 10 },
+    priceCategories: [{ size: 'Small', price: 12, checkoutMode: 'FCFS' }, { size: 'Large', price: 24, checkoutMode: 'FCFS' }],
+    notes: [], images: [], categories: [],
+  });
+  console.log(JSON.stringify(res2));
   const { loadProducts } = await import('../lib/server-config');
   const products = await loadProducts(null, { tenantId: TENANT });
   const pr = products['prod_tenant_test_1'];
