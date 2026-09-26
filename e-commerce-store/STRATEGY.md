@@ -199,6 +199,18 @@ evidence, and write the evidence next to it.
   (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading
   is the first go-live action.
 
+- [ ] **🛑 A merchant can run their OWN store from the merchant app.** Found
+  2026-09-26: the whole admin tree acts on the original store and authorized
+  any valid admin session, so a merchant owner could read and write the
+  original store. Proven read-only on production, then **contained**: sessions
+  for another store now get 403 on /admin and /api/admin
+  (`lib/default-tenant.ts`, `scripts/verify-admin-tenant-guard.ts`). That
+  leaves a merchant with no dashboard at all: they can't manage their catalog,
+  prices, stock, orders, branding or Connect onboarding. Public merchant
+  signup is still open (`ALLOW_MERCHANT_SIGNUP=true`), so a new signup lands
+  on "dashboard not available". Closing signup until the dashboard exists is
+  an owner decision.
+
 ### Must also be true
 
 - [ ] **Every charge path writes an order**, proven by a real charge on each

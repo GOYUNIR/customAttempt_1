@@ -51,8 +51,17 @@
 > **The original store stays on R1/R2** until the owner explicitly starts
 > the cutover (owner, 2026-09-26). See the open question in CONNECT.md §4.
 >
-> **What's left before a merchant store is usable end to end:** see the
-> owner report of 2026-09-26. In short, merchant self-service comes first.
+> **SECURITY, found and contained 2026-09-26:** the admin tree acted on the
+> original store for ANY valid admin session. Proven read-only: test4's owner
+> session listed the original store's products (HTTP 200). Contained at three
+> layers (middleware, `adminAuthorized`, `resolveAdminActor`); verified live by
+> `scripts/verify-admin-tenant-guard.ts`: the merchant session gets 403, the
+> original store's own admin still gets 200. Staff impersonation of a merchant
+> is refused with it.
+>
+> **Next, and the real gap:** the merchant dashboard, the admin tree resolving
+> its tenant from the session. Merchant self-service comes before emails,
+> legal pages and the rest.
 
 > _Previous note (phase 4 deployed, before 00035):_
 >
