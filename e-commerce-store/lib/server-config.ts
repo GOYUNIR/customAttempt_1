@@ -4,6 +4,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { UNCONFIGURED_PRICE_SENTINEL, resolveSizeLimits, normalizeInventorySyncSlug, resolveInventorySyncSlug, sharedInventoryField } from '@/lib/storefront-config';
 import { sanitizeCommerceMode, normalizeAccessRule, normalizeBillingRule, normalizeScheduleConfig } from '@/lib/commerce-modes';
+import { requestOriginOf } from './edge-router';
 import {
   PRODUCTS_KEY,
   STORE_CONFIG_KEY,
@@ -951,11 +952,10 @@ export function resolveStripePriceId(stored?: string | null): string {
 }
 
 export function buildAbsoluteUrl(request: Request | undefined, path = '/') {
-  const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? 'localhost:3000';
-  // Platform-agnostic: behind any proxy the protocol is forwarded; when it is
-  // not, assume https in production regardless of the hosting platform.
-  const protocol = request?.headers.get('x-forwarded-proto') ?? (process.env.NODE_ENV === 'production' ? 'https' : 'http');
-  return new URL(path, `${protocol}://${host}`).toString();
+  // Host only unless TRUST_FORWARDED_HOST (lib/edge-router.ts requestOrigin):
+  // these URLs become Stripe redirects and email links.
+  if (!request) return new URL(path, process.env.NODE_ENV === 'production' ? 'https://localhost:3000' : 'http://localhost:3000').toString();
+  return new URL(path, requestOriginOf(request)).toString();
 }
 
 // ============================================================

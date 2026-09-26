@@ -13,13 +13,13 @@
 
 import { createKvClient } from '@/lib/server-config';
 import { rateLimitKey } from '@/lib/redis-keys';
+import { clientIpFromHeaders } from '@/lib/edge-router';
 
-/** Best-effort client IP from the standard proxy headers (never trusted as
- *  identity — only as a coarse abuse signal). */
+/** The client IP for rate limiting (lib/edge-router.ts clientIpFromHeaders:
+ *  cf-connecting-ip; forwarded headers only behind a trusted proxy). Never
+ *  identity — a coarse abuse signal that a client must not be able to rotate. */
 export function clientIp(request: Request): string {
-  const fwd = request.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim() || 'unknown';
-  return request.headers.get('x-real-ip') || 'unknown';
+  return clientIpFromHeaders((name) => request.headers.get(name));
 }
 
 /** Returns true when the caller has exceeded `max` requests in `windowS`

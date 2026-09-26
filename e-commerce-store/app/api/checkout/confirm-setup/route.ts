@@ -30,6 +30,7 @@ import { getSiteUrl, fallbackSiteUrl } from '@/lib/env';
 import { maskEmail, isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
+import { requestOriginOf } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,12 +40,9 @@ function siteUrlFromRequest(request: Request) {
   // The request host is the most truthful base for confirmation emails sent in
   // response to a customer action — never fall back to a stock example.com.
   try {
-    const forwardedHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    if (forwardedHost) {
-      const host = String(forwardedHost).split(',')[0].trim();
-      const proto = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
-      return normalizeSiteBase(`${proto}://${host}`);
-    }
+    // Host only (lib/edge-router.ts requestOrigin): never a client-supplied
+    // x-forwarded-host in a link we email to a customer.
+    if (request.headers.get('host')) return normalizeSiteBase(requestOriginOf(request));
     const u = new URL(request.url);
     return normalizeSiteBase(`${u.protocol}//${u.host}`);
   } catch {

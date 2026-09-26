@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { requestOrigin } from '@/lib/edge-router';
 
 /**
  * Server-only site-URL resolver for the CURRENT request (imports next/headers,
@@ -14,16 +15,14 @@ import { headers } from 'next/headers';
 export async function getRequestSiteUrl(): Promise<string> {
   try {
     const h = await headers();
-    const forwardedHost = h.get('x-forwarded-host');
-    const host = String(forwardedHost || h.get('host') || '')
-      .split(',')[0]
-      .trim();
+    // Host only unless TRUST_FORWARDED_HOST (lib/edge-router.ts requestOrigin):
+    // this becomes canonical and og:url, which must name the host the request
+    // really hit, never one a client put in x-forwarded-host.
+    const host = String(h.get('host') || '').trim();
     // A `$` in the host is an unresolved Vercel placeholder (never a real
     // domain) — reject it so metadata/OG URLs can't point at a nonexistent host.
     if (!host || host.includes('$')) return '';
-    const forwardedProto = h.get('x-forwarded-proto');
-    const proto = String(forwardedProto || 'https').split(',')[0].trim() || 'https';
-    return `${proto}://${host}`.replace(/\/+$/, '');
+    return requestOrigin({ host, xForwardedHost: h.get('x-forwarded-host'), xForwardedProto: h.get('x-forwarded-proto') }).replace(/\/+$/, '');
   } catch {
     return '';
   }

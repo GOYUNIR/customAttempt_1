@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { runAutoDraws } from '@/lib/auto-draw';
 import { createKvClient, autoDrawRateLimitKey } from '@/lib/server-config';
+import { clientIpFromHeaders } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -29,9 +30,7 @@ const RATE_LIMIT_MAX = 8; // requests per window per IP
 const RATE_LIMIT_WINDOW_S = 60;
 
 function clientIp(request: Request): string {
-  const fwd = request.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim() || 'unknown';
-  return request.headers.get('x-real-ip') || 'unknown';
+  return clientIpFromHeaders((name) => request.headers.get(name));
 }
 
 async function rateLimited(request: Request): Promise<boolean> {

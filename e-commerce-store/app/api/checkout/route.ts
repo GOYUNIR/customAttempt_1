@@ -14,6 +14,7 @@ import { readLiveStock } from '@/lib/stock-gate';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
 import { startTenantCheckout } from '@/lib/tenant-checkout';
+import { requestOriginOf } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -303,13 +304,9 @@ export async function POST(request: Request) {
       orderRef,
     } as any);
 
-    const origin = (() => {
-      const forwardedProto = request.headers.get('x-forwarded-proto');
-      const forwardedHost = request.headers.get('x-forwarded-host');
-      const host = forwardedHost || request.headers.get('host') || 'localhost:3000';
-      const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
-      return `${protocol}://${host}`;
-    })();
+    // From Host only (lib/edge-router.ts requestOrigin): a client-supplied
+    // x-forwarded-host would choose where Stripe sends the payer afterwards.
+    const origin = requestOriginOf(request);
 
     // Stripe-only gate: raffle card-save (setup mode) is a Stripe concept. The
     // other providers power the instant-buy (FCFS) path only.

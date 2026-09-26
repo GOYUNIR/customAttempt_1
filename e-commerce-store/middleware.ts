@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 import { classifyStorefrontHost, parseLegacyHosts, merchantHostAllowsPath } from '@/lib/storefront-host';
 
@@ -110,9 +110,7 @@ function verifyBasicAuth(authorization: string | null) {
  *  lib/rate-limit.ts pulls in lib/server-config.ts's Node-only imports
  *  (stripe, crypto) which the Edge runtime can't load. */
 function edgeClientIp(request: NextRequest): string {
-  const fwd = request.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim() || 'unknown';
-  return request.headers.get('x-real-ip') || 'unknown';
+  return clientIpFromHeaders((name) => request.headers.get(name));
 }
 
 /**
@@ -457,7 +455,12 @@ export async function middleware(request: NextRequest) {
 
     if (!ready) {
       if (isSetupPath || isSuperLoginPath || isLoginPath) {
-        return NextResponse.next(); // bootstrap + in-site login endpoints are open pre-config
+        // bootstrap + in-site login endpoints are open pre-config. x-pathname is
+        // set here too: app/admin/layout.tsx skips its auth check on exempt paths
+        // by this header, so NO pass-through may forward a client-supplied copy.
+        const preConfigHeaders = new Headers(request.headers);
+        preConfigHeaders.set('x-pathname', pathname);
+        return NextResponse.next({ request: { headers: preConfigHeaders } });
       }
       if (pathname.startsWith('/api/admin')) {
         return NextResponse.json(

@@ -185,14 +185,16 @@ test('portalHomeRewrite: the rewrite target is itself an allowed path for that p
 
 // ── Public host resolution (Phase C) ──────────────────────────────────────
 
-test('resolveRequestHost: prefers x-forwarded-host, then host, then fallback', () => {
-  assert.equal(resolveRequestHost({ xForwardedHost: 'admin.site.com', host: 'internal:3000' }), 'admin.site.com');
+test('resolveRequestHost: Host, then fallback; a client x-forwarded-host is IGNORED by default', () => {
+  // Hardened 2026-09-26: it used to win, and any client can send it.
+  assert.equal(resolveRequestHost({ xForwardedHost: 'admin.site.com', host: 'shop.site.com' }), 'shop.site.com');
   assert.equal(resolveRequestHost({ host: 'sales.site.com' }), 'sales.site.com');
   assert.equal(resolveRequestHost({}, 'fallback.site.com'), 'fallback.site.com');
 });
 
-test('resolveRequestHost: takes the FIRST value of a comma-joined forwarded chain', () => {
-  assert.equal(resolveRequestHost({ xForwardedHost: 'app.site.com, proxy.internal' }), 'app.site.com');
+test('resolveRequestHost: behind a declared trusted proxy, x-forwarded-host wins and its FIRST value is used', () => {
+  assert.equal(resolveRequestHost({ xForwardedHost: 'admin.site.com', host: 'internal:3000' }, '', true), 'admin.site.com');
+  assert.equal(resolveRequestHost({ xForwardedHost: 'app.site.com, proxy.internal' }, '', true), 'app.site.com');
 });
 
 test('resolveRequestHost: lowercases and strips the port', () => {

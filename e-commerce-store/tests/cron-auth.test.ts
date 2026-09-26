@@ -6,10 +6,13 @@ function req(url: string, headers: Record<string, string> = {}): Request {
   return new Request(url, { headers });
 }
 
-test('Vercel cron requests are trusted via x-vercel-cron without a secret', () => {
+test('SPOOF GUARD: x-vercel-cron alone authorizes nothing (any client can send it)', () => {
+  // Proven on production 2026-09-26: this header ran a cron route from curl.
   const r = req('https://store.example.com/api/checkout/cron-draw', { 'x-vercel-cron': '1' });
-  assert.equal(isPlatformScheduledInvocation(r), true);
-  assert.equal(isCronAuthorized(r, 's3cret'), true);
+  assert.equal(isPlatformScheduledInvocation(r), false);
+  assert.equal(isCronAuthorized(r, 's3cret'), false);
+  // With the secret it still works, header or not.
+  assert.equal(isCronAuthorized(req('https://store.example.com/api/checkout/cron-draw', { 'x-vercel-cron': '1', authorization: 'Bearer s3cret' }), 's3cret'), true);
 });
 
 test('a plain request is not a platform scheduled invocation', () => {

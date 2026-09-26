@@ -23,6 +23,7 @@ import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
+import { requestOriginOf } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -125,13 +126,9 @@ export async function POST(request: Request) {
     // Resolve the deployment origin for Stripe success/cancel URLs. In a Next.js
     // route handler `origin` is NOT a global (that's browser-only), so derive it
     // from the forwarded headers (Vercel) or the Host header (localhost/dev).
-    const origin = (() => {
-      const forwardedProto = request.headers.get('x-forwarded-proto');
-      const forwardedHost = request.headers.get('x-forwarded-host');
-      const host = forwardedHost || request.headers.get('host') || 'example.com';
-      const protocol = forwardedProto || (host.includes('localhost') ? 'http' : 'https');
-      return `${protocol}://${host}`;
-    })();
+    // From Host only (lib/edge-router.ts requestOrigin): a client-supplied
+    // x-forwarded-host would choose where Stripe sends the payer afterwards.
+    const origin = requestOriginOf(request);
 
     const allProducts = await loadProducts(redis);
     const aggregate = new Map<string, { productId: string; size: string; quantity: number }>();

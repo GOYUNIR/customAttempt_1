@@ -4,8 +4,9 @@
  * The store's safety-net jobs (auto-draw, recovery emails, social tick) are
  * plain HTTP endpoints so ANY scheduler can run them:
  *
- *   - Vercel cron        → vercel.json. Vercel signs the request with the
- *                          `x-vercel-cron: 1` header (trusted directly).
+ *   - Vercel cron        → vercel.json. With CRON_SECRET set, Vercel sends
+ *                          `Authorization: Bearer $CRON_SECRET` itself. The
+ *                          `x-vercel-cron` header is NOT trusted (see below).
  *   - Netlify scheduled  → netlify/functions/cron-tasks.mjs fetches the same
  *                          endpoints with `Authorization: Bearer $CRON_SECRET`.
  *   - Cloudflare Workers → cron-worker/ is a tiny scheduled worker that fetches
@@ -20,12 +21,18 @@
  * load it directly (see tests/cron-auth.test.ts).
  */
 
-/** True when the request carries a platform-issued scheduler signature that is
- * trusted WITHOUT a secret. Vercel Cron sets `x-vercel-cron: 1`; other
- * platforms' scheduled jobs reach these endpoints as plain HTTP calls and are
- * authenticated by secret instead. */
-export function isPlatformScheduledInvocation(request: Request): boolean {
-  return request.headers.get('x-vercel-cron') === '1';
+/**
+ * NO HEADER IS TRUSTED AS PROOF OF A SCHEDULER. This used to return true for
+ * `x-vercel-cron: 1`, which any client can send: on this deployment
+ * (Cloudflare, where nothing strips it) `curl -H "x-vercel-cron: 1"` ran the
+ * social-proof tick on production, and the same header authorized both raffle
+ * DRAW routes and the recovery emails (verified 2026-09-26, HARDENING in
+ * TENANCY.md). Every scheduler authenticates with the secret instead,
+ * including Vercel's, which sends the bearer itself when CRON_SECRET is set.
+ * Kept (always false) so no caller silently regains the old trust.
+ */
+export function isPlatformScheduledInvocation(_request: Request): boolean {
+  return false;
 }
 
 /** Constant-time string comparison (no `node:crypto` import — mirrors
@@ -49,7 +56,6 @@ function timingSafeStringEq(a: string, b: string): boolean {
  *   - no secret is configured and `openWhenNoSecret` is true (the historical
  *     behavior of the recovery/social-tick routes, kept for backward
  *     compatibility), OR
- *   - the request is a trusted platform scheduler invocation, OR
  *   - `Authorization: Bearer <secret>` / `?key=<secret>` / `x-cron-secret` matches.
  */
 export function isCronAuthorized(
@@ -58,7 +64,6 @@ export function isCronAuthorized(
   opts?: { openWhenNoSecret?: boolean },
 ): boolean {
   if (!secret) return opts?.openWhenNoSecret === true;
-  if (isPlatformScheduledInvocation(request)) return true;
   const url = new URL(request.url);
   const bearer = request.headers.get('authorization') || '';
   if (bearer.startsWith('Bearer ') && timingSafeStringEq(bearer.slice(7), secret)) return true;

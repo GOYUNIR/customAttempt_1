@@ -5,6 +5,7 @@ import { rateLimitedResponse } from '@/lib/rate-limit';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { getNextDrawTimestampForSchedule, resolveProductSchedule } from '@/lib/storefront-config';
 import { sendEntryRecoveryEmail } from '@/lib/email';
+import { requestOriginOf } from '@/lib/edge-router';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -50,10 +51,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: true, skipped: true, reason: 'disabled' });
     }
 
-    const host =
-      request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
-    const proto = request.headers.get('x-forwarded-proto') || 'https';
-    const siteUrl = `${proto}://${host}`;
+    // Host only (lib/edge-router.ts requestOrigin): these links go out in emails.
+    const siteUrl = requestOriginOf(request);
 
     let sentEarly = 0;
     let sentPre = 0;

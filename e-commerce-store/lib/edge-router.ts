@@ -284,21 +284,30 @@ export function portalHomeRewrite(pathname: string, portal: Portal): string | nu
  * all before deploying. Verified directly against `next dev`: a request with
  * `Host: admin.goyunir.com` produced `nextUrl.host === 'localhost:3111'`.
  *
- * Order: `x-forwarded-host` (set by proxies/CDNs, first value wins) → `host` →
- * the caller's fallback. The result is lowercased and stripped of any port.
+ * Order: `host` → the caller's fallback. `x-forwarded-host` is used ONLY when
+ * TRUST_FORWARDED_HOST=true says a trusted proxy in front of this app sets it
+ * (and strips any client copy). The result is lowercased, port stripped.
  *
- * SECURITY: `Host`/`x-forwarded-host` are client-supplied, so this is NOT an
- * authentication input and must never be treated as one. A spoofed Host can
- * at most make the path fence *more* permissive for that request — it still
- * has to pass the session checks in middleware.ts, which key off the path, not
- * the host. That separation is exactly why those path-based auth triggers must
- * not be removed in favor of host classification.
+ * SECURITY (hardened 2026-09-26). `x-forwarded-host` used to win over `Host`.
+ * Any client can send it, and on this deployment (Cloudflare) nothing strips
+ * it, so a request could claim to be for another portal's host. The session
+ * and role checks still stopped unauthorized access, but host classification
+ * now decides WHOSE STORE a request is for (TENANCY.md), and the catalog leak
+ * showed what a mis-classified request can expose. On Cloudflare `Host` is the
+ * hostname the request was routed by: the one header here a client cannot
+ * point at a different store. Path-based auth triggers in middleware.ts still
+ * must not be removed in favor of host classification.
  */
+export function trustForwardedHost(env: Record<string, string | undefined> = process.env): boolean {
+  return String(env.TRUST_FORWARDED_HOST || '').trim().toLowerCase() === 'true';
+}
+
 export function resolveRequestHost(
   headers: { xForwardedHost?: string | null; host?: string | null },
   fallback = '',
+  trustForwarded: boolean = trustForwardedHost(),
 ): string {
-  const forwarded = String(headers.xForwardedHost || '').split(',')[0].trim();
+  const forwarded = trustForwarded ? String(headers.xForwardedHost || '').split(',')[0].trim() : '';
   const direct = String(headers.host || '').trim();
   return (forwarded || direct || fallback).toLowerCase().replace(/:\d+$/, '');
 }
@@ -368,4 +377,59 @@ export function isStrayMarketingPath(pathname: string, portal: Portal): boolean 
   // Legal pages belong to the platform as much as to the shop.
   if (pathname === '/privacy' || pathname === '/terms') return false;
   return true;
+}
+
+/**
+ * The request's own origin (scheme://host[:port]) for URLs we hand to others:
+ * Stripe success/cancel URLs, email links. Same rule as resolveRequestHost:
+ * from `Host` unless TRUST_FORWARDED_HOST. A client-chosen host here would make
+ * Stripe send a payer to a site of the client's choosing after paying.
+ */
+export function requestOrigin(
+  headers: { host?: string | null; xForwardedHost?: string | null; xForwardedProto?: string | null },
+  fallbackHost = 'localhost:3000',
+  trustForwarded: boolean = trustForwardedHost(),
+): string {
+  const first = (v?: string | null) => String(v || '').split(',')[0].trim().toLowerCase();
+  const hostWithPort = (trustForwarded && first(headers.xForwardedHost)) || first(headers.host) || fallbackHost.toLowerCase();
+  const bare = hostWithPort.replace(/:\d+$/, '');
+  const local = bare === 'localhost' || bare === '127.0.0.1';
+  const fwdProto = trustForwarded ? first(headers.xForwardedProto) : '';
+  const proto = fwdProto === 'http' || fwdProto === 'https' ? fwdProto : (local ? 'http' : 'https');
+  return proto + '://' + hostWithPort;
+}
+
+/** requestOrigin for a Request. */
+export function requestOriginOf(request: Request, fallbackHost?: string): string {
+  return requestOrigin({
+    host: request.headers.get('host'),
+    xForwardedHost: request.headers.get('x-forwarded-host'),
+    xForwardedProto: request.headers.get('x-forwarded-proto'),
+  }, fallbackHost);
+}
+
+/**
+ * The client IP for rate limiting and audit. From `cf-connecting-ip`, which
+ * Cloudflare sets to the real connecting address and a client cannot
+ * override. `x-forwarded-for` / `x-real-ip` are used ONLY with
+ * TRUST_FORWARDED_HOST (a trusted proxy that strips client copies): on
+ * Cloudflare a client-sent x-forwarded-for passes straight through, and taking
+ * its first value let any script rotate "IPs" past every rate limit —
+ * proven on production 2026-09-26: merchant signup's 5/hour limit returned 429
+ * on the 6th plain request but never with a spoofed header. Edge-safe (no
+ * imports), shared by middleware.ts and lib/rate-limit.ts.
+ */
+export function clientIpFromHeaders(
+  get: (name: string) => string | null,
+  trustForwarded: boolean = trustForwardedHost(),
+): string {
+  const cf = String(get('cf-connecting-ip') || '').trim();
+  if (cf) return cf;
+  if (trustForwarded) {
+    const fwd = String(get('x-forwarded-for') || '').split(',')[0].trim();
+    if (fwd) return fwd;
+    const real = String(get('x-real-ip') || '').trim();
+    if (real) return real;
+  }
+  return 'unknown';
 }
