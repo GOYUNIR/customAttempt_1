@@ -1,6 +1,62 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-26, after phase 2)
+> ## ▶ RESUME HERE (2026-09-26, after phase 3 + header hardening)
+>
+> **Header hardening: done and verified on production** (owner asked for it
+> before phase 3). **Method:** an inventory of every request header the code
+> reads, then a live probe of each client-settable one, before and after the
+> fix.
+>
+> | Header | Before (proven on production) | Fix | After |
+> |---|---|---|---|
+> | `x-vercel-cron: 1` | ran `/api/analytics/social-tick` from curl (401 → 200). Also authorized both raffle DRAW routes and the recovery emails (not called) | no header is trusted; the secret is always required (the Cloudflare cron worker already sends it) | 401 on all four scheduler routes |
+> | `x-forwarded-for` | rotating it never hit signup's 5/hour limit; plain requests got 429 on the 6th. Every limit was bypassable, admin login's included | `cf-connecting-ip` (Cloudflare refuses a client-sent one: 403) | spoofed requests share the real IP's bucket and get 429 |
+> | `x-forwarded-host` (portal) | `shop./admin` + `admin.*` was routed as the admin portal (307 to its login) | `Host` only; `TRUST_FORWARDED_HOST=true` opts a trusted proxy back in | 404 |
+> | `x-forwarded-host` (Stripe/email URLs) | not exploitable here: production handlers received the real host | one helper, `requestOrigin`, for all six builders | `success_url` stays `shop.goyunir.com` under spoofing |
+> | `x-pathname` | no exploit found | the pre-config pass-through now sets it; a test fails if a dynamic route appears under `app/admin` | n/a |
+>
+> **Phase 3 (cart) is live and proven:** `scripts/verify-tenant-cart.ts`, a
+> real bag on `test4.goyunir.com`, **all PASS**:
+> - **The bag:** Pair Large ×1, Pair Small ×2, Item ×1 = 6700, paid on
+>   test4's account only, three line items.
+> - **The fee:** 134 on the cart total.
+> - **The order:** ONE order, `TEST-1CDJ0N2`, all three lines linked to their
+>   variants with the right quantities and prices, fee 134.
+> - **Records:** one billing row; stock 10/10/8 → 9/8/7; nothing written for
+>   the default store; the event was processed once.
+> - **Merchant-side refunds:** partial 2400 → fee returned in proportion, 48;
+>   the rest → the whole fee, 134; month volume back to where it started.
+> - **Default store's cart:** still reaches Stripe on the platform account,
+>   unchanged.
+> - **Isolation, both directions:** clean.
+>
+> **Known limits** (true of the default store too, unless noted):
+> - Stock is checked at checkout and decremented after payment. Two buyers can
+>   pay for the last unit: the reservation-hold go-live blocker (STRATEGY §9).
+> - If the webhook died between the stock decrement and marking the event
+>   done, a reclaim (5 minutes later) would decrement again. The order and the
+>   fee are idempotent; stock is not.
+> - A refund does not restock.
+> - The default store's cart route puts the whole cart in ONE metadata value
+>   (a 500-character cap), so a large cart there can fail at session creation.
+>   The tenant path splits it.
+>
+> **Not yet for a connected merchant** (refused, never mixed with the default
+> store):
+> - raffles and waitlists, and promo codes;
+> - customer accounts and login;
+> - release alerts;
+> - order emails;
+> - `/catalog` groupings;
+> - per-store share card and icon;
+> - the footer's Terms, Privacy, Shipping and "Manage My Entry" links. The
+>   template shows them, but they 404 on merchant addresses (T10), so they are
+>   dead links there.
+>
+> **Next:** phase 4 (raffle, draws, waitlist, with the saved-card cutover rule
+> in CONNECT.md §4), then phase 5 (accounts, alerts, emails, legal pages).
+
+> _Phase 2 evidence:_
 >
 > **Phase 2 is live and proven:** a connected merchant sells through its own
 > Stripe account, from its own address.
@@ -83,8 +139,7 @@
 > | `admin.` / `app.` | portals unchanged (307 to `/admin`) |
 >
 > **Also found:**
-> - **HARDENING, fix soon (owner, 2026-09-26: not urgent, not to be deferred
->   indefinitely):** the middleware's portal classification
+> - **HARDENING — DONE 2026-09-26** (see the top of this note). Was: the middleware's portal classification
 >   (`resolveRequestHost` in `lib/edge-router.ts`) prefers `x-forwarded-host`,
 >   which any client can set, so a request can claim to be for another portal
 >   host. The admin role check still stops unauthorized access. The fix: use
