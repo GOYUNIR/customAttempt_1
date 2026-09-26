@@ -132,7 +132,7 @@ export const APP_TOP_LEVEL_ROUTES: readonly string[] = [
  * reached from another store's address — including routes added later.
  * Add a path here only after it resolves its tenant (lib/storefront-tenant.ts).
  */
-const MERCHANT_ALLOWED_EXACT = new Set(['/', '/catalog', '/api/store', '/api/catalog/status']);
+const MERCHANT_ALLOWED_EXACT = new Set(['/', '/catalog', '/api/store', '/api/catalog/status', '/api/checkout']);
 
 export function merchantHostAllowsPath(pathname: string): boolean {
   const path = String(pathname || '/').replace(/\/+$/, '') || '/';

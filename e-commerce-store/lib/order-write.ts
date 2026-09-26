@@ -70,6 +70,10 @@ export type RecordOrderInput = {
   promoCode?: string | null;
   stripeCustomerId?: string | null;
   stripePaymentIntentId?: string | null;
+  /** ISO currency of the charge. Defaults to 'usd' (every pre-Connect caller). */
+  currency?: string | null;
+  /** What the platform took on this sale (Connect application fee), 00032. */
+  platformFeeCents?: number | null;
 } & (
   // Single-line callers (direct checkout, the raffle draw, the webhook's
   // non-cart branch) sell exactly one thing and keep the original shape.
@@ -138,7 +142,8 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
         payment_status: 'paid',
         subtotal_cents: amountCents,
         total_cents: amountCents,
-        currency: 'usd',
+        currency: String(input.currency || 'usd').toLowerCase(),
+        ...(typeof input.platformFeeCents === 'number' ? { platform_fee_cents: Math.max(0, Math.round(input.platformFeeCents)) } : {}),
         checkout_mode: realCheckoutMode,
         stripe_payment_intent_id: input.stripePaymentIntentId || null,
         metadata: {

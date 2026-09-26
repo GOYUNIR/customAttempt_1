@@ -4,6 +4,7 @@ import { resolveConnectWebhookSecret, syncConnectedAccount, tenantIdForAccount }
 import { resolveConnectEventTenant } from '@/lib/connect-routing';
 import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
 import { subrequestCount, reportSubrequests } from '@/lib/subrequest-meter';
+import { handleConnectCheckoutCompleted, handleConnectChargeRefunded } from '@/lib/tenant-checkout';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,12 +26,17 @@ export const dynamic = 'force-dynamic';
  *                       payload) and refresh the tenant's cached status. This
  *                       is what flips connect_charges_enabled when a merchant
  *                       finishes onboarding.
- *   payment events   -> NOT YET. No charge is made on a connected account until
- *                       the charge paths are wired (CONNECT.md §8 step 4), so
- *                       none should arrive. If one does, it is answered 500 and
- *                       its claim released, so Stripe keeps retrying until a
- *                       handler exists — a payment is never acknowledged
- *                       without being recorded.
+ *   checkout.session.completed -> the order, the fee record, the stock
+ *                       decrement (lib/tenant-checkout.ts). A failure before
+ *                       the order is written is a 500 + released claim, so
+ *                       Stripe retries: a payment is never acknowledged
+ *                       without its order.
+ *   charge.refunded  -> D5: our fee on the sale is returned in proportion, and
+ *                       the month's running total is reduced.
+ *   charge.dispute.created -> logged. The fee is KEPT (TENANCY.md T11); the
+ *                       dispute debits the merchant's balance. Its tenant comes
+ *                       from the PaymentIntent (disputes carry no metadata).
+ *   payment_intent.succeeded -> acknowledged; the session event records it.
  *
  * Dedupe: webhook_dedupe, scope 'stripe_connect_event', keyed by event id.
  */
@@ -95,10 +101,16 @@ export async function POST(request: Request) {
 
     if (PAYMENT_EVENTS.has(event.type)) {
       const object = event.data?.object || {};
+      let metadataTenantId: string | null = object?.metadata?.tenant_id ?? null;
+      if (event.type === 'charge.dispute.created' && !metadataTenantId && eventAccount && object?.payment_intent) {
+        // Stripe puts no metadata on a dispute; ours is on its PaymentIntent.
+        const pi = await stripe.paymentIntents.retrieve(String(object.payment_intent), {}, { stripeAccount: eventAccount });
+        metadataTenantId = pi?.metadata?.tenant_id ?? null;
+      }
       const who = resolveConnectEventTenant({
         eventAccount,
         tenantForAccount,
-        metadataTenantId: object?.metadata?.tenant_id ?? null,
+        metadataTenantId,
         requireMetadata: true,
       });
       if (!who.ok) {
@@ -109,12 +121,20 @@ export async function POST(request: Request) {
         await completeWebhookKey(SCOPE, String(event.id));
         return NextResponse.json({ received: true, refused: who.reason });
       }
-      // Passed the guard, but no handler exists yet. Never acknowledge a
-      // payment we have not recorded: release the claim and let Stripe retry.
-      console.error('[connect-webhook] ' + event.type + ' for tenant ' + who.tenantId +
-        ' arrived before its handler exists (CONNECT.md §8 step 4) — 500 so Stripe retries');
-      await releaseWebhookKey(SCOPE, String(event.id));
-      return NextResponse.json({ error: 'Not yet handled' }, { status: 500 });
+      let result: { handled: boolean; note: string } = { handled: false, note: 'acknowledged' };
+      if (event.type === 'checkout.session.completed') {
+        result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount));
+      } else if (event.type === 'charge.refunded') {
+        result = await handleConnectChargeRefunded(object, String(eventAccount));
+      } else if (event.type === 'charge.dispute.created') {
+        console.error('[connect-webhook] DISPUTE ' + object?.id + ' on ' + eventAccount + ' (tenant ' + who.tenantId + '), ' +
+          object?.amount + ' ' + object?.currency + ', reason ' + object?.reason + ' — debits the merchant; platform fee kept (T11)');
+        result = { handled: true, note: 'dispute logged' };
+      }
+      await completeWebhookKey(SCOPE, String(event.id));
+      console.log('[connect-webhook] ' + event.type + ' ' + event.id + ' tenant ' + who.tenantId + ': ' + result.note);
+      reportSubrequests('connect-webhook ' + event.type, started);
+      return NextResponse.json({ received: true, tenant: who.tenantId, ...result });
     }
 
     await completeWebhookKey(SCOPE, String(event.id));

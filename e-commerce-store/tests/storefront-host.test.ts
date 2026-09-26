@@ -98,11 +98,11 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('LEAK GUARD: a merchant address serves only tenant-aware paths', () => {
-  for (const p of ['/', '/catalog', '/catalog/', '/api/store', '/api/catalog/status', '/roccstar', '/some-product']) {
+  for (const p of ['/', '/catalog', '/catalog/', '/api/store', '/api/catalog/status', '/api/checkout', '/roccstar', '/some-product']) {
     assert.equal(merchantHostAllowsPath(p), true, p);
   }
   for (const p of ['/api/store/config', '/api/config/public', '/api/promo/validate', '/api/auth/me', '/api/ai/hero-animation',
-    '/api/analytics/heartbeat', '/api/checkout', '/api/account/lookup', '/story', '/terms', '/account', '/admin', '/og', '/icon',
+    '/api/analytics/heartbeat', '/api/checkout/cart', '/api/checkout/direct', '/api/checkout/confirm-setup', '/api/account/lookup', '/story', '/terms', '/account', '/admin', '/og', '/icon',
     '/auth/login', '/a/b', '/platform']) {
     assert.equal(merchantHostAllowsPath(p), false, p);
   }

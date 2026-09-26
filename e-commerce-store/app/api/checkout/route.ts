@@ -12,7 +12,8 @@ import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
-import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
+import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
+import { startTenantCheckout } from '@/lib/tenant-checkout';
 
 export const dynamic = 'force-dynamic';
 const PROMO_PENDING_TTL_SECONDS = 10 * 60;
@@ -47,11 +48,25 @@ async function countChargedByEmail(redis: any, email: string, variant: string, s
 }
 
 export async function POST(request: Request) {
-  // TENANCY.md phase 1: not tenant-aware yet, so only the default store's
-  // address may use it. From another store's address it would act on the
-  // default store's data (or charge its account).
-  const refusedForStore = await refuseUnlessDefaultStore(request);
-  if (refusedForStore) return refusedForStore as any;
+  // Whose store (TENANCY.md): from the Host header only. The default store
+  // keeps the path below, unchanged. Any other store sells through its OWN
+  // Stripe account on a separate, narrow path (lib/tenant-checkout.ts).
+  const who = await storefrontTenantForRequest(request);
+  if (who.kind === 'none') return NextResponse.json({ error: 'Store not found.' }, { status: 404 });
+  if (who.kind === 'unavailable') return NextResponse.json({ error: 'Please try again shortly.' }, { status: 503 });
+  if (!who.isDefault) {
+    try {
+      const limited = await rateLimitedResponse('checkout', request, 20, 60);
+      if (limited) return limited;
+      const body = await request.json().catch(() => null);
+      if (!body) return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+      const host = String(request.headers.get('host') || '');
+      return (await startTenantCheckout({ tenantId: who.tenantId, tenantSlug: who.slug, origin: 'https://' + host, body })) as any;
+    } catch (err: any) {
+      console.error('[checkout] tenant ' + who.tenantId + ' failed', err?.raw?.message || err?.message || err);
+      return NextResponse.json({ error: 'Checkout could not be started. Please try again.' }, { status: 500 });
+    }
+  }
   try {
     const redis = createKvClient();
     if (!redis) {

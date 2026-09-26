@@ -1169,8 +1169,13 @@ export function getFallbackStoreProducts(): Record<string, any> {
  * `opts.source` forces one side; it exists for that parity harness and for
  * the backfill, not for request paths.
  */
-export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgres' }): Promise<Record<string, any>> {
-  const forced = opts?.source;
+export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgres'; tenantId?: string }): Promise<Record<string, any>> {
+  // A store other than the default one (TENANCY.md T8): its own Postgres
+  // catalog ONLY. The KV catalog below is the default store's; falling back
+  // to it would sell another merchant's products.
+  const { DEFAULT_TENANT_ID } = await import('@/lib/tenant-context');
+  const otherStore = Boolean(opts?.tenantId) && opts!.tenantId !== DEFAULT_TENANT_ID;
+  const forced = otherStore ? 'postgres' : opts?.source;
   let raw: Record<string, any> | null = null;
   // Whether `raw` is the Postgres catalog. Only then may the authoritative
   // liveStock survive normalization -- see normalizePriceCategory.
@@ -1182,7 +1187,7 @@ export async function loadProducts(redis: any, opts?: { source?: 'kv' | 'postgre
         import('@/lib/postgres-catalog-read'),
         import('@/lib/tenant-context'),
       ]);
-      const pg = await readProductsFromPostgres(await ensureDefaultTenant());
+      const pg = await readProductsFromPostgres(otherStore ? opts!.tenantId! : await ensureDefaultTenant());
       if (pg) {
         raw = {};
         for (const item of pg.productsRaw) raw[String(item.id)] = item;
