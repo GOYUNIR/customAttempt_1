@@ -14,6 +14,7 @@ import { getDb } from '@/lib/db/client';
 import { eq, type FilterOp } from '@/lib/db/query';
 import { DEFAULT_TENANT_ID } from '@/lib/tenant-context';
 import { classifyStorefrontHost, parseLegacyHosts } from '@/lib/storefront-host';
+export { withNeutralHero } from '@/lib/storefront-host';
 
 export type StorefrontTenant =
   | { kind: 'store'; tenantId: string; isDefault: boolean; slug: string | null; name: string | null }
@@ -99,3 +100,4 @@ export async function refuseUnlessDefaultStore(request: Request): Promise<Respon
   const error = who.kind === 'store' ? 'This store cannot take orders yet.' : who.kind === 'none' ? 'Store not found.' : 'Please try again shortly.';
   return new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
 }
+

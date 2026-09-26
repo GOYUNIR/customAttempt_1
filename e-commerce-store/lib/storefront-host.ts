@@ -92,3 +92,24 @@ export function classifyStorefrontHost(input: {
   if (!/^[a-z0-9.-]+$/.test(host) || !host.includes('.')) return { kind: 'not_found' };
   return { kind: 'custom', host };
 }
+
+/**
+ * A new store's hero without the DEFAULT store's copy. The built-in template
+ * defaults (goyunir.config.ts, lib/storefront-config.ts, LegacyHomePage's
+ * fallbacks) carry the original store's brand text, and an empty field falls
+ * back to it, so for a store other than the default one every hero field the
+ * merchant has NOT set is replaced: the headline becomes the store's name,
+ * and the eyebrow, body and story link (/story is still the default store's
+ * page) are hidden. Anything the merchant set is kept as-is.
+ */
+export function withNeutralHero(stored: Record<string, any>, storeName: string | null): Record<string, any> {
+  const own = (stored?.heroContent || {}) as Record<string, any>;
+  const has = (k: string) => typeof own[k] === 'string' && own[k].trim() !== '';
+  const neutral: Record<string, any> = {
+    headline: has('headline') ? own.headline : (storeName || ''),
+    ...(has('eyebrow') ? {} : { eyebrow: ' ', showEyebrow: false }),
+    ...(has('body') ? {} : { body: ' ', showBody: false }),
+    ...(has('storyBody') || has('storyHeadline') ? {} : { storyBody: ' ', showStory: false }),
+  };
+  return { ...stored, heroContent: { ...own, ...neutral } };
+}

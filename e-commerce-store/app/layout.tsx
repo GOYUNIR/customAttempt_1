@@ -15,7 +15,7 @@ import { GOOGLE_FONTS_HREF } from '@/lib/font-catalog';
 import { MapFactory } from '@/services/maps/factory';
 import { headers } from 'next/headers';
 import { isPlatformSurface, hidesStorefrontChrome } from '@/lib/platform-surface';
-import { storefrontTenantFromHeaders, type StorefrontTenant } from '@/lib/storefront-tenant';
+import { storefrontTenantFromHeaders, withNeutralHero, type StorefrontTenant } from '@/lib/storefront-tenant';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 
@@ -67,7 +67,7 @@ async function storeConfigFor(who: StorefrontTenant, redis: ReturnType<typeof cr
     const row = ((await getDb().select<any>('tenant_store_config', {
       where: { tenant_id: eq(who.tenantId) }, select: ['config'], limit: 1,
     })) as any[])[0];
-    const config = (row?.config || {}) as Record<string, any>;
+    const config = withNeutralHero((row?.config || {}) as Record<string, any>, who.name);
     return { ...config, branding: { ...(config.branding || {}), brandName: config.branding?.brandName || who.name || undefined } };
   } catch (err) {
     console.error('[layout] store config read failed for ' + who.tenantId, (err as Error)?.message || err);

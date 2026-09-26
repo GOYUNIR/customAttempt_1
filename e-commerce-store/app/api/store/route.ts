@@ -22,7 +22,7 @@ import { edgeCacheHeaders } from '@/lib/cache-headers';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { readCatalogFromPostgres, readProductsFromPostgres } from '@/lib/postgres-catalog-read';
-import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
+import { storefrontTenantForRequest, withNeutralHero } from '@/lib/storefront-tenant';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 
@@ -511,7 +511,7 @@ async function buildTenantStorePayload(tenantId: string, tenantName: string | nu
   const row = (configRows as any[])[0] || {};
   const stored = (row.config || {}) as Record<string, any>;
   const withName = {
-    ...stored,
+    ...withNeutralHero(stored, tenantName),
     branding: { ...(stored.branding || {}), brandName: stored.branding?.brandName || tenantName || undefined },
   };
   const config = mergePublicConfig(withName);

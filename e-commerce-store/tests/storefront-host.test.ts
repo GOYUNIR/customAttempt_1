@@ -71,3 +71,24 @@ test('reserved slugs: platform labels, empty, and ordinary slugs allowed', () =>
     assert.equal(isReservedStoreSlug(s, LEGACY, ROOT), false, s);
   }
 });
+
+import { withNeutralHero } from '../lib/storefront-host.ts';
+
+test('BRAND GUARD: a new store gets its own name, never the default store\'s hero copy', () => {
+  const out = withNeutralHero({}, 'Atelier Nord').heroContent;
+  assert.equal(out.headline, 'Atelier Nord');
+  // Empty fields fall back to the template (the default store's copy), so the
+  // unset ones are hidden rather than blanked.
+  assert.equal(out.showEyebrow, false);
+  assert.equal(out.showBody, false);
+  assert.equal(out.showStory, false);
+  // Not "legacy" hero content (which mergePublicConfig swaps for the defaults).
+  assert.equal(typeof out.storyBody, 'string');
+});
+
+test('what the merchant set is kept', () => {
+  const stored = { heroContent: { headline: 'Our drop', eyebrow: 'Oslo', body: 'Made here.', storyHeadline: 'Story', storyBody: 'Why.' }, other: 1 };
+  const out = withNeutralHero(stored, 'Atelier Nord');
+  assert.equal(out.other, 1);
+  assert.deepEqual(out.heroContent, stored.heroContent);
+});
