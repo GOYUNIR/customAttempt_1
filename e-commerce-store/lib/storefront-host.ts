@@ -113,3 +113,31 @@ export function withNeutralHero(stored: Record<string, any>, storeName: string |
   };
   return { ...stored, heroContent: { ...own, ...neutral } };
 }
+
+/**
+ * Top-level routes of the app other than the product page (`app/[slug]`).
+ * A single path segment that is NOT one of these is a product slug. Kept in
+ * step with the app/ directory by a test (tests/storefront-host.test.ts).
+ */
+export const APP_TOP_LEVEL_ROUTES: readonly string[] = [
+  'account', 'admin', 'api', 'app', 'auth', 'catalog', 'maintenance', 'media', 'og',
+  'platform', 'privacy', 'sales', 'shipping', 'story', 'terms', 'icon',
+];
+
+/**
+ * DEFAULT-DENY for a merchant's address (a slug or custom domain; never the
+ * default store's hosts). Only paths proven tenant-aware are served; every
+ * other page and API is a 404 at the edge, so a route that still reads the
+ * DEFAULT store's data (the catalog/status leak found 2026-09-26) cannot be
+ * reached from another store's address — including routes added later.
+ * Add a path here only after it resolves its tenant (lib/storefront-tenant.ts).
+ */
+const MERCHANT_ALLOWED_EXACT = new Set(['/', '/catalog', '/api/store', '/api/catalog/status']);
+
+export function merchantHostAllowsPath(pathname: string): boolean {
+  const path = String(pathname || '/').replace(/\/+$/, '') || '/';
+  if (MERCHANT_ALLOWED_EXACT.has(path)) return true;
+  const m = /^\/([^/]+)$/.exec(path);
+  // A product page: one segment that is not another app route.
+  return Boolean(m && !APP_TOP_LEVEL_ROUTES.includes(m[1].toLowerCase()) && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(m[1]));
+}

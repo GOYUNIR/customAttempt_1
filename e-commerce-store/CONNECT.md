@@ -53,9 +53,12 @@
 >   test4's balance by -3400 (the $19.00 sale plus Stripe's $15.00 dispute
 >   fee). It does not exist on the platform, and no dispute or adjustment
 >   touched the platform balance.
-> - **Open (owner):** the platform KEEPS its fee on a disputed sale (38,
->   refunded 0). Stripe doesn't return application fees on disputes. D5 covers
->   refunds only. Should a lost dispute also return our fee?
+> - **Decided (owner, 2026-09-26): the platform KEEPS its fee on a lost
+>   dispute** (38, refunded 0, as proven). This is explicit, not a default: it
+>   matches Stripe, which doesn't return application fees on disputes, and the
+>   merchant made the sale and carries the dispute outcome under the chosen
+>   liability model. Refunds still return the fee exactly (D5). Recorded as
+>   TENANCY.md T11.
 > - The first runs failed on script bugs, not on Stripe: a missing
 >   `include: ['defaults']`, a wrong `balance.retrieve` signature, and reading
 >   the fee link before Stripe had written it (about 2s after the charge). All

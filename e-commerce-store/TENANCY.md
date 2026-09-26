@@ -33,10 +33,14 @@
 >    `test4.goyunir.com`, proven per CONNECT.md §7.
 >
 > **Also found:**
-> - The middleware's portal classification prefers `x-forwarded-host`, which a
->   client can set. The resolver ignores it and uses `Host` only. The admin
->   role check still applies, so there's no privilege bypass, but host
->   isolation is spoofable. Worth fixing separately.
+> - **HARDENING, fix soon (owner, 2026-09-26: not urgent, not to be deferred
+>   indefinitely):** the middleware's portal classification
+>   (`resolveRequestHost` in `lib/edge-router.ts`) prefers `x-forwarded-host`,
+>   which any client can set, so a request can claim to be for another portal
+>   host. The admin role check still stops unauthorized access. The fix: use
+>   `Host` only in production (keep the forwarded header for local proxies),
+>   and test it. The tenancy resolver and the T10 edge check already use
+>   `Host` only.
 > - **Owner:** the template defaults carry the original store's brand copy
 >   (hero text, "CALIFORNIA USA") in `goyunir.config.ts`,
 >   `lib/storefront-config.ts` and `LegacyHomePage`. Other stores are shielded
@@ -98,6 +102,8 @@ Each is the conservative choice. The ones marked **(owner)** can be changed.
 | T6 | **With no root domain configured** (single-domain deployments, local dev), every host is the default store. | Behaviour for such deployments stays exactly as today. |
 | T7 | **A non-default tenant never touches global KV keys.** Its KV state lives under a tenant prefix; the default tenant's keys are unchanged, so no data migration. | Isolation without risking the live store's data. |
 | T8 | **A non-default tenant never falls back to the KV catalog.** Postgres or nothing. | The fallback *is* the default store's catalog. |
+| T10 | **Default-deny at the edge on a merchant address.** Middleware serves a slug or custom-domain host only the paths proven tenant-aware (`merchantHostAllowsPath`: `/`, `/catalog`, product pages, `/api/store`, `/api/catalog/status`); every other page and API is a 404. A path is added only once it resolves its tenant. | Phase 1 guarded routes one by one and missed `/api/catalog/status`, which listed the default store's products on test4 (owner spotted it, 2026-09-26). Enumerating the routes that must be closed fails open; this fails closed, including for routes added later. |
+| T11 | **Disputes: the platform keeps its fee** (owner decision, 2026-09-26). On a lost dispute the application fee is NOT returned to the merchant. This is explicit, not a default: it matches Stripe (which doesn't return platform fees on disputes), and the merchant made the sale and carries the dispute outcome under the liability model (`losses_collector: stripe`, direct charges). Refunds still return the fee exactly (D5). Proven: dispute `du_1UJXVcPIsRXBZjvCeTnzUoBs`, fee 38 kept, refunded 0. | Owner decision. |
 | T9 | **A non-default tenant sells only through its own connected account** (routing rule, CONNECT.md §3). No account, or onboarding not finished, means checkout is refused. | Already the rule; stated here so no phase forgets it. |
 
 ## 3. Resolution order (pure function, `lib/storefront-tenant.ts`)

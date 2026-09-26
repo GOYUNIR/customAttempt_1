@@ -92,3 +92,24 @@ test('what the merchant set is kept', () => {
   assert.equal(out.other, 1);
   assert.deepEqual(out.heroContent, stored.heroContent);
 });
+
+import { merchantHostAllowsPath, APP_TOP_LEVEL_ROUTES } from '../lib/storefront-host.ts';
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+test('LEAK GUARD: a merchant address serves only tenant-aware paths', () => {
+  for (const p of ['/', '/catalog', '/catalog/', '/api/store', '/api/catalog/status', '/roccstar', '/some-product']) {
+    assert.equal(merchantHostAllowsPath(p), true, p);
+  }
+  for (const p of ['/api/store/config', '/api/config/public', '/api/promo/validate', '/api/auth/me', '/api/ai/hero-animation',
+    '/api/analytics/heartbeat', '/api/checkout', '/api/account/lookup', '/story', '/terms', '/account', '/admin', '/og', '/icon',
+    '/auth/login', '/a/b', '/platform']) {
+    assert.equal(merchantHostAllowsPath(p), false, p);
+  }
+});
+
+test('the route list matches the app/ directory (a new page must not pass as a product slug)', () => {
+  const appDir = join(import.meta.dirname, '..', 'app');
+  const dirs = readdirSync(appDir).filter((n) => statSync(join(appDir, n)).isDirectory() && !n.startsWith('[') && !n.startsWith('(') && !n.startsWith('_'));
+  for (const d of dirs) assert.ok(APP_TOP_LEVEL_ROUTES.includes(d), 'app/' + d + ' missing from APP_TOP_LEVEL_ROUTES');
+});

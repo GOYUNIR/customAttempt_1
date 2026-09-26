@@ -10,6 +10,7 @@ import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
 import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
+import { classifyStorefrontHost, parseLegacyHosts, merchantHostAllowsPath } from '@/lib/storefront-host';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -290,6 +291,19 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.host,
   );
   const portal = classifyHost(publicHost, platformRootDomain);
+
+  // TENANCY — default-deny on a MERCHANT's address (TENANCY.md T10). Only
+  // paths proven tenant-aware are served there; everything else would read
+  // the default store's data. From the Host header only: x-forwarded-host is
+  // client-settable, and this decides whose data a request may reach.
+  const merchantHost = classifyStorefrontHost({
+    host: String(request.headers.get('host') || ''),
+    rootDomain: platformRootDomain,
+    legacyHosts: parseLegacyHosts(process.env.STOREFRONT_LEGACY_HOSTS, platformRootDomain),
+  });
+  if ((merchantHost.kind === 'slug' || merchantHost.kind === 'custom') && !merchantHostAllowsPath(pathname)) {
+    return new NextResponse('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
   // Host-to-tier home rewrite (Phase C). Computed HERE, ahead of every auth
   // gate, and folded into `effectivePathname` so the session checks below run
   // against the path that will ACTUALLY be served. The rewrite response itself

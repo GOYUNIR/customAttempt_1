@@ -18,11 +18,36 @@ import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { resolveNextRaffleAnchorMs, normalizeCategories, resolveSizeNextAnchorMs, filterStaleCatalogEntries } from '@/lib/storefront-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { edgeCacheHeaders } from '@/lib/cache-headers';
+import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+const EMPTY_CATALOG = {
+  activeDrops: [],
+  upcomingDrops: [],
+  archiveScents: [],
+  sectionOrder: [],
+  categories: [],
+  archivedProductIds: [],
+  soldOutProductIds: [],
+  notesByProductId: {},
+  availableFromByProductId: {},
+  records: [],
+};
+
+export async function GET(request: Request) {
   try {
+    // Everything below reads the DEFAULT store's KV catalog. Served on another
+    // store's address it listed the default store's products (found on
+    // test4.goyunir.com, 2026-09-26). Until this reads the tenant's own
+    // catalog, another store gets an explicit empty payload: not the default
+    // store's drops, and not the page's built-in sample drops either (which a
+    // 404 would fall back to).
+    const who = await storefrontTenantForRequest(request);
+    if (who.kind === 'none') return NextResponse.json({ error: 'Store not found.' }, { status: 404 });
+    if (who.kind === 'unavailable') return NextResponse.json({ ...EMPTY_CATALOG, error: 'Catalog unavailable.' }, { status: 503 });
+    if (!who.isDefault) return NextResponse.json(EMPTY_CATALOG, { headers: edgeCacheHeaders('public, s-maxage=15, stale-while-revalidate=30') });
+
     const payload = await withTtlCache('catalog:status:v2', 15_000, () => buildCatalogPayload());
     // Edge-cache so Vercel's CDN serves the catalog instead of streaming it
     // from the origin on every request (matches the 15s server TTL).
