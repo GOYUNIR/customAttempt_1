@@ -68,6 +68,8 @@ async function merchantDrops(request: Request, productId: string | undefined): P
     return NextResponse.json({
       success: true,
       skipped: r.skipped,
+      // More due work than one invocation's call budget: trigger again.
+      more: r.more,
       draws: r.draws.filter((d: any) => d.drawId).length,
       charged: all.filter((d: any) => d.status === 'charged').length,
       declined: all.filter((d: any) => d.status === 'declined').length,

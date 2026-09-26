@@ -130,17 +130,28 @@ async function enterOnce(slug: string, size: string, email: string, card: string
   } else if (stage === 'draw') {
     const st = JSON.parse(readFileSync(STATE, 'utf8'));
     const emails = [...st.raffleEntrants, ...st.waitlisters].map((e: any) => e.email);
-    execSync('npx tsx scripts/seed-tenant-drop-products.ts --draw-in=-1 --preorder-live', { stdio: 'inherit' });
-    // Let the storefront's own caches expire, as a real trigger would see it.
-    await sleep(15000);
-    const drawsBefore = ((await getDb().select('drop_draws', { where: { tenant_id: eq(TENANT), variant_id: eq(String(raffleVariant)) } })) as any[]).length;
-    console.log('\nTwo triggers at once');
+    const enteredAt = new Date(parseInt(st.run, 36) - 60_000).toISOString();
+    const drawsSinceEntry = async () => ((await getDb().select('drop_draws', { where: { tenant_id: eq(TENANT), variant_id: eq(String(raffleVariant)) }, select: ['executed_at'] })) as any[]).filter((d) => String(d.executed_at) > enteredAt).length;
+    if ((await drawsSinceEntry()) === 0) {
+      execSync('npx tsx scripts/seed-tenant-drop-products.ts --draw-in=-1 --preorder-live', { stdio: 'inherit' });
+      // Let the storefront's own caches expire, as a real trigger would see it.
+      await sleep(15000);
+    } else {
+      console.log('(resuming: the draw for these entries already ran)');
+    }
+    console.log('\nTwo triggers at once, then again until nothing is left (each trigger does what fits in one invocation\'s call budget)');
     const fire = () => fetch(STORE + '/api/checkout/auto-draw', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((r) => r.json());
     const [r1, r2] = await Promise.all([fire(), fire()]);
     console.log('  trigger 1: ' + JSON.stringify(r1) + '\n  trigger 2: ' + JSON.stringify(r2));
-    await sleep(4000);
-    const drawsAfter = ((await getDb().select('drop_draws', { where: { tenant_id: eq(TENANT), variant_id: eq(String(raffleVariant)) } })) as any[]).length;
-    check(drawsAfter === drawsBefore + 1, 'exactly one draw ran (' + drawsBefore + ' -> ' + drawsAfter + ')');
+    let last: any = r2;
+    for (let i = 0; i < 20 && (last?.more || last?.success === false || r1?.more); i++) {
+      await sleep(9000); // the public trigger allows 8 a minute per connection
+      last = await fire();
+      console.log('  trigger ' + (i + 3) + ': ' + JSON.stringify(last));
+      if (last?.success && !last?.more && last.charged === 0) break;
+    }
+    await sleep(3000);
+    check((await drawsSinceEntry()) === 1, 'exactly one draw for these entries');
     const all = await entriesFor(emails);
     const byEmail = (em: string) => all.find((e) => e.email === em);
     for (const e of all) console.log('  ' + e.email + ' ' + e.entry_type + ' -> ' + e.status);
@@ -176,8 +187,7 @@ async function enterOnce(slug: string, size: string, email: string, card: string
     console.log('  ' + JSON.stringify(r3));
     await sleep(3000);
     const after3 = await entriesFor(emails);
-    const drawsAfter3 = ((await getDb().select('drop_draws', { where: { tenant_id: eq(TENANT), variant_id: eq(String(raffleVariant)) } })) as any[]).length;
-    check(drawsAfter3 === drawsAfter && after3.filter((e) => e.status === 'charged').length === charged.length, 'no new draw and no new charge');
+    check((await drawsSinceEntry()) === 1 && after3.filter((e) => e.status === 'charged').length === charged.length, 'no new draw and no new charge');
   } else {
     console.log('usage: verify-tenant-drops.ts enter | draw');
     process.exit(2);

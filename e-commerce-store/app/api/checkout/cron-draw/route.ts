@@ -4,6 +4,7 @@ import { isCronAuthorized, isPlatformScheduledInvocation } from '@/lib/cron-auth
 import { runAutoDraws } from '@/lib/auto-draw';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { connectedTenantIds, runTenantDueDrops } from '@/lib/tenant-drops';
+import { subrequestCount } from '@/lib/subrequest-meter';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,6 +26,7 @@ export const maxDuration = 60;
  */
 
 async function runAutoDraw(request: Request) {
+  const invocationStart = subrequestCount();
   const url = new URL(request.url);
 
   // Allow ping requests to check status without auth.
@@ -60,7 +62,7 @@ async function runAutoDraw(request: Request) {
   try {
     for (const t of await connectedTenantIds()) {
       try {
-        tenantDrops.push(await runTenantDueDrops(t.id, t.slug));
+        tenantDrops.push(await runTenantDueDrops(t.id, t.slug, { invocationStartCount: invocationStart }));
       } catch (err) {
         console.error('[cron-draw] tenant ' + t.id + ' drops failed', (err as Error)?.message || err);
         tenantDrops.push({ tenantId: t.id, error: (err as Error)?.message || String(err) });

@@ -40,6 +40,7 @@ import { createRaffleEntry, findPendingEntryId, executeDraw, markRaffleEntryOutc
 import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
 import { savedCardChargeRoute } from '@/lib/saved-card-route';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
+import { subrequestCount, SUBREQUEST_LIMIT_FREE } from '@/lib/subrequest-meter';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -196,22 +197,68 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
   throw new Error('entry not recorded: ' + (created.error || created.reason));
 }
 
+// ── Budget ───────────────────────────────────────────────────────────────────
+//
+// A Worker invocation has a hard ceiling of outbound calls (50 on the free
+// plan, 1000 on paid). The first live draw ran straight into it: cards were
+// charged and then the order, billing or stock write failed with "Too many
+// subrequests by single Worker invocation" (2026-09-26). So a run spends a
+// BUDGET: a charge is only started if a whole charge still fits, and anything
+// left is reported as `more` for the next trigger. Database calls are counted
+// by the meter (lib/subrequest-meter.ts); Stripe calls are counted here.
+
+const PER_CHARGE_CALLS = 28;   // measured worst case of one chargeEntry, with margin
+const SAFETY_CALLS = 4;
+
+class Budget {
+  /** From the start of the INVOCATION when given: a caller that already spent
+   *  calls (the scheduler runs the original store's engine first) must not
+   *  hand this run a budget that is partly gone. */
+  constructor(private readonly startDb: number = subrequestCount()) {}
+  private stripeCalls = 0;
+  readonly limit = Math.max(20, Number(process.env.WORKER_SUBREQUEST_LIMIT) || SUBREQUEST_LIMIT_FREE);
+  stripe(n = 1) { this.stripeCalls += n; }
+  used() { return subrequestCount() - this.startDb + this.stripeCalls; }
+  canAffordCharge() { return this.used() + PER_CHARGE_CALLS <= this.limit - SAFETY_CALLS; }
+}
+
+/** A Stripe card error: the only failure that means "declined". Anything else
+ *  (network, the call ceiling) must be retried, never recorded as a decline. */
+function isCardDecline(err: any): boolean {
+  return err?.type === 'StripeCardError' || err?.rawType === 'card_error' || err?.raw?.type === 'card_error';
+}
+
 // ── Charging a saved card ───────────────────────────────────────────────────
 
 type VariantInfo = { variantId: string; productId: string; productName: string; size: string; priceCents: number };
+type ChargeResult = { entryId: string; status: 'charged' | 'declined' | 'skipped' | 'deferred'; note: string; calls?: number };
 
+/**
+ * Charge one entry's saved card, then write order, billing and stock — every
+ * step safe to REPEAT, so a run that dies part-way is repaired by the next:
+ *   the charge   Stripe idempotency key per attempt (same PaymentIntent back)
+ *   the order    upsert on (tenant, order_ref); the ref is derived from the entry
+ *   billing      one row per PaymentIntent (primary key)
+ *   stock        its own claim per attempt (tenant_stock): decremented once
+ *   the entry    marked 'charged' LAST, and only then is the claim completed
+ * Any failure after the charge throws, leaving the claim to be retried (it
+ * is released, or reclaimable after 5 minutes if even that fails). Only a
+ * Stripe CARD error marks the entry declined.
+ */
 async function chargeEntry(input: {
-  tenantId: string; tenantSlug: string | null; storeAccount: string; currency: string; entry: any; variant: VariantInfo; kind: Kind;
-}): Promise<{ entryId: string; status: 'charged' | 'declined' | 'skipped'; note: string }> {
-  const { tenantId, tenantSlug, storeAccount, currency, entry, variant, kind } = input;
+  tenantId: string; tenantSlug: string | null; storeAccount: string; currency: string; entry: any; variant: VariantInfo; kind: Kind; budget: Budget;
+}): Promise<ChargeResult> {
+  const { tenantId, tenantSlug, storeAccount, currency, entry, variant, kind, budget } = input;
   const entryId = String(entry.id);
+  if (!budget.canAffordCharge()) return { entryId, status: 'deferred', note: 'call budget spent — next trigger' };
+  const before = budget.used();
   // Keyed by the entry AND the moment it was selected: a declined raffle winner
   // goes back to the pool and may win a later draw, which must be chargeable
   // (a key on the entry alone would read 'already done' forever, and Stripe
   // would replay the old decline for 24h). A waitlist entry converts once.
   const attempt = kind === 'raffle' ? entryId + ':' + String(entry.decided_at || '') : entryId;
   const claim = await claimWebhookKey('tenant_charge', attempt);
-  if (claim === 'duplicate') return { entryId, status: 'skipped', note: 'already being charged / charged' };
+  if (claim === 'duplicate') return { entryId, status: 'skipped', note: 'in progress or done elsewhere' };
   try {
     const route = savedCardChargeRoute({ entryAccount: entry.stripe_account, isDefaultStore: false, storeAccount });
     const customerId = entry.customer_id ? await stripeCustomerIdFor(tenantId, String(entry.customer_id)) : null;
@@ -223,13 +270,14 @@ async function chargeEntry(input: {
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
       if (kind === 'raffle') await rollDeclinedEntryBackToPool(tenantId, entryId);
       await completeWebhookKey('tenant_charge', attempt);
-      return { entryId, status: 'declined', note: why };
+      return { entryId, status: 'declined', note: why, calls: budget.used() - before };
     }
     const email = String(entry.email || '');
     const orderRef = buildOrderRef(email, variant.productId, variant.size, normalizeRefPrefix(tenantSlug || 'ORD'), entryId);
     const fee = await platformFeeForCharge(tenantId, variant.priceCents);
     let pi: any;
     try {
+      budget.stripe();
       pi = await stripe.paymentIntents.create({
         amount: variant.priceCents,
         currency,
@@ -243,14 +291,17 @@ async function chargeEntry(input: {
         metadata: { tenant_id: tenantId, entry_id: entryId, entryType: kind, orderRef },
       }, { stripeAccount: route.stripeAccount!, idempotencyKey: boundIdempotencyKey(`tenant-${kind}:${attempt}`) });
     } catch (err: any) {
+      if (!isCardDecline(err)) throw err; // not a decline: retry, never "declined"
       const msg = err?.raw?.message || err?.message || String(err);
       console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' declined: ' + msg);
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
       if (kind === 'raffle') await rollDeclinedEntryBackToPool(tenantId, entryId);
       await completeWebhookKey('tenant_charge', attempt);
-      return { entryId, status: 'declined', note: msg };
+      return { entryId, status: 'declined', note: msg, calls: budget.used() - before };
     }
-    // Order and billing are idempotent; stock is last (TENANCY.md known limit).
+    if (pi.status !== 'succeeded') throw new Error('PaymentIntent ' + pi.id + ' is ' + pi.status);
+    const feeCharged = Number(pi.application_fee_amount || 0);
+
     const recorded = await recordOrder({
       tenantId, orderRef, email,
       externalProductId: variant.productId, productName: variant.productName, size: variant.size, quantity: 1,
@@ -259,111 +310,136 @@ async function chargeEntry(input: {
       stripeCustomerId: customerId,
       stripePaymentIntentId: pi.id,
       currency,
-      platformFeeCents: Number(pi.application_fee_amount || 0),
+      platformFeeCents: feeCharged,
     });
-    if (!recorded.ok) console.error('[tenant-drops] CHARGED BUT NOT RECORDED — entry ' + entryId + ' pi ' + pi.id + ': ' + recorded.message);
-    await recordBillingCharge({ paymentIntentId: pi.id, tenantId, volumeCents: variant.priceCents, feeCents: Number(pi.application_fee_amount || 0), orderId: recorded.ok ? recorded.orderId : null });
-    await decrementForSale({ tenantId, externalProductId: variant.productId, size: variant.size, quantity: 1, context: 'tenant-' + kind })
-      .catch((err) => console.error('[tenant-drops] stock not decremented for entry ' + entryId, (err as Error)?.message || err));
+    if (!recorded.ok) throw new Error('CHARGED BUT NOT RECORDED (will retry) — entry ' + entryId + ' pi ' + pi.id + ': ' + recorded.message);
+    await recordBillingCharge({ paymentIntentId: pi.id, tenantId, volumeCents: variant.priceCents, feeCents: feeCharged, orderId: recorded.orderId });
+
+    // Stock exactly once per attempt, however many times this is retried.
+    const stockClaim = await claimWebhookKey('tenant_stock', attempt);
+    if (stockClaim !== 'duplicate') {
+      const r = await decrementForSale({ tenantId, externalProductId: variant.productId, size: variant.size, quantity: 1, context: 'tenant-' + kind });
+      if (!r.ok && r.reason !== 'insufficient_stock') {
+        await releaseWebhookKey('tenant_stock', attempt).catch(() => {});
+        throw new Error('stock not decremented (will retry): ' + r.reason);
+      }
+      await completeWebhookKey('tenant_stock', attempt);
+    }
+
     await markRaffleEntryOutcome(tenantId, entryId, 'charged');
     await completeWebhookKey('tenant_charge', attempt);
-    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + Number(pi.application_fee_amount || 0) + (recorded.ok ? ', order ' + orderRef : ', ORDER NOT RECORDED') };
+    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + feeCharged + ', order ' + orderRef, calls: budget.used() - before };
   } catch (err) {
-    // Unexpected failure before the charge: hand the claim back for a retry.
     await releaseWebhookKey('tenant_charge', attempt).catch(() => {});
+    console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' incomplete, will retry: ' + ((err as Error)?.message || err));
     throw err;
   }
 }
 
 // ── Draws and waitlist conversion ───────────────────────────────────────────
 
-export type TenantDropRun = { tenantId: string; draws: any[]; waitlist: any[]; skipped?: string };
+export type TenantDropRun = { tenantId: string; draws: any[]; waitlist: any[]; more: boolean; calls: number; skipped?: string };
 
 /**
- * Run whatever is DUE for this store: raffle draws whose date has passed (once
- * per variant per date), charging of any selected-but-uncharged winners, and
- * waitlist conversion for products now on sale. Safe to call from anyone, at
- * any time, concurrently: only due work runs, each draw and each charge once.
+ * Run whatever is DUE for this store, within this invocation's call budget:
+ * raffle draws whose date has passed (once per variant per date), charging
+ * of selected winners (including any a crashed run left half-done), and
+ * waitlist conversion for products on sale. `more` = work remains for the
+ * next trigger. Safe from anyone, at any time, concurrently.
  */
-export async function runTenantDueDrops(tenantId: string, tenantSlug: string | null, opts?: { onlyProductId?: string }): Promise<TenantDropRun> {
-  const out: TenantDropRun = { tenantId, draws: [], waitlist: [] };
+export async function runTenantDueDrops(tenantId: string, tenantSlug: string | null, opts?: { onlyProductId?: string; invocationStartCount?: number }): Promise<TenantDropRun> {
+  const budget = new Budget(opts?.invocationStartCount);
+  const out: TenantDropRun = { tenantId, draws: [], waitlist: [], more: false, calls: 0 };
+  const done = (skipped?: string) => ({ ...out, calls: budget.used(), ...(skipped ? { skipped } : {}) });
   const route = await chargeRouteForTenant(tenantId);
-  if (route.route !== 'connected') return { ...out, skipped: 'not connected' };
-  if (!(await raffleSchemaReady())) return { ...out, skipped: '00035 not applied' };
+  if (route.route !== 'connected') return done('not connected');
+  if (!(await raffleSchemaReady())) return done('00035 not applied');
   const stripe: any = await resolveStripeClient();
-  if (!stripe) return { ...out, skipped: 'Stripe not configured' };
+  if (!stripe) return done('Stripe not configured');
+  budget.stripe();
   const account = await stripe.v2.core.accounts.retrieve(route.stripeAccount, { include: ['defaults'] });
   const currency = String(account?.defaults?.currency || '').toLowerCase();
-  if (!currency) return { ...out, skipped: 'no currency' };
+  if (!currency) return done('no currency');
   const tz = storeTimezone(await tenantConfig(tenantId));
   const products = await loadProducts(null, { tenantId });
-  const now = Date.now();
 
+  // Every variant of the store in ONE call (was one lookup per size).
+  const variantRows = (await getDb().select<any>('product_variants', {
+    where: { tenant_id: eq(tenantId) },
+    select: ['id', 'option_label', { relation: 'products', columns: ['external_id'] }],
+  })) as any[];
+  const variantIdOf = new Map<string, string>();
+  for (const v of variantRows) variantIdOf.set(String(v.products?.external_id) + '|' + String(v.option_label), String(v.id));
+  // Every open entry of the store in ONE call.
+  const open = (await getDb().select<any>('raffle_entries', {
+    where: { tenant_id: eq(tenantId), status: inList(['winner', 'pending']) }, select: ['*'],
+  })) as any[];
+
+  const now = Date.now();
   for (const product of Object.values(products) as any[]) {
     if (opts?.onlyProductId && String(product.id) !== opts.onlyProductId) continue;
     for (const cat of (product.priceCategories || []) as any[]) {
       const size = String(cat.size || '');
-      if (!size) continue;
-      const variantId = await resolveVariantId(tenantId, String(product.id), size);
-      if (!variantId) continue;
+      const variantId = variantIdOf.get(String(product.id) + '|' + size);
+      if (!size || !variantId) continue;
       const variant: VariantInfo = { variantId, productId: String(product.id), productName: String(product.name || product.id), size, priceCents: Math.round(Number(cat.price) * 100) };
       const mode = getSizeCheckoutMode(product, size);
+      const mine = open.filter((e) => e.variant_id === variantId);
 
       if (mode === 'RAFFLE') {
         const at = drawAtMs(product, size, tz);
-        if (at !== null && at <= now) {
+        const pendingRaffle = mine.filter((e) => e.status === 'pending' && e.entry_type === 'raffle');
+        if (at !== null && at <= now && pendingRaffle.length > 0) {
           // ONE draw per variant per draw date, however many triggers race.
           const drawKey = variantId + ':' + at;
           if ((await claimWebhookKey('tenant_draw', drawKey)) !== 'duplicate') {
             try {
               const stock = readLiveStock(product, size);
               const tiers = String(cat.winnerTiers ?? product.winnerTiers ?? '').split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
-              const available = stock.ok ? Math.max(0, stock.stock) : 0;
-              // Winners already selected but not yet charged (a crashed run) hold
-              // stock too: never select more than there is.
-              const unchargedWinners = ((await getDb().select<any>('raffle_entries', {
-                where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('winner') }, select: ['id'],
-              })) as any[]).length;
-              const room = Math.max(0, available - unchargedWinners);
-              const winnerCount = Math.min(room, tiers[0] || room);
-              const draw = await executeDraw(tenantId, variantId, winnerCount, { entryType: 'raffle' });
+              // Winners already selected but not yet charged hold stock too.
+              const room = Math.max(0, (stock.ok ? stock.stock : 0) - mine.filter((e) => e.status === 'winner').length);
+              const draw = await executeDraw(tenantId, variantId, Math.min(room, tiers[0] || room), { entryType: 'raffle' });
               await completeWebhookKey('tenant_draw', drawKey);
-              out.draws.push({ product: product.name, size, drawId: draw.drawId, entries: draw.entriesCount, winners: draw.winnerCount, stockAtDraw: stock.ok ? stock.stock : stock.reason });
+              out.draws.push({ product: product.name, size, drawId: draw.drawId, entries: draw.entriesCount, winners: draw.winnerCount });
+              for (const w of draw.winners) {
+                const row = mine.find((e) => e.id === w.id);
+                if (row) { row.status = 'winner'; row.decided_at = (w as any).decided_at; }
+              }
             } catch (err) {
               await releaseWebhookKey('tenant_draw', drawKey).catch(() => {});
-              console.error('[tenant-drops] draw failed for ' + variantId, (err as Error)?.message || err);
-              out.draws.push({ product: product.name, size, error: (err as Error)?.message || String(err) });
+              throw err;
             }
           }
         }
-        // Charge every selected-but-uncharged winner (this draw's, or one a
-        // crashed run left behind). Each charge is claimed per entry.
-        const winners = (await getDb().select<any>('raffle_entries', {
-          where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('winner'), entry_type: eq('raffle') }, select: ['*'],
+        // Charge winners: this draw's, and any a crashed run left half-done.
+        // decided_at is re-read so the attempt key matches what is stored.
+        const winnerIds = mine.filter((e) => e.status === 'winner').map((e) => e.id);
+        const winners = winnerIds.length === 0 ? [] : (await getDb().select<any>('raffle_entries', {
+          where: { id: inList(winnerIds), status: eq('winner') }, select: ['*'],
         })) as any[];
         for (const entry of winners) {
-          const r = await chargeEntry({ tenantId, tenantSlug, storeAccount: route.stripeAccount, currency, entry, variant, kind: 'raffle' });
+          const r = await chargeEntry({ tenantId, tenantSlug, storeAccount: route.stripeAccount, currency, entry, variant, kind: 'raffle', budget });
+          if (r.status === 'deferred') { out.more = true; break; }
           out.draws.push({ product: product.name, size, ...r });
         }
       } else if (product.isActive === true && product.isUpcoming !== true && product.isArchived !== true) {
         // On sale: convert the waitlist, oldest first, up to the stock there is.
-        const pending = (await getDb().select<any>('raffle_entries', {
-          where: { tenant_id: eq(tenantId), variant_id: eq(variantId), status: eq('pending'), entry_type: eq('waitlist') }, select: ['*'],
-        })) as any[];
-        if (pending.length === 0) continue;
-        pending.sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)));
+        const pending = mine.filter((e) => e.status === 'pending' && e.entry_type === 'waitlist')
+          .sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)));
         const stock = readLiveStock(product, size);
         let left = stock.ok ? Math.max(0, stock.stock) : 0;
         for (const entry of pending) {
           if (left <= 0) break;
-          const r = await chargeEntry({ tenantId, tenantSlug, storeAccount: route.stripeAccount, currency, entry, variant, kind: 'waitlist' });
+          const r = await chargeEntry({ tenantId, tenantSlug, storeAccount: route.stripeAccount, currency, entry, variant, kind: 'waitlist', budget });
+          if (r.status === 'deferred') { out.more = true; break; }
           out.waitlist.push({ product: product.name, size, ...r });
           if (r.status === 'charged') left -= 1;
         }
       }
+      if (out.more) return done();
     }
   }
-  return out;
+  return done();
 }
 
 /** Every connected store other than the default one, for the scheduler. */
@@ -375,7 +451,6 @@ export async function connectedTenantIds(): Promise<Array<{ id: string; slug: st
   return rows.filter((r) => String(r.id) !== DEFAULT_TENANT_ID).map((r) => ({ id: String(r.id), slug: r.slug ?? null }));
 }
 
-void inList;
 
 /**
  * The product page's confirm step after a card-save page, for a connected
