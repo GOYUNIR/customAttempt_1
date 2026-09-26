@@ -1,6 +1,73 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-26)
+> ## ▶ RESUME HERE (2026-09-26, after phase 2)
+>
+> **Phase 2 is live and proven:** a connected merchant sells through its own
+> Stripe account, from its own address.
+>
+> **Real checkouts through `test4.goyunir.com`** (`scripts/verify-tenant-checkout.ts`,
+> Chrome at phone width), **all PASS:**
+> - **The journey:** product page → size → email → address from the dropdown →
+>   "SECURE PIECE · $19.00" → Stripe's hosted page (branded test4) → paid →
+>   back on test4 with "Purchase complete".
+> - **Stripe:**
+>   - the session and PaymentIntent are on `acct_1UJWFxPIsRXBZjvC` only;
+>   - `application_fee_amount` 38 = `platformFeeForCharge`;
+>   - the platform received the fee.
+> - **Database, written by the Connect webhook:**
+>   - order `TEST-SSFCMX`: 1900 usd, `platform_fee_cents` 38, fcfs, paid;
+>   - exactly one `tenant_billing_charges` row;
+>   - stock 10 → 9;
+>   - month volume 0 → 1900;
+>   - nothing written for the default store;
+>   - the event was processed once.
+> - **Refund from the merchant side** (the refund call itself does not return
+>   our fee): the webhook returned it exactly, 38 of 38 (D5), and the month
+>   volume went back to 0.
+> - **Dispute card:**
+>   - order `TEST-MQE9F2` recorded as above;
+>   - dispute `du_1UJqraPIsRXBZjvCPAQFC9kj` is on test4 only;
+>   - the fee was kept (T11);
+>   - the `charge.dispute.created` event was processed (tenant taken from the
+>     PaymentIntent).
+>
+> **Also verified:**
+> - **Connect webhook** `we_1UJqaJPIsR6ijfBZKhEtltNm` is registered
+>   (owner-confirmed). `account.updated` → tenant re-synced
+>   (`scripts/verify-connect-webhook.ts`).
+> - **Isolation, both directions** (`scripts/verify-tenant-isolation.ts`): no
+>   default-store product on any test4 page or response, and no test4 product
+>   on any shop page.
+> - **Default store:** the mobile buy journey still reaches Stripe at 375,
+>   390 and 414 px.
+>
+> **The leak the owner spotted (fixed):** `/api/catalog/status` listed the
+> default store's products on test4. It was one of about 20 public routes that
+> read the default store's KV data without calling `ensureDefaultTenant()`,
+> which is what phase 1's sweep searched for. Fixed structurally: **T10,
+> default-deny at the edge on merchant addresses.**
+>
+> **Not yet for a connected merchant** (refused, never mixed with the default
+> store):
+> - cart checkout (`/api/checkout/cart`);
+> - raffles and waitlists;
+> - promo codes;
+> - customer accounts and login;
+> - release alerts;
+> - catalog groupings on `/catalog` (the page is empty; product pages work);
+> - per-store share card and icon;
+> - order confirmation emails.
+>
+> A refund does not restock.
+>
+> **Next, in order:**
+> 1. Cart for connected merchants (phase 3).
+> 2. Raffle, draws, waitlist (phase 4, with the saved-card cutover rule).
+> 3. Customer accounts, alerts, emails (phase 5).
+> 4. **HARDENING, soon:** middleware portal classification trusts
+>    `x-forwarded-host` (see below).
+
+> _Earlier note (phase 1):_
 >
 > **Phase 1 is live and verified on production** (commits 62ef0bc, then the
 > neutral-hero fix):
@@ -14,23 +81,6 @@
 > | `nosuchstore-xyz.` pages and API | 404; the legacy-host setting is live |
 > | `media.` | 404 at `/`; product images still 200 |
 > | `admin.` / `app.` | portals unchanged (307 to `/admin`) |
->
-> **Phase 2 is redefined by a finding.** The storefront UI never calls
-> `checkout/direct`. Shoppers use `/api/checkout` (hosted Checkout Session)
-> and `/api/checkout/cart`, and the order is written by the webhook. For a
-> connected merchant, those events arrive **only** at the Connect endpoint,
-> which is **not registered**. Opening checkout for test4 before it is would
-> let a customer be charged with no order written. So phase 2 is:
-> 1. **Owner confirms**, then register the Connect endpoint (`00034` is
->    applied).
-> 2. `/api/checkout`: a Session on the merchant's account, with
->    `payment_intent_data.application_fee_amount` and `metadata.tenant_id`,
->    for a connected tenant.
-> 3. Connect webhook `checkout.session.completed`: the guard, then the order
->    row and `recordBillingCharge`.
-> 4. Tenant-scoped KV for the per-email cap and ledger (T7).
-> 5. A test product in test4's catalog, then a real checkout through
->    `test4.goyunir.com`, proven per CONNECT.md §7.
 >
 > **Also found:**
 > - **HARDENING, fix soon (owner, 2026-09-26: not urgent, not to be deferred

@@ -67,3 +67,6 @@ next-env.d.ts
 files_list.txt
 *.pid
 scripts/tmp-*
+
+# Screenshots from scripts/verify-tenant-checkout.ts
+tenant-checkout-out/

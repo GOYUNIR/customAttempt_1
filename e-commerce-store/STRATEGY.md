@@ -184,10 +184,13 @@ evidence, and write the evidence next to it.
   multi-merchant selling legal. Design: `CONNECT.md`.
   - Connect and Accounts v2 are enabled (verified through the API on
     2026-09-25). The first test connected account exists.
-  - Also part of this blocker, found 2026-09-25: **the storefront is
-    single-tenant.** Every checkout route resolves to the default tenant, so no
-    second merchant's customer can reach a checkout at all. How that gets
-    solved is an owner decision (CONNECT.md, "RESUME HERE").
+  - **Per-merchant storefronts** (TENANCY.md): phases 1–2 are live. A
+    connected merchant's single-product hosted checkout is proven end to end
+    through `test4.goyunir.com` (2026-09-26): the fee, the order, billing,
+    refund and dispute.
+  - **Still to do:** the cart, raffle/waitlist, customer accounts and emails
+    for connected merchants. They are refused on merchant addresses until
+    built.
 - [ ] **🛑 Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
   invocation. The checkout webhook measured 51 on a one-item cart before B
   (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading

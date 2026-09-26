@@ -64,17 +64,19 @@
 >   the fee link before Stripe had written it (about 2s after the charge). All
 >   fixed. The fee existed on every run.
 >
-> **Next, in order:**
-> 1. **Owner confirms**, then register the Connect endpoint
->    (`https://goyunir.com/api/stripe/connect-webhook`, `connect: true`,
->    `account.updated`) and store its secret (apply `00034` first). Until then,
->    `scripts/connect-onboarding-link.ts --sync` does what `account.updated`
->    will do.
-> 2. **B:** per-merchant storefront resolution (host → tenant), so a
->    connected merchant's customers can reach a checkout.
-> 3. Then wire the fee into the charge paths, one per change, each proven
->    with a real charge through the real route (§7 step 3 onward, including
->    the order row and `tenant_billing_charges`).
+> **Done 2026-09-26:**
+> - **Connect endpoint registered** (`we_1UJqaJPIsR6ijfBZKhEtltNm`,
+>   owner-confirmed), secret stored (`00034`).
+> - **Per-merchant storefronts built** (TENANCY.md).
+> - **The single-product hosted checkout is wired and proven through the real
+>   route** on `test4.goyunir.com`: fee on the charge, order row with
+>   `platform_fee_cents`, one `tenant_billing_charges` row, a merchant-side
+>   refund returning the fee exactly, the dispute on the merchant. Evidence in
+>   TENANCY.md, "RESUME HERE".
+>
+> **Next:** the cart, then setup/raffle, draws and waitlist, with the legacy
+> cutover rule (§4). The legacy (default) store still charges on the platform
+> account.
 
 Status (2026-09-24): **groundwork only.**
 
