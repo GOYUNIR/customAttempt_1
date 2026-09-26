@@ -1,10 +1,49 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-25)
+> ## ▶ RESUME HERE (2026-09-26)
 >
-> Design written; **phase 1 in progress.** Owner chose this work (option "B"
-> in CONNECT.md) after the Connect money path was proven on test4. See §5 for
-> the phase list.
+> **Phase 1 is live and verified on production** (commits 62ef0bc, then the
+> neutral-hero fix):
+>
+> | Check | Result |
+> |---|---|
+> | `shop.` / `www.` | the default store, unchanged: both products, the same hero |
+> | `shop.` buy journey (mobile flows, 30 steps at 375, 390 and 414 px) | reaches Stripe checkout |
+> | `test4.` | its own empty catalog, named "test4", neutral hero (no default-store copy) |
+> | `test4.` checkout / cart / session routes | 409 "cannot take orders yet" |
+> | `nosuchstore-xyz.` pages and API | 404; the legacy-host setting is live |
+> | `media.` | 404 at `/`; product images still 200 |
+> | `admin.` / `app.` | portals unchanged (307 to `/admin`) |
+>
+> **Phase 2 is redefined by a finding.** The storefront UI never calls
+> `checkout/direct`. Shoppers use `/api/checkout` (hosted Checkout Session)
+> and `/api/checkout/cart`, and the order is written by the webhook. For a
+> connected merchant, those events arrive **only** at the Connect endpoint,
+> which is **not registered**. Opening checkout for test4 before it is would
+> let a customer be charged with no order written. So phase 2 is:
+> 1. **Owner confirms**, then register the Connect endpoint (`00034` is
+>    applied).
+> 2. `/api/checkout`: a Session on the merchant's account, with
+>    `payment_intent_data.application_fee_amount` and `metadata.tenant_id`,
+>    for a connected tenant.
+> 3. Connect webhook `checkout.session.completed`: the guard, then the order
+>    row and `recordBillingCharge`.
+> 4. Tenant-scoped KV for the per-email cap and ledger (T7).
+> 5. A test product in test4's catalog, then a real checkout through
+>    `test4.goyunir.com`, proven per CONNECT.md §7.
+>
+> **Also found:**
+> - The middleware's portal classification prefers `x-forwarded-host`, which a
+>   client can set. The resolver ignores it and uses `Host` only. The admin
+>   role check still applies, so there's no privilege bypass, but host
+>   isolation is spoofable. Worth fixing separately.
+> - **Owner:** the template defaults carry the original store's brand copy
+>   (hero text, "CALIFORNIA USA") in `goyunir.config.ts`,
+>   `lib/storefront-config.ts` and `LegacyHomePage`. Other stores are shielded
+>   by `withNeutralHero`. The defaults themselves are untouched because the
+>   live store's saved config matches them.
+> - **Owner:** stores with `license_status: 'expired'` get a 404. Nothing sets
+>   it today.
 
 ## 1. The problem
 
