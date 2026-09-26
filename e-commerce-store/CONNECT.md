@@ -210,9 +210,14 @@ below runs until then. In order:
 5. Once no platform-saved entry is left pending, the original store is fully
    on Connect.
 
-**Owner decision for step 4:** should the original store's own sales on its
-connected account carry the platform fee? That would be the owner paying
-their own platform. Irrelevant until the switch.
+**Not started, by owner decision (2026-09-26).** The original store stays on
+R1/R2 until the owner explicitly asks to begin this procedure, in a session
+of its own. It is a live-behaviour change.
+
+**Open question for that session (not decided):** should the original
+store's own sales on its connected account carry the platform fee? The
+owner's instinct is **no**: it's their own store, not a merchant
+relationship being monetized. Decide at cutover, with full context.
 
 The safest moment to switch is between drops, with no pool open. The rule
 makes it safe at any moment regardless.

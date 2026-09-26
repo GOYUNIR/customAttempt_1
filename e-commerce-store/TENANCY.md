@@ -1,6 +1,61 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-26, phase 4 built and deployed; waiting on 00035)
+> ## ▶ RESUME HERE (2026-09-26, phase 4 proven live)
+>
+> **Phase 4 (merchant raffles + waitlists) is live and proven on test4**
+> (`scripts/verify-tenant-drops.ts enter|draw`, 00035 applied by the owner).
+>
+> **ENTER:** five real card saves.
+> - Three raffle entries: two 4242, one 4000…0341.
+> - Two waitlist entries.
+> - Each showed the right confirmation.
+> - Each is recorded ONCE (the webhook and the confirm step both ran),
+>   pending, on `acct_1UJWFxPIsRXBZjvC`, with its type, a `pm_…` and a
+>   customer.
+> - None of the cards exists on the platform account.
+>
+> **DRAW, first attempt: FAILED, and that found a real bug.** Every trigger
+> hit "Too many subrequests by single Worker invocation" (free plan, 50
+> calls). Four cards were charged, then the order, billing or stock writes
+> died part-way.
+> - A failed order write was only logged before the entry was marked
+>   charged.
+> - Stock was not repeatable on retry.
+> - Both are fixed. The engine now spends a per-invocation call budget
+>   (`WORKER_SUBREQUEST_LIMIT`, default 50), does only whole charges, and
+>   reports `more`.
+> - Every step after the charge throws on failure and is safe to repeat. The
+>   entry is marked charged last.
+> - Only a Stripe card error is a decline.
+> - Test data was reconciled by hand: one completed stock claim for
+>   raffle-a, standing for the single decrement that had already happened.
+>
+> **DRAW, resumed: ALL PASS.** Seven triggers, one charge each on the free
+> plan; all worker invocations were clean in the logs.
+> - Exactly one draw.
+> - raffle-a and raffle-b: 3000, fee 60 each.
+> - wait-a and wait-b: 1500, fee 30 each.
+> - Every charge was on test4 only, with ONE PaymentIntent and one
+>   successful charge per entry. The half-finished charges were REPAIRED,
+>   not redone.
+> - An order and one billing row for each.
+> - The 0341 winner declined and is back in the pool.
+> - Stock: raffle 3 → 1, preorder 5 → 3.
+> - Nothing was written for the default store; a later trigger does nothing.
+>
+> **On the free plan a merchant draw completes about ONE charge per
+> trigger.** The countdown and the scheduler keep triggering. Workers Paid
+> (a go-live blocker already) makes one trigger handle ~35. Set
+> `WORKER_SUBREQUEST_LIMIT=1000` when upgrading.
+>
+> **The original store stays on R1/R2** until the owner explicitly starts
+> the cutover (owner, 2026-09-26). See the open question in CONNECT.md §4.
+>
+> **What's left before a merchant store is usable end to end:** see the
+> owner report of 2026-09-26. In short, merchant self-service comes first.
+
+> _Previous note (phase 4 deployed, before 00035):_
+>
 >
 > **Phase 4 (merchant raffles and waitlists) is built and deployed**
 > (`lib/tenant-drops.ts`). It is **closed at the door until the owner applies

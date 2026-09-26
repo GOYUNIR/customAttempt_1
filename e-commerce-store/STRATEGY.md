@@ -192,7 +192,10 @@ evidence, and write the evidence next to it.
     for connected merchants. They are refused on merchant addresses until
     built.
 - [ ] **🛑 Cloudflare Workers Paid.** On Free the ceiling is 50 subrequests per
-  invocation. The checkout webhook measured 51 on a one-item cart before B
+  invocation. **Also hit by merchant raffle draws**
+  (2026-09-26). On Free a draw completes about one charge per trigger, and the
+  first live draw exhausted the budget mid-write before the engine was made
+  budget-aware. At the upgrade, set . The checkout webhook measured 51 on a one-item cart before B
   (2026-09-24). Staying on Free until go-live is deliberate (owner). Upgrading
   is the first go-live action.
 
