@@ -11,6 +11,7 @@ import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
 import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 import { classifyStorefrontHost, parseLegacyHosts, merchantHostAllowsPath } from '@/lib/storefront-host';
+import { isForeignTenantSession } from '@/lib/default-tenant';
 
 
 // The admin signs in with their EMAIL (not a username). The Basic Auth
@@ -502,6 +503,26 @@ export async function middleware(request: NextRequest) {
         if (deviceToken) deviceCookieValid = await adminDeviceValid(storage, deviceToken);
       } catch {
         /* fail closed */
+      }
+    }
+
+    // A session for ANOTHER STORE may not use the admin tree (lib/default-
+    // tenant.ts): every admin route acts on the default store and checks only
+    // that the session is valid. Proven 2026-09-26: test4's owner session read
+    // the original store's catalog via /api/admin/products. Sign-in paths stay
+    // reachable so the person can switch accounts; super-admins are unaffected.
+    if (deviceToken && deviceCookieValid && !superAdminOk && !isLoginPath && !isSuperLoginPath) {
+      let foreign = true; // fail closed if the record can't be read
+      try {
+        const raw = await storage!.hget(ADMIN_DEVICES_KEY, deviceToken);
+        const rec = parseStoredValue(raw) as { tenantId?: unknown; superAdmin?: boolean; role?: string } | null;
+        foreign = !rec || (isForeignTenantSession(rec.tenantId) && rec.superAdmin !== true && rec.role !== 'super_admin');
+      } catch { /* stays foreign */ }
+      if (foreign) {
+        const msg = 'This session belongs to another store. Its dashboard is not available yet.';
+        return pathname.startsWith('/api/')
+          ? NextResponse.json({ error: msg, code: 'FOREIGN_TENANT_SESSION' }, { status: 403, headers: { 'Cache-Control': 'no-store' } })
+          : new NextResponse(msg, { status: 403, headers: { 'Cache-Control': 'no-store', 'content-type': 'text/plain; charset=utf-8' } });
       }
     }
 

@@ -27,6 +27,7 @@ import { sendAdminVerificationEmail } from '@/lib/email';
 import { STEP_UP_TTL_MS } from '@/lib/lockdown';
 import { actorHasFullAdminAccess, IMPERSONATION_TTL_SECONDS as PURE_IMPERSONATION_TTL_SECONDS } from '@/lib/admin-actor';
 import type { AdminActor, AdminActorRole } from '@/lib/admin-actor';
+import { isForeignTenantSession } from '@/lib/default-tenant';
 
 export { actorHasFullAdminAccess };
 export type { AdminActor, AdminActorRole };
@@ -319,6 +320,10 @@ export async function resolveAdminActor(request: Request): Promise<AdminActor | 
   if (redis && token) {
     const record = await readAdminDevice(redis, token);
     if (record) {
+      // A session for ANOTHER store is no actor here (lib/default-tenant.ts):
+      // the admin routes act on the default store. Platform super-admins are
+      // unaffected. Staff impersonation of a merchant is refused with it.
+      if (isForeignTenantSession(record.tenantId) && record.role !== 'super_admin' && record.superAdmin !== true) return null;
       const role = record.role as AdminActorRole | undefined;
       if (role && ['super_admin', 'sales', 'sales_rep', 'sales_admin', 'deal_desk', 'owner', 'staff'].includes(role)) {
         return {
@@ -458,7 +463,12 @@ export async function adminAuthorized(
   if (!redis) return false;
   const token = adminDeviceTokenFromRequest(request);
   if (!token) return false;
-  return isAdminDeviceValid(redis, token).catch(() => false);
+  if (!(await isAdminDeviceValid(redis, token).catch(() => false))) return false;
+  // A session for ANOTHER store may not act here: these routes act on the
+  // default store (lib/default-tenant.ts). Fail closed on a read error.
+  const record = await readAdminDevice(redis, token).catch(() => null);
+  if (!record) return false;
+  return !isForeignTenantSession((record as any).tenantId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

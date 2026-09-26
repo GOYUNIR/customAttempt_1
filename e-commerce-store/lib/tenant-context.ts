@@ -26,7 +26,8 @@ import type { AdminActor } from '@/lib/admin-actor';
  *  real onboarded tenant (a real Cloudflare-for-SaaS / multi-tenant
  *  onboarding flow would mint its own uuid per tenant, same as any other
  *  row in this table). */
-export const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-00000000000d';
+export { DEFAULT_TENANT_ID } from '@/lib/default-tenant';
+import { DEFAULT_TENANT_ID } from '@/lib/default-tenant';
 const DEFAULT_TENANT_SLUG = 'default';
 
 /** Idempotently ensure the single-tenant deployment's `tenants` row exists,
