@@ -167,13 +167,55 @@ merchants.
 | Auto-draw, admin trigger-drop, waitlist (off-session) | PaymentIntent on the merchant's account, using the entry's customer and card, which live there too, with the application fee. |
 | Refunds (D5) | On the merchant's account, with `refund_application_fee: true`, so our fee on that sale is returned exactly. Then `setBillingRefund`. |
 
-**The legacy tenant's cutover has one trap.** Cards saved before the switch
-live on the *platform* account, and a card can't be charged on a different
-account without cloning it. The legacy tenant should therefore switch only
-between drops, with no open raffle pools. Pools still open at the switch are
-charged on the account where their cards were saved. The draw code has to
-route by where the entry's card lives, not by the tenant's current state. I'll
-design that with the path changes, not bolt it on.
+### The saved-card cutover rule (built 2026-09-26, `lib/saved-card-route.ts`)
+
+A saved card (a Customer plus a PaymentMethod) exists on exactly one Stripe
+account and can only be charged there. Cloning it to another account is
+possible, but it is a data migration of customers' cards, and nothing here
+does it. So **every off-session charge follows the card**, as recorded when
+the card was saved. It never follows the store's current charge route.
+
+- **R1:** An entry with no recorded account was saved on the **platform**.
+  That is every entry that exists today, KV pools and `raffle_entries` alike
+  (00035 adds `raffle_entries.stripe_account`; a KV entry would carry
+  `stripeAccount`).
+- **R2:** The original store charges its platform-saved cards on the
+  platform, exactly as it always has. An original-store entry recorded on a
+  connected account can only exist after its switch. Until the switch is
+  built, every original-store engine refuses it **into its decline path**,
+  loudly (auto-draw, trigger-drop winner and waitlist, the Postgres engine).
+  It is never charged on a guessed account.
+- **R3:** A merchant charges only cards saved on its **own** connected
+  account. A platform card, or another account's card, is refused.
+
+The rule is unit-tested (`tests/saved-card-route.test.ts`). It was wired in
+after a search for **every** money-moving Stripe call, not only the known
+engines. `lib/draw.ts` is dead code.
+
+**The original store's switch, when the owner decides to make it.** Nothing
+below runs until then. In order:
+1. The original store gets its own connected account through the same
+   onboarding as any merchant, and its row gets `stripe_account_id`.
+   `chargeRouteForTenant` then returns `connected` for it.
+2. **New** entries and purchases move to the connected account. The
+   original store's checkout path (`app/api/checkout`, the cart,
+   `confirm-setup`) consults `chargeRouteForTenant` instead of always using
+   the platform, and records `stripeAccount` on each new entry. This is the
+   one step that changes live behaviour; build it with its own proof.
+3. **Entries already pending stay on the platform** and are charged there
+   when drawn (R1/R2), with no platform fee. It's the platform's own sale
+   under the old model. No card is migrated or cloned.
+4. R2's refusal for connected-account entries is then replaced by charging
+   them on that account, with the fee decision below.
+5. Once no platform-saved entry is left pending, the original store is fully
+   on Connect.
+
+**Owner decision for step 4:** should the original store's own sales on its
+connected account carry the platform fee? That would be the owner paying
+their own platform. Irrelevant until the switch.
+
+The safest moment to switch is between drops, with no pool open. The rule
+makes it safe at any moment regardless.
 
 ## 5. Webhooks
 

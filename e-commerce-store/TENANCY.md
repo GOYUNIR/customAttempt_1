@@ -1,6 +1,53 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-26, after phase 3 + header hardening)
+> ## ▶ RESUME HERE (2026-09-26, phase 4 built and deployed; waiting on 00035)
+>
+> **Phase 4 (merchant raffles and waitlists) is built and deployed**
+> (`lib/tenant-drops.ts`). It is **closed at the door until the owner applies
+> migration `00035`** (`raffle_entries.stripe_account` + `entry_type`).
+> Verified on production:
+> - test4's raffle entry answers "Raffle entries aren't open in this store yet".
+> - test4's countdown trigger answers `skipped: "00035 not applied"`.
+> - No card is saved without its account recorded.
+>
+> **Resume, in order:**
+> 1. Owner applies `00035`.
+> 2. `npx tsx scripts/verify-tenant-drops.ts enter`: real card saves on test4.
+>    Three raffle entries (one with 4000…0341, which declines when charged)
+>    and two waitlist entries, each checked as recorded with test4's account.
+> 3. `npx tsx scripts/verify-tenant-drops.ts draw`: makes the raffle due and
+>    the preorder live, fires two triggers at once, and checks:
+>    - exactly one draw;
+>    - two raffle charges and two waitlist charges on test4, each with our
+>      fee, an order and one billing row;
+>    - the 0341 winner back in the pool;
+>    - stock down by four;
+>    - a third trigger does nothing.
+>
+> Test products `connect-test-raffle` and `connect-test-preorder` are already
+> in test4's catalog (`scripts/seed-tenant-drop-products.ts`).
+>
+> **The saved-card cutover rule** is built, tested and wired into every
+> saved-card charge site. The rule and the ordered switch procedure for the
+> original store are in CONNECT.md §4. The original store's behaviour today
+> is identical:
+> - its raffle entry still opens a card-save page on the platform (probe
+>   session expired);
+> - its buy journey passes at all three widths.
+>
+> **Not exercised live for the original store:** its draw engines with the
+> new guard. Running a real draw there would charge the saved cards in its
+> real pools. The guard is a check placed before the unchanged charge call,
+> and its rule is unit-tested.
+>
+> **Scope limits of phase 4** (merchant stores):
+> - one draw per draw date (no recurring cadence);
+> - raffle lines in the CART are refused (enter from the product page);
+> - no winner or waitlist emails;
+> - a declined waitlist entry is marked declined, not retried.
+
+> _Previous note (phase 3 + hardening):_
+>
 >
 > **Header hardening: done and verified on production** (owner asked for it
 > before phase 3). **Method:** an inventory of every request header the code
