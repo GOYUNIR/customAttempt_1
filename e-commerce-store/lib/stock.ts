@@ -12,7 +12,7 @@
  * (real Postgres) and scripts/verify-stock-race.ts (production, concurrent).
  */
 import { getDb } from '@/lib/db/client';
-import { eq, inList } from '@/lib/db/query';
+import { eq, inList, neq } from '@/lib/db/query';
 import { readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
 
 /** Stripe Checkout's minimum session life is 30 minutes; a minute of slack. */
@@ -40,6 +40,22 @@ export async function reserveStock(tenantId: string, holdKey: string, items: Sto
   const r: any = await rpc('stock_reserve', { p_tenant: tenantId, p_hold_key: holdKey, p_items: itemsJson(items), p_ttl_seconds: ttlSeconds, p_reference: reference ?? null });
   if (r?.ok) return { ok: true, already: r.already, expiresAt: r.expires_at ?? null };
   return { ok: false, reason: r?.reason || 'insufficient', variantId: r?.variant_id, available: r?.available };
+}
+
+/**
+ * Hold units for ONE BUYER's checkout attempt. A newer attempt by the same
+ * buyer for the same sizes first releases their own older, still-active holds,
+ * so one person tapping "buy" repeatedly cannot pile up holds on the last
+ * units. Every checkout path (merchant and original store) uses this.
+ */
+export async function reserveForBuyer(tenantId: string, holdKey: string, buyerEmail: string, items: StockItem[], ttlSeconds: number): Promise<ReserveResult> {
+  const buyer = 'buyer:' + String(buyerEmail || '').trim().toLowerCase();
+  const older = (await getDb().select<any>('stock_holds', {
+    where: { tenant_id: eq(tenantId), reference: eq(buyer), status: eq('active'), variant_id: inList(items.map((i) => i.variantId)), hold_key: neq(holdKey) },
+    select: ['hold_key'],
+  })) as any[];
+  for (const k of new Set(older.map((o) => String(o.hold_key)))) await releaseStock(tenantId, k);
+  return reserveStock(tenantId, holdKey, items, ttlSeconds, buyer);
 }
 
 /** Give a checkout's (or a declined winner's) units back. Returns holds released. */

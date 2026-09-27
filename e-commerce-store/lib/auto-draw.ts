@@ -609,6 +609,7 @@ export async function runAutoDraws(options: AutoDrawOptions = {}): Promise<AutoD
               externalProductId: String(product.id),
               size: String(productSize),
               context: 'auto-draw',
+              reference: String(winnerIntent.id),
             });
 
             // RECORD THE SALE. THIS ENGINE HAS NEVER WRITTEN AN ORDER.

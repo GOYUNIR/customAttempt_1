@@ -19,10 +19,14 @@ import { rateLimitedResponse } from '@/lib/rate-limit';
 import { withRedisLock } from '@/lib/redis-lock';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { resolveVariantId, decrementInventory as decrementPostgresInventory, restockInventory } from '@/lib/inventory';
+import { resolveVariantId } from '@/lib/inventory';
+import { reserveForBuyer, releaseStock, commitSale } from '@/lib/stock';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
 import { recordOrder } from '@/lib/order-write';
 import { refuseUnlessDefaultStore } from '@/lib/storefront-tenant';
+
+/** The direct (in-page) charge is seconds, not a hosted page: a short hold. */
+const DIRECT_HOLD_SECONDS = 10 * 60;
 
 /** Same anti-scalping check `checkout/route.ts` enforces before creating a
  * Stripe Checkout Session — this direct-charge path was missing it entirely,
@@ -142,6 +146,7 @@ export async function POST(request: Request) {
     // blocks the sale rather than risk an unprotected oversell.
     let pgTenantId: string | null = null;
     let pgVariantId: string | null = null;
+    let holdKey: string | null = null;
     if (isPostgresPrimaryEnabled()) {
       pgTenantId = await ensureDefaultTenant().catch(() => null);
       if (!pgTenantId) {
@@ -154,10 +159,14 @@ export async function POST(request: Request) {
           { status: 503 },
         );
       }
-      const decrementResult = await decrementPostgresInventory(pgTenantId, pgVariantId, 1);
-      if (!decrementResult.ok) {
-        const status = decrementResult.reason === 'insufficient_stock' ? 400 : 409;
-        return NextResponse.json({ error: decrementResult.reason === 'insufficient_stock' ? 'Sold out.' : 'Please retry — inventory is busy.' }, { status });
+      // HOLD the unit while the card is charged (00037): it is out of sale
+      // from now, sold (commitSale) only if the charge succeeds, released if
+      // not. Replaces the raw pre-charge decrement + restock, which wrote
+      // stock outside the ledger. Keyed per 30s attempt, like the charge.
+      holdKey = 'direct:' + String(productId) + ':' + String(size) + ':' + normalizedEmail + ':' + Math.floor(Date.now() / 30_000);
+      const held = await reserveForBuyer(pgTenantId, holdKey, normalizedEmail, [{ variantId: pgVariantId, quantity: 1 }], DIRECT_HOLD_SECONDS);
+      if (!held.ok) {
+        return NextResponse.json({ error: held.reason === 'insufficient' ? 'Sold out.' : 'Please retry — inventory is busy.' }, { status: held.reason === 'insufficient' ? 400 : 409 });
       }
     }
 
@@ -209,15 +218,26 @@ export async function POST(request: Request) {
         { idempotencyKey },
       );
     } catch (chargeErr) {
-      if (pgTenantId && pgVariantId) await restockInventory(pgTenantId, pgVariantId, 1).catch(() => {});
+      if (pgTenantId && holdKey) await releaseStock(pgTenantId, holdKey).catch(() => 0);
       throw chargeErr;
     }
 
     if (paymentIntent.status !== 'succeeded') {
-      // Roll back the Postgres reservation — the charge never went through,
-      // so the unit is still available.
-      if (pgTenantId && pgVariantId) await restockInventory(pgTenantId, pgVariantId, 1).catch(() => {});
+      // The charge never went through: the held unit goes back on sale.
+      if (pgTenantId && holdKey) await releaseStock(pgTenantId, holdKey).catch(() => 0);
       return NextResponse.json({ error: 'Payment not successful.' }, { status: 400 });
+    }
+
+    // Charged: the held unit is SOLD, once per PaymentIntent (00037). The card
+    // is already charged, so this never refuses; a failure is retried once,
+    // then logged loudly and audited for reconciliation (the hold then lapses).
+    if (pgTenantId && pgVariantId && holdKey) {
+      const sell = () => commitSale(pgTenantId!, holdKey, [{ variantId: pgVariantId!, quantity: 1 }], String(paymentIntent.id));
+      const sold = await sell().catch(() => sell()).catch((err) => {
+        console.error('[checkout/direct] CHARGED BUT STOCK NOT RECORDED — ' + paymentIntent.id + ' ' + productId + '/' + size + ': ' + ((err as Error)?.message || err));
+        return null;
+      });
+      if ((sold?.[0]?.shortfall || 0) > 0) console.error('[checkout/direct] OVERSOLD by ' + sold![0].shortfall + ' — ' + paymentIntent.id + ' ' + productId + '/' + size);
     }
 
     // Deduct inventory. The card is already charged at this point, so a
@@ -230,11 +250,9 @@ export async function POST(request: Request) {
       await saveLiveState(redis, inner);
       return inner;
     };
-    // NO Postgres decrement here. This route ALREADY decremented
-    // inventory_levels PRE-CHARGE (decrementPostgresInventory above), which is
-    // the correct place for it: it is the one path that can still refuse the
-    // sale. Adding decrementForSale here as well double-decremented every
-    // order -- caught by tracing the pre-charge gate, not by any test.
+    // NO further Postgres write here: the unit was HELD before the charge and
+    // SOLD (commitSale, once per PaymentIntent) right after it, above. A
+    // second decrement here would double-count every order.
     //
     // The remaining write below is the KV live-state mirror only.
     const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);

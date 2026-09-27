@@ -21,6 +21,8 @@ import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config'
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
+import { reserveForBuyer, releaseStock, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS, type StockItem } from '@/lib/stock';
+import { resolveVariantId } from '@/lib/inventory';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
 import { startTenantCartCheckout } from '@/lib/tenant-checkout';
@@ -202,7 +204,10 @@ export async function POST(request: Request) {
             console.error('[checkout/cart] stock for ' + product.id + '/' + item.size + ' is ' + stock.reason +
               ' — refusing the sale (fail closed)');
           }
-          enoughStock = stock.ok && stock.stock >= item.quantity;
+          // Readable only: HOW MANY is decided by the all-or-nothing hold at
+          // session creation (a count here excludes the buyer's own open
+          // checkout, so a retry would be refused).
+          enoughStock = stock.ok;
         } else {
           const live = await getLiveProductState(redis, product, item.size);
           enoughStock = Boolean(live) && live.inventoryRemaining >= item.quantity;
@@ -392,8 +397,31 @@ export async function POST(request: Request) {
       // session does not exist yet at this point.
       const cartRefNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const orderRef = buildOrderRef(email, summaryItems[0].productId, summaryItems[0].size, refPrefix, cartRefNonce);
-      const session = await stripe.checkout.sessions.create({
+      // HOLD every instant-buy line, or none, before the buyer is sent to pay
+      // (00037): sold by the webhook, released on expiry or a failed create.
+      let holdKey: string | null = null;
+      let pgTenant: string | null = null;
+      if (isPostgresPrimaryEnabled()) {
+        pgTenant = await ensureDefaultTenant();
+        const items: StockItem[] = [];
+        for (const line of fcfsLines) {
+          const variantId = await resolveVariantId(pgTenant, String(line.product.id), line.size);
+          if (!variantId) return NextResponse.json({ error: `${line.product.name} (${line.size}) does not have enough inventory.` }, { status: 409 });
+          items.push({ variantId, quantity: line.quantity });
+        }
+        holdKey = 'co:' + orderRef;
+        const held = await reserveForBuyer(pgTenant, holdKey, email, items, CHECKOUT_HOLD_SECONDS);
+        if (!held.ok) {
+          const short = fcfsLines.find((_, i) => items[i]?.variantId === held.variantId) || fcfsLines[0];
+          const left = held.reason === 'insufficient' ? Math.max(0, Number(held.available) || 0) : 0;
+          return NextResponse.json({ error: left > 0 ? `Only ${left} of ${short.product.name} (${short.size}) left.` : `${short.product.name} (${short.size}) does not have enough inventory.` }, { status: 409 });
+        }
+      }
+      let session: any;
+      try {
+      session = await stripe.checkout.sessions.create({
         mode: 'payment',
+        ...(holdKey ? { expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_SECONDS } : {}),
         customer: customer.id,
         payment_method_types: ['card'],
         line_items,
@@ -407,8 +435,13 @@ export async function POST(request: Request) {
           promoCode: fcfsPromoNormalized,
           ref: fcfsPromoNormalized,
           orderRef,
+          ...(holdKey ? { hold_key: holdKey } : {}),
         },
       });
+      } catch (err) {
+        if (pgTenant && holdKey) await releaseStock(pgTenant, holdKey).catch(() => 0);
+        throw err;
+      }
       if (fcfsPromoNormalized) {
         await redis.setex(promoPendingKey(fcfsPromoNormalized, email), PROMO_PENDING_TTL_SECONDS, session.id);
       }

@@ -11,6 +11,8 @@ import { isSyncedSourceReleased } from '@/lib/checkout-mode';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
+import { resolveVariantId } from '@/lib/inventory';
+import { reserveForBuyer, releaseStock, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS } from '@/lib/stock';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { storefrontTenantForRequest } from '@/lib/storefront-tenant';
 import { startTenantCheckout } from '@/lib/tenant-checkout';
@@ -279,7 +281,10 @@ export async function POST(request: Request) {
         if (!stock.ok) {
           console.error('[checkout] stock for ' + product.id + '/' + size + ' is ' + stock.reason + ' — refusing (fail closed)');
         }
-        inStock = stock.ok && stock.stock > 0;
+        // Readable is all that is checked here: HOW MANY is decided by the
+        // hold below (a count here reads sellable stock, which excludes this
+        // buyer's own open checkout: a retry would be told "sold out").
+        inStock = stock.ok;
       } else {
         const live = await getLiveProductState(redis, product, String(size));
         inStock = Boolean(live) && live.inventoryRemaining > 0;
@@ -356,14 +361,36 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ url: session.url, sessionId: session.id });
     } else {
-      const session = await payment.createCheckoutSession(priceCents, `${productId}:${size}`, {
+      // HOLD the unit before the buyer is sent to pay (00037, owner-approved
+      // 2026-09-27): out of sale for this checkout, sold by the webhook
+      // (commitSale), released on expiry. Per ATTEMPT (orderRef here is stable
+      // per buyer+size, so a returning customer's next purchase must not find
+      // their last, converted hold); the buyer's older attempts are replaced.
+      let holdKey: string | null = null;
+      let pgTenant: string | null = null;
+      if (isPostgresPrimaryEnabled()) {
+        pgTenant = await ensureDefaultTenant();
+        const variantId = await resolveVariantId(pgTenant, String(productId), String(size));
+        if (!variantId) {
+          console.error('[checkout] no variant for ' + productId + '/' + size + ' — refusing (fail closed)');
+          return NextResponse.json({ error: 'Sold out for this size.' }, { status: 409 });
+        }
+        holdKey = 'co:' + orderRef + ':' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const held = await reserveForBuyer(pgTenant, holdKey, normalizedEmail, [{ variantId, quantity: 1 }], CHECKOUT_HOLD_SECONDS);
+        if (!held.ok) return NextResponse.json({ error: 'Sold out for this size.' }, { status: 409 });
+      }
+      let session: Awaited<ReturnType<typeof payment.createCheckoutSession>>;
+      try {
+      session = await payment.createCheckoutSession(priceCents, `${productId}:${size}`, {
         successUrl: `${origin}/${productSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${origin}/${productSlug}?purchase=cancel`,
         customerEmail: normalizedEmail,
         receiptEmail: email,
         productName: `${product.name} - ${size}`,
         productDescription: product.tagline || product.desc || undefined,
+        ...(holdKey ? { expiresAt: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_SECONDS } : {}),
         metadata: {
+          ...(holdKey ? { hold_key: holdKey } : {}),
           productId: String(productId),
           productSlug,
           variant: String(product.name || ''),
@@ -377,6 +404,11 @@ export async function POST(request: Request) {
           entryType: usesWaitlist ? 'waitlist' : 'direct',
         },
       });
+      } catch (err) {
+        // No checkout page, no reason to keep the unit from everyone else.
+        if (pgTenant && holdKey) await releaseStock(pgTenant, holdKey).catch(() => 0);
+        throw err;
+      }
       if (normalizedPromo) {
         await redis.setex(promoPendingKey(normalizedPromo, normalizedEmail), PROMO_PENDING_TTL_SECONDS, session.sessionId);
       }

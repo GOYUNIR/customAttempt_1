@@ -19,7 +19,7 @@
  *     recorded for a checkout nobody paid.
  */
 import { getDb } from '@/lib/db/client';
-import { eq, inList, neq } from '@/lib/db/query';
+import { eq, inList } from '@/lib/db/query';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { chargeRouteForTenant } from '@/lib/connect';
 import { platformFeeForCharge, recordBillingCharge, setBillingRefund } from '@/lib/billing';
@@ -27,7 +27,7 @@ import { loadProducts } from '@/lib/server-config';
 import { getSizeCheckoutMode, isConfiguredPrice } from '@/lib/storefront-config';
 import { readLiveStock } from '@/lib/stock-gate';
 import { resolveVariantId } from '@/lib/inventory';
-import { reserveStock, releaseStock, commitSale, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS, type StockItem } from '@/lib/stock';
+import { reserveForBuyer, releaseStock, commitSale, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS, type StockItem } from '@/lib/stock';
 import { recordOrder } from '@/lib/order-write';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
@@ -101,13 +101,7 @@ async function holdForCheckout(
     }
     items.push({ variantId, quantity: w.quantity });
   }
-  const buyer = 'buyer:' + email;
-  const older = (await getDb().select<any>('stock_holds', {
-    where: { tenant_id: eq(tenantId), reference: eq(buyer), status: eq('active'), variant_id: inList(items.map((i) => i.variantId)), hold_key: neq(holdKey) },
-    select: ['hold_key'],
-  })) as any[];
-  for (const k of new Set(older.map((o) => String(o.hold_key)))) await releaseStock(tenantId, k);
-  const r = await reserveStock(tenantId, holdKey, items, CHECKOUT_HOLD_SECONDS, buyer);
+  const r = await reserveForBuyer(tenantId, holdKey, email, items, CHECKOUT_HOLD_SECONDS);
   if (r.ok) return { ok: true };
   if (r.reason !== 'insufficient') {
     console.error('[tenant-checkout] hold refused for ' + tenantId + ': ' + r.reason + ' (' + (r.variantId || '?') + ')');

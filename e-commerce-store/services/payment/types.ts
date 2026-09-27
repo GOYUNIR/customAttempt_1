@@ -33,6 +33,13 @@ export interface CheckoutSessionOptions {
   metadata?: Record<string, string>;
   /** Extra email that receives the payment receipt (Stripe). */
   receiptEmail?: string;
+  /**
+   * When the hosted page stops accepting payment (unix seconds). Set when the
+   * checkout HOLDS stock (lib/stock.ts), so the page closes before its hold
+   * does. Providers without such a control ignore it; the hold lapses by
+   * itself either way.
+   */
+  expiresAt?: number;
 }
 
 export interface CheckoutSessionResult {

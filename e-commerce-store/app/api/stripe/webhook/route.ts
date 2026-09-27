@@ -32,7 +32,8 @@ import { recordOrder, type RecordOrderLine } from '@/lib/order-write';
 import { subrequestCount, reportSubrequests } from '@/lib/subrequest-meter';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
-import { resolveVariantId, decrementInventory as decrementPostgresInventory } from '@/lib/inventory';
+import { resolveVariantId } from '@/lib/inventory';
+import { commitSale, releaseStock } from '@/lib/stock';
 import { createRaffleEntry } from '@/lib/raffle';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 
@@ -44,21 +45,25 @@ import { recordPlatformAudit } from '@/lib/platform-audit';
  * blocks or fails the webhook response (see lib/order-write.ts's
  * identical "never blocks the real transaction" contract).
  */
-async function shadowDecrementInventory(tenantId: string, externalProductId: string, size: string, qty: number): Promise<void> {
+async function shadowDecrementInventory(tenantId: string, externalProductId: string, size: string, qty: number, holdKey: string | null, reference: string): Promise<void> {
   try {
     const variantId = await resolveVariantId(tenantId, externalProductId, size);
     if (!variantId) return; // not backfilled into Postgres yet — nothing to mirror
-    const result = await decrementPostgresInventory(tenantId, variantId, qty);
-    if (!result.ok) {
-      console.error('[webhook] Postgres inventory oversold — manual reconciliation needed', { externalProductId, size, qty, reason: result.reason });
+    // The SALE through the stock ledger (00037): converts this checkout's
+    // hold, applied once per (size, reference) however often Stripe
+    // redelivers. It never refuses a paid sale: a shortfall (paid after the
+    // hold lapsed and the units had gone) is recorded and shown instead.
+    const [line] = await commitSale(tenantId, holdKey, [{ variantId, quantity: qty }], reference);
+    if ((line?.shortfall || 0) > 0) {
+      console.error('[webhook] OVERSOLD by ' + line.shortfall + ' — ' + externalProductId + '/' + size + ' ' + reference);
       await recordPlatformAudit({
         action: 'postgres_inventory_oversold',
         tenantId,
-        detail: { externalProductId, size, qty, reason: result.reason },
+        detail: { externalProductId, size, qty, shortfall: line.shortfall, reference },
       });
     }
   } catch (e) {
-    console.error('[webhook] Postgres inventory shadow-decrement failed', e);
+    console.error('[webhook] STOCK NOT RECORDED for a paid sale — reconcile', externalProductId, size, reference, (e as Error)?.message || e);
   }
 }
 
@@ -215,6 +220,20 @@ export async function POST(request: Request) {
     // (signature errors can leak payload details / internals).
     console.error('[webhook] event verification failed', err?.message || err);
     return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
+  }
+
+  // Nobody paid in time: the units this (original-store) checkout held go
+  // back on sale now rather than when the hold lapses (00037). Idempotent: a
+  // redelivery releases nothing more, and a paid (converted) hold is untouched.
+  if (event.type === 'checkout.session.expired') {
+    const expired = event.data.object || {};
+    const key = expired?.metadata?.hold_key ? String(expired.metadata.hold_key) : '';
+    let released = 0;
+    if (key && expired.mode === 'payment') {
+      const tenantId = await ensureDefaultTenant().catch(() => null);
+      if (tenantId) released = await releaseStock(tenantId, key).catch((e) => { console.error('[webhook] hold release failed for ' + key, (e as Error)?.message || e); return 0; });
+    }
+    return NextResponse.json({ received: true, released });
   }
 
   if (event.type === 'checkout.session.completed') {
@@ -622,7 +641,7 @@ export async function POST(request: Request) {
             // Authoritative stock, straight after the sale and before any
             // best-effort work can spend what is left of the budget.
             for (const l of cartLines) {
-              await shadowDecrementInventory(cartTenantId, String(l.product.id), l.size, l.qty);
+              await shadowDecrementInventory(cartTenantId, String(l.product.id), l.size, l.qty, session.metadata?.hold_key ? String(session.metadata.hold_key) : null, String(session.payment_intent || session.id));
             }
           }
         }
@@ -757,7 +776,7 @@ export async function POST(request: Request) {
                 console.error('[webhook] CHARGED BUT NOT RECORDED — ' + maskEmail(email) +
                   ' ref=' + String(orderRef || session.id) + ': ' + recorded.message);
               }
-              await shadowDecrementInventory(orderTenantId, String(product.id), size, 1);
+              await shadowDecrementInventory(orderTenantId, String(product.id), size, 1, session.metadata?.hold_key ? String(session.metadata.hold_key) : null, String(session.payment_intent || session.id));
             }
           }
         }

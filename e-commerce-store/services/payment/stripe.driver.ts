@@ -71,6 +71,7 @@ export class StripeDriver implements PaymentDriver {
     const currency = (options.currency || 'usd').toLowerCase();
     const session = await this.stripeClient.checkout.sessions.create({
       mode: 'payment',
+      ...(options.expiresAt ? { expires_at: Math.floor(options.expiresAt) } : {}),
       payment_method_types: ['card'],
       customer_email: options.customerEmail,
       line_items: [

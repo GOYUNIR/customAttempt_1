@@ -154,6 +154,7 @@ export async function runDropDraw(request: Request | NextRequest) {
               externalProductId: String(product.id),
               size: String(size),
               context: 'draw',
+              reference: String(paymentIntent.id),
             });
             const lockResult = await withRedisLock(redis, `inventory:${product.id}:${size}`, decrementInventory);
             // KV live-state mirror ONLY. Postgres inventory_levels is
