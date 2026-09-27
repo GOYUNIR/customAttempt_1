@@ -200,7 +200,7 @@ export default function StaffLoginForm({ realm: realmKey, backUrl = '/', backLab
                 </p>
               ) : (
                 <p style={hintStyle}>
-                  After your password is accepted, a <strong>6-digit code is emailed</strong> to you to confirm it&apos;s really you. That two-step protection keeps the store safe even if your password leaks.
+                  After your password is accepted, a <strong>6-digit code is emailed</strong> to you to confirm it&apos;s really you. That second step keeps your account safe even if your password leaks.
                 </p>
               )}
             </div>

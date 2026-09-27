@@ -28,6 +28,18 @@ const SECTION_LABEL: React.CSSProperties = {
   color: INK.muted, fontWeight: 700, margin: '0 0 18px',
 };
 
+// What a shared link to the platform shows (the layout's defaults are the
+// original store's). openGraph is replaced whole at page level, so the share
+// image is restated.
+const SHARE_TITLE = 'Sell the way your brand actually sells.';
+const SHARE_TEXT = 'Drops, waitlists and everyday retail: one catalog, one customer record, your own Stripe account.';
+export const metadata = {
+  title: SHARE_TITLE,
+  description: SHARE_TEXT,
+  openGraph: { title: SHARE_TITLE, description: SHARE_TEXT, type: 'website', images: [{ url: '/og', width: 1200, height: 630 }] },
+  twitter: { card: 'summary_large_image', title: SHARE_TITLE, description: SHARE_TEXT, images: ['/og'] },
+};
+
 export default function PlatformPage() {
   const rootDomain = process.env.PLATFORM_ROOT_DOMAIN || null;
 

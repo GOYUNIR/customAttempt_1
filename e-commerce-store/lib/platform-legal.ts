@@ -11,7 +11,7 @@
 
 export const LEGAL_DRAFT = {
   reviewed: '2026-09-27',
-  status: 'First draft. Pending legal review; not yet reviewed by a lawyer.',
+  status: 'This is our first version; we will update it after legal review.',
 };
 
 export type LegalSection = { h: string; p: string[] };
