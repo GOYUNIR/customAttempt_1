@@ -215,10 +215,31 @@ evidence, and write the evidence next to it.
     3. merchant checkout and cart;
     4. raffles and waitlist;
     5. the original store.
-  - **Status:** 00037 has been run in real Postgres by
-    `tests/stock-sql.test.ts` (13/13). The live race proof,
-    `scripts/verify-stock-race.ts`, is waiting for the migration to be
-    applied.
+  - **Status: all five steps are live and proven on production
+    (2026-09-27).**
+    - **Evidence:**
+      - `tests/stock-sql.test.ts` 13/13 (real Postgres);
+      - `scripts/verify-stock-race.ts` 13/13 (12 concurrent buyers on 5
+        units, then 5 exactly; recount racing sales, with the movement chain
+        re-derived independently);
+      - `scripts/verify-merchant-isolation.ts` 89/89 (stock tools included);
+      - `scripts/verify-merchant-dashboard-ui.ts` 25/25;
+      - `scripts/verify-stock-checkout.ts` ALL PASS (merchant: last unit,
+        second buyer refused, expiry release, recount during open checkout,
+        cart all-or-nothing);
+      - `scripts/verify-tenant-drops.ts` enter + draw ALL PASS (winner and
+        waitlist holds);
+      - `scripts/verify-stock-original.ts` ALL PASS (original store: single,
+        cart, direct, expiry; real products byte-identical).
+    - **Structural guard:** `tests/stock-writes.test.ts` fails if runtime code
+      writes inventory_levels outside the ledger.
+    - **Still open for the stock blocker above:** the ORIGINAL store's /admin
+      has no stock tool yet. Merchants have one in /app; the original store's
+      admin inventory screens still write the KV mirror only.
+    - **At go-live:** the LIVE-mode Stripe webhook endpoints (platform and
+      Connect) must subscribe to `checkout.session.expired`, as the test-mode
+      ones now do. Without it, holds still lapse, just 36 minutes later
+      instead of at session expiry.
 - [ ] **🛑 Stripe Connect.** Each merchant sells through their own connected
   account (Accounts v2 with direct charges), with the platform fee collected as
   an application fee. Today every tenant shares one Stripe account, so a second
