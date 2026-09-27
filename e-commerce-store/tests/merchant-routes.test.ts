@@ -74,3 +74,17 @@ test('prices, stock, sizes and limits are bounded', () => {
   ];
   for (const b of bad) assert.equal(validateMerchantProduct(b).ok, false, JSON.stringify(b));
 });
+
+import { validateMerchantSettings } from '../lib/merchant-settings-input.ts';
+
+test('settings: bounded, store never from the input, empty policies allowed (= not published)', () => {
+  const ok = validateMerchantSettings({ brandName: 'Atelier', hero: { headline: 'Hi' }, legal: { supportEmail: 'Help@Atelier.test', terms: '' }, tenantId: 'x' });
+  assert.ok(ok.ok);
+  if (ok.ok) { assert.equal(ok.value.legal.supportEmail, 'help@atelier.test'); assert.equal((ok.value as any).tenantId, undefined); assert.equal(ok.value.legal.terms, ''); }
+  for (const bad of [
+    { brandName: 'x'.repeat(81) },
+    { hero: { headline: 'x'.repeat(121) } },
+    { legal: { supportEmail: 'not an email' } },
+    { legal: { terms: 'x'.repeat(20001) } },
+  ]) assert.equal(validateMerchantSettings(bad).ok, false, JSON.stringify(bad).slice(0, 60));
+});

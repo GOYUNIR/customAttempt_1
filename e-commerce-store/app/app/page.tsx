@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 type Store = { store: { name: string | null; slug: string | null; address: string | null; plan: string | null }; you: { email: string; role: string }; payments: { connected: boolean; status: string; hasAccount: boolean; outstandingRequirements: number } };
 type Size = { size: string; price: number | string; mode: 'FCFS' | 'RAFFLE'; stock?: number | string | null; winners?: number | string | null };
 type Product = { id: string; name: string; slug: string; tagline: string; description: string; isActive: boolean; isUpcoming: boolean; releaseEndsAt: string; maxPerEmail: number; sizes: Size[] };
+type Settings = { brandName: string; hero: { eyebrow: string; headline: string; body: string }; legal: { companyName: string; supportEmail: string; terms: string; privacy: string; shipping: string } };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -42,7 +43,8 @@ export default function MerchantDashboard() {
   const [fatal, setFatal] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tab, setTab] = useState<'products' | 'orders'>('products');
+  const [tab, setTab] = useState<'products' | 'orders' | 'settings'>('products');
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -56,6 +58,8 @@ export default function MerchantDashboard() {
     if (!s.ok) { setFatal(s.body.error || 'Your store could not be loaded.'); return; }
     setStore(s.body);
     const [p, o] = await Promise.all([api<{ products: Product[] }>('/api/merchant/products'), api<{ orders: Order[] }>('/api/merchant/orders')]);
+    const st = await api<Settings>('/api/merchant/settings');
+    if (st.ok) setSettings(st.body);
     if (p.ok) setProducts(p.body.products || []);
     if (o.ok) setOrders(o.body.orders || []);
   }, []);
@@ -99,6 +103,14 @@ export default function MerchantDashboard() {
     setNotice(editing.id ? 'Saved.' : 'Product created.');
     setEditing(null);
     load();
+  };
+
+  const saveSettings = async () => {
+    if (!settings) return;
+    setSaving(true);
+    const r = await api<{ saved: boolean }>('/api/merchant/settings', { method: 'POST', body: JSON.stringify(settings) });
+    setSaving(false);
+    setNotice(r.ok ? 'Settings saved. Your store shows them within a minute.' : (r.body.error || 'Settings could not be saved.'));
   };
 
   const toLocalInput = (iso: string) => {
@@ -152,8 +164,8 @@ export default function MerchantDashboard() {
         </section>
 
         <nav style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {(['products', 'orders'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : `Orders (${orders.length})`}</button>
+          {(['products', 'orders', 'settings'] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'orders' ? `Orders (${orders.length})` : 'Settings'}</button>
           ))}
         </nav>
 
@@ -209,6 +221,24 @@ export default function MerchantDashboard() {
               <button style={btn} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
               <button style={ghost} onClick={() => setEditing(null)}>Cancel</button>
             </div>
+          </section>
+        )}
+
+        {tab === 'settings' && settings && (
+          <section style={card} aria-label="Settings">
+            <div style={{ fontWeight: 700 }}>Store</div>
+            <label style={label}>Store name shown to customers<input style={input} value={settings.brandName} onChange={(e) => setSettings({ ...settings, brandName: e.target.value })} /></label>
+            <label style={label}>Homepage line above the headline<input style={input} value={settings.hero.eyebrow} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, eyebrow: e.target.value } })} /></label>
+            <label style={label}>Homepage headline<input style={input} value={settings.hero.headline} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, headline: e.target.value } })} /></label>
+            <label style={label}>Homepage text<textarea style={{ ...input, minHeight: 70, paddingTop: 10 }} value={settings.hero.body} onChange={(e) => setSettings({ ...settings, hero: { ...settings.hero, body: e.target.value } })} /></label>
+            <div style={{ fontWeight: 700, marginTop: 18 }}>Policies</div>
+            <p style={{ color: C.muted, fontSize: 13, margin: '6px 0 0' }}>Shown at /terms, /privacy and /shipping on your store. Until you add one, that page says it has not been published.</p>
+            <label style={label}>Business name<input style={input} value={settings.legal.companyName} onChange={(e) => setSettings({ ...settings, legal: { ...settings.legal, companyName: e.target.value } })} /></label>
+            <label style={label}>Contact email for customers<input type="email" style={input} value={settings.legal.supportEmail} onChange={(e) => setSettings({ ...settings, legal: { ...settings.legal, supportEmail: e.target.value } })} /></label>
+            {(['terms', 'privacy', 'shipping'] as const).map((k) => (
+              <label key={k} style={label}>{k === 'terms' ? 'Terms of service' : k === 'privacy' ? 'Privacy policy' : 'Shipping & sales policy'}<textarea style={{ ...input, minHeight: 120, paddingTop: 10 }} value={settings.legal[k]} onChange={(e) => setSettings({ ...settings, legal: { ...settings.legal, [k]: e.target.value } })} /></label>
+            ))}
+            <div style={{ marginTop: 14 }}><button style={btn} onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>
           </section>
         )}
 

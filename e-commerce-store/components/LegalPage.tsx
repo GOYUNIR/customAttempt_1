@@ -4,6 +4,10 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { getSupportEmail } from '@/lib/env';
+import { storefrontTenantFromHeaders } from '@/lib/storefront-tenant';
+import { getDb } from '@/lib/db/client';
+import { eq } from '@/lib/db/query';
+import { notFound } from 'next/navigation';
 
 /**
  * Server-rendered policy page (/terms, /privacy, /shipping).
@@ -15,21 +19,45 @@ import { getSupportEmail } from '@/lib/env';
  * never need a code change to update their policies.
  */
 export default async function LegalPage({ page }: { page: LegalPageKey }) {
-  const redis = createKvClient();
-  const config = await loadStoreConfigCached(redis);
-  const colors = { ...GOYUNIR_STORE_SUITE.themeColors, ...(config.themeColors || {}) };
-  const legal = { ...DEFAULT_LEGAL, ...(config.legal || {}) };
-  const branding = config.branding || {};
-  const brandName = String(branding.brandName || branding.shareTitle || legal.companyName || DEFAULT_LEGAL.companyName);
-  const companyName = String(legal.companyName || brandName);
-  const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
-  const blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
-
   const titles: Record<LegalPageKey, string> = {
     terms: 'Terms of Service',
     privacy: 'Privacy Policy',
     shipping: 'Shipping & Sales Policy',
   };
+
+  // Whose store (TENANCY.md). The original store: its KV config and template
+  // defaults, exactly as before. Any other store: ITS OWN policy text from its
+  // config row (the merchant dashboard's Settings). No text = not published,
+  // said plainly -- never the template's policies under a merchant's name,
+  // and never the owner's sign-in email as a contact.
+  const who = await storefrontTenantFromHeaders();
+  if (who.kind === 'none') notFound();
+  if (who.kind === 'unavailable') throw new Error('[legal] store lookup unavailable');
+  let colors: Record<string, any>;
+  let companyName: string;
+  let blocks: ReturnType<typeof parseLegalContent>;
+  if (who.isDefault) {
+    const redis = createKvClient();
+    const config = await loadStoreConfigCached(redis);
+    colors = { ...GOYUNIR_STORE_SUITE.themeColors, ...(config.themeColors || {}) };
+    const legal = { ...DEFAULT_LEGAL, ...(config.legal || {}) };
+    const branding = config.branding || {};
+    const brandName = String(branding.brandName || branding.shareTitle || legal.companyName || DEFAULT_LEGAL.companyName);
+    companyName = String(legal.companyName || brandName);
+    const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
+    blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
+  } else {
+    const row = ((await getDb().select<any>('tenant_store_config', { where: { tenant_id: eq(who.tenantId) }, select: ['config'], limit: 1 }).catch(() => [])) as any[])[0];
+    const config = (row?.config || {}) as Record<string, any>;
+    colors = { ...GOYUNIR_STORE_SUITE.themeColors, ...(config.themeColors || {}) };
+    const legal = (config.legal || {}) as Record<string, any>;
+    companyName = String(legal.companyName || config.branding?.brandName || who.name || 'This store');
+    const supportEmail = String(legal.supportEmail || '');
+    const own = String(legal[page] || '').trim();
+    blocks = own
+      ? parseLegalContent(own, { companyName, supportEmail: supportEmail || 'the store' })
+      : [{ kind: 'paragraph', text: companyName + ' has not published its ' + titles[page].toLowerCase() + ' yet.' + (supportEmail ? ' Questions: ' + supportEmail + '.' : '') }];
+  }
 
   return (
     <main

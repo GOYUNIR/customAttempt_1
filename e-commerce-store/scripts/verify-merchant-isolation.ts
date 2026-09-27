@@ -135,6 +135,31 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const acctAAfter = await acctOf(A);
     check(acctAAfter === acctA && acctB1 !== acctA, 'test4\'s account is untouched and different from store B\'s');
 
+    console.log('\n/api/merchant/settings and the store\'s own policy pages');
+    const pageText = async (url: string) => { const r = await fetch(url); return { status: r.status, text: (await r.text()).replace(/<[^>]+>/g, ' ') }; };
+    const shopTermsBefore = await pageText('https://shop.goyunir.com/terms');
+    const defaultRowBefore = JSON.stringify((await db.select<any>('tenant_store_config', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['config'] })) as any[]);
+    const markA = 'TEST4-TERMS-' + run, markB = 'STOREB-TERMS-' + run;
+    const setA = await call('/api/merchant/settings', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brandName: 'test4', legal: { companyName: 'Test Four Co', supportEmail: 'help@test4.example', terms: 'Terms heading\n' + markA, privacy: '', shipping: '' } }) });
+    const setB = await call('/api/merchant/settings', sB, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brandName: 'goyunir test 1', tenantId: A, legal: { companyName: 'Store B Co', terms: markB } }) });
+    check(setA.status === 200 && setB.status === 200, 'both owners save their own settings: ' + setA.status + ' / ' + setB.status);
+    const getA = await call('/api/merchant/settings', sA);
+    const getB = await call('/api/merchant/settings', sB);
+    check(String(getA.body?.legal?.terms).includes(markA) && !String(getA.body?.legal?.terms).includes(markB), 'test4 reads back only its own terms');
+    check(String(getB.body?.legal?.terms).includes(markB) && !String(getB.body?.legal?.terms).includes(markA), 'store B reads back only its own (the smuggled tenant id was ignored)');
+    const defaultRowAfter = JSON.stringify((await db.select<any>('tenant_store_config', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['config'] })) as any[]);
+    check(defaultRowAfter === defaultRowBefore, 'the original store\'s config row is byte-identical');
+    const t4Terms = await pageText('https://test4.goyunir.com/terms');
+    const bTerms = await pageText('https://goyunir-test-1.goyunir.com/terms');
+    const t4Privacy = await pageText('https://test4.goyunir.com/privacy');
+    check(t4Terms.status === 200 && t4Terms.text.includes(markA) && !t4Terms.text.includes(markB), 'test4.goyunir.com/terms shows test4\'s own terms only');
+    check(bTerms.status === 200 && bTerms.text.includes(markB) && !bTerms.text.includes(markA), 'store B\'s /terms shows store B\'s own terms only');
+    check(t4Privacy.status === 200 && /has not published its privacy policy yet/.test(t4Privacy.text) && t4Privacy.text.includes('help@test4.example'), 'an unset policy says it is not published (with the store\'s own contact), no template text');
+    const shopTermsAfter = await pageText('https://shop.goyunir.com/terms');
+    const strip = (t: string) => t.replace(/Last updated: \d{4}-\d{2}-\d{2}/, '').replace(/\s+/g, ' ');
+    check(shopTermsAfter.status === 200 && strip(shopTermsAfter.text) === strip(shopTermsBefore.text) && !shopTermsAfter.text.includes(markA) && !shopTermsAfter.text.includes(markB), 'the original store\'s /terms is unchanged (identical text before and after)');
+    check((await pageText('https://nosuchstore-xyz.goyunir.com/terms')).status === 404, 'an unknown address still gets 404 for /terms');
+
     console.log('\nFences');
     check((await call('/api/merchant/store', sA, {}, 'https://shop.goyunir.com')).status === 404, 'the merchant API does not answer on the original store\'s host');
     check((await call('/api/merchant/store', sA, {}, 'https://test4.goyunir.com')).status === 404, 'nor on a merchant\'s storefront address');
