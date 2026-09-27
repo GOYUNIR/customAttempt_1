@@ -185,17 +185,18 @@ Add an item whenever a gap is found; tick it only with evidence, recorded in
   disputes, order emails.
 - Merchant dashboard with per-route isolation proofs; public signup closed.
 - Pooled stock is refused by every gate (real pool support is a separate feature).
+- The original store's admin Stock tab (count, add/remove, history, oversold)
+  on the same ledger (2026-09-27).
+- The pricing page states the per-sale fee, derived from the plan data
+  (DEFERRED-9, 2026-09-27).
 
 **Pending:**
-- 🛑 The original store's /admin has no stock tool (its inventory screens write
-  only the KV mirror).
 - 🛑 Cloudflare Workers Paid (50-subrequest ceiling on Free): the first
   go-live action; staying on Free until then is deliberate (owner).
 - 🛑 Live-mode Stripe webhooks (platform + Connect) must subscribe to
   `checkout.session.expired`, as the test-mode ones do.
 - Every charge path writes an order: admin trigger-drop not yet proven with a
   real charge.
-- The pricing page states the per-sale fee, derived from the plan data (DEFERRED-9, done 2026-09-27).
 
 ## 10. Where things live
 
