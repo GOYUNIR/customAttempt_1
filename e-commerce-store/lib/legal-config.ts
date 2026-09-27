@@ -88,13 +88,13 @@ To the fullest extent permitted by law, {companyName} is not liable for indirect
 ## 7. Contact
 Support: use the address listed on the storefront or Manage My Entry.`,
   privacy: `## What we collect
-Email, shipping address, and payment details processed by Stripe. Device/session identifiers for fraud reduction and basic analytics. Entry and draw logs stored in our database (e.g. Redis).
+Email, shipping address, and payment details processed by Stripe. Device/session identifiers for fraud reduction and basic analytics. Entry and draw records kept in our database.
 
 ## How we use it
 To run allocations, charge selected entrants, ship orders, prevent abuse, send transactional email, and improve the service.
 
 ## Sharing
-Stripe (payments), email delivery provider (e.g. Resend), hosting (e.g. Vercel), and shipping partners as needed to fulfill. We do not sell personal information.
+Stripe (payments), our email delivery and hosting providers, and shipping partners as needed to fulfill. We do not sell personal information.
 
 ## Retention
 Entry and order records are kept as long as needed for operations, legal, and accounting purposes.
