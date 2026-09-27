@@ -234,3 +234,45 @@ data. After that, `public.plans` is the source, and a test asserts it matches
 
 Items 1–2 can go ahead as soon as the decisions are made. Items 3–5 are part
 of the Connect work.
+
+## 9. Plan billing — SCOPE ONLY, not built (2026-09-27)
+
+**Why it matters.** Until this exists the pricing page cannot sell Growth: it
+now says "talk to us" instead of offering a trial nobody can start
+(OBJECTIONS.md §1).
+
+**Already in place.** Plans (`public.plans`, 00027/00032) and a per-store plan
+(`tenants.plan_id`). The fee engine (`platformFeeForCharge` → `tenantPlan`)
+already charges 0% on a flat-fee plan. So the moment a store's plan becomes
+`growth`, its per-sale fee stops. The missing piece is purely *how a merchant
+pays $99 and how their plan follows the payment*.
+
+**The shape (Stripe Billing, on the PLATFORM account, not the merchant's):**
+1. Owner-only "Switch to Growth" in /app → Stripe Checkout (`mode:
+   subscription`, the platform's Growth price), Stripe customer = the store.
+   The store id rides in subscription metadata.
+2. The platform webhook (existing endpoint) handles
+   `customer.subscription.created/updated/deleted` and
+   `invoice.paid/payment_failed`, idempotent on event id:
+   - active → `plan_id = growth`;
+   - past_due → keep Growth for a grace period, then Free;
+   - canceled → Free at period end.
+   The plan change is audited.
+3. "Manage billing" → Stripe's customer portal (cancel, card update,
+   invoices), so no billing UI is ours to build.
+4. The D3 prompt ("you're paying Growth's price this month…") links to step 1.
+5. Isolation proof (only the store's owner can subscribe or cancel its own
+   plan; a forged store id in metadata is refused by matching the Stripe
+   customer to the store). Then a live test-mode proof: subscribe → fee
+   drops to 0% on the next sale; cancel → back to graduated at period end;
+   failed renewal → grace, then Free.
+
+**Size.** About 2–3 days including both proofs. No new money-path engine: the
+fee side is done.
+
+**Decisions needed before building:**
+1. A trial or not: the old copy promised 14 days. A trial costs nothing on
+   the fee side, since Growth is 0% anyway.
+2. Grace length on a failed renewal (suggest 7 days).
+3. Tax on our subscription invoices: Stripe Tax on, off, or later.
+4. Whether Scale gets any self-serve path (suggest no: invoiced by contract).
