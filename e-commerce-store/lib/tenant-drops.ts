@@ -31,7 +31,8 @@ import { getSizeCheckoutMode } from '@/lib/storefront-config';
 import { resolveSizeReleaseEndsAt } from '@/lib/size-configs';
 import { dropTimestampToMs } from '@/lib/drop-timestamps';
 import { readLiveStock } from '@/lib/stock-gate';
-import { resolveVariantId, decrementForSale } from '@/lib/inventory';
+import { resolveVariantId } from '@/lib/inventory';
+import { reserveStock, releaseStock, commitSale } from '@/lib/stock';
 import { recordOrder } from '@/lib/order-write';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
@@ -225,6 +226,11 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
 // was once added here, 28 -> 35, and on the 50-call plan no run could afford
 // a single charge any more: every trigger deferred. Caught by the live proof.)
 const PER_CHARGE_CALLS = 28;
+
+/** A waitlist conversion holds its unit while the saved card is tried. */
+const WAITLIST_HOLD_SECONDS = 15 * 60;
+/** One hold per entry: a drawn winner (no expiry) or a waitlist conversion. */
+const entryHoldKey = (kind: Kind, entryId: string) => (kind === 'raffle' ? 'win:' : 'wl:') + entryId;
 const SAFETY_CALLS = 4;
 
 class Budget {
@@ -277,6 +283,21 @@ async function chargeEntry(input: {
   const attempt = kind === 'raffle' ? entryId + ':' + String(entry.decided_at || '') : entryId;
   const claim = await claimWebhookKey('tenant_charge', attempt);
   if (claim === 'duplicate') return { entryId, status: 'skipped', note: 'in progress or done elsewhere' };
+  // The unit this charge is for is HELD first (00037): a drawn winner's hold
+  // was taken at the draw (this just confirms it), a waitlist entry takes one
+  // now. No unit, no charge. Nothing else can sell it while the card is tried.
+  const holdKey = entryHoldKey(kind, entryId);
+  const held = await reserveStock(tenantId, holdKey, [{ variantId: variant.variantId, quantity: 1 }], kind === 'raffle' ? null : WAITLIST_HOLD_SECONDS, 'entry:' + entryId);
+  if (!held.ok) {
+    await releaseWebhookKey('tenant_charge', attempt).catch(() => {});
+    if (kind === 'raffle') {
+      // Drawn, but the unit is gone (the merchant counted lower since): this
+      // winner cannot be fulfilled, so back to the pool, card untouched.
+      console.error('[tenant-drops] raffle winner ' + entryId + ' has no unit to hold (' + held.reason + ') — back to the pool, not charged');
+      await rollDeclinedEntryBackToPool(tenantId, entryId);
+    }
+    return { entryId, status: 'skipped', note: 'no stock' };
+  }
   try {
     const route = savedCardChargeRoute({ entryAccount: entry.stripe_account, isDefaultStore: false, storeAccount });
     const customerId = entry.customer_id ? await stripeCustomerIdFor(tenantId, String(entry.customer_id)) : null;
@@ -287,6 +308,7 @@ async function chargeEntry(input: {
       console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' NOT CHARGED — ' + why);
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
       if (kind === 'raffle') await rollDeclinedEntryBackToPool(tenantId, entryId);
+      await releaseStock(tenantId, holdKey);
       await completeWebhookKey('tenant_charge', attempt);
       return { entryId, status: 'declined', note: why, calls: budget.used() - before };
     }
@@ -314,6 +336,8 @@ async function chargeEntry(input: {
       console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' declined: ' + msg);
       await markRaffleEntryOutcome(tenantId, entryId, 'declined');
       if (kind === 'raffle') await rollDeclinedEntryBackToPool(tenantId, entryId);
+      // The card said no: the unit goes back on sale (or to the next draw).
+      await releaseStock(tenantId, holdKey);
       await completeWebhookKey('tenant_charge', attempt);
       return { entryId, status: 'declined', note: msg, calls: budget.used() - before };
     }
@@ -333,15 +357,11 @@ async function chargeEntry(input: {
     if (!recorded.ok) throw new Error('CHARGED BUT NOT RECORDED (will retry) — entry ' + entryId + ' pi ' + pi.id + ': ' + recorded.message);
     await recordBillingCharge({ paymentIntentId: pi.id, tenantId, volumeCents: variant.priceCents, feeCents: feeCharged, orderId: recorded.orderId });
 
-    // Stock exactly once per attempt, however many times this is retried.
-    const stockClaim = await claimWebhookKey('tenant_stock', attempt);
-    if (stockClaim !== 'duplicate') {
-      const r = await decrementForSale({ tenantId, externalProductId: variant.productId, size: variant.size, quantity: 1, context: 'tenant-' + kind });
-      if (!r.ok && r.reason !== 'insufficient_stock') {
-        await releaseWebhookKey('tenant_stock', attempt).catch(() => {});
-        throw new Error('stock not decremented (will retry): ' + r.reason);
-      }
-      await completeWebhookKey('tenant_stock', attempt);
+    // The SALE (00037): the held unit leaves on-hand, once per PaymentIntent
+    // however many times this is retried (a throw retries the whole attempt).
+    const sale = await commitSale(tenantId, holdKey, [{ variantId: variant.variantId, quantity: 1 }], String(pi.id));
+    if ((sale[0]?.shortfall || 0) > 0) {
+      console.error('[tenant-drops] OVERSOLD by ' + sale[0].shortfall + ' on ' + variant.variantId + ' (' + kind + ' entry ' + entryId + ', ' + pi.id + '): shown to the merchant');
     }
 
     await markRaffleEntryOutcome(tenantId, entryId, 'charged');
@@ -470,15 +490,27 @@ export async function runTenantDueDrops(tenantId: string, tenantSlug: string | n
             try {
               const stock = readLiveStock(product, size);
               const tiers = String(cat.winnerTiers ?? product.winnerTiers ?? '').split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
-              // Winners already selected but not yet charged hold stock too.
-              const room = Math.max(0, (stock.ok ? stock.stock : 0) - mine.filter((e) => e.status === 'winner').length);
+              // SELLABLE stock (00037): earlier winners' units are already held,
+              // so they are already out of this number. (Subtracting winners
+              // again, as before holds, would count them twice.)
+              const room = Math.max(0, stock.ok ? stock.stock : 0);
               const draw = await executeDraw(tenantId, variantId, Math.min(room, tiers[0] || room), { entryType: 'raffle' });
               await completeWebhookKey('tenant_draw', drawKey);
-              out.draws.push({ product: product.name, size, drawId: draw.drawId, entries: draw.entriesCount, winners: draw.winnerCount });
+              // Each winner's unit is HELD now, until charged or declined, so
+              // nothing else can sell it in between.
+              let unheld = 0;
               for (const w of draw.winners) {
+                const h = await reserveStock(tenantId, entryHoldKey('raffle', String(w.id)), [{ variantId, quantity: 1 }], null, 'entry:' + w.id);
                 const row = mine.find((e) => e.id === w.id);
+                if (!h.ok) {
+                  unheld += 1;
+                  console.error('[tenant-drops] drawn winner ' + w.id + ' has no unit to hold (' + h.reason + ') — back to the pool');
+                  await rollDeclinedEntryBackToPool(tenantId, String(w.id));
+                  continue;
+                }
                 if (row) { row.status = 'winner'; row.decided_at = (w as any).decided_at; }
               }
+              out.draws.push({ product: product.name, size, drawId: draw.drawId, entries: draw.entriesCount, winners: draw.winnerCount - unheld });
             } catch (err) {
               await releaseWebhookKey('tenant_draw', drawKey).catch(() => {});
               throw err;
@@ -500,14 +532,17 @@ export async function runTenantDueDrops(tenantId: string, tenantSlug: string | n
         // On sale: convert the waitlist, oldest first, up to the stock there is.
         const pending = mine.filter((e) => e.status === 'pending' && e.entry_type === 'waitlist')
           .sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)));
-        const stock = readLiveStock(product, size);
-        let left = stock.ok ? Math.max(0, stock.stock) : 0;
+        // Each conversion HOLDS its unit before the card is tried; when there
+        // is no unit left to hold, the rest of the waitlist stays pending.
+        // (No numeric pre-check: sellable stock excludes an entry's OWN hold
+        // left by a crashed run, which would stall it until the hold lapsed;
+        // the hold alone decides. Pooled/unknown stock still refuses.)
+        if (!readLiveStock(product, size).ok) continue;
         for (const entry of pending) {
-          if (left <= 0) break;
           const r = await chargeEntry({ tenantId, tenantSlug, storeAccount: route.stripeAccount, currency, entry, variant, kind: 'waitlist', budget });
           if (r.status === 'deferred') { out.more = true; break; }
+          if (r.status === 'skipped' && r.note === 'no stock') break;
           out.waitlist.push({ product: product.name, size, ...r });
-          if (r.status === 'charged') left -= 1;
         }
       }
       if (out.more) return done();
