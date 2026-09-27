@@ -105,6 +105,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const newId = created.body?.product?.id;
     const row = newId ? ((await db.select<any>('products', { where: { external_id: eq(newId) }, select: ['tenant_id', 'name'] })) as any[]) : [];
     check(row.length === 1 && row[0].tenant_id === B, 'it was written to store B only (the body\'s tenant id was ignored): ' + JSON.stringify(row));
+    const newVariant = newId ? await (await import('../lib/inventory')).resolveVariantId(B, newId, 'M') : null;
+    const firstMove = newVariant ? ((await db.select<any>('stock_movements', { where: { variant_id: eq(newVariant) }, select: ['tenant_id', 'reason', 'delta', 'quantity_after', 'actor'] })) as any[]) : [];
+    check(firstMove.length === 1 && firstMove[0].tenant_id === B && firstMove[0].reason === 'count' && firstMove[0].quantity_after === 4, 'its starting stock (4) is the first entry in its stock history, in store B: ' + JSON.stringify(firstMove));
     const pA2 = await call('/api/merchant/products', sA);
     check(!(pA2.body?.products || []).some((p: any) => p.id === newId), 'test4 does not see store B\'s new product');
     const aItem = (pA.body?.products || []).find((p: any) => p.id === 'prod_tenant_test_1');
@@ -208,6 +211,36 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const cA2 = await call('/api/merchant/drops/cancel', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entryId }) });
     check(cA2.status === 404, 'an entry no longer pending cannot be removed again');
 
+    // ── Stock tools (00037) ────────────────────────────────────────────────
+    console.log('\n/api/merchant/stock');
+    const { resolveVariantId } = await import('../lib/inventory');
+    const fixture = String(await resolveVariantId(A, 'prod_stock_race', 'One'));
+    const defaultStockBefore = JSON.stringify(await db.select<any>('inventory_levels', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['variant_id', 'quantity_available'], order: { column: 'variant_id', ascending: true } }));
+    const skA = await call('/api/merchant/stock', sA);
+    const skB = await call('/api/merchant/stock', sB);
+    const idsOf = (b: any) => (b?.products || []).flatMap((p: any) => p.sizes.map((z: any) => z.variantId)).filter(Boolean);
+    check(skA.status === 200 && idsOf(skA.body).length > 0 && idsOf(skA.body).every((x: string) => aVariants.has(x)) && idsOf(skA.body).includes(fixture), 'test4 lists only its own sizes (' + idsOf(skA.body).length + ')');
+    check(skB.status === 200 && !idsOf(skB.body).some((x: string) => aVariants.has(x)), 'store B lists none of test4\'s sizes');
+    const stPost = (tok: string, path: string, b: any) => call('/api/merchant/stock/' + path, tok, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+    const onHandNow = async () => Number(((await db.select<any>('inventory_levels', { where: { variant_id: eq(fixture) }, select: ['quantity_available'] })) as any[])[0]?.quantity_available);
+    const stockSetA = await stPost(sA, 'set', { variantId: fixture, count: 7, note: 'iso count', tenantId: B, tenant_id: B });
+    check(stockSetA.status === 200 && stockSetA.body?.onHand === 7 && (await onHandNow()) === 7, 'test4 counts its own size to 7 (a smuggled store id is ignored): ' + stockSetA.status);
+    const bSetStock = await stPost(sB, 'set', { variantId: fixture, count: 999 });
+    const bAdj = await stPost(sB, 'adjust', { variantId: fixture, delta: 999 });
+    check(bSetStock.status === 404 && bAdj.status === 404 && (await onHandNow()) === 7, 'store B cannot count or restock test4\'s size by id: ' + bSetStock.status + '/' + bAdj.status + ', still 7');
+    const adjA = await stPost(sA, 'adjust', { variantId: fixture, delta: -3, reason: 'adjust', note: 'iso damaged' });
+    const tooLow = await stPost(sA, 'adjust', { variantId: fixture, delta: -10, reason: 'adjust' });
+    const blank = await stPost(sA, 'set', { variantId: fixture, count: '' });
+    check(adjA.status === 200 && adjA.body?.onHand === 4 && tooLow.status === 409 && blank.status === 400 && (await onHandNow()) === 4, 'remove 3 -> 4; never below zero (409); a blank count is refused, not zero (400)');
+    const hA = await call('/api/merchant/stock/history?variantId=' + fixture, sA);
+    const hB = await call('/api/merchant/stock/history?variantId=' + fixture, sB);
+    const top2 = (hA.body?.history || []).slice(0, 2);
+    check(hA.status === 200 && top2[0]?.change === -3 && top2[0]?.by === aOwner && top2[1]?.reason === 'count' && top2[1]?.after === 7, 'history shows the count and the removal, by the owner: ' + JSON.stringify(top2.map((m: any) => [m.reason, m.change, m.after, m.by])));
+    check(hB.status === 200 && (hB.body?.history || []).length === 0, 'store B asking for test4\'s history gets nothing');
+    const stockAudit = ((await db.select<any>('audit_logs', { where: { action: eq('MERCHANT_STOCK_ADJUSTED'), actor: eq(aOwner) }, select: ['tenant_id'], order: { column: 'created_at', ascending: false }, limit: 1 })) as any[])[0];
+    check(stockAudit?.tenant_id === A, 'stock changes are audited, tagged test4');
+    check(JSON.stringify(await db.select<any>('inventory_levels', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['variant_id', 'quantity_available'], order: { column: 'variant_id', ascending: true } })) === defaultStockBefore, 'the original store\'s stock rows are byte-identical');
+
     // ── Audit placement ────────────────────────────────────────────────────
     console.log('\nAudit');
     const auditRows = async (action: string, actor: string) => (await db.select<any>('audit_logs', { where: { action: eq(action), actor: eq(actor) }, select: ['tenant_id', 'detail', 'created_at'], order: { column: 'created_at', ascending: false }, limit: 5 })) as any[];
@@ -310,6 +343,10 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const supSave = await call('/api/merchant/settings', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cur.body) });
     const supAudit = (await auditRows('MERCHANT_SETTINGS_SAVED', salesEmail))[0];
     check(supSave.status === 200 && supAudit?.tenant_id === A && supAudit?.detail?.support === true, 'a support write is audited under the support person, tagged test4, marked support: ' + JSON.stringify(supAudit?.detail));
+    const fixtureId = String(await (await import('../lib/inventory')).resolveVariantId(A, 'prod_stock_race', 'One'));
+    const supCount = await call('/api/merchant/stock/set', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ variantId: fixtureId, count: 0, note: 'iso support count' }) });
+    const supStockAudit = (await auditRows('MERCHANT_STOCK_COUNTED', salesEmail))[0];
+    check(supCount.status === 200 && supStockAudit?.tenant_id === A && supStockAudit?.detail?.support === true, 'support can count stock, audited as support, tagged test4 (fixture back to 0)');
     const forgedB = (await issueAdminDevice(kv, salesEmail, false, { role: 'sales', impersonating: true, tenantId: B }, 600)).token;
     const fB = await call('/api/merchant/store', forgedB);
     check(fB.status === 403 && fB.body?.code === 'ASSIGNMENT_REVOKED', 'a support session forged for store B is refused: ' + fB.status + ' ' + fB.body?.code);
