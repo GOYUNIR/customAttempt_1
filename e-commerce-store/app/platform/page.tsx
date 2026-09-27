@@ -3,7 +3,7 @@ import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/compon
 import CheckoutModeShowcase from '@/components/platform/CheckoutModeShowcase';
 import { CAPABILITIES, COMPARISON, PLANS, FAQS, feeSummary } from '@/lib/platform-marketing';
 
-import { getSupportEmail } from '@/lib/env';
+import { getSupportEmail, merchantSignupOpen } from '@/lib/env';
 
 // The per-sale fee, derived from the plan data (DEFERRED-9).
 const FEES = feeSummary();
@@ -261,9 +261,9 @@ export default function PlatformPage() {
           <div>
             <h2 style={{ fontSize: 32, fontWeight: 800, margin: '0 0 14px', letterSpacing: '-0.6px' }}>Start your store</h2>
             <p style={{ fontSize: 15, lineHeight: 1.65, color: INK.muted, margin: '0 0 14px' }}>
-              Tell us the name and we will create it. You will get an email to set your password —
-              that link is what proves the address is yours, so nobody can claim a store they cannot
-              receive mail for.
+              {merchantSignupOpen()
+                ? 'Tell us the name and we will create it. You will get an email to set your password — that link is what proves the address is yours, so nobody can claim a store they cannot receive mail for.'
+                : 'Tell us about your store and we will set it up with you, then send you an email to set your password.'}
             </p>
             <p style={{ fontSize: 13.5, lineHeight: 1.6, color: INK.muted, margin: 0 }}>
               No card required. Nothing is charged until you choose a plan.

@@ -7,6 +7,7 @@ import { recordPlatformAudit } from '@/lib/platform-audit';
 import { createInvite, INVITE_TTL_DAYS } from '@/lib/staff-invites';
 import { sendStaffInviteEmail } from '@/lib/email';
 import { acceptInviteUrl } from '@/lib/staff-realms';
+import { merchantSignupOpen } from '@/lib/env';
 import { isReservedStoreSlug, parseLegacyHosts } from '@/lib/storefront-host';
 
 export const dynamic = 'force-dynamic';
@@ -30,9 +31,7 @@ export const dynamic = 'force-dynamic';
  * somebody's live shop. That is a decision for the operator, not a default.
  */
 
-function signupEnabled(): boolean {
-  return String(process.env.ALLOW_MERCHANT_SIGNUP || '').trim().toLowerCase() === 'true';
-}
+const signupEnabled = merchantSignupOpen;
 
 /** A URL-safe slug from a store name, or '' when nothing usable survives. */
 function slugify(input: string): string {

@@ -145,3 +145,8 @@ export function fallbackSiteUrl(): string {
 export function getPlatformName(): string {
   return readEnv('PLATFORM_NAME') || String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
 }
+
+/** Self-serve store creation (ALLOW_MERCHANT_SIGNUP=true). Off by default. */
+export function merchantSignupOpen(): boolean {
+  return String(process.env.ALLOW_MERCHANT_SIGNUP || '').trim().toLowerCase() === 'true';
+}
