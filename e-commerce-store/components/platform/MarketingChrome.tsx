@@ -103,7 +103,6 @@ export function MarketingFooter({ rootDomain }: { rootDomain: string | null }) {
       links: [
         { label: 'Create your store', href: '#start' },
         { label: 'Merchant sign-in', href: staffLoginUrl('merchant', rootDomain), external: true },
-        { label: 'Sales portal', href: staffLoginUrl('sales', rootDomain), external: true },
       ],
     },
     {

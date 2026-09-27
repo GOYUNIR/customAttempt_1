@@ -25,7 +25,7 @@ const inputStyle = {
   background: '#0a0a0c', color: PALETTE.text, fontSize: 16, width: '100%', boxSizing: 'border-box',
 } as const;
 
-export default function MerchantSignupForm() {
+export default function MerchantSignupForm({ contactEmail = null }: { contactEmail?: string | null } = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [storeName, setStoreName] = useState('');
   const [email, setEmail] = useState('');
@@ -81,6 +81,11 @@ export default function MerchantSignupForm() {
           Self-serve store creation is switched off on this deployment. Get in touch and we will set
           your store up directly.
         </p>
+        {contactEmail && (
+          <a href={'mailto:' + contactEmail + '?subject=' + encodeURIComponent('Set up my store')} style={{ color: PALETTE.text, fontWeight: 700, fontSize: 14 }}>
+            Email {contactEmail}
+          </a>
+        )}
       </div>
     );
   }

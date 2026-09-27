@@ -195,7 +195,7 @@ Add an item whenever a gap is found; tick it only with evidence, recorded in
   `checkout.session.expired`, as the test-mode ones do.
 - Every charge path writes an order: admin trigger-drop not yet proven with a
   real charge.
-- The pricing page must state the per-sale fee (DEFERRED-9).
+- The pricing page states the per-sale fee, derived from the plan data (DEFERRED-9, done 2026-09-27).
 
 ## 10. Where things live
 

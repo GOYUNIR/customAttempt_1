@@ -1,3 +1,5 @@
+import { graduatedSchedule, type FeePlan } from './pricing/graduated-fee.ts';
+
 /**
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THE MARKETING SITE SAYS.
@@ -37,7 +39,7 @@ export const CAPABILITIES: Capability[] = [
   {
     outcome: 'Two people can never buy the last one',
     proof:
-      'Stock is decremented with a compare-and-swap, so simultaneous checkouts cannot both take the final unit. Oversells are refused by the database, not patched up by support afterwards.',
+      'A unit is held for a shopper from the moment they reach checkout, so two checkouts can never both take the last one. Every change to stock is recorded, and a count you enter never erases a sale in flight.',
   },
   {
     outcome: 'Run drops, waitlists and ordinary shopping from one catalog',
@@ -47,7 +49,7 @@ export const CAPABILITIES: Capability[] = [
   {
     outcome: 'Know who a customer is, not just what they bought',
     proof:
-      'One durable record per person across every drop, order and subscription, carrying their loyalty balance, marketing consent and history. Not a blob keyed to an internal id that nothing else can read.',
+      'One durable record per person across every entry and order, with their history. Not a blob keyed to an internal id that nothing else can read.',
   },
   {
     outcome: 'Give staff their own logins, and see who did what',
@@ -55,14 +57,14 @@ export const CAPABILITIES: Capability[] = [
       'Invite people by email with a role, from platform admin down to sales rep. Two-step verification on every account, and an activity log the database itself refuses to edit or delete.',
   },
   {
-    outcome: 'Sell on your own domain, not a slug of ours',
+    outcome: 'Your own store address and your own sign-ins',
     proof:
-      'Every store runs on its own domain or subdomain, with separate sign-ins for staff, merchants and sales — instead of one shared admin password everybody passes around.',
+      'Every store gets its own address, with separate sign-ins for you, your staff and our support — instead of one shared admin password everybody passes around. Your own custom domain is coming.',
   },
   {
     outcome: 'Leave whenever you want, and take everything with you',
     proof:
-      'Your data lives in standard Postgres, your media in standard object storage, your payments in your own Stripe account. Export it all at any time. Nothing here is designed to make leaving hard.',
+      'Your payments run in your own Stripe account, and your data lives in standard Postgres. Ask and we export all of it for you; self-serve export is coming. Nothing here is designed to make leaving hard.',
   },
 ];
 
@@ -90,17 +92,17 @@ export const COMPARISON: ComparisonRow[] = [
   {
     question: 'Knowing what your marketing actually earned',
     today: 'Gross attributed revenue — every sale that touched a campaign, including the ones you would have made anyway',
-    here: 'Measured against a held-back control group, so the figure is what the campaign ADDED',
+    here: 'Measured against a held-back control group, so the figure is what the campaign ADDED (coming to merchant stores)',
   },
   {
     question: 'Selling to trade buyers',
     today: 'A separate wholesale plan, or a spreadsheet and a lot of email',
-    here: 'Quotes, net terms, contract pricing and approvals in the same catalog as retail',
+    here: 'Quotes, net terms, contract pricing and approvals in the same catalog as retail (coming to merchant stores)',
   },
   {
     question: 'Getting your data out',
     today: 'A CSV export, and an API you pay for',
-    here: 'Standard Postgres, your own Stripe account, your own object storage',
+    here: 'Your own Stripe account; standard Postgres, exported for you on request (self-serve export coming)',
   },
 ];
 
@@ -144,6 +146,16 @@ export type Plan = {
    * changing a price here moves the breakpoints, with nothing to keep in sync.
    */
   platformFeeBps?: number;
+  /**
+   * false = a band of the fee schedule, not a plan to choose (D2: with the
+   * graduated fee, Starter is never the cheaper choice, so the page shows
+   * Free · Growth · Scale). It stays in PLANS because the fee engine derives
+   * its breakpoints from every priced plan.
+   */
+  listed?: boolean;
+  /** The button opens a conversation (mailto) instead of the signup form:
+   *  the plan cannot be bought self-serve yet. */
+  contactOnly?: boolean;
 };
 
 /**
@@ -171,17 +183,17 @@ export const PLANS: Plan[] = [
     monthlyUsd: 0,
     platformFeeBps: 200,
     tagline: 'Open a real store and sell. No card, no clock.',
-    priceNote: 'Free while you are finding your first customers.',
+    // The per-sale fee is stated on the card itself (feeSummary(), from this
+    // data), never left for a merchant to find in their Stripe payouts. The
+    // old "Up to 50 orders a month" note is gone: owner decision D1 dropped
+    // the cap, and it was never enforced anyway.
+    priceNote: 'No monthly fee. A small fee on each sale instead (below).',
     ctaLabel: 'Start free',
-    // The ceiling is stated in orders because that is the unit a merchant
-    // thinks in. It maps to our real constraint — every order sends
-    // transactional mail out of one shared provider allowance.
-    limitNote: 'Up to 50 orders a month. Everything else is the same product.',
     points: [
-      'A real storefront on your own domain',
+      'A real storefront',
       'Oversell protection from the first sale',
       'Your own Stripe account — the money is yours',
-      'Move to a paid plan only when the limit starts costing you sales',
+      'The per-sale fee stops growing at the price of Growth',
     ],
   },
   {
@@ -189,6 +201,7 @@ export const PLANS: Plan[] = [
     name: 'Starter',
     monthlyUsd: 29,
     platformFeeBps: 50,
+    listed: false,
     trialDays: 14,
     priceNote: '14 days free. Cancel before the first charge and pay nothing.',
     ctaLabel: 'Start free trial',
@@ -206,16 +219,17 @@ export const PLANS: Plan[] = [
     monthlyUsd: 99,
     platformFeeBps: 0,
     featured: true,
-    trialDays: 14,
-    priceNote: '14 days free. Cancel before the first charge and pay nothing.',
-    ctaLabel: 'Start free trial',
-    tagline: 'For stores where the growth modules pay for themselves.',
+    // No trial and no self-serve upgrade until plan billing exists (it does
+    // not yet): the button opens a conversation instead of promising one.
+    contactOnly: true,
+    priceNote: 'A flat monthly price and no per-sale fee.',
+    ctaLabel: 'Talk to us',
+    tagline: 'For stores selling enough that a flat price beats the per-sale fee.',
     points: [
-      'Everything in Starter',
-      'Abandoned cart and back-in-stock recovery',
-      'Impact measured against a control group',
-      'Staff accounts with roles and audit history',
-      'B2B quotes and net terms',
+      'Everything in Free, with no per-sale fee',
+      'Abandoned cart and back-in-stock recovery (coming)',
+      'Impact measured against a control group (coming)',
+      'B2B quotes and net terms (coming)',
     ],
   },
   {
@@ -226,12 +240,38 @@ export const PLANS: Plan[] = [
     tagline: 'Multiple stores, or volume that needs its own conversation.',
     points: [
       'Everything in Growth',
-      'Multiple storefronts on one account',
+      'Multiple storefronts (by arrangement)',
       'Priority support and onboarding',
       'Custom contract and invoicing',
     ],
   },
 ];
+
+/**
+ * The per-sale fee in plain words, DERIVED from PLANS through the fee engine
+ * (lib/pricing/graduated-fee.ts), so the page can never drift from what is
+ * actually charged. DEFERRED-9: the page used to imply there was no
+ * percentage fee at all.
+ */
+export function feeSummary(): { freeLine: string; footnote: string } {
+  const plans: FeePlan[] = PLANS
+    .filter((p) => p.monthlyUsd !== null && p.platformFeeBps !== undefined)
+    .map((p) => ({ id: p.id, monthlyCents: Math.round((p.monthlyUsd as number) * 100), feeBps: p.platformFeeBps as number }));
+  const tiers = graduatedSchedule(plans);
+  const pct = (bps: number) => (bps / 100).toFixed(bps % 100 === 0 ? 0 : 1) + '%';
+  const usd = (cents: number) => '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const capPlan = PLANS.filter((p) => p.monthlyUsd !== null && p.platformFeeBps === 0).sort((a, b) => (a.monthlyUsd as number) - (b.monthlyUsd as number))[0];
+  const paid = tiers.filter((t) => t.bps > 0);
+  const bands = paid.map((t, i) => (i === 0 ? pct(t.bps) + ' of your sales each month' : 'then ' + pct(t.bps) + ' above ' + usd(t.fromCents)));
+  const cap = capPlan ? ', and never more than ' + usd((capPlan.monthlyUsd as number) * 100) + ' a month in total — the price of ' + capPlan.name : '';
+  const freeLine = 'Per-sale fee: ' + bands.join(', ') + cap + '.';
+  const footnote =
+    'Free has no monthly price: we take a small fee from each sale instead, collected by Stripe when the sale happens — ' +
+    bands.join(', ') + cap + '. ' +
+    (capPlan ? capPlan.name + ' is a flat ' + usd((capPlan.monthlyUsd as number) * 100) + ' a month with no per-sale fee. ' : '') +
+    'Separately, and always: we never charge a share of the revenue our own marketing tools claim to have generated.';
+  return { freeLine, footnote };
+}
 
 export type Faq = { q: string; a: string };
 
@@ -247,7 +287,7 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'Why do your revenue numbers look smaller than my current tool’s?',
-    a: 'Because they measure something different. Most tools report every sale that touched a campaign, including customers who would have bought anyway. We hold back a small control group and report the difference — what the campaign actually added. It is a smaller number and a true one, and you can read the method in your dashboard.',
+    a: 'Because they measure something different. Most tools report every sale that touched a campaign, including customers who would have bought anyway. We hold back a small control group and report the difference — what the campaign actually added. It is a smaller number and a true one. (Reporting is live for our own store and coming to merchant dashboards.)',
   },
   {
     q: 'Can I use my own payment processor?',
@@ -263,6 +303,6 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'Do I need a developer?',
-    a: 'Not to launch. Starter templates cover the storefront, product pages and catalog for each way of selling, and the merchant panel handles day-to-day changes. A developer helps if you want something bespoke.',
+    a: 'Not to launch. Your store comes with a storefront, product pages and checkout, and the merchant dashboard handles products, raffles, stock, orders, staff and policies. A developer helps if you want something bespoke.',
   },
 ];

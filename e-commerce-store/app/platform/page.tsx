@@ -1,8 +1,12 @@
 import MerchantSignupForm from '@/components/platform/MerchantSignupForm';
 import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/components/platform/MarketingChrome';
 import CheckoutModeShowcase from '@/components/platform/CheckoutModeShowcase';
-import { CAPABILITIES, COMPARISON, PLANS, FAQS } from '@/lib/platform-marketing';
+import { CAPABILITIES, COMPARISON, PLANS, FAQS, feeSummary } from '@/lib/platform-marketing';
+
 import { getSupportEmail } from '@/lib/env';
+
+// The per-sale fee, derived from the plan data (DEFERRED-9).
+const FEES = feeSummary();
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +46,8 @@ export default function PlatformPage() {
           Sell the way your brand actually sells.
         </h1>
         <p style={{ fontSize: 19, lineHeight: 1.6, color: INK.muted, margin: '0 0 34px', maxWidth: 560 }}>
-          Drops, waitlists, everyday retail and trade orders — one catalog, one customer record,
-          your own domain.
+          Drops, waitlists and everyday retail — one catalog, one customer record, your own
+          Stripe account.
         </p>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <a href="#start" style={{ background: INK.text, color: INK.bg, borderRadius: 999, padding: '16px 32px', fontWeight: 800, fontSize: 16, textDecoration: 'none' }}>
@@ -157,16 +161,18 @@ export default function PlatformPage() {
         {/* 240px min so four tiers fit one row inside the 1100px shell; below
             that they wrap in pairs rather than stranding a single card. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18 }}>
-          {PLANS.map((plan) => {
+          {PLANS.filter((plan) => plan.listed !== false).map((plan) => {
             // 'Contact us' used to point at #start — the self-signup form. A buyer
             // asking for a conversation was handed a create-your-own-store wizard.
             // Until the lead form ships this at least opens a real email; with no
             // inbox configured the button says where it actually goes instead of
             // promising a conversation nobody receives.
-            const quoteTier = plan.monthlyUsd === null;
+            // Scale (no price) and plans not yet sold self-serve open a
+            // conversation, never the signup form.
+            const quoteTier = plan.monthlyUsd === null || plan.contactOnly === true;
             const inbox = getSupportEmail();
             const ctaHref = quoteTier && inbox
-              ? 'mailto:' + inbox + '?subject=' + encodeURIComponent('Scale plan enquiry')
+              ? 'mailto:' + inbox + '?subject=' + encodeURIComponent(plan.name + ' plan enquiry')
               : '#start';
             // The label is the plan's own promise (lib/platform-marketing.ts).
             // Only the quote tier overrides it, and only to stay honest about
@@ -204,6 +210,9 @@ export default function PlatformPage() {
                     {plan.limitNote}
                   </p>
                 )}
+                {plan.monthlyUsd === 0 && (
+                  <p style={{ fontSize: 12.5, lineHeight: 1.55, color: INK.text, margin: '8px 0 0' }}>{FEES.freeLine}</p>
+                )}
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 9, flex: '1 1 auto' }}>
                 {plan.points.map((point) => (
@@ -230,10 +239,7 @@ export default function PlatformPage() {
           })}
         </div>
         <p style={{ fontSize: 12.5, color: INK.muted, margin: '14px 2px 0', maxWidth: 760, lineHeight: 1.6 }}>
-          Start free and stay free until the limit starts costing you sales. Paid plans are flat and
-          monthly, billed through Stripe. We do not charge a percentage of the revenue our own tools
-          claim to have generated — that is only fair once the measurement has been proven over
-          time, and we would rather earn it than assume it.
+          {FEES.footnote}
         </p>
       </section>
 
@@ -251,7 +257,7 @@ export default function PlatformPage() {
               No card required. Nothing is charged until you choose a plan.
             </p>
           </div>
-          <MerchantSignupForm />
+          <MerchantSignupForm contactEmail={getSupportEmail() || null} />
         </div>
       </section>
 
