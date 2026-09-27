@@ -124,13 +124,13 @@ export async function POST(request: Request) {
         await completeWebhookKey(SCOPE, String(event.id));
         return NextResponse.json({ received: true, refused: who.reason });
       }
-      let result: { handled: boolean; note: string } = { handled: false, note: 'acknowledged' };
+      let result: { handled: boolean; note: string; afterCommit?: () => Promise<string> } = { handled: false, note: 'acknowledged' };
       if (event.type === 'checkout.session.completed' && object?.mode === 'setup') {
         // A raffle/waitlist entry's card was saved (phase 4). Throws until it
         // can be recorded, so Stripe retries: an entry is never dropped.
-        result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount), { invocationStart: started });
+        result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount));
       } else if (event.type === 'checkout.session.completed') {
-        result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount), { invocationStart: started });
+        result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount));
       } else if (event.type === 'charge.refunded') {
         result = await handleConnectChargeRefunded(object, String(eventAccount));
       } else if (event.type === 'charge.dispute.created') {
@@ -139,9 +139,14 @@ export async function POST(request: Request) {
         result = { handled: true, note: 'dispute logged' };
       }
       await completeWebhookKey(SCOPE, String(event.id));
-      console.log('[connect-webhook] ' + event.type + ' ' + event.id + ' tenant ' + who.tenantId + ': ' + result.note);
+      // The customer's email runs only NOW, after the event is marked done:
+      // whatever happens to it (the call ceiling included) can no longer touch
+      // the order, the stock or this event's bookkeeping. It never throws.
+      const { afterCommit, ...outcome } = result;
+      const mail = afterCommit ? await afterCommit().catch((e) => 'failed: ' + ((e as Error)?.message || e)) : null;
+      console.log('[connect-webhook] ' + event.type + ' ' + event.id + ' tenant ' + who.tenantId + ': ' + outcome.note + (mail ? ', email ' + mail : ''));
       reportSubrequests('connect-webhook ' + event.type, started);
-      return NextResponse.json({ received: true, tenant: who.tenantId, ...result });
+      return NextResponse.json({ received: true, tenant: who.tenantId, ...outcome, ...(mail ? { email: mail } : {}) });
     }
 
     await completeWebhookKey(SCOPE, String(event.id));

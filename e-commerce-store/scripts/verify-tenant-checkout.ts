@@ -74,7 +74,9 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: IPHONE_UA });
   await ctx.addInitScript('window.__name = function (f) { return f; };');
   const page = await ctx.newPage();
-  const email = 'tenant-checkout-' + Date.now() + '@goyunir.invalid';
+  // Resend's test inbox (a unique label per run): accepts the confirmation
+  // email without delivering it anywhere, so it can be read back.
+  const email = 'delivered+tc' + Date.now() + '@resend.dev';
   let sessionId = '';
   try {
     await page.goto(STORE + '/' + PRODUCT_SLUG, { waitUntil: 'load', timeout: 90_000 });
@@ -169,6 +171,33 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const ev = events.data.find((e: any) => e.data?.object?.id === sessionId);
   const dd = ev ? ((await getDb().select('webhook_dedupe', { where: { scope: eq('stripe_connect_event'), dedupe_key: eq(ev.id) } })) as any[]) : [];
   check(Boolean(ev) && ev.pending_webhooks === 0 && dd.length === 1 && dd[0].status === 'done', 'webhook event ' + (ev?.id || '?') + ' delivered and processed once');
+
+  console.log('\nThe customer\'s confirmation email (lib/tenant-email.ts)');
+  const mailKey = TENANT + ':order:' + orderRef;
+  let mailClaim: any = null;
+  for (let i = 0; i < 15 && mailClaim?.status !== 'done'; i++) {
+    mailClaim = ((await getDb().select('webhook_dedupe', { where: { scope: eq('tenant_email'), dedupe_key: eq(mailKey) } })) as any[])[0] || null;
+    if (mailClaim?.status !== 'done') await sleep(1000);
+  }
+  check(mailClaim?.status === 'done', 'sent, once, after the order was written (claim ' + (mailClaim?.status || 'missing') + ')');
+  const usageRows = (await getDb().select('usage_events', { where: { reference: eq('contact:' + email) }, select: ['tenant_id'] })) as any[];
+  check(usageRows.length === 1 && usageRows[0].tenant_id === TENANT, 'counted as test4\'s email, not the original store\'s: ' + JSON.stringify(usageRows));
+  const settingsRow = ((await getDb().select('global_platform_settings', { select: ['mail_provider', 'mail_api_key'], limit: 1 }).catch(() => [])) as any[])[0];
+  const resendKey = settingsRow?.mail_provider === 'resend' && settingsRow?.mail_api_key ? settingsRow.mail_api_key : process.env.RESEND_API_KEY;
+  const rs = (path: string) => fetch('https://api.resend.com' + path, { headers: { authorization: 'Bearer ' + resendKey } }).then((r) => r.json() as Promise<any>);
+  const listed = await rs('/emails?limit=50').catch(() => null);
+  const hit = (listed?.data || []).find((m: any) => (Array.isArray(m.to) ? m.to : [m.to]).includes(email));
+  const msg = hit ? await rs('/emails/' + hit.id) : null;
+  const storeRow = ((await getDb().select('tenant_store_config', { where: { tenant_id: eq(TENANT) }, select: ['config'], limit: 1 })) as any[])[0];
+  const storeName = String(storeRow?.config?.branding?.brandName || 'test4');
+  const support = String(storeRow?.config?.legal?.supportEmail || '');
+  const originalBrand = String(process.env.BRAND_NAME || process.env.NEXT_PUBLIC_SITE_NAME || '').trim();
+  check(Boolean(msg) && String(msg.from).startsWith('"' + storeName + '" <'), 'from the STORE: ' + (msg ? msg.from : '(not found in Resend)'));
+  check(Boolean(msg) && String(msg.subject) === 'Your order from ' + storeName + ' (' + orderRef + ')', 'subject: ' + (msg?.subject || '?'));
+  const replyTo = msg ? [].concat(msg.reply_to || []).join(',') : '';
+  check(Boolean(msg) && (support ? replyTo === support : replyTo === ''), 'reply-to is the store\'s own support address' + (support ? '' : ' (none set: none)') + ': ' + (replyTo || '(none)'));
+  check(Boolean(msg) && String(msg.html).includes(orderRef) && String(msg.html).includes('$19.00') && (!originalBrand || !String(msg.html).includes(originalBrand)) && !/<img/i.test(String(msg.html)),
+    'body: the order and $19.00, and nothing of the original store (no logo, no brand' + (originalBrand ? ' "' + originalBrand + '"' : '') + ')');
 
   if (CARD === '4000000000000259') {
     console.log('\nDispute');

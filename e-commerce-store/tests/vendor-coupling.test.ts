@@ -44,6 +44,10 @@ const ALLOWED: Record<string, string> = {
   'lib/mapbox-autofill.ts': 'client-side SDK bootstrap (browser only)',
   // The shared Mapbox Search JS asset URL, not an API call.
   'services/maps/types.ts': 'shared SDK asset URL',
+  // A verification script READING BACK what production sent (sender, reply-to,
+  // body of a store's order email). The email driver only sends; there is no
+  // port for inspecting a provider's sent log, and business code never does.
+  'scripts/verify-tenant-checkout.ts': 'proof read-back of the sent email (not business logic)',
 };
 
 /**

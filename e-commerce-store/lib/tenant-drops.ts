@@ -41,7 +41,7 @@ import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/we
 import { savedCardChargeRoute } from '@/lib/saved-card-route';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { subrequestCount, SUBREQUEST_LIMIT_FREE } from '@/lib/subrequest-meter';
-import { sendStoreEmailOnce, renderEntryReceived, renderEntryCharged, withinCallBudget, STORE_EMAIL_CALLS } from '@/lib/tenant-email';
+import { sendStoreEmailOnce, renderEntryReceived, renderEntryCharged, STORE_EMAIL_CALLS } from '@/lib/tenant-email';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -157,8 +157,8 @@ export async function startTenantEntry(input: {
  * Connect webhook and the page's confirm step both call it. Throws when it
  * cannot record yet (the webhook then retries) — an entry is never dropped.
  */
-export async function recordTenantEntryFromSetupSession(session: any, tenantId: string, stripeAccount: string, opts: { invocationStart?: number } = {}): Promise<{
-  handled: boolean; kind?: Kind; entryId?: string; alreadyEntered?: boolean; note: string;
+export async function recordTenantEntryFromSetupSession(session: any, tenantId: string, stripeAccount: string): Promise<{
+  handled: boolean; kind?: Kind; entryId?: string; alreadyEntered?: boolean; note: string; afterCommit?: () => Promise<string>;
 }> {
   const md = session?.metadata || {};
   const kind: Kind | null = md.entryType === 'raffle' ? 'raffle' : md.entryType === 'waitlist' ? 'waitlist' : null;
@@ -188,17 +188,16 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
     entryType: kind,
   });
   if (created.ok) {
-    // Only a NEW entry is confirmed by email (the webhook and the page both
-    // call this; exactly one creates it). After the entry exists; never throws.
-    let mail = 'skipped (call budget)';
-    if (withinCallBudget(opts.invocationStart, STORE_EMAIL_CALLS)) {
-      const m = await sendStoreEmailOnce({
+    return {
+      handled: true, kind, entryId: created.entryId, note: kind + ' entry recorded',
+      // Only a NEW entry is confirmed by email (the webhook and the page both
+      // call this; exactly one creates it). The caller runs it after its own
+      // bookkeeping is done; it never throws.
+      afterCommit: async () => (await sendStoreEmailOnce({
         tenantId, kind: 'entry', key: String(created.entryId), to: email,
         build: (store) => renderEntryReceived(store, { kind, product: String(md.variant || ''), size: String(md.size || '') }),
-      });
-      mail = m.status;
-    }
-    return { handled: true, kind, entryId: created.entryId, note: kind + ' entry recorded, email ' + mail };
+      })).status,
+    };
   }
   if (created.reason === 'already_entered') {
     // The same session recorded by the other path, or a genuine second entry.
@@ -495,6 +494,7 @@ export async function confirmTenantEntry(tenantId: string, sessionId: string): P
   if (session.status !== 'complete') return json({ success: false, message: 'Card setup was not completed.' });
   const r = await recordTenantEntryFromSetupSession(session, tenantId, route.stripeAccount);
   if (!r.handled) return json({ success: false, message: 'Card setup was not completed.' });
+  if (r.afterCommit) await r.afterCommit().catch(() => 'failed');
   const name = String(session.metadata?.variant || 'this item') + ' (' + String(session.metadata?.size || '') + ')';
   if (r.alreadyEntered) {
     return json({ success: true, alreadyEntered: true, message: r.kind === 'waitlist' ? `You're already on the waitlist for ${name}.` : `You're already entered for ${name}.` });

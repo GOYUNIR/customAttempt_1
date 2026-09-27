@@ -8,7 +8,8 @@
  * out through sendStoreEmail, which adds no masthead, brand or reply-to of its
  * own. Store- and customer-supplied text is escaped.
  *
- * Every send is AFTER the money step it reports is complete, BEST-EFFORT (it
+ * Every send is AFTER the money step it reports is complete (webhooks run it
+ * only after the event is marked done), BEST-EFFORT (it
  * never throws into the order, entry or charge path) and ONCE: a claim per
  * (store, kind, reference) in the same table the charge path uses, so a
  * retried webhook or a re-run draw never sends twice.
@@ -18,20 +19,10 @@ import { eq } from '@/lib/db/query';
 import { sendStoreEmail, platformSendingAddress } from '@/lib/email';
 import { storeFromHeader } from '@/lib/tenant-email-render';
 import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
-import { subrequestCount, SUBREQUEST_LIMIT_FREE } from '@/lib/subrequest-meter';
 
 /** Outbound calls one send can cost (store lookup 2, claim up to 2, send 1,
  *  usage row 1, complete 1): what a caller must budget for. */
 export const STORE_EMAIL_CALLS = 7;
-
-/** Whether an invocation that started at `invocationStart` (subrequestCount)
- *  can still afford `need` more calls with a safety margin. No start = unknown
- *  = yes (the caller has no budget to protect). */
-export function withinCallBudget(invocationStart: number | undefined, need: number): boolean {
-  if (invocationStart === undefined) return true;
-  const limit = Math.max(20, Number(process.env.WORKER_SUBREQUEST_LIMIT) || SUBREQUEST_LIMIT_FREE);
-  return subrequestCount() - invocationStart + need <= limit - 4;
-}
 
 export type { StoreIdentity, StoreEmail } from '@/lib/tenant-email-render';
 import { EMAIL_RE, type StoreIdentity, type StoreEmail } from '@/lib/tenant-email-render';
