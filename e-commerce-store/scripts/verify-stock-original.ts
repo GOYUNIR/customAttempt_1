@@ -44,19 +44,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const T = await ensureDefaultTenant();
   const run = Date.now().toString(36);
 
-  let vOne = await resolveVariantId(T, FIX.id, 'One');
-  if (!vOne) {
-    const w = await writeProductToPostgres(T, {
-      id: FIX.id, name: 'Stock proof fixture (hidden)', slug: FIX.slug, tagline: '', desc: '',
-      isActive: false, isArchived: false, isUpcoming: false, checkoutMode: 'FCFS', productType: 'fcfs', isRaffle: false,
-      maxPerEmail: 5, maxPerCart: 5, releaseEndsAt: '', totalInventory: 0, inventoryPerSize: { One: 0, Two: 0 },
-      priceCategories: [{ size: 'One', price: 1, checkoutMode: 'FCFS', stripeId: 'price_fixture_unused' }, { size: 'Two', price: 1, checkoutMode: 'FCFS', stripeId: 'price_fixture_unused' }],
-      notes: [], images: [], categories: [],
-    } as any);
-    if (!w.ok) throw new Error('fixture: ' + w.error);
-    vOne = await resolveVariantId(T, FIX.id, 'One');
-  }
-  const v1 = String(vOne);
+  // Draft products are not for sale (isHiddenFromSale), so the fixture is LIVE
+  // only while this proof runs and goes back to draft in `finally`.
+  const fixture = (isActive: boolean) => writeProductToPostgres(T, {
+    id: FIX.id, name: 'Stock proof fixture', slug: FIX.slug, tagline: '', desc: '',
+    isActive, isArchived: false, isUpcoming: false, checkoutMode: 'FCFS', productType: 'fcfs', isRaffle: false,
+    maxPerEmail: 5, maxPerCart: 5, releaseEndsAt: '', totalInventory: 0, inventoryPerSize: { One: 0, Two: 0 },
+    priceCategories: [{ size: 'One', price: 1, checkoutMode: 'FCFS', stripeId: 'price_fixture_unused' }, { size: 'Two', price: 1, checkoutMode: 'FCFS', stripeId: 'price_fixture_unused' }],
+    notes: [], images: [], categories: [],
+  } as any);
+  const w = await fixture(true);
+  if (!w.ok) throw new Error('fixture: ' + w.error);
+  const v1 = String(await resolveVariantId(T, FIX.id, 'One'));
   const v2 = String(await resolveVariantId(T, FIX.id, 'Two'));
   const others = async () => JSON.stringify(await db.select<any>('inventory_levels', { where: { tenant_id: eq(T), variant_id: neq(v1) }, select: ['variant_id', 'quantity_available'], order: { column: 'variant_id', ascending: true } }).then((r: any[]) => r.filter((x) => x.variant_id !== v2)));
   const realBefore = await others();
@@ -147,7 +146,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     for (const e of Object.values(b)) for (const h of await holdsOf(e)) if (h.status === 'active') await stock.releaseStock(T, h.hold_key).catch(() => 0);
     await stock.setStock(T, v1, 0, 'verify-stock-original', run + ' cleanup').catch(() => null);
     await stock.setStock(T, v2, 0, 'verify-stock-original', run + ' cleanup').catch(() => null);
-    console.log('\nfixture back to 0, holds released');
+    await fixture(false).catch(() => null);
+    console.log('\nfixture back to 0 and draft (hidden), holds released');
   }
   console.log(failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)');
   process.exit(failures === 0 ? 0 : 1);
