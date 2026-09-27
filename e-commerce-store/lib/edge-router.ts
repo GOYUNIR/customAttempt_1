@@ -148,6 +148,10 @@ export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain
   if (isAdminPath) return portal === 'admin' || portal === 'merchant';
   if (isSalesPath) return portal === 'sales' || portal === 'admin';
   if (isMerchantPath(pathname)) return portal === 'merchant' || portal === 'admin';
+  // The merchant dashboard's API (lib/merchant-session.ts): the merchant
+  // portal host only. Its session cookie is scoped there anyway; this keeps the
+  // routes from answering on any other host at all.
+  if (pathname === '/api/merchant' || pathname.startsWith('/api/merchant/')) return portal === 'merchant';
   return true;
 }
 
