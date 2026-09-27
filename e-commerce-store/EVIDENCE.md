@@ -122,3 +122,29 @@ evidence, and write the evidence next to it.
   in `tests/stock-gate.test.ts`. Not exercised live, because no production
   variant uses a pool. Real pool support is a separate feature.
 - [ ] **The homepage copy doesn't contradict the fee model** (DEFERRED-9).
+
+## Plan billing (2026-09-27, Stripe TEST mode, production deploy 82c39a5)
+
+`scripts/verify-plan-billing.ts`, all phases ALL PASS. Every plan change arrived through the deployed platform webhook.
+- **subscribe** (22 checks). test4 on Free: a $19 sale carries a 38¢ fee. The owner's Billing tab offers "Switch to Growth: $99.00/month, no per-sale fee". The real button opens real Stripe Checkout ($99.00/month, no trial), paid with card 4242 in a browser. The dashboard then shows "Your plan: Growth" / "No per-sale fee.". Read back:
+  - `tenants.plan_id = growth`, no grace;
+  - subscription active, $99, tagged test4;
+  - `platformFeeForCharge` = 0 (flat);
+  - PLAN_CHANGED is in `audit_logs`;
+  - a second purchase gets 409;
+  - the portal opens billing.stripe.com;
+  - store B's portal gets 404.
+- **forgery.** A live subscription whose metadata names store B, paid by another customer, is refused and store B stays on Free. A forged-then-cancelled subscription naming test4 is refused and test4 stays on Growth.
+- **real sale on Growth** (`verify-tenant-checkout.ts`, ALL PASS): `application_fee_amount` null, no application fee object, order `platform_fee_cents` 0, billing row `fee_cents` 0.
+- **cancel.** The webhook moves test4 to Free, the subscription row reads canceled, and the dashboard offers Growth again. The next real sale carries `application_fee_amount` 38 and application fee fee_1UKGH5… for 38.
+- **renewal** (store B on a Stripe test clock):
+  - subscription active → Growth;
+  - card 0341 set, clock +32 days → past_due → Growth with grace ending exactly 7 days out;
+  - a sale during grace carries a fee of 0;
+  - the Billing tab shows the failure and its date;
+  - once grace has passed, `tenantPlan` returns Free and a sale carries a 38¢ graduated fee;
+  - card fixed and invoice paid → Growth, grace cleared;
+  - clock deleted → Free.
+- **deleted billing customer.** Store B's customer had been deleted with the clock; a new checkout replaces it (200, new customer).
+- **isolation** (`verify-merchant-isolation.ts`, ALL PASS). The staff and support sessions each get 403 on all three billing routes.
+- Unit tests: `tests/plan-billing.test.ts` (10). A planted regression (cancel always → Free) is caught.

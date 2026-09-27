@@ -235,44 +235,48 @@ data. After that, `public.plans` is the source, and a test asserts it matches
 Items 1–2 can go ahead as soon as the decisions are made. Items 3–5 are part
 of the Connect work.
 
-## 9. Plan billing — SCOPE ONLY, not built (2026-09-27)
+## 9. Plan billing — BUILT and proven in test mode (2026-09-27)
 
-**Why it matters.** Until this exists the pricing page cannot sell Growth: it
-now says "talk to us" instead of offering a trial nobody can start
-(OBJECTIONS.md §1).
+**Owner decisions:** no trial; a failed renewal keeps the paid plan for 7 days
+(`PLAN_GRACE_DAYS`), then Free; Scale is never self-serve (contract);
+Stripe Tax deferred (see below).
 
-**Already in place.** Plans (`public.plans`, 00027/00032) and a per-store plan
-(`tenants.plan_id`). The fee engine (`platformFeeForCharge` → `tenantPlan`)
-already charges 0% on a flat-fee plan. So the moment a store's plan becomes
-`growth`, its per-sale fee stops. The missing piece is purely *how a merchant
-pays $99 and how their plan follows the payment*.
+**How it works** (`lib/plan-billing.ts`, rules in `lib/plan-billing-rules.ts`,
+migration 00038):
+1. Owner-only "Plan & billing" tab in /app. "Switch to Growth" opens Stripe
+   Checkout (`mode: subscription`) on the PLATFORM account. The price is
+   found by lookup key `plan_<id>_<cents>_monthly` or created from the plans
+   row, so the amount is data. One Stripe customer per store
+   (`tenant_subscriptions`), replaced if deleted in Stripe.
+2. The platform webhook handles `customer.subscription.*` and
+   `invoice.paid/payment_failed`, once per event. It re-reads the
+   subscription from Stripe and applies it only when its customer is that
+   store's billing customer (THE GUARD). The plan follows the store's
+   GOVERNING subscription (paying > failing > ended), so a duplicate
+   purchase cannot be cancelled into a downgrade. A subscription only moves
+   a store between Free and its own plan, so a contract store is never
+   moved. Changes are audited as `PLAN_CHANGED`.
+3. Grace: `tenants.plan_grace_until`, enforced inside `tenantPlan()` (no
+   extra call on the charge path).
+4. "Manage billing" opens Stripe's customer portal (cancel at period end,
+   card, invoices).
+5. A subscription-mode `checkout.session.completed` is acknowledged and
+   never treated as an order.
 
-**The shape (Stripe Billing, on the PLATFORM account, not the merchant's):**
-1. Owner-only "Switch to Growth" in /app → Stripe Checkout (`mode:
-   subscription`, the platform's Growth price), Stripe customer = the store.
-   The store id rides in subscription metadata.
-2. The platform webhook (existing endpoint) handles
-   `customer.subscription.created/updated/deleted` and
-   `invoice.paid/payment_failed`, idempotent on event id:
-   - active → `plan_id = growth`;
-   - past_due → keep Growth for a grace period, then Free;
-   - canceled → Free at period end.
-   The plan change is audited.
-3. "Manage billing" → Stripe's customer portal (cancel, card update,
-   invoices), so no billing UI is ours to build.
-4. The D3 prompt ("you're paying Growth's price this month…") links to step 1.
-5. Isolation proof (only the store's owner can subscribe or cancel its own
-   plan; a forged store id in metadata is refused by matching the Stripe
-   customer to the store). Then a live test-mode proof: subscribe → fee
-   drops to 0% on the next sale; cancel → back to graduated at period end;
-   failed renewal → grace, then Free.
+**Proof:** `scripts/verify-plan-billing.ts` (subscribe / cancel / renewal,
+all ALL PASS) and `verify-tenant-checkout.ts` real sales at each step. Log
+in EVIDENCE.md.
 
-**Size.** About 2–3 days including both proofs. No new money-path engine: the
-fee side is done.
+**Not built:**
+- The D3 prompt ("you're paying Growth's price this month…").
+- Growth on the public pricing page is still "talk to us" (`contactOnly`).
+  Making it self-serve there (signup → dashboard → Switch) is an owner
+  call.
+- 🛑 **Stripe Tax: deferred, a PRE-REAL-REVENUE requirement.** Not a toggle:
+  the platform account's tax settings are "pending" (no head office address
+  or registrations). To turn it on: complete Stripe Tax settings, add
+  registrations where required, then set `PLAN_BILLING_AUTOMATIC_TAX=true`
+  (Checkout then collects the address and adds tax).
+- 🛑 **Live mode:** the live platform webhook must subscribe to the five plan
+  events, and the live portal configuration is created on first use.
 
-**Decisions needed before building:**
-1. A trial or not: the old copy promised 14 days. A trial costs nothing on
-   the fee side, since Growth is 0% anyway.
-2. Grace length on a failed renewal (suggest 7 days).
-3. Tax on our subscription invoices: Stripe Tax on, off, or later.
-4. Whether Scale gets any self-serve path (suggest no: invoiced by contract).

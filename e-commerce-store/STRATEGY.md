@@ -189,12 +189,19 @@ Add an item whenever a gap is found; tick it only with evidence, recorded in
   on the same ledger (2026-09-27).
 - The pricing page states the per-sale fee, derived from the plan data
   (DEFERRED-9, 2026-09-27).
+- Plan billing: Growth by Stripe subscription, 7-day grace, proven in test
+  mode with real sales at 0% and graduated (PRICING.md §9, 2026-09-27).
 
 **Pending:**
 - 🛑 Cloudflare Workers Paid (50-subrequest ceiling on Free): the first
   go-live action; staying on Free until then is deliberate (owner).
 - 🛑 Live-mode Stripe webhooks (platform + Connect) must subscribe to
-  `checkout.session.expired`, as the test-mode ones do.
+  `checkout.session.expired`, as the test-mode ones do. The live PLATFORM
+  webhook must also subscribe to `customer.subscription.created/updated/deleted`
+  and `invoice.paid/payment_failed` (plan billing).
+- 🛑 Stripe Tax on plan invoices before real subscription revenue (PRICING.md §9).
+- 🛑 support@goyunir.com must receive mail (goyunir.com has no MX), then set
+  `SUPPORT_EMAIL`.
 - Every charge path writes an order: admin trigger-drop not yet proven with a
   real charge.
 

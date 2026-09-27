@@ -138,14 +138,15 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const onPlatform = await stripe.checkout.sessions.retrieve(sessionId).then(() => true).catch(() => false);
   check(!onPlatform, 'the session does NOT exist on the platform account');
   const pi = await stripe.paymentIntents.retrieve(String(session.payment_intent), {}, on);
-  check(pi.application_fee_amount === expectedFee, 'application_fee_amount ' + pi.application_fee_amount + ' = expected ' + expectedFee);
+  check((pi.application_fee_amount ?? 0) === expectedFee && (expectedFee > 0 || pi.application_fee_amount == null), 'application_fee_amount ' + pi.application_fee_amount + ' = expected ' + expectedFee);
   check(pi.metadata?.tenant_id === TENANT, 'PaymentIntent carries tenant_id');
   let fee: any = null;
-  for (let i = 0; i < 20 && !fee; i++) {
+  // A zero fee (e.g. Growth) is sent as no fee at all, so no fee object is made.
+  for (let i = 0; i < (expectedFee > 0 ? 20 : 5) && !fee; i++) {
     const ch = await stripe.charges.retrieve(String(pi.latest_charge), {}, on);
     if (ch.application_fee) fee = await stripe.applicationFees.retrieve(String(ch.application_fee)); else await sleep(1000);
   }
-  check(Boolean(fee) && fee.amount === expectedFee && fee.account === acct, 'platform received fee ' + (fee ? fee.id + ' ' + fee.amount : '(none)'));
+  check(expectedFee > 0 ? Boolean(fee) && fee.amount === expectedFee && fee.account === acct : !fee, 'platform received fee ' + (fee ? fee.id + ' ' + fee.amount : '(none)') + ' (expected ' + expectedFee + ')');
 
   console.log('\nDatabase (waiting for the webhook)');
   const orderRef = String(session.metadata?.orderRef || '');
