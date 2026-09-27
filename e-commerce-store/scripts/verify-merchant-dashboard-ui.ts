@@ -61,6 +61,36 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
       check(/TEST-/.test(orders), 'test4\'s orders are listed');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
       check(!overflow, 'no sideways scrolling at 390px');
+      const wide = () => page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+
+      await page.getByRole('button', { name: /^Raffles & waitlists/ }).tap(); await page.waitForTimeout(1000);
+      const drops = await page.evaluate(() => document.body.innerText);
+      await page.screenshot({ path: join(OUT, 'dash-test4-drops.png'), fullPage: true });
+      check(/Connect Test Raffle/.test(drops) && /Run due draws now/.test(drops) && /Recent draws/.test(drops), 'the raffles tab lists test4\'s raffle, its recent draws, and the run button');
+      check(!(await wide()), 'raffles tab: no sideways scrolling');
+      await page.getByRole('button', { name: 'Entries' }).first().tap(); await page.waitForTimeout(1500);
+      const ent = await page.evaluate(() => document.body.innerText);
+      await page.screenshot({ path: join(OUT, 'dash-test4-entries.png'), fullPage: true });
+      check(/@goyunir\.invalid/.test(ent) && /(charged|pending|declined|cancelled)/.test(ent) && !/pm_|cus_/.test(ent), 'entries show email and status, no card ids');
+      check(!(await wide()), 'entries: no sideways scrolling');
+      await page.getByRole('button', { name: 'Back' }).tap(); await page.waitForTimeout(400);
+
+      await page.getByRole('button', { name: /^Staff$/ }).tap(); await page.waitForTimeout(800);
+      const staff = await page.evaluate(() => document.body.innerText);
+      await page.screenshot({ path: join(OUT, 'dash-test4-staff.png'), fullPage: true });
+      check(/People who can run this store/.test(staff) && staff.includes(aEmail) && /Send invitation/.test(staff), 'the owner sees the staff tab: themselves, and the invite form');
+      check(!/isolation-owner-b/.test(staff), 'and no one from store B');
+      check(!(await wide()), 'staff tab: no sideways scrolling');
+      await ctx.close(); }
+
+    console.log('\nSign out');
+    { const sOut = (await issueAdminDevice(kv, aEmail, false, deviceMetaFor(idA!), 600)).token;
+      const { ctx, page } = await open(sOut);
+      await page.goto('https://app.goyunir.com/app', { waitUntil: 'load' }); await page.waitForTimeout(3000);
+      await page.getByRole('button', { name: 'Sign out' }).tap(); await page.waitForTimeout(2500);
+      check(/\/app\/login/.test(page.url()), 'tapping Sign out lands on the merchant sign-in: ' + page.url());
+      const after = await fetch('https://app.goyunir.com/api/merchant/store', { headers: { cookie: 'goyunir_admin_device=' + sOut } });
+      check(after.status === 401, 'and that session is dead on the server too: ' + after.status);
       await ctx.close(); }
 
     console.log('\nstore B creates a product through the form');
