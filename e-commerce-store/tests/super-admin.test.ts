@@ -37,8 +37,8 @@ function withSupabaseEnv(fn: () => Promise<void>) {
 }
 
 test(
-  'verifySuperAdminSignIn: returns the account when credentials + super-admin flag are valid',
-  withSupabaseEnv(async () => {
+  'verifySuperAdminSignIn: returns the account when the SERVER-SIDE users row says super admin',
+  withSupabaseServiceEnv(async () => {
     const restore = installFetchMock((url) => {
       if (url.includes('/auth/v1/token')) {
         return new Response(
@@ -46,8 +46,8 @@ test(
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      if (url.includes('/rest/v1/profiles')) {
-        return new Response(JSON.stringify([{ is_super_admin: true }]), {
+      if (url.includes('/rest/v1/users')) {
+        return new Response(JSON.stringify([{ is_super_admin: true, role: null }]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -67,7 +67,7 @@ test(
 
 test(
   'verifySuperAdminSignIn: rejects a user who is NOT a super-admin',
-  withSupabaseEnv(async () => {
+  withSupabaseServiceEnv(async () => {
     const restore = installFetchMock((url) => {
       if (url.includes('/auth/v1/token')) {
         return new Response(
@@ -105,7 +105,7 @@ test(
         id: 'user-1',
         email: 'admin@x.co',
         accessToken: 'tok',
-        isSuperAdmin: false,
+        metadataClaimsSuperAdmin: false,
       });
     } finally {
       restore();
@@ -114,8 +114,11 @@ test(
 );
 
 test(
-  'verifySuperAdminSignIn: falls back to GoTrue metadata when the profiles table read fails (schema not applied)',
-  withSupabaseEnv(async () => {
+  // REGRESSION (proven exploitable on production): user_metadata is editable by
+  // the user themselves, and the profiles read failed on every call (42P17), so
+  // this fallback made any account holder a super admin. Metadata must never count.
+  'verifySuperAdminSignIn: NEVER trusts self-editable metadata, even when the server-side reads fail',
+  withSupabaseServiceEnv(async () => {
     const restore = installFetchMock((url) => {
       if (url.includes('/auth/v1/token')) {
         return new Response(
@@ -130,17 +133,13 @@ test(
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      if (url.includes('/rest/v1/profiles')) {
-        // A fresh project with no schema → PostgREST returns a 404/PGRST error.
-        return new Response('{"message":"Could not find the table"}', { status: 404 });
+      if (url.includes('/rest/v1/')) {
+        return new Response('{"code":"42P17","message":"infinite recursion detected in policy for relation profiles"}', { status: 500 });
       }
       return new Response('{}', { status: 404 });
     });
     try {
-      assert.deepEqual(await verifySuperAdminSignIn('admin@x.co', 'pw'), {
-        id: 'user-1',
-        email: 'admin@x.co',
-      });
+      assert.equal(await verifySuperAdminSignIn('admin@x.co', 'pw'), null);
     } finally {
       restore();
     }
@@ -250,6 +249,45 @@ test(
       });
     } finally {
       restore();
+    }
+  }),
+);
+
+test(
+  'verifySuperAdminSignIn: falls back to the service-role profiles flag when users has none',
+  withSupabaseServiceEnv(async () => {
+    const restore = installFetchMock((url) => {
+      if (url.includes('/auth/v1/token')) {
+        return new Response(JSON.stringify({ access_token: 'tok', user: { id: 'user-1', email: 'admin@x.co' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/rest/v1/users')) return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.includes('/rest/v1/profiles')) return new Response(JSON.stringify([{ is_super_admin: true }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response('{}', { status: 404 });
+    });
+    try {
+      assert.deepEqual(await verifySuperAdminSignIn('admin@x.co', 'pw'), { id: 'user-1', email: 'admin@x.co' });
+    } finally {
+      restore();
+    }
+  }),
+);
+
+test(
+  'verifySuperAdminSignIn: fails closed without the service-role key (cannot verify = refused)',
+  withSupabaseEnv(async () => {
+    const svc = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const restore = installFetchMock((url) => {
+      if (url.includes('/auth/v1/token')) {
+        return new Response(JSON.stringify({ access_token: 'tok', user: { id: 'user-1', email: 'admin@x.co', user_metadata: { is_super_admin: true } } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify([{ is_super_admin: true }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    try {
+      assert.equal(await verifySuperAdminSignIn('admin@x.co', 'pw'), null);
+    } finally {
+      restore();
+      if (svc !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = svc;
     }
   }),
 );

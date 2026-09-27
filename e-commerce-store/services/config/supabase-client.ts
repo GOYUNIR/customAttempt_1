@@ -498,7 +498,7 @@ export async function createSuperAdmin(input: {
 export async function verifySuperAdminCredentials(
   email: string,
   password: string,
-): Promise<{ id: string; email: string; accessToken: string; isSuperAdmin: boolean } | null> {
+): Promise<{ id: string; email: string; accessToken: string; metadataClaimsSuperAdmin: boolean } | null> {
   if (!supabaseConfigured()) return null;
   const { anonKey } = readSupabaseEnv();
   try {
@@ -512,105 +512,63 @@ export async function verifySuperAdminCredentials(
     } | null;
     if (!result?.access_token || !result.user?.id) return null;
     const meta = result.user.user_metadata || {};
-    const isSuperAdmin =
+    // SELF-EDITABLE by the user (PUT /auth/v1/user): informational only, never
+    // an authorization input. See readSuperAdminFlag.
+    const metadataClaimsSuperAdmin =
       meta.is_super_admin === true || meta.role === 'super_admin';
     return {
       id: String(result.user.id),
       email: String(result.user.email || email).trim().toLowerCase(),
       accessToken: String(result.access_token),
-      isSuperAdmin,
+      metadataClaimsSuperAdmin,
     };
   } catch {
     return null;
   }
 }
 
-/** Full super-admin sign-in: verify credentials AND confirm the
- *  `profiles.is_super_admin` flag (via the authenticated user's own RLS-scoped
- *  read of their profile row). Returns the master account on success, null when
- *  the credentials are wrong OR the user is not a super-admin.
+/**
+ * Is this Auth user a super admin, by SERVER-SIDE data only: public.users
+ * (is_super_admin, or role 'super_admin'), else public.profiles.is_super_admin,
+ * both read with the service-role key. Null when it cannot be determined.
  *
- *  Robustness: when the `profiles` table read fails (a fresh Supabase project
- *  whose schema was never applied — the most common cause of "Invalid email or
- *  password" despite a correct password), fall back to the GoTrue user_metadata
- *  super-admin flag. The wizard is the only thing that ever creates an Auth user
- *  with that flag, so accepting it cannot be a privilege escalation. */
+ * Never from GoTrue user_metadata: any signed-in user can rewrite their own
+ * user_metadata (PUT /auth/v1/user with their own token). This used to fall
+ * back to it whenever the user-scoped `profiles` read failed -- which on
+ * production is EVERY time ("infinite recursion detected in policy for
+ * relation profiles", 42P17) -- so any account holder could flag themselves
+ * and sign in as super admin. Proven with a throwaway staff account before
+ * this fix.
+ */
+async function readSuperAdminFlag(userId: string): Promise<boolean | null> {
+  const { serviceRoleKey } = readSupabaseEnv();
+  if (!serviceRoleKey) return null;
+  const id = encodeURIComponent(userId);
+  try {
+    const users = (await supabaseRestFetch(`/users?id=eq.${id}&select=is_super_admin,role&limit=1`, { key: serviceRoleKey })) as Array<{ is_super_admin?: boolean; role?: string | null }> | null;
+    if (Array.isArray(users) && users[0] && (users[0].is_super_admin === true || users[0].role === 'super_admin')) return true;
+  } catch { /* fall through to profiles */ }
+  try {
+    const profiles = (await supabaseRestFetch(`/profiles?id=eq.${id}&select=is_super_admin&limit=1`, { key: serviceRoleKey })) as Array<{ is_super_admin?: boolean }> | null;
+    return Array.isArray(profiles) && profiles[0]?.is_super_admin === true;
+  } catch {
+    return null;
+  }
+}
+
+/** Full super-admin sign-in: verify credentials AND confirm super-admin status
+ *  from server-side data (readSuperAdminFlag). Null when the credentials are
+ *  wrong, the user is not a super admin, or that cannot be confirmed (fails
+ *  closed: a sign-in that cannot be verified is refused). */
 export async function verifySuperAdminSignIn(
   email: string,
   password: string,
 ): Promise<{ id: string; email: string } | null> {
   const credentials = await verifySuperAdminCredentials(email, password);
   if (!credentials) return null;
-  try {
-    const { anonKey } = readSupabaseEnv();
-    const rows = (await supabaseRestFetch(
-      `/profiles?id=eq.${encodeURIComponent(credentials.id)}&select=is_super_admin&limit=1`,
-      { key: anonKey, bearer: credentials.accessToken },
-    )) as Array<{ is_super_admin?: boolean }> | null;
-    if (Array.isArray(rows) && rows.length > 0 && rows[0]?.is_super_admin === true) {
-      return { id: credentials.id, email: credentials.email };
-    }
-    // A profile row exists but isn't flagged super-admin → not a super-admin
-    // (fail closed). Only fall through to metadata when the read genuinely
-    // failed (schema missing), handled below.
-  } catch {
-    // Profile read failed (e.g. `profiles` table missing on a fresh project).
-    // Fall back to the wizard-stamped GoTrue metadata below.
-  }
-  if (credentials.isSuperAdmin) {
-    return { id: credentials.id, email: credentials.email };
-  }
-  return null;
+  return (await readSuperAdminFlag(credentials.id)) === true ? { id: credentials.id, email: credentials.email } : null;
 }
 
-/** The platform's RBAC roles (mirrors lib/rbac.ts's `PortalRole` — duplicated
- *  here rather than imported so this Node-only Supabase client module never
- *  needs to import a shared type from an edge-safe zero-import module and
- *  vice versa; both are kept in lock-step by the 00003 migration's CHECK
- *  constraint being the actual source of truth). */
-export type PortalSignInRole = 'super_admin' | 'sales' | 'owner' | 'staff' | 'customer';
-
-/**
- * General portal sign-in: verify Supabase Auth credentials AND resolve the
- * account's RBAC `role` + `tenant_id` from `profiles` (the table this app's
- * auth flow already reads — see verifySuperAdminSignIn above). Unlike that
- * function, this accepts ANY valid role, not just super_admin — it's what
- * the Staff Impersonation flow (Tier 2 sales/support signing into a tenant
- * store) and any future non-super-admin portal entry point use.
- *
- * Falls back to the GoTrue user_metadata `role` (same wizard-stamped
- * convention verifySuperAdminSignIn falls back to) when the `profiles` read
- * fails outright — but NEVER upgrades a role: the metadata fallback can only
- * return 'customer' unless `is_super_admin`/`role: 'super_admin'` was
- * explicitly stamped by the wizard, so a `profiles` outage can't be used to
- * self-escalate.
- */
-export async function verifyPortalSignIn(
-  email: string,
-  password: string,
-): Promise<{ id: string; email: string; role: PortalSignInRole; tenantId: string | null } | null> {
-  const credentials = await verifySuperAdminCredentials(email, password);
-  if (!credentials) return null;
-  try {
-    const { anonKey } = readSupabaseEnv();
-    const rows = (await supabaseRestFetch(
-      `/profiles?id=eq.${encodeURIComponent(credentials.id)}&select=role,is_super_admin,tenant_id&limit=1`,
-      { key: anonKey, bearer: credentials.accessToken },
-    )) as Array<{ role?: string | null; is_super_admin?: boolean; tenant_id?: string | null }> | null;
-    if (Array.isArray(rows) && rows.length > 0) {
-      const row = rows[0];
-      const role: PortalSignInRole = row.is_super_admin === true
-        ? 'super_admin'
-        : (['sales', 'owner', 'staff', 'customer'].includes(String(row.role || '')) ? (row.role as PortalSignInRole) : 'customer');
-      return { id: credentials.id, email: credentials.email, role, tenantId: row.tenant_id ?? null };
-    }
-  } catch {
-    // profiles read failed (schema missing) — fall through to metadata below.
-  }
-  return {
-    id: credentials.id,
-    email: credentials.email,
-    role: credentials.isSuperAdmin ? 'super_admin' : 'customer',
-    tenantId: null,
-  };
-}
+// verifyPortalSignIn (role from a user-scoped profiles read, falling back to
+// self-editable user_metadata) was removed: impersonation now resolves the role
+// server-side (readStaffIdentity), like every other sign-in.

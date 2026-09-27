@@ -25,12 +25,20 @@ const APP = 'https://app.goyunir.com';
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const B = 'ff8d5e59-1a07-4e83-bc13-f949c745d9de'; // goyunir-test-1
 const B_OWNER = 'isolation-owner-b@goyunir.invalid';
+const SALES = 'https://sales.goyunir.com';
+const RAFFLE_VARIANT_A = '1e02eebc-af34-4f52-b57d-5227b6633589'; // test4's raffle size (already drawn)
+// Resend's official test inbox: accepts mail without delivering it anywhere.
+const INVITE_PROBE = 'delivered@resend.dev';
+let entryEmail = '';
+let staffEmail = '';
+let salesEmail = '';
+const runStart = new Date().toISOString();
 let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 
 (async () => {
   const { getDb } = await import('../lib/db/client');
-  const { eq } = await import('../lib/db/query');
+  const { eq, isNull } = await import('../lib/db/query');
   const { readStaffIdentity, deviceMetaFor } = await import('../lib/staff-identity');
   const { issueAdminDevice } = await import('../lib/admin-verify');
   const { createKvClient, loadProducts } = await import('../lib/server-config');
@@ -169,6 +177,157 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     check(csrf.status === 403, 'a cross-site write is blocked: ' + csrf.status);
     check((await call('/api/admin/products?includeArchived=true', sA)).status === 403, 'the admin tree still refuses a merchant session');
 
+    // ── Raffles & waitlists ────────────────────────────────────────────────
+    console.log('\n/api/merchant/drops');
+    const variantsOf = async (t: string) => new Set(((await db.select<any>('product_variants', { where: { tenant_id: eq(t) }, select: ['id'] })) as any[]).map((v) => String(v.id)));
+    const aVariants = await variantsOf(A);
+    const dA = await call('/api/merchant/drops', sA);
+    const dB = await call('/api/merchant/drops', sB);
+    const dAIds = (dA.body?.drops || []).map((d: any) => d.variantId);
+    check(dA.status === 200 && dAIds.length > 0 && dAIds.every((v: string) => aVariants.has(v)) && dAIds.includes(RAFFLE_VARIANT_A), 'test4 lists only its own raffles/waitlists (' + dAIds.length + ')');
+    check(dB.status === 200 && !(dB.body?.drops || []).some((d: any) => aVariants.has(d.variantId)), 'store B lists none of test4\'s (' + (dB.body?.drops || []).length + ')');
+    entryEmail = 'iso-entry-' + Date.now() + '@goyunir.invalid';
+    const inserted = (await db.insert<any>('raffle_entries', { tenant_id: A, variant_id: RAFFLE_VARIANT_A, email: entryEmail, status: 'pending', entry_type: 'raffle' })) as any[];
+    const entryId = String(inserted[0].id);
+    const eA = await call('/api/merchant/drops/entries?variantId=' + RAFFLE_VARIANT_A, sA);
+    const eB = await call('/api/merchant/drops/entries?variantId=' + RAFFLE_VARIANT_A, sB);
+    check(eA.status === 200 && (eA.body?.entries || []).some((e: any) => e.id === entryId) && !JSON.stringify(eA.body).match(/pm_|cus_|seti_/), 'test4 sees the entry (and no card/customer ids)');
+    check(eB.status === 200 && (eB.body?.entries || []).length === 0, 'store B asking for test4\'s item by id gets nothing (' + (eB.body?.entries || []).length + ')');
+    const stillPending = async () => String(((await db.select<any>('raffle_entries', { where: { id: eq(entryId) }, select: ['status'] })) as any[])[0]?.status);
+    const cB = await call('/api/merchant/drops/cancel', sB, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entryId, tenantId: A }) });
+    check(cB.status === 404 && (await stillPending()) === 'pending', 'store B cannot remove test4\'s entry by id: ' + cB.status + ', entry still pending');
+    const snapA = async () => JSON.stringify([
+      ((await db.select<any>('raffle_entries', { where: { tenant_id: eq(A) }, select: ['id', 'status'], order: { column: 'id', ascending: true } })) as any[]),
+      ((await db.select<any>('drop_draws', { where: { tenant_id: eq(A) }, select: ['id'] })) as any[]).length,
+    ]);
+    const beforeRun = await snapA();
+    const runB = await call('/api/merchant/drops/run', sB, { method: 'POST' });
+    check(runB.status === 200 && (await snapA()) === beforeRun, 'store B running its draws leaves every test4 entry and draw untouched: ' + JSON.stringify(runB.body));
+    const cA = await call('/api/merchant/drops/cancel', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entryId }) });
+    check(cA.status === 200 && (await stillPending()) === 'cancelled', 'test4 removes its own pending entry');
+    const cA2 = await call('/api/merchant/drops/cancel', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entryId }) });
+    check(cA2.status === 404, 'an entry no longer pending cannot be removed again');
+
+    // ── Audit placement ────────────────────────────────────────────────────
+    console.log('\nAudit');
+    const auditRows = async (action: string, actor: string) => (await db.select<any>('audit_logs', { where: { action: eq(action), actor: eq(actor) }, select: ['tenant_id', 'detail', 'created_at'], order: { column: 'created_at', ascending: false }, limit: 5 })) as any[];
+    const cancelAudit = (await auditRows('MERCHANT_ENTRY_CANCELLED', aOwner))[0];
+    check(cancelAudit?.tenant_id === A && String(cancelAudit?.detail?.detail) === entryEmail, 'the removal is in the platform audit, tagged test4: ' + JSON.stringify(cancelAudit));
+    const settingsAuditB = (await auditRows('MERCHANT_SETTINGS_SAVED', B_OWNER))[0];
+    check(settingsAuditB?.tenant_id === B, 'store B\'s settings save is tagged store B');
+    // (the original store's admin audit list is checked at the end, over everything this run did)
+
+    // ── Sign-out ───────────────────────────────────────────────────────────
+    console.log('\n/api/merchant/signout');
+    const sA2 = (await issueAdminDevice(kv, aOwner, false, deviceMetaFor(idA), 600)).token;
+    const outRes = await fetch(APP + '/api/merchant/signout', { method: 'POST', headers: { cookie: 'goyunir_admin_device=' + sA2, origin: APP } });
+    check(outRes.status === 200 && /goyunir_admin_device=;|Max-Age=0/i.test(String(outRes.headers.get('set-cookie'))), 'sign-out answers 200 and clears the cookie');
+    check((await call('/api/merchant/store', sA2)).status === 401, 'the signed-out session no longer works (the record is gone, not just the cookie)');
+    check((await call('/api/merchant/store', sA)).status === 200, 'the same owner\'s other session is unaffected');
+    check((await call('/api/merchant/signout', null, { method: 'POST' })).status === 401, 'sign-out without a session: 401');
+
+    // ── Staff ──────────────────────────────────────────────────────────────
+    console.log('\n/api/merchant/staff');
+    const tenantOfEmail = async (e: string) => ((await db.select<any>('users', { where: { email: eq(e) }, select: ['tenant_id', 'role'] })) as any[])[0];
+    const sfA = await call('/api/merchant/staff', sA);
+    const sfB = await call('/api/merchant/staff', sB);
+    const aPeople = (sfA.body?.people || []).map((p: any) => p.email);
+    const aTenants = await Promise.all(aPeople.map(tenantOfEmail));
+    check(sfA.status === 200 && aPeople.includes(aOwner) && aTenants.every((u: any) => u?.tenant_id === A), 'test4 lists only test4\'s people: ' + aPeople.join(', '));
+    check(sfB.status === 200 && !(sfB.body?.people || []).some((p: any) => aPeople.includes(p.email)), 'store B lists none of them');
+    await db.update('staff_invites', { where: { email: eq(INVITE_PROBE), accepted_at: isNull() } }, { revoked_at: new Date().toISOString() }, { returning: 'minimal' } as any).catch(() => null);
+    const inv = await call('/api/merchant/staff/invite', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: INVITE_PROBE, role: 'owner', tenantId: B, tenant_id: B }) });
+    const invRow = ((await db.select<any>('staff_invites', { where: { email: eq(INVITE_PROBE) }, select: ['id', 'tenant_id', 'role', 'revoked_at', 'accepted_at'], order: { column: 'created_at', ascending: false }, limit: 1 })) as any[])[0];
+    check(inv.status === 201 && invRow?.tenant_id === A && invRow?.role === 'staff', 'an owner\'s invite is for THEIR store as staff (smuggled role/store ignored): ' + inv.status + ' ' + JSON.stringify(invRow));
+    const invIdsB = (sfB.body?.invites || []).map((i: any) => i.id);
+    check(!invIdsB.includes(invRow?.id) && !((await call('/api/merchant/staff', sB)).body?.invites || []).some((i: any) => i.id === invRow?.id), 'store B does not see test4\'s invite');
+    const rvB = await call('/api/merchant/staff/revoke-invite', sB, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ inviteId: invRow?.id }) });
+    const invAfterB = ((await db.select<any>('staff_invites', { where: { id: eq(invRow?.id) }, select: ['revoked_at'] })) as any[])[0];
+    check(rvB.status === 404 && !invAfterB?.revoked_at, 'store B cannot revoke test4\'s invite: ' + rvB.status);
+    const rvA = await call('/api/merchant/staff/revoke-invite', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ inviteId: invRow?.id }) });
+    const invAfterA = ((await db.select<any>('staff_invites', { where: { id: eq(invRow?.id) }, select: ['revoked_at'] })) as any[])[0];
+    check(rvA.status === 200 && Boolean(invAfterA?.revoked_at), 'test4 revokes its own invite');
+
+    // A staff member of test4, made through the real invite + accept flow.
+    staffEmail = 'iso-staff-a-' + Date.now() + '@goyunir.invalid';
+    const sInv: any = await createInvite({ email: staffEmail, role: 'staff', tenantId: A, invitedByEmail: aOwner });
+    const acc = await fetch(APP + '/api/admin/accept-invite', { method: 'POST', headers: { 'content-type': 'application/json', origin: APP }, body: JSON.stringify({ token: sInv.token, password: 'Iso-' + crypto.randomUUID() + '-Aa1!' }) });
+    const idS = await readStaffIdentity(staffEmail);
+    check(acc.status === 200 && idS?.tenantId === A && idS?.role === 'staff', 'test4 staff member created through the real accept route: ' + acc.status);
+    const sS = (await issueAdminDevice(kv, staffEmail, false, deviceMetaFor(idS!), 600)).token;
+    const sStore = await call('/api/merchant/store', sS);
+    check(sStore.status === 200 && sStore.body?.store?.slug === 'test4' && sStore.body?.you?.role === 'staff', 'the staff session runs test4');
+    check((await call('/api/merchant/products', sS)).status === 200 && (await call('/api/merchant/drops', sS)).status === 200, 'staff can use products and raffles');
+    const staffRefusals = [
+      (await call('/api/merchant/staff', sS)).status,
+      (await call('/api/merchant/staff/invite', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'x@goyunir.invalid' }) })).status,
+      (await call('/api/merchant/staff/remove', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: aOwner }) })).status,
+      (await call('/api/merchant/payments', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ country: 'US' }) })).status,
+    ];
+    check(staffRefusals.every((s) => s === 403), 'staff cannot see or change staff, or touch payments: ' + staffRefusals.join(','));
+    const rmB = await call('/api/merchant/staff/remove', sB, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: staffEmail }) });
+    check(rmB.status === 404 && (await tenantOfEmail(staffEmail))?.tenant_id === A, 'store B cannot remove test4\'s staff: ' + rmB.status);
+    check((await call('/api/merchant/staff/remove', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: B_OWNER }) })).status === 404 && (await tenantOfEmail(B_OWNER))?.tenant_id === B, 'test4 cannot remove store B\'s owner');
+    check((await call('/api/merchant/staff/remove', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: aOwner }) })).status === 400, 'an owner cannot remove themselves');
+    const rmA = await call('/api/merchant/staff/remove', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: staffEmail }) });
+    const afterRm = await call('/api/merchant/store', sS);
+    check(rmA.status === 200 && afterRm.status === 403 && afterRm.body?.code === 'MEMBERSHIP_REVOKED', 'removed: their open session stops at once (' + afterRm.status + ' ' + afterRm.body?.code + ')');
+    check(!(await tenantOfEmail(staffEmail)) && !(await readStaffIdentity(staffEmail)), 'and the account is gone: no staff identity anywhere, so not the original store\'s either');
+    const adminAsRemoved = await call('/api/admin/products?includeArchived=true', sS);
+    check(adminAsRemoved.status === 401 || adminAsRemoved.status === 403, 'the removed person gets nothing from the admin tree: ' + adminAsRemoved.status);
+    staffEmail = '';
+
+    // ── Platform support (sales), through the real impersonation route ─────
+    console.log('\nSupport sessions');
+    salesEmail = 'iso-sales-' + Date.now() + '@goyunir.invalid';
+    const salesPassword = 'Iso-' + crypto.randomUUID() + '-Aa1!';
+    const salesInv: any = await createInvite({ email: salesEmail, role: 'sales', tenantId: null, invitedByEmail: 'isolation-proof@goyunir.invalid' });
+    const salesAcc = await fetch(SALES + '/api/admin/accept-invite', { method: 'POST', headers: { 'content-type': 'application/json', origin: SALES }, body: JSON.stringify({ token: salesInv.token, password: salesPassword }) });
+    const idSales = await readStaffIdentity(salesEmail);
+    check(salesAcc.status === 200 && idSales?.role === 'sales', 'a sales account created through the real accept route: ' + salesAcc.status);
+    await db.insert('sales_tenant_assignments', { sales_user_id: idSales!.id, tenant_id: A }, { returning: 'minimal' } as any);
+    const impersonate = (tenant: string) => fetch(SALES + '/api/admin/impersonate', { method: 'POST', headers: { 'content-type': 'application/json', origin: SALES, 'x-staff-impersonate-tenant-id': tenant }, body: JSON.stringify({ email: salesEmail, password: salesPassword }) });
+    const imp = await impersonate(A);
+    const impBody: any = await imp.json().catch(() => ({}));
+    const code = String(impBody?.next || '').split('#')[1] || '';
+    check(imp.status === 200 && String(impBody?.next).startsWith(APP + '/app/support#') && /^[0-9a-f]{64}$/.test(code) && !imp.headers.get('set-cookie'), 'impersonating test4 returns a one-time link to the dashboard host (fragment), and no cookie: ' + imp.status);
+    const impB = await impersonate(B);
+    check(impB.status === 401, 'impersonating store B (not assigned) is refused: ' + impB.status);
+    const redeem = (base: string) => fetch(base + '/api/merchant-support/redeem', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ code }) });
+    check((await redeem(SALES)).status === 404, 'the code cannot be redeemed on the sales host');
+    const red = await redeem(APP);
+    const sSup = (String(red.headers.get('set-cookie') || '').match(/goyunir_admin_device=([^;]+)/) || [])[1] || '';
+    check(red.status === 200 && sSup.length > 20, 'redeemed on the dashboard host: 200 with a session cookie');
+    check((await redeem(APP)).status === 401, 'the same code a second time: 401');
+    const supStore = await call('/api/merchant/store', sSup);
+    check(supStore.status === 200 && supStore.body?.store?.slug === 'test4' && supStore.body?.you?.role === 'support', 'the support session runs test4, as support: ' + JSON.stringify(supStore.body?.you));
+    const supRefusals = [
+      (await call('/api/merchant/staff', sSup)).status,
+      (await call('/api/merchant/payments', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ country: 'US' }) })).status,
+    ];
+    check(supRefusals.every((s) => s === 403), 'support cannot touch staff or payments: ' + supRefusals.join(','));
+    const cur = await call('/api/merchant/settings', sSup);
+    const supSave = await call('/api/merchant/settings', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cur.body) });
+    const supAudit = (await auditRows('MERCHANT_SETTINGS_SAVED', salesEmail))[0];
+    check(supSave.status === 200 && supAudit?.tenant_id === A && supAudit?.detail?.support === true, 'a support write is audited under the support person, tagged test4, marked support: ' + JSON.stringify(supAudit?.detail));
+    const forgedB = (await issueAdminDevice(kv, salesEmail, false, { role: 'sales', impersonating: true, tenantId: B }, 600)).token;
+    const fB = await call('/api/merchant/store', forgedB);
+    check(fB.status === 403 && fB.body?.code === 'ASSIGNMENT_REVOKED', 'a support session forged for store B is refused: ' + fB.status + ' ' + fB.body?.code);
+    await kv.hdel(ADMIN_DEVICES_KEY, forgedB);
+    await db.remove('sales_tenant_assignments', { where: { sales_user_id: eq(idSales!.id), tenant_id: eq(A) } });
+    const unassigned = await call('/api/merchant/store', sSup);
+    check(unassigned.status === 403 && unassigned.body?.code === 'ASSIGNMENT_REVOKED', 'assignment removed: the open support session stops at once (' + unassigned.status + ' ' + unassigned.body?.code + ')');
+    await kv.hdel(ADMIN_DEVICES_KEY, sSup);
+
+    console.log('\nThe original store\'s admin audit list');
+    // Everything written there during THIS run (invites accepted, support
+    // entering a store, merchant writes) must not mention a merchant store.
+    const kvAudit = ((await kv.lrange('admin:audit_log', -200, -1)) || [])
+      .map((r: any) => (typeof r === 'string' ? r : JSON.stringify(r)))
+      .filter((r: string) => { try { return String(JSON.parse(r).at) >= runStart; } catch { return false; } });
+    const leaked = kvAudit.filter((r: string) => /MERCHANT_|iso-entry|iso-staff-a|iso-sales|isolation-owner-b|delivered@resend|test4|goyunir test 1/i.test(r));
+    check(leaked.length === 0, 'nothing about a merchant store reached it during this run (' + kvAudit.length + ' new entries, ' + leaked.length + ' about merchants)' + (leaked.length ? ': ' + leaked.join(' | ').slice(0, 300) : ''));
+
     console.log('\nRevocation');
     await db.update('users', { where: { email: eq(B_OWNER) } }, { tenant_id: A }, { returning: 'minimal' } as any);
     const moved = await call('/api/merchant/store', sB);
@@ -176,6 +335,10 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     await db.update('users', { where: { email: eq(B_OWNER) } }, { tenant_id: B }, { returning: 'minimal' } as any);
     check((await call('/api/merchant/store', sB)).status === 200, 'restored: the session works again');
   } finally {
+    // Throwaway people and rows from this run (store B's owner is kept for re-runs).
+    const { deleteStaffAccount } = await import('../lib/staff-accounts');
+    if (entryEmail) await db.remove('raffle_entries', { where: { tenant_id: eq(A), email: eq(entryEmail) } }).catch(() => null);
+    for (const e of [staffEmail, salesEmail]) if (e) await deleteStaffAccount(e).catch(() => false);
     for (const t of [sA, sB, sOwn]) await kv.hdel(ADMIN_DEVICES_KEY, t);
     console.log('\nsessions deleted');
   }

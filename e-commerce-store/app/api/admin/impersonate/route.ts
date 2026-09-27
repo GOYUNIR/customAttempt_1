@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createKvClient, ADMIN_DEVICE_COOKIE } from '@/lib/server-config';
 import { issueAdminDevice, IMPERSONATION_TTL_SECONDS } from '@/lib/admin-verify';
-import { verifyPortalSignIn } from '@/services/config/supabase-client';
+import { verifySuperAdminCredentials } from '@/services/config/supabase-client';
+import { readStaffIdentity } from '@/lib/staff-identity';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 import { isValidEmail, isValidPassword } from '@/lib/validation';
@@ -68,7 +69,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Enter a valid email and password.' }, { status: 400 });
     }
 
-    const account = await verifyPortalSignIn(email, password);
+    // Password via Supabase Auth; ROLE from public.users with the service key
+    // (readStaffIdentity) -- the same source the admin sign-in and the
+    // merchant gate use. It used to come from verifyPortalSignIn's `profiles`
+    // read under the user's own token, which fails on production with
+    // "infinite recursion detected in policy for relation profiles" (42P17)
+    // and silently fell back to 'customer': every sales rep was refused.
+    const credentials = await verifySuperAdminCredentials(email, password);
+    const identity = credentials ? await readStaffIdentity(credentials.email) : null;
+    // Never from GoTrue user_metadata: the user can rewrite it themselves.
+    const account = credentials && identity && identity.id === credentials.id
+      ? { id: identity.id, email: identity.email, role: identity.role as string }
+      : null;
     // Generic message on every failure branch below — never reveal WHICH
     // check failed (credentials vs role vs tenant assignment), matching the
     // account-enumeration discipline the rest of the auth surface uses.

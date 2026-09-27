@@ -3,6 +3,7 @@ import { createKvClient, safeParseKvItem, AUDIT_LOG_KEY} from '@/lib/server-conf
 import { adminAuthorized } from '@/lib/admin-verify';
 import { recordPlatformAudit } from '@/lib/platform-audit';
 import { clientIp } from '@/lib/rate-limit';
+import { isForeignTenantSession } from '@/lib/default-tenant';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,12 @@ export async function appendAudit(
   entry: { action: string; detail?: string; actor?: string; email?: string; staffId?: string | null; tenantId?: string | null },
   request?: Request,
 ) {
-  try {
+  // The KV list is the ORIGINAL store's own admin "recent activity" view. An
+  // event about ANOTHER store (a merchant's invite accepted, support entering
+  // a merchant store, …) goes to the store-tagged platform table only, never
+  // into another store's admin. One rule here covers every caller.
+  const otherStore = isForeignTenantSession(entry.tenantId);
+  if (!otherStore) try {
     await redis.rpush(
       AUDIT_LOG_KEY,
       JSON.stringify({
