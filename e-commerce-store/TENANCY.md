@@ -36,7 +36,19 @@
 >   on `goyunir-test-1.goyunir.com`, and nowhere else.
 >
 > **Routes in the dashboard so far:** store, orders (read), products (list,
-> create, edit), payments onboarding. **Public merchant signup is CLOSED**
+> create, edit), payments onboarding, **settings** (store name, homepage
+> text, policies).
+>
+> **Isolation proof, now 36/36.** Added for settings:
+> - each store's policy text shows only on its own address;
+> - an unset policy says "not published" (no template text under a
+>   merchant's name, no owner email);
+> - the original store's config row is byte-identical, and its /terms has the
+>   same visible text before and after.
+>
+> The legal pages are open on merchant addresses, so the dead footer links
+> are fixed. Known quirk: "Last updated" always shows today's date, on every
+> store. **Public merchant signup is CLOSED**
 > (owner, 2026-09-26: `ALLOW_MERCHANT_SIGNUP=false`, verified: GET shows
 > `enabled: false`, POST gets 403).
 >
@@ -46,8 +58,7 @@
 > The key is now store + hour. The broken and probe accounts are closed.
 >
 > **Next, each feature only after its route's isolation proof:**
-> 1. Legal pages and store settings (per-store config).
-> 2. Raffle draw controls and entries view.
+> 1. Raffle draw controls and entries view.
 > 3. Stock changes: WAIT for the stock-set + reservation-holds design pass
 >    (STRATEGY §9).
 > 4. Sign-out.

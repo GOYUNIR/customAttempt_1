@@ -136,7 +136,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     check(acctAAfter === acctA && acctB1 !== acctA, 'test4\'s account is untouched and different from store B\'s');
 
     console.log('\n/api/merchant/settings and the store\'s own policy pages');
-    const pageText = async (url: string) => { const r = await fetch(url); return { status: r.status, text: (await r.text()).replace(/<[^>]+>/g, ' ') }; };
+    // VISIBLE text only: the embedded page data (RSC) streams in a varying order
+    // between identical requests, so raw HTML differs even when nothing changed.
+    const pageText = async (url: string) => { const r = await fetch(url); return { status: r.status, text: (await r.text()).replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]+>/g, ' ') }; };
     const shopTermsBefore = await pageText('https://shop.goyunir.com/terms');
     const defaultRowBefore = JSON.stringify((await db.select<any>('tenant_store_config', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['config'] })) as any[]);
     const markA = 'TEST4-TERMS-' + run, markB = 'STOREB-TERMS-' + run;
