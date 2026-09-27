@@ -219,11 +219,10 @@ export const PLANS: Plan[] = [
     monthlyUsd: 99,
     platformFeeBps: 0,
     featured: true,
-    // No trial and no self-serve upgrade until plan billing exists (it does
-    // not yet): the button opens a conversation instead of promising one.
-    contactOnly: true,
-    priceNote: 'A flat monthly price and no per-sale fee.',
-    ctaLabel: 'Talk to us',
+    // Self-serve: bought from the store's dashboard (Plan & billing, Stripe
+    // subscription, PRICING.md §9). No trial (owner decision).
+    priceNote: 'A flat monthly price and no per-sale fee. Switch from your dashboard, cancel any time.',
+    ctaLabel: 'Start a store',
     tagline: 'For stores selling enough that a flat price beats the per-sale fee.',
     points: [
       'Everything in Free, with no per-sale fee',

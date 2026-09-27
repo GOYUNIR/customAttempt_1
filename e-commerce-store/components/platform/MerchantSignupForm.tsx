@@ -76,10 +76,10 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
   if (!enabled) {
     return (
       <div style={card}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: PALETTE.text }}>Signups are not open yet</h3>
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: PALETTE.text }}>We are setting up stores personally</h3>
         <p style={{ color: PALETTE.muted, fontSize: 14, lineHeight: 1.6, margin: 0 }}>
-          Self-serve store creation is switched off on this deployment. Get in touch and we will set
-          your store up directly.
+          Right now every new store is set up with us, so it is ready to sell from day one. Email us
+          and we will get yours started.
         </p>
         {contactEmail && (
           <a href={'mailto:' + contactEmail + '?subject=' + encodeURIComponent('Set up my store')} style={{ color: PALETTE.text, fontWeight: 700, fontSize: 14 }}>

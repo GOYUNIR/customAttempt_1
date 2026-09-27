@@ -22,9 +22,9 @@ test('the page shows Free, Growth and Scale (owner decision D2)', () => {
   assert.deepEqual(PLANS.filter((p) => p.listed !== false).map((p) => p.id), ['free', 'growth', 'scale']);
 });
 
-test('no listed plan offers a trial or a self-serve upgrade before plan billing exists', () => {
+test('no listed plan offers a trial; Growth is self-serve (plan billing, PRICING.md §9)', () => {
+  assert.ok(PLANS.find((p) => p.id === 'growth')?.contactOnly !== true, 'Growth is bought from the dashboard');
   for (const p of PLANS.filter((x) => x.listed !== false && (x.monthlyUsd || 0) > 0)) {
-    assert.ok(p.contactOnly === true, p.id + ' must open a conversation, not a checkout that does not exist');
     assert.ok(!p.trialDays && !/trial/i.test(String(p.priceNote) + String(p.ctaLabel)), p.id + ' must not promise a trial');
   }
 });
