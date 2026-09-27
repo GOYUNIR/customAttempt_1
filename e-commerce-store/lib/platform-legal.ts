@@ -76,7 +76,7 @@ export function platformPrivacy(site: string, inbox: string): LegalSection[] {
       'We do not sell personal information, and we do not use shoppers\' data for our own advertising.',
     ] },
     { h: 'Who processes it for us', p: [
-      'Stripe (payments and plan billing), Supabase (database and sign-in), Cloudflare (hosting, storage of images and session data, and email forwarding), and Resend (sending email). Store pages and the store admin load fonts from Google Fonts, which sees your IP address when the page loads; this site's own pages do not. Each processes data only to provide its service. Some are in the United States.',
+      'Stripe (payments and plan billing), Supabase (database and sign-in), Cloudflare (hosting, storage of images and session data, and email forwarding), and Resend (sending email). Store pages and the store admin load fonts from Google Fonts, which sees your IP address when the page loads; this site\'s own pages do not. Each processes data only to provide its service. Some are in the United States.',
     ] },
     { h: 'Cookies', p: [
       'The platform sets only the cookies needed to keep you signed in and secure. A store may add its own analytics or marketing tools; its own policy covers those.',
