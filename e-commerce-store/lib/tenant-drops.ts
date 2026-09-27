@@ -41,6 +41,7 @@ import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/we
 import { savedCardChargeRoute } from '@/lib/saved-card-route';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { subrequestCount, SUBREQUEST_LIMIT_FREE } from '@/lib/subrequest-meter';
+import { sendStoreEmailOnce, renderEntryReceived, renderEntryCharged, withinCallBudget, STORE_EMAIL_CALLS } from '@/lib/tenant-email';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -156,7 +157,7 @@ export async function startTenantEntry(input: {
  * Connect webhook and the page's confirm step both call it. Throws when it
  * cannot record yet (the webhook then retries) — an entry is never dropped.
  */
-export async function recordTenantEntryFromSetupSession(session: any, tenantId: string, stripeAccount: string): Promise<{
+export async function recordTenantEntryFromSetupSession(session: any, tenantId: string, stripeAccount: string, opts: { invocationStart?: number } = {}): Promise<{
   handled: boolean; kind?: Kind; entryId?: string; alreadyEntered?: boolean; note: string;
 }> {
   const md = session?.metadata || {};
@@ -186,7 +187,19 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
     stripeAccount,
     entryType: kind,
   });
-  if (created.ok) return { handled: true, kind, entryId: created.entryId, note: kind + ' entry recorded' };
+  if (created.ok) {
+    // Only a NEW entry is confirmed by email (the webhook and the page both
+    // call this; exactly one creates it). After the entry exists; never throws.
+    let mail = 'skipped (call budget)';
+    if (withinCallBudget(opts.invocationStart, STORE_EMAIL_CALLS)) {
+      const m = await sendStoreEmailOnce({
+        tenantId, kind: 'entry', key: String(created.entryId), to: email,
+        build: (store) => renderEntryReceived(store, { kind, product: String(md.variant || ''), size: String(md.size || '') }),
+      });
+      mail = m.status;
+    }
+    return { handled: true, kind, entryId: created.entryId, note: kind + ' entry recorded, email ' + mail };
+  }
   if (created.reason === 'already_entered') {
     // The same session recorded by the other path, or a genuine second entry.
     const pendingId = await findPendingEntryId(tenantId, variantId, email);
@@ -207,7 +220,9 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
 // left is reported as `more` for the next trigger. Database calls are counted
 // by the meter (lib/subrequest-meter.ts); Stripe calls are counted here.
 
-const PER_CHARGE_CALLS = 28;   // measured worst case of one chargeEntry, with margin
+// Measured worst case of one chargeEntry (28, with margin) plus its customer
+// email (STORE_EMAIL_CALLS): a charge only starts if its email fits too.
+const PER_CHARGE_CALLS = 28 + STORE_EMAIL_CALLS;
 const SAFETY_CALLS = 4;
 
 class Budget {
@@ -328,7 +343,14 @@ async function chargeEntry(input: {
 
     await markRaffleEntryOutcome(tenantId, entryId, 'charged');
     await completeWebhookKey('tenant_charge', attempt);
-    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + feeCharged + ', order ' + orderRef, calls: budget.used() - before };
+    // The customer hears only once everything above is done. Keyed by the
+    // attempt, like the charge. Best-effort: never throws, never undoes.
+    budget.stripe(1); // the email provider call is not metered
+    const mail = await sendStoreEmailOnce({
+      tenantId, kind: 'charged', key: attempt, to: email,
+      build: (store) => renderEntryCharged(store, { kind, product: variant.productName, size: variant.size, amountCents: variant.priceCents, currency, orderRef }),
+    });
+    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + feeCharged + ', order ' + orderRef + ', email ' + mail.status, calls: budget.used() - before };
   } catch (err) {
     await releaseWebhookKey('tenant_charge', attempt).catch(() => {});
     console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' incomplete, will retry: ' + ((err as Error)?.message || err));

@@ -34,6 +34,7 @@ import { isValidEmail } from '@/lib/validation';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { encodeCartMetadata, decodeCartMetadata } from '@/lib/cart-metadata';
 import { startTenantEntry } from '@/lib/tenant-drops';
+import { sendStoreEmailOnce, renderOrderConfirmed, withinCallBudget, STORE_EMAIL_CALLS } from '@/lib/tenant-email';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -209,7 +210,7 @@ export async function startTenantCheckout(input: {
  * safely retried by Stripe; the decrement is not idempotent, so it runs last
  * and never throws.
  */
-export async function handleConnectCheckoutCompleted(session: any, tenantId: string, account: string): Promise<{ handled: boolean; note: string }> {
+export async function handleConnectCheckoutCompleted(session: any, tenantId: string, account: string, opts: { invocationStart?: number } = {}): Promise<{ handled: boolean; note: string }> {
   const md = session?.metadata || {};
   const kind = md.entryType === 'direct' ? 'direct' : md.entryType === 'cart' ? 'cart' : null;
   if (session?.mode !== 'payment' || !kind) return { handled: false, note: 'not an instant-buy or cart session' };
@@ -251,10 +252,12 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
     }
   }
 
+  const orderRef = String(md.orderRef || 'CONNECT-' + session.id);
+  const customerEmail = String(md.email || session.customer_details?.email || '');
   const recorded = await recordOrder({
     tenantId,
-    orderRef: String(md.orderRef || 'CONNECT-' + session.id),
-    email: String(md.email || session.customer_details?.email || ''),
+    orderRef,
+    email: customerEmail,
     lines,
     checkoutMode: 'fcfs',
     stripeCustomerId: typeof session.customer === 'string' ? session.customer : null,
@@ -279,10 +282,24 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
     stockNotes.push(l.externalProductId + '/' + l.size + ' x' + l.quantity + (r.ok ? ' decremented' : ' NOT decremented: ' + r.reason));
   }
 
+  // The customer's confirmation: after everything above is done, once per
+  // order, best-effort, and only if the invocation can afford it (the order
+  // and stock writes above must never be starved by an email).
+  let mail = 'skipped (call budget)';
+  if (withinCallBudget(opts.invocationStart, STORE_EMAIL_CALLS)) {
+    const m = await sendStoreEmailOnce({
+      tenantId, kind: 'order', key: orderRef, to: customerEmail,
+      build: (store) => renderOrderConfirmed(store, { orderRef, lines, totalCents: amountCents, currency: String(session.currency || '') }),
+    });
+    mail = m.status + (m.note ? ' (' + m.note + ')' : '');
+  } else {
+    console.warn('[connect-webhook] order ' + orderRef + ' (tenant ' + tenantId + '): confirmation email skipped, call budget');
+  }
+
   return {
     handled: true,
     note: kind + ' order ' + recorded.orderId + ' (' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + '), fee ' + feeCents +
-      (billing.recorded ? '' : ' (billing already recorded)') + ', stock: ' + stockNotes.join('; '),
+      (billing.recorded ? '' : ' (billing already recorded)') + ', stock: ' + stockNotes.join('; ') + ', email: ' + mail,
   };
 }
 

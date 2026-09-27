@@ -128,9 +128,9 @@ export async function POST(request: Request) {
       if (event.type === 'checkout.session.completed' && object?.mode === 'setup') {
         // A raffle/waitlist entry's card was saved (phase 4). Throws until it
         // can be recorded, so Stripe retries: an entry is never dropped.
-        result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount));
+        result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount), { invocationStart: started });
       } else if (event.type === 'checkout.session.completed') {
-        result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount));
+        result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount), { invocationStart: started });
       } else if (event.type === 'charge.refunded') {
         result = await handleConnectChargeRefunded(object, String(eventAccount));
       } else if (event.type === 'charge.dispute.created') {

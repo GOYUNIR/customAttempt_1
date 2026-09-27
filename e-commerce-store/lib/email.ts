@@ -3,6 +3,7 @@ import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl, getBrandLog
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { EmailFactory } from '@/services/email';
 import type { EmailDriver } from '@/services/email';
+import { storeFromHeader, sendingAddressOf } from '@/lib/tenant-email-render';
 
 
 export { normalizeSiteBase };
@@ -90,12 +91,14 @@ function getResend() {
  * is a reporting problem, while a password reset that failed because the ledger
  * was unreachable is a person locked out of their account.
  */
-async function recordPlatformEmail(to: string): Promise<void> {
+async function recordPlatformEmail(to: string, tenantId?: string): Promise<void> {
   try {
     const { recordUsage } = await import('@/lib/growth/ledger');
     const { DEFAULT_TENANT_ID } = await import('@/lib/tenant-context');
     await recordUsage({
-      tenantId: DEFAULT_TENANT_ID,
+      // A merchant store's email is that store's usage (and its customer is
+      // that store's contact), never the original store's.
+      tenantId: tenantId || DEFAULT_TENANT_ID,
       moduleId: 'platform',
       unit: 'email',
       quantity: 1,
@@ -109,6 +112,49 @@ async function recordPlatformEmail(to: string): Promise<void> {
     console.error('[email] send not recorded in the cost ledger', (err as Error)?.message || err);
   }
 }
+
+/**
+ * Send an email ON BEHALF OF ONE STORE (a merchant store, or a merchant's
+ * staff invite). Unlike every template in this file it adds NOTHING of the
+ * original store: no logo masthead, no default reply-to, no brand; the caller
+ * supplies from/replyTo/subject/body, and usage is recorded against that store.
+ * The caller escapes any store- or customer-supplied text in `html`.
+ */
+export async function sendStoreEmail(payload: {
+  tenantId: string;
+  from: string;
+  to: string;
+  replyTo?: string | null;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<{ ok: boolean; id?: string; skipped?: boolean; error?: unknown }> {
+  const driver = await getEmailDriver();
+  if (!driver) return { ok: false, skipped: true, error: 'No email provider configured.' };
+  try {
+    const result = await driver.sendTransactional({
+      from: payload.from,
+      to: payload.to,
+      ...(payload.replyTo ? { replyTo: payload.replyTo } : {}),
+      subject: payload.subject.replace(/[\r\n]+/g, ' '),
+      html: payload.html,
+      text: payload.text,
+    });
+    if (!result.ok) return { ok: false, error: result.error ?? new Error('Email send failed') };
+    await recordPlatformEmail(payload.to, payload.tenantId);
+    return { ok: true, id: result.id };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+/** The platform's verified sending ADDRESS (no name): the address inside
+ *  TENANT_EMAIL_FROM, else EMAIL_FROM / RESEND_FROM. Null when none is set. */
+export function platformSendingAddress(): string | null {
+  return sendingAddressOf(process.env.TENANT_EMAIL_FROM || process.env.EMAIL_FROM || process.env.RESEND_FROM);
+}
+
+export { storeFromHeader };
 
 function emailBrandName(): string {
   return getBrandName() || 'Store';
@@ -851,19 +897,18 @@ export async function sendStaffInviteEmail(opts: {
   /** A merchant store's own name: the invite is to THAT store, not to the
    *  platform's brand, and a reply goes to the person who invited. */
   storeName?: string | null;
+  /** With storeName: the store it is for. The email then goes out as that
+   *  store (sendStoreEmail), with nothing of the original store in it. */
+  tenantId?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
   const storeName = String(opts.storeName || '').replace(/\s+/g, ' ').trim();
   const brandText = storeName || emailBrandName();
   const brand = escapeHtml(brandText);
+  const subject = `You have been invited to join ${brandText}`;
   try {
-    const { error } = await resend.emails.send({
-      from: from(),
-      to: opts.to,
-      replyTo: storeName ? opts.invitedBy : replyTo(),
-      subject: `You have been invited to join ${brandText}`,
-      html: `
+    const html = `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
           <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand.toUpperCase()}</p>
           <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">You have been invited</h1>
@@ -881,8 +926,13 @@ export async function sendStaffInviteEmail(opts: {
             This invitation expires in ${opts.expiresInDays} days. If you were not expecting it, ignore this email — no account is created until the link is used.
           </p>
         </div>
-      `,
-    });
+      `;
+    if (storeName && opts.tenantId) {
+      const address = platformSendingAddress();
+      if (!address) return { ok: false, skipped: true, error: 'No platform sending address configured.' };
+      return await sendStoreEmail({ tenantId: opts.tenantId, from: storeFromHeader(storeName, address), to: opts.to, replyTo: opts.invitedBy, subject, html });
+    }
+    const { error } = await resend.emails.send({ from: from(), to: opts.to, replyTo: replyTo(), subject, html });
     if (error) return { ok: false, error };
     return { ok: true };
   } catch (error) {

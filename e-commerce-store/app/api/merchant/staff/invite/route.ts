@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     acceptUrl: acceptInviteUrl('staff', inv.token, process.env.PLATFORM_ROOT_DOMAIN),
     expiresInDays: INVITE_TTL_DAYS,
     storeName: gate.session.tenantName,
+    tenantId: gate.session.tenantId,
   }).catch(() => ({ ok: false }));
   await auditMerchant(gate.session, request, 'STAFF_INVITED', email + ' invited as staff' + (sent.ok ? '' : ' (email not sent)'));
   return merchantJson({ invited: true, emailed: Boolean(sent.ok) }, 201);
