@@ -19,14 +19,15 @@
  *     recorded for a checkout nobody paid.
  */
 import { getDb } from '@/lib/db/client';
-import { eq, inList } from '@/lib/db/query';
+import { eq, inList, neq } from '@/lib/db/query';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { chargeRouteForTenant } from '@/lib/connect';
 import { platformFeeForCharge, recordBillingCharge, setBillingRefund } from '@/lib/billing';
 import { loadProducts } from '@/lib/server-config';
 import { getSizeCheckoutMode, isConfiguredPrice } from '@/lib/storefront-config';
 import { readLiveStock } from '@/lib/stock-gate';
-import { resolveVariantId, decrementForSale } from '@/lib/inventory';
+import { resolveVariantId } from '@/lib/inventory';
+import { reserveStock, releaseStock, commitSale, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS, type StockItem } from '@/lib/stock';
 import { recordOrder } from '@/lib/order-write';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { boundIdempotencyKey } from '@/lib/idempotency-key';
@@ -69,6 +70,61 @@ async function tenantRefPrefix(tenantId: string, slug: string | null): Promise<s
   // Never the default store's prefix: the store's own setting, else its slug.
   return normalizeRefPrefix(configured || slug || 'ORD');
 }
+
+/** This store's variant id per product|size, in ONE call. */
+async function variantIdsOf(tenantId: string): Promise<Map<string, string>> {
+  const rows = (await getDb().select<any>('product_variants', {
+    where: { tenant_id: eq(tenantId) }, select: ['id', 'option_label', { relation: 'products', columns: ['external_id'] }] as any,
+  })) as any[];
+  return new Map(rows.map((v) => [String(v.products?.external_id) + '|' + String(v.option_label), String(v.id)]));
+}
+
+/**
+ * HOLD the units for one checkout before the buyer is sent to Stripe (00037,
+ * owner-approved 2026-09-27): all lines or none, for CHECKOUT_HOLD_SECONDS.
+ * The key is the attempt's order ref (one per 30s window, like the Stripe
+ * idempotency key), so a double tap reuses one hold and one session. A newer
+ * attempt by the same buyer for the same size replaces their older hold, so
+ * one person cannot pile up holds on the last units.
+ */
+async function holdForCheckout(
+  tenantId: string, holdKey: string, email: string,
+  wanted: Array<{ productId: string; size: string; quantity: number; name: string }>,
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  const ids = await variantIdsOf(tenantId);
+  const items: StockItem[] = [];
+  for (const w of wanted) {
+    const variantId = ids.get(w.productId + '|' + w.size);
+    if (!variantId) {
+      console.error('[tenant-checkout] no variant for ' + tenantId + '/' + w.productId + '/' + w.size + ' — refusing (fail closed)');
+      return { ok: false, response: json({ error: `${w.name} (${w.size}) is sold out.` }, 409) };
+    }
+    items.push({ variantId, quantity: w.quantity });
+  }
+  const buyer = 'buyer:' + email;
+  const older = (await getDb().select<any>('stock_holds', {
+    where: { tenant_id: eq(tenantId), reference: eq(buyer), status: eq('active'), variant_id: inList(items.map((i) => i.variantId)), hold_key: neq(holdKey) },
+    select: ['hold_key'],
+  })) as any[];
+  for (const k of new Set(older.map((o) => String(o.hold_key)))) await releaseStock(tenantId, k);
+  const r = await reserveStock(tenantId, holdKey, items, CHECKOUT_HOLD_SECONDS, buyer);
+  if (r.ok) return { ok: true };
+  if (r.reason !== 'insufficient') {
+    console.error('[tenant-checkout] hold refused for ' + tenantId + ': ' + r.reason + ' (' + (r.variantId || '?') + ')');
+  }
+  const short = wanted.find((w) => ids.get(w.productId + '|' + w.size) === r.variantId) || wanted[0];
+  const left = r.reason === 'insufficient' ? Math.max(0, Number(r.available) || 0) : 0;
+  return { ok: false, response: json({ error: left > 0 ? `Only ${left} of ${short.name} (${short.size}) left.` : `${short.name} (${short.size}) is sold out.` }, 409) };
+}
+
+/**
+ * The Stripe session's own clock, from the attempt's 30s window rather than
+ * "now": Stripe refuses an idempotency key reused with ANY different
+ * parameter, so a double tap in the same window must send the same value.
+ * Window end + 31 min: always >= Stripe's 30-minute minimum, and it ends
+ * before its hold (CHECKOUT_HOLD_SECONDS from the reserve) does.
+ */
+const sessionExpiresAt = (window: string) => (Number(window) + 1) * 30 + CHECKOUT_SESSION_SECONDS;
 
 /**
  * Start a hosted checkout for an instant-buy product on a connected merchant.
@@ -172,10 +228,18 @@ export async function startTenantCheckout(input: {
     entryType: 'direct',
     platform_fee_cents: String(fee.feeCents),
     platform_fee_basis: fee.basis,
+    hold_key: 'co:' + orderRef,
   };
 
-  const session = await stripe.checkout.sessions.create({
+  // The unit is set aside for this buyer BEFORE they are sent to pay.
+  const held = await holdForCheckout(tenantId, metadata.hold_key, normalizedEmail, [{ productId: String(product.id), size: String(size), quantity: 1, name: String(product.name || product.id) }]);
+  if (!held.ok) return held.response;
+
+  let session: any;
+  try {
+  session = await stripe.checkout.sessions.create({
     mode: 'payment',
+    expires_at: sessionExpiresAt(window),
     customer: customer.id,
     payment_method_types: ['card'],
     line_items: [{
@@ -199,8 +263,26 @@ export async function startTenantCheckout(input: {
     cancel_url: `${origin}/${productSlug}?purchase=cancel`,
     metadata,
   }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-checkout:${route.stripeAccount}:${normalizedEmail}:${product.id}:${size}:${window}`) });
+  } catch (err) {
+    // No session, no reason to keep the unit from everyone else.
+    await releaseStock(tenantId, metadata.hold_key).catch(() => 0);
+    throw err;
+  }
 
   return json({ url: session.url, sessionId: session.id });
+}
+
+/**
+ * checkout.session.expired on a merchant's account: nobody paid in time, so
+ * the units this checkout set aside go back on sale now (the hold would also
+ * lapse by itself; this just does not wait). Idempotent: releasing twice
+ * releases nothing the second time, and a paid (converted) hold is untouched.
+ */
+export async function handleConnectCheckoutExpired(session: any, tenantId: string): Promise<{ handled: boolean; note: string }> {
+  const key = session?.metadata?.hold_key ? String(session.metadata.hold_key) : '';
+  if (session?.mode !== 'payment' || !key) return { handled: false, note: 'no checkout hold' };
+  const released = await releaseStock(tenantId, key);
+  return { handled: true, note: 'hold ' + key + ' released (' + released + ' line(s))' };
 }
 
 /**
@@ -271,15 +353,32 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
   // Volume is what Stripe charged, not our line arithmetic.
   const billing = await recordBillingCharge({ paymentIntentId: piId, tenantId, volumeCents: amountCents, feeCents, orderId: recorded.orderId });
 
-  // Stock last: not idempotent, so it must never be reached twice (the claim
-  // is completed right after) and never throws.
+  // Stock: the SALE, through the ledger (00037). One call for every line,
+  // applied once per PaymentIntent, converting this checkout's hold. Being
+  // idempotent, a failure here THROWS so Stripe retries the whole event (the
+  // order and billing writes above are idempotent too); it never double-counts.
+  // Paid after the hold lapsed and the units had gone: stock stops at 0 and
+  // the shortfall is recorded for the merchant (owner decision: no auto-refund).
   const stockNotes: string[] = [];
+  const ids = await variantIdsOf(tenantId);
+  const saleItems: StockItem[] = [];
   for (const l of lines) {
-    if (!l.externalProductId) { stockNotes.push('unattributed line: not decremented'); continue; }
-    const r = await decrementForSale({
-      tenantId, externalProductId: l.externalProductId, size: l.size, quantity: l.quantity, context: 'connect-webhook',
-    }).catch((err) => ({ ok: false, remaining: null, reason: (err as Error)?.message || String(err) }));
-    stockNotes.push(l.externalProductId + '/' + l.size + ' x' + l.quantity + (r.ok ? ' decremented' : ' NOT decremented: ' + r.reason));
+    const variantId = l.externalProductId ? ids.get(l.externalProductId + '|' + l.size) : undefined;
+    if (!variantId) {
+      console.error('[connect-webhook] STOCK NOT RECORDED for a paid line (' + (l.externalProductId || 'unattributed') + '/' + l.size + ', session ' + session.id + '): no variant. Reconcile by hand.');
+      stockNotes.push((l.externalProductId || 'unattributed') + ': no variant, not recorded');
+      continue;
+    }
+    saleItems.push({ variantId, quantity: l.quantity });
+  }
+  if (saleItems.length > 0) {
+    const sale = await commitSale(tenantId, md.hold_key ? String(md.hold_key) : null, saleItems, piId);
+    for (const s of sale) {
+      if ((s.shortfall || 0) > 0) {
+        console.error('[connect-webhook] OVERSOLD by ' + s.shortfall + ' on variant ' + s.variantId + ' (tenant ' + tenantId + ', ' + piId + '): paid after the hold lapsed; shown to the merchant.');
+      }
+      stockNotes.push(s.variantId + (s.applied ? ' -> ' + s.remaining + (s.shortfall ? ' (OVERSOLD by ' + s.shortfall + ')' : '') : ' ' + s.reason));
+    }
   }
 
   return {
@@ -426,8 +525,16 @@ export async function startTenantCartCheckout(input: {
   const orderRef = buildOrderRef(email, lines[0].productId, lines[0].size, await tenantRefPrefix(tenantId, tenantSlug), cartSignature + ':' + window);
   const returnSlug = String(products[lines[0].productId]?.slug || lines[0].productId);
 
-  const session = await stripe.checkout.sessions.create({
+  // Every line set aside, or none, BEFORE the buyer is sent to pay.
+  const holdKey = 'co:' + orderRef;
+  const held = await holdForCheckout(tenantId, holdKey, email, lines.map((l) => ({ productId: l.productId, size: l.size, quantity: l.quantity, name: l.name })));
+  if (!held.ok) return held.response;
+
+  let session: any;
+  try {
+  session = await stripe.checkout.sessions.create({
     mode: 'payment',
+    expires_at: sessionExpiresAt(window),
     customer: customer.id,
     payment_method_types: ['card'],
     line_items: lines.map((l) => ({
@@ -451,9 +558,14 @@ export async function startTenantCartCheckout(input: {
       orderRef,
       platform_fee_cents: String(fee.feeCents),
       platform_fee_basis: fee.basis,
+      hold_key: holdKey,
       ...cartMd,
     },
   }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-cart:${route.stripeAccount}:${email}:${cartSignature}:${window}`) });
+  } catch (err) {
+    await releaseStock(tenantId, holdKey).catch(() => 0);
+    throw err;
+  }
 
   return json({ url: session.url, sessionId: session.id });
 }

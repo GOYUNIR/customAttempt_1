@@ -143,11 +143,15 @@ export async function readProductsFromPostgres(
     });
 
     const variantIds = variants.map((v) => v.id);
-    const inventoryRows = variantIds.length
-      ? await db.select<PgInventoryRow>('inventory_levels', {
+    // SELLABLE stock (00037's stock_levels view): on hand minus units held by
+    // open checkouts and drawn winners. A unit in someone's checkout is not
+    // for sale, so the storefront shows it gone (owner decision 2026-09-27:
+    // "sold out" during a hold, back automatically on release).
+    const inventoryRows: PgInventoryRow[] = variantIds.length
+      ? ((await db.select<{ variant_id: string; available: number }>('stock_levels', {
           where: { variant_id: inList(variantIds) },
-          select: ['variant_id', 'quantity_available'],
-        })
+          select: ['variant_id', 'available'],
+        })) as Array<{ variant_id: string; available: number }>).map((r) => ({ variant_id: r.variant_id, quantity_available: Number(r.available) || 0 }))
       : [];
 
     const poolIds = [...new Set(variants.map((v) => v.shared_pool_id).filter((id): id is string => Boolean(id)))];

@@ -4,7 +4,7 @@ import { resolveConnectWebhookSecret, syncConnectedAccount, tenantIdForAccount }
 import { resolveConnectEventTenant } from '@/lib/connect-routing';
 import { claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
 import { subrequestCount, reportSubrequests } from '@/lib/subrequest-meter';
-import { handleConnectCheckoutCompleted, handleConnectChargeRefunded } from '@/lib/tenant-checkout';
+import { handleConnectCheckoutCompleted, handleConnectCheckoutExpired, handleConnectChargeRefunded } from '@/lib/tenant-checkout';
 import { recordTenantEntryFromSetupSession } from '@/lib/tenant-drops';
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +46,7 @@ export const dynamic = 'force-dynamic';
 const SCOPE = 'stripe_connect_event';
 const PAYMENT_EVENTS = new Set([
   'checkout.session.completed',
+  'checkout.session.expired',
   'payment_intent.succeeded',
   'charge.refunded',
   'charge.dispute.created',
@@ -131,6 +132,9 @@ export async function POST(request: Request) {
         result = await recordTenantEntryFromSetupSession(object, who.tenantId, String(eventAccount));
       } else if (event.type === 'checkout.session.completed') {
         result = await handleConnectCheckoutCompleted(object, who.tenantId, String(eventAccount));
+      } else if (event.type === 'checkout.session.expired') {
+        // Nobody paid in time: the checkout's held units go back on sale.
+        result = await handleConnectCheckoutExpired(object, who.tenantId);
       } else if (event.type === 'charge.refunded') {
         result = await handleConnectChargeRefunded(object, String(eventAccount));
       } else if (event.type === 'charge.dispute.created') {
