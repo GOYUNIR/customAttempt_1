@@ -32,10 +32,22 @@ test('every /api/merchant handler passes merchantSession() first', () => {
 test('no /api/merchant route reaches for the original store\'s data', () => {
   for (const f of routeFiles(ROOT)) {
     const src = readFileSync(f, 'utf8');
-    for (const banned of ['ensureDefaultTenant', 'resolveActingTenantId', 'createKvClient', 'DEFAULT_TENANT_ID', "from '@/lib/tenant-context'", 'searchParams.get(\'tenant', 'body.tenant', 'x-tenant']) {
+    for (const banned of ['ensureDefaultTenant', 'resolveActingTenantId', 'createKvClient', 'DEFAULT_TENANT_ID', "from '@/lib/tenant-context'", 'searchParams.get(\'tenant', 'body.tenant', 'x-tenant', 'appendAudit', 'AUDIT_LOG_KEY']) {
       assert.ok(!src.includes(banned), f + ' must not use ' + banned);
     }
   }
+});
+
+// The gate itself needs the shared KV for sessions, so the route ban above
+// cannot cover it. What it must never do is write the ORIGINAL store's admin
+// audit list (admin:audit_log): merchant audit goes to the store-tagged
+// platform table only.
+test('merchant audit never lands in the original store\'s admin audit log', () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'lib', 'merchant-session.ts'), 'utf8');
+  for (const banned of ['appendAudit', 'AUDIT_LOG_KEY', 'admin:audit_log', "'@/app/api/admin/audit/route'"]) {
+    assert.ok(!src.includes(banned), 'lib/merchant-session.ts must not use ' + banned);
+  }
+  assert.ok(src.includes('recordPlatformAudit('), 'merchant audit must go to the platform table');
 });
 
 const good = { name: 'Summer Tee', sizes: [{ size: 'M', price: 24, mode: 'FCFS', stock: 5 }] };

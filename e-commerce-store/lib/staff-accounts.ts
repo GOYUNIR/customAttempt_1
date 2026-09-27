@@ -123,6 +123,39 @@ export async function createStaffAccount(input: {
 }
 
 /**
+ * Remove one STAFF member of one store — both records, like deleteStaffAccount,
+ * but only when the row is role 'staff' of exactly that store. Every step
+ * matches the store, so another store's person, an owner, or a platform
+ * account is never touched.
+ *
+ * The account is deleted rather than detached: a staff row with NO store reads
+ * as the original store (isForeignTenantSession(null) is false), so clearing
+ * tenant_id would move the person into the original store's admin instead of
+ * removing them.
+ */
+export async function removeTenantStaff(email: string, tenantId: string): Promise<'removed' | 'not_found' | 'error'> {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized || !tenantId || !supabaseServiceConfigured()) return 'error';
+  const scope = { email: eq(normalized), tenant_id: eq(tenantId), role: eq('staff') };
+  try {
+    const rows = (await getDb().select<{ id: string }>('users', { where: scope, select: ['id'], limit: 1 })) as Array<{ id: string }>;
+    const id = rows?.[0]?.id;
+    if (!id) return 'not_found';
+    await getDb().remove('users', { where: { ...scope, id: eq(id) } });
+    try {
+      const { serviceRoleKey } = readSupabaseEnv();
+      await supabaseAuthFetch('/admin/users/' + id, { key: serviceRoleKey, method: 'DELETE' });
+    } catch (err) {
+      console.error('[staff-accounts] auth user delete failed after the users row was removed', normalized, (err as Error)?.message || err);
+    }
+    return 'removed';
+  } catch (err) {
+    console.error('[staff-accounts] store staff removal failed', normalized, (err as Error)?.message || err);
+    return 'error';
+  }
+}
+
+/**
  * Remove a staff account entirely — both records.
  *
  * The `users` row goes first: while it exists the person can sign in, so

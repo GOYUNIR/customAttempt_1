@@ -15,6 +15,10 @@ type Store = { store: { name: string | null; slug: string | null; address: strin
 type Size = { size: string; price: number | string; mode: 'FCFS' | 'RAFFLE'; stock?: number | string | null; winners?: number | string | null };
 type Product = { id: string; name: string; slug: string; tagline: string; description: string; isActive: boolean; isUpcoming: boolean; releaseEndsAt: string; maxPerEmail: number; sizes: Size[] };
 type Settings = { brandName: string; hero: { eyebrow: string; headline: string; body: string }; legal: { companyName: string; supportEmail: string; terms: string; privacy: string; shipping: string } };
+type Drop = { variantId: string; product: string; size: string; kind: 'raffle' | 'waitlist'; drawAt: string | null; stock: number | null; entries: Record<'pending' | 'winner' | 'charged' | 'declined' | 'cancelled', number> };
+type Drops = { drops: Drop[]; recentDraws: { item: string; winners: number; entries: number; at: string }[] };
+type Entry = { id: string; email: string; type: string; status: string; submittedAt: string; decidedAt: string | null };
+type Staff = { people: { email: string; role: string; name: string | null; since: string; you: boolean }[]; invites: { id: string; email: string; role: string; status: string; expiresAt: string }[] };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -43,7 +47,13 @@ export default function MerchantDashboard() {
   const [fatal, setFatal] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tab, setTab] = useState<'products' | 'orders' | 'settings'>('products');
+  const [tab, setTab] = useState<'products' | 'drops' | 'orders' | 'settings' | 'staff'>('products');
+  const [drops, setDrops] = useState<Drops | null>(null);
+  const [openDrop, setOpenDrop] = useState<Drop | null>(null);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [running, setRunning] = useState(false);
+  const [staff, setStaff] = useState<Staff | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [saving, setSaving] = useState(false);
@@ -58,11 +68,67 @@ export default function MerchantDashboard() {
     if (!s.ok) { setFatal(s.body.error || 'Your store could not be loaded.'); return; }
     setStore(s.body);
     const [p, o] = await Promise.all([api<{ products: Product[] }>('/api/merchant/products'), api<{ orders: Order[] }>('/api/merchant/orders')]);
-    const st = await api<Settings>('/api/merchant/settings');
+    const [st, d] = await Promise.all([api<Settings>('/api/merchant/settings'), api<Drops>('/api/merchant/drops')]);
     if (st.ok) setSettings(st.body);
+    if (d.ok) setDrops(d.body);
     if (p.ok) setProducts(p.body.products || []);
     if (o.ok) setOrders(o.body.orders || []);
+    if (s.body.you.role === 'owner') {
+      const sf = await api<Staff>('/api/merchant/staff');
+      if (sf.ok) setStaff(sf.body);
+    }
   }, []);
+
+  const signOut = async () => {
+    await api('/api/merchant/signout', { method: 'POST' }).catch(() => null);
+    window.location.assign('/app/login');
+  };
+
+  const showEntries = async (drop: Drop) => {
+    setOpenDrop(drop);
+    setEntries([]);
+    const r = await api<{ entries: Entry[] }>('/api/merchant/drops/entries?variantId=' + encodeURIComponent(drop.variantId));
+    if (r.ok) setEntries(r.body.entries || []); else setNotice(r.body.error || 'Entries could not be loaded.');
+  };
+
+  const cancelEntry = async (e: Entry) => {
+    if (!window.confirm('Remove ' + e.email + ' from this ' + (openDrop?.kind || 'drop') + '? They will not be drawn or charged.')) return;
+    const r = await api('/api/merchant/drops/cancel', { method: 'POST', body: JSON.stringify({ entryId: e.id }) });
+    setNotice(r.ok ? 'Entry removed.' : (r.body.error || 'The entry could not be removed.'));
+    if (openDrop) showEntries(openDrop);
+    load();
+  };
+
+  const runDraws = async () => {
+    setRunning(true);
+    const r = await api<{ skipped: string | null; draws: number; charged: number; declined: number; more: boolean }>('/api/merchant/drops/run', { method: 'POST' });
+    setRunning(false);
+    if (!r.ok) { setNotice(r.body.error || 'Draws could not be run. Try again.'); return; }
+    const b = r.body;
+    setNotice(b.skipped ? 'Nothing ran: ' + b.skipped + '.' : `${b.draws} draw(s) run, ${b.charged} charged, ${b.declined} card(s) declined.${b.more ? ' More is due; press again.' : ''}`);
+    load();
+  };
+
+  const invite = async () => {
+    const r = await api<{ emailed: boolean }>('/api/merchant/staff/invite', { method: 'POST', body: JSON.stringify({ email: inviteEmail }) });
+    if (!r.ok) { setNotice(r.body.error || 'The invitation could not be sent.'); return; }
+    setNotice(r.body.emailed ? 'Invitation sent to ' + inviteEmail + '.' : 'Invitation created, but the email could not be sent. Check your email provider, then revoke and invite again.');
+    setInviteEmail('');
+    load();
+  };
+
+  const revokeInvite = async (id: string) => {
+    const r = await api('/api/merchant/staff/revoke-invite', { method: 'POST', body: JSON.stringify({ inviteId: id }) });
+    setNotice(r.ok ? 'Invitation revoked.' : (r.body.error || 'The invitation could not be revoked.'));
+    load();
+  };
+
+  const removeStaff = async (email: string) => {
+    if (!window.confirm('Remove ' + email + '? Their account is deleted and they are signed out at once.')) return;
+    const r = await api('/api/merchant/staff/remove', { method: 'POST', body: JSON.stringify({ email }) });
+    setNotice(r.ok ? email + ' removed.' : (r.body.error || 'That person could not be removed.'));
+    load();
+  };
 
   useEffect(() => {
     load();
@@ -137,8 +203,13 @@ export default function MerchantDashboard() {
             <h1 style={{ margin: '4px 0 0', fontSize: 26 }}>{store.store.name}</h1>
             {store.store.address && <a href={store.store.address} target="_blank" rel="noreferrer" style={{ color: C.muted, fontSize: 14 }}>{store.store.address.replace('https://', '')}</a>}
           </div>
-          <div style={{ fontSize: 13, color: C.muted }}>{store.you.email} · {store.you.role}</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, color: C.muted }}>
+            <span>{store.you.email} · {store.you.role}</span>
+            <button onClick={signOut} style={{ ...ghost, minHeight: 36, padding: '0 12px', fontSize: 14 }}>Sign out</button>
+          </div>
         </header>
+
+        {store.you.role === 'support' && <div role="note" style={{ ...card, borderColor: C.warn }}>Support session: you are acting inside this store. Everything you change is recorded under your name. Payments and staff stay with the owner.</div>}
 
         {notice && <div role="status" style={{ ...card, borderColor: C.warn, color: C.text }}>{notice} <button onClick={() => setNotice('')} style={{ ...ghost, minHeight: 32, padding: '0 10px', marginLeft: 8 }}>Dismiss</button></div>}
 
@@ -163,11 +234,81 @@ export default function MerchantDashboard() {
           </div>
         </section>
 
-        <nav style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {(['products', 'orders', 'settings'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'orders' ? `Orders (${orders.length})` : 'Settings'}</button>
+        <nav style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const] : [])] as const).map((t) => (
+            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : 'Settings'}</button>
           ))}
         </nav>
+
+        {tab === 'drops' && !openDrop && (
+          <section style={card} aria-label="Raffles and waitlists">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ fontWeight: 700 }}>Raffles &amp; waitlists</div>
+              <button style={btn} onClick={runDraws} disabled={running}>{running ? 'Running…' : 'Run due draws now'}</button>
+            </div>
+            <p style={{ color: C.muted, fontSize: 13, marginTop: 0 }}>Draws also run by themselves after their draw date. Running now only does what is already due.</p>
+            {(!drops || drops.drops.length === 0) && <p style={{ color: C.muted }}>No raffles or waitlists yet. Make a size a raffle, or mark a product coming soon.</p>}
+            {drops?.drops.map((d) => (
+              <div key={d.variantId} style={{ borderTop: `1px solid ${C.line}`, padding: '12px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{d.product} · {d.size} <span style={{ fontSize: 12, color: C.muted, marginLeft: 6 }}>{d.kind}</span></div>
+                  {d.drawAt && <div style={{ color: C.muted, fontSize: 13 }}>Draw: {new Date(d.drawAt).toLocaleString()}</div>}
+                  <div style={{ color: C.muted, fontSize: 13 }}>{`${d.entries.pending} waiting · ${d.entries.winner} won · ${d.entries.charged} paid · ${d.entries.declined} declined · ${d.stock ?? '?'} left`}</div>
+                </div>
+                <button style={ghost} onClick={() => showEntries(d)}>Entries</button>
+              </div>
+            ))}
+            {drops && drops.recentDraws.length > 0 && (
+              <>
+                <div style={{ fontWeight: 700, marginTop: 18 }}>Recent draws</div>
+                {drops.recentDraws.map((r, i) => <div key={i} style={{ color: C.muted, fontSize: 13, padding: '6px 0' }}>{`${new Date(r.at).toLocaleString()} · ${r.item} · ${r.winners} winner(s) from ${r.entries}`}</div>)}
+              </>
+            )}
+          </section>
+        )}
+
+        {tab === 'drops' && openDrop && (
+          <section style={card} aria-label="Entries">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              <div style={{ fontWeight: 700 }}>{openDrop.product} · {openDrop.size}</div>
+              <button style={ghost} onClick={() => setOpenDrop(null)}>Back</button>
+            </div>
+            {entries.length === 0 && <p style={{ color: C.muted }}>No entries.</p>}
+            {entries.map((e) => (
+              <div key={e.id} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                  <div style={{ fontWeight: 600 }}>{e.email}</div>
+                  <div style={{ color: C.muted, fontSize: 13 }}>{e.status}{e.type === 'waitlist' ? ' · waitlist' : ''} · {new Date(e.submittedAt).toLocaleString()}</div>
+                </div>
+                {e.status === 'pending' && <button style={ghost} onClick={() => cancelEntry(e)}>Remove</button>}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {tab === 'staff' && staff && (
+          <section style={card} aria-label="Staff">
+            <div style={{ fontWeight: 700 }}>People who can run this store</div>
+            {staff.people.map((p) => (
+              <div key={p.email} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{p.email} <span style={{ color: C.muted, fontSize: 13 }}>· {p.role}{p.you ? ' (you)' : ''}</span></div>
+                {p.role === 'staff' && !p.you && <button style={ghost} onClick={() => removeStaff(p.email)}>Remove</button>}
+              </div>
+            ))}
+            <div style={{ fontWeight: 700, marginTop: 18 }}>Invite staff</div>
+            <p style={{ color: C.muted, fontSize: 13, margin: '6px 0 0' }}>Staff can manage products, raffles, orders and settings. Only you can connect payments or manage staff.</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <input type="email" aria-label="Email to invite" placeholder="name@example.com" style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+              <button style={btn} onClick={invite} disabled={!inviteEmail}>Send invitation</button>
+            </div>
+            {staff.invites.filter((i) => i.status === 'pending').map((i) => (
+              <div key={i.id} style={{ borderTop: `1px solid ${C.line}`, marginTop: 10, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{i.email} <span style={{ color: C.muted, fontSize: 13 }}>· invited, expires {new Date(i.expiresAt).toLocaleDateString()}</span></div>
+                <button style={ghost} onClick={() => revokeInvite(i.id)}>Revoke</button>
+              </div>
+            ))}
+          </section>
+        )}
 
         {tab === 'products' && !editing && (
           <section style={card} aria-label="Products">

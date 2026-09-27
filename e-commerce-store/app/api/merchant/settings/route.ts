@@ -1,8 +1,9 @@
-import { merchantSession, merchantJson } from '@/lib/merchant-session';
+import { merchantSession, merchantJson, auditMerchant } from '@/lib/merchant-session';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
 import { validateMerchantSettings } from '@/lib/merchant-settings-input';
 import { rateLimitedResponse } from '@/lib/rate-limit';
+import { stampLegalUpdated } from '@/lib/legal-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,8 +48,9 @@ export async function POST(request: Request) {
     ...current,
     branding: { ...(current.branding || {}), brandName: v.brandName },
     heroContent: hero,
-    legal: { ...(current.legal || {}), ...v.legal },
+    legal: stampLegalUpdated(current.legal, { ...(current.legal || {}), ...v.legal }),
   };
   await getDb().insert('tenant_store_config', { tenant_id: tenantId, config: next, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id', returning: 'minimal' } as any);
+  await auditMerchant(gate.session, request, 'SETTINGS_SAVED', 'store name, homepage text, policies');
   return merchantJson({ saved: true });
 }

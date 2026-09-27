@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createKvClient, safeParseKvItem, STORE_CONFIG_KEY } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
 import { normalizeCategories } from '@/lib/storefront-config';
+import { stampLegalUpdated } from '@/lib/legal-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +67,8 @@ export async function POST(request: Request) {
       catalogPreview: catalogPreview || current.catalogPreview || { upcomingDrops: [], archiveScents: [] },
       orbs: orbs || current.orbs || {},
       copy: copy || current.copy || {},
-      legal: legal || current.legal || {},
+      // Each policy's date moves only when its text changes (not on every save).
+      legal: legal ? stampLegalUpdated(current.legal, legal) : (current.legal || {}),
       catalog: {
         sectionOrder: Array.isArray(catalog?.sectionOrder) && catalog.sectionOrder.length > 0
           ? catalog.sectionOrder

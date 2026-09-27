@@ -36,7 +36,9 @@ export default function ImpersonationLauncher() {
         setError(data?.error || 'Could not start impersonation.');
         return;
       }
-      window.location.href = '/admin';
+      // A merchant store opens on its own dashboard host via a one-time link;
+      // the original store keeps opening in /admin.
+      window.location.href = typeof data?.next === 'string' ? data.next : '/admin';
     } catch (err: any) {
       setError(err?.message || 'Network error.');
     } finally {

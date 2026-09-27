@@ -1,4 +1,4 @@
-import { merchantSession, merchantJson } from '@/lib/merchant-session';
+import { merchantSession, merchantJson, auditMerchant } from '@/lib/merchant-session';
 import { loadProducts } from '@/lib/server-config';
 import { writeProductToPostgres } from '@/lib/catalog-write';
 import { validateMerchantProduct } from '@/lib/merchant-product-input';
@@ -93,6 +93,7 @@ export async function POST(request: Request) {
     console.error('[merchant/products] write failed for ' + tenantId + ': ' + result.error);
     return merchantJson({ error: 'The product could not be saved. Try again.' }, 500);
   }
+  await auditMerchant(gate.session, request, input.id ? 'PRODUCT_UPDATED' : 'PRODUCT_CREATED', input.name + ' (' + id + ')');
   const after = await loadProducts(null, { tenantId });
   return merchantJson({ product: after[id] ? publicShape(after[id]) : { id } }, input.id ? 200 : 201);
 }

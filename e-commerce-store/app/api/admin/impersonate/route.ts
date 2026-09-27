@@ -8,6 +8,11 @@ import { isValidEmail, isValidPassword } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { appendAudit } from '@/app/api/admin/audit/route';
 import { portalCookieAttrs } from '@/lib/portal-cookies';
+import { isForeignTenantSession } from '@/lib/default-tenant';
+import { createSupportHandoff, supportHandoffUrl } from '@/lib/merchant-support-handoff';
+import { recordPlatformAudit } from '@/lib/platform-audit';
+import { clientIp } from '@/lib/rate-limit';
+import { ADMIN_DEVICES_KEY } from '@/lib/redis-keys';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,18 +124,37 @@ export async function POST(request: Request) {
       IMPERSONATION_TTL_SECONDS,
     );
 
-    await appendAudit(
-      redis,
-      {
-        action: 'STAFF_IMPERSONATION_STARTED',
-        detail: `${account.email} (${account.role}) entered tenant ${tenant.name} (${tenant.id})`,
-        actor: account.email,
-        email: account.email,
-        staffId: account.id,
-        tenantId: tenant.id,
-      },
-      request,
-    );
+    const startEntry = {
+      action: 'STAFF_IMPERSONATION_STARTED',
+      detail: `${account.email} (${account.role}) entered tenant ${tenant.name} (${tenant.id})`,
+      actor: account.email,
+      email: account.email,
+      staffId: account.id,
+      tenantId: tenant.id,
+    };
+
+    // A MERCHANT store: the session is used on app.<root>, which this host's
+    // cookie can never reach, so hand it over with a one-time code
+    // (lib/merchant-support-handoff.ts). No cookie here: the admin tree
+    // refuses a merchant store's session anyway. Audited in the platform table
+    // only -- the KV list behind appendAudit is the original store's own admin
+    // audit view, and another store's name has no business there.
+    if (isForeignTenantSession(tenant.id)) {
+      const code = await createSupportHandoff(redis as any, token, tenant.id);
+      if (!code) {
+        await redis.hdel(ADMIN_DEVICES_KEY, token).catch(() => 0);
+        return NextResponse.json({ error: 'Could not start impersonation.' }, { status: 503 });
+      }
+      await recordPlatformAudit({ action: startEntry.action, actor: account.email, detail: { detail: startEntry.detail }, staffId: account.id, tenantId: tenant.id, ipAddress: clientIp(request) });
+      return NextResponse.json({
+        ok: true,
+        tenant: { id: tenant.id, name: tenant.name },
+        expiresInSeconds: maxAgeSeconds,
+        next: supportHandoffUrl(code, process.env.PLATFORM_ROOT_DOMAIN),
+      });
+    }
+
+    await appendAudit(redis, startEntry, request);
 
     const response = NextResponse.json({
       ok: true,

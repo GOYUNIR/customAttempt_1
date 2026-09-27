@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createKvClient, loadStoreConfigCached } from '@/lib/server-config';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
-import { DEFAULT_LEGAL, parseLegalContent, type LegalPageKey } from '@/lib/legal-config';
+import { DEFAULT_LEGAL, parseLegalContent, legalUpdatedDate, type LegalPageKey } from '@/lib/legal-config';
 import { surfaceBackground, themeRadius } from '@/lib/storefront-config';
 import { getSupportEmail } from '@/lib/env';
 import { storefrontTenantFromHeaders } from '@/lib/storefront-tenant';
@@ -36,6 +36,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
   let colors: Record<string, any>;
   let companyName: string;
   let blocks: ReturnType<typeof parseLegalContent>;
+  let updated: string | null = null;
   if (who.isDefault) {
     const redis = createKvClient();
     const config = await loadStoreConfigCached(redis);
@@ -46,6 +47,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
     companyName = String(legal.companyName || brandName);
     const supportEmail = String(legal.supportEmail || getSupportEmail() || GOYUNIR_STORE_SUITE.brandFooterData.supportEmail || 'support');
     blocks = parseLegalContent(String(legal[page] || DEFAULT_LEGAL[page] || ''), { companyName, supportEmail });
+    updated = legalUpdatedDate(config.legal, page);
   } else {
     const row = ((await getDb().select<any>('tenant_store_config', { where: { tenant_id: eq(who.tenantId) }, select: ['config'], limit: 1 }).catch(() => [])) as any[])[0];
     const config = (row?.config || {}) as Record<string, any>;
@@ -54,6 +56,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
     companyName = String(legal.companyName || config.branding?.brandName || who.name || 'This store');
     const supportEmail = String(legal.supportEmail || '');
     const own = String(legal[page] || '').trim();
+    if (own) updated = legalUpdatedDate(legal, page);
     blocks = own
       ? parseLegalContent(own, { companyName, supportEmail: supportEmail || 'the store' })
       : [{ kind: 'paragraph', text: companyName + ' has not published its ' + titles[page].toLowerCase() + ' yet.' + (supportEmail ? ' Questions: ' + supportEmail + '.' : '') }];
@@ -97,7 +100,7 @@ export default async function LegalPage({ page }: { page: LegalPageKey }) {
       </Link>
       <h1 style={{ fontSize: 28, margin: '24px 0 8px', color: colors.textMain }}>{titles[page]}</h1>
       <p style={{ color: colors.textMuted, fontSize: 12 }}>
-        {companyName} · Last updated: {new Date().toISOString().slice(0, 10)}
+        {companyName}{updated ? ' · Last updated: ' + updated : ''}
       </p>
       <div
         style={{

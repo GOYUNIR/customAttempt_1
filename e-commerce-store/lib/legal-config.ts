@@ -27,9 +27,39 @@ export type StoreLegalConfig = {
   privacy?: string;
   /** Multi-line Shipping & Sales Policy content (see format above). */
   shipping?: string;
+  /** When each policy's text last changed (YYYY-MM-DD). Set only by stampLegalUpdated. */
+  updatedAt?: Partial<Record<LegalPageKey, string>>;
 };
 
-export const DEFAULT_LEGAL: Required<StoreLegalConfig> = {
+const LEGAL_PAGES: LegalPageKey[] = ['terms', 'privacy', 'shipping'];
+
+/**
+ * The legal block to store, with each policy's "last updated" date carried
+ * forward, or set to today when that policy's text actually changed. The
+ * dates come only from the previous stored value and the clock, never from
+ * the incoming body, so a save cannot backdate a policy.
+ */
+export function stampLegalUpdated(prev: Record<string, any> | null | undefined, next: Record<string, any>, now = new Date()): Record<string, any> {
+  const before = prev || {};
+  const kept = (before.updatedAt && typeof before.updatedAt === 'object' ? before.updatedAt : {}) as Record<string, unknown>;
+  const today = now.toISOString().slice(0, 10);
+  const updatedAt: Partial<Record<LegalPageKey, string>> = {};
+  for (const page of LEGAL_PAGES) {
+    const changed = String(next[page] ?? '').trim() !== String(before[page] ?? '').trim();
+    const date = changed ? today : kept[page];
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) updatedAt[page] = date;
+  }
+  const { updatedAt: _ignored, ...rest } = next;
+  return { ...rest, updatedAt };
+}
+
+/** The date a page shows, or null when nobody has recorded one (the line is then left out). */
+export function legalUpdatedDate(legal: Record<string, any> | null | undefined, page: LegalPageKey): string | null {
+  const d = legal?.updatedAt?.[page];
+  return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
+
+export const DEFAULT_LEGAL: Required<Omit<StoreLegalConfig, 'updatedAt'>> = {
   // Neutral white-label defaults. Template buyers set their real company name
   // and support inbox in /admin → Settings → Legal & Policies (or env vars
   // SUPPORT_EMAIL / REPLY_TO_EMAIL). Nothing here is a brand.

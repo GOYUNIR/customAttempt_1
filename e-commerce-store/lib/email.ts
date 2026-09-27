@@ -848,16 +848,21 @@ export async function sendStaffInviteEmail(opts: {
   invitedBy: string;
   acceptUrl: string;
   expiresInDays: number;
+  /** A merchant store's own name: the invite is to THAT store, not to the
+   *  platform's brand, and a reply goes to the person who invited. */
+  storeName?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
-  const brand = emailBrandName();
+  const storeName = String(opts.storeName || '').replace(/\s+/g, ' ').trim();
+  const brandText = storeName || emailBrandName();
+  const brand = escapeHtml(brandText);
   try {
     const { error } = await resend.emails.send({
       from: from(),
       to: opts.to,
-      replyTo: replyTo(),
-      subject: `You have been invited to join ${brand}`,
+      replyTo: storeName ? opts.invitedBy : replyTo(),
+      subject: `You have been invited to join ${brandText}`,
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
           <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${brand.toUpperCase()}</p>

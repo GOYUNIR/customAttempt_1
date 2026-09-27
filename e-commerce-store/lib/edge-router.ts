@@ -152,6 +152,8 @@ export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain
   // portal host only. Its session cookie is scoped there anyway; this keeps the
   // routes from answering on any other host at all.
   if (pathname === '/api/merchant' || pathname.startsWith('/api/merchant/')) return portal === 'merchant';
+  // The support handoff sets the merchant host's session cookie: that host only.
+  if (pathname === '/api/merchant-support' || pathname.startsWith('/api/merchant-support/')) return portal === 'merchant';
   return true;
 }
 

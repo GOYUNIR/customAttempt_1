@@ -1,4 +1,4 @@
-import { merchantSession, merchantJson } from '@/lib/merchant-session';
+import { merchantSession, merchantJson, auditMerchant } from '@/lib/merchant-session';
 import { ensureConnectedAccount, chargeRouteForTenant } from '@/lib/connect';
 import { resolveStripeClient } from '@/services/payment/factory';
 import { rateLimitedResponse } from '@/lib/rate-limit';
@@ -50,5 +50,6 @@ export async function POST(request: Request) {
       },
     },
   });
+  await auditMerchant(gate.session, request, 'PAYMENTS_ONBOARDING', 'Stripe account ' + account + ' (' + country + ')');
   return merchantJson({ status: 'onboarding', url: link.url });
 }
