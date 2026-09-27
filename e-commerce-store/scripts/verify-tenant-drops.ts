@@ -109,6 +109,14 @@ async function enterOnce(slug: string, size: string, email: string, card: string
 
   if (stage === 'enter') {
     execSync('npx tsx scripts/seed-tenant-drop-products.ts --draw-in=30', { stdio: 'inherit' });
+    // The draw is random over EVERY pending entry. Leftover pending entries
+    // from earlier runs (declined cards back in the pool) would compete with
+    // this run's and make "both good cards charged" depend on luck, as it
+    // once did: 5 in the pool, a leftover drawn instead of a good card. This
+    // test raffle's leftovers are cancelled so the pool is this run's alone.
+    const leftovers = (await getDb().select('raffle_entries', { where: { tenant_id: eq(TENANT), variant_id: eq(String(raffleVariant)), status: eq('pending') }, select: ['id', 'email'] })) as any[];
+    for (const l of leftovers) await getDb().update('raffle_entries', { where: { id: eq(l.id), tenant_id: eq(TENANT), status: eq('pending') } }, { status: 'cancelled' }, { returning: 'minimal' } as any);
+    console.log('cancelled ' + leftovers.length + ' leftover pending test entr' + (leftovers.length === 1 ? 'y' : 'ies') + ' on the test raffle');
     const run = Date.now().toString(36);
     const raffleEntrants = [
       // Resend's test inbox: the store's emails to them can be read back.
@@ -198,6 +206,21 @@ async function enterOnce(slug: string, size: string, email: string, card: string
         && billing.length === 1 && billing[0].fee_cents === pi.application_fee_amount,
         e.entry_type + ' ' + e.email + ': ' + (pi ? pi.id + ' ' + pi.amount + ' fee ' + pi.application_fee_amount : 'no PI') + ', order ' + JSON.stringify(order[0] || null) + ', billing rows ' + billing.length);
     }
+    console.log('\nHolds (00037)');
+    const holdOf = async (entryId: string) => ((await getDb().select('stock_holds', { where: { tenant_id: eq(TENANT), reference: eq('entry:' + entryId) }, select: ['hold_key', 'status', 'expires_at'] })) as any[]);
+    for (const e of charged) {
+      const hs = await holdOf(String(e.id));
+      const pi = piFor(String(e.id))[0];
+      const sales = pi ? ((await getDb().select('stock_movements', { where: { tenant_id: eq(TENANT), reason: eq('sale'), reference: eq(pi.id) }, select: ['delta', 'shortfall'] })) as any[]) : [];
+      const wantKey = (e.entry_type === 'raffle' ? 'win:' : 'wl:') + e.id;
+      check(hs.length === 1 && hs[0].hold_key === wantKey && hs[0].status === 'converted' && (e.entry_type === 'raffle' ? hs[0].expires_at === null : hs[0].expires_at !== null) && sales.length === 1 && sales[0].delta === -1 && sales[0].shortfall === 0,
+        e.email + ': its ' + (e.entry_type === 'raffle' ? 'winner hold (no expiry)' : 'waitlist hold (15 min)') + ' converted, one sale for ' + (pi?.id || '?') + ' ' + JSON.stringify(hs.map((h) => h.status)));
+    }
+    const badHolds = bad ? await holdOf(String(bad.id)) : [];
+    check(badHolds.length > 0 && badHolds.every((h) => h.status === 'released'), 'the declined winner\'s hold was released (' + JSON.stringify(badHolds.map((h) => h.status)) + ')');
+    const stillActive = (await Promise.all(all.map((e) => holdOf(String(e.id))))).flat().filter((h) => h.status === 'active');
+    check(stillActive.length === 0, 'no hold left active for these entries (' + stillActive.length + ')');
+
     const raffleStock = await stockOf(raffleVariant);
     const preStock = await stockOf(preVariant);
     check(raffleStock === st.raffleStock - 2 && preStock === st.preStock - 2, 'stock raffle ' + st.raffleStock + ' -> ' + raffleStock + ', preorder ' + st.preStock + ' -> ' + preStock);
