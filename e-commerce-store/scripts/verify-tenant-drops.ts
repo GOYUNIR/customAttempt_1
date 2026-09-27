@@ -35,6 +35,7 @@ const STATE = join(OUT, 'drops-state.json');
 const RAFFLE = { slug: 'connect-test-raffle', productId: 'prod_tenant_test_3', size: 'Standard', priceCents: 3000 };
 const PREORDER = { slug: 'connect-test-preorder', productId: 'prod_tenant_test_4', size: 'One Size', priceCents: 1500 };
 
+import { testInbox, sentTo } from './resend-readback';
 let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -97,19 +98,27 @@ async function enterOnce(slug: string, size: string, email: string, card: string
   const raffleVariant = await resolveVariantId(TENANT, RAFFLE.productId, RAFFLE.size);
   const preVariant = await resolveVariantId(TENANT, PREORDER.productId, PREORDER.size);
   const stockOf = async (v: string | null) => v ? Number(((await getDb().select('inventory_levels', { where: { tenant_id: eq(TENANT), variant_id: eq(v) }, select: ['quantity_available'], limit: 1 })) as any[])[0]?.quantity_available) : null;
+  const storeName = async () => {
+    const [t, c] = await Promise.all([
+      getDb().select('tenants', { where: { id: eq(TENANT) }, select: ['name'], limit: 1 }),
+      getDb().select('tenant_store_config', { where: { tenant_id: eq(TENANT) }, select: ['config'], limit: 1 }),
+    ]) as any[][];
+    return String(c[0]?.config?.branding?.brandName || t[0]?.name || 'Store').trim();
+  };
   const entriesFor = async (emails: string[]) => (await getDb().select('raffle_entries', { where: { tenant_id: eq(TENANT) }, select: ['*'] }) as any[]).filter((e) => emails.includes(String(e.email)));
 
   if (stage === 'enter') {
     execSync('npx tsx scripts/seed-tenant-drop-products.ts --draw-in=30', { stdio: 'inherit' });
     const run = Date.now().toString(36);
     const raffleEntrants = [
-      { email: `raffle-a-${run}@goyunir.invalid`, card: '4242424242424242' },
-      { email: `raffle-b-${run}@goyunir.invalid`, card: '4242424242424242' },
-      { email: `raffle-decline-${run}@goyunir.invalid`, card: '4000000000000341' },
+      // Resend's test inbox: the store's emails to them can be read back.
+      { email: testInbox('ra' + run), card: '4242424242424242' },
+      { email: testInbox('rb' + run), card: '4242424242424242' },
+      { email: testInbox('rdecline' + run), card: '4000000000000341' },
     ];
     const waitlisters = [
-      { email: `wait-a-${run}@goyunir.invalid`, card: '4242424242424242' },
-      { email: `wait-b-${run}@goyunir.invalid`, card: '4242424242424242' },
+      { email: testInbox('wa' + run), card: '4242424242424242' },
+      { email: testInbox('wb' + run), card: '4242424242424242' },
     ];
     console.log('\nEntering (' + run + ')');
     for (const [i, e] of raffleEntrants.entries()) console.log('  raffle ' + e.email + ': "' + await enterOnce(RAFFLE.slug, RAFFLE.size, e.email, e.card, `drops-raffle-${i}.png`) + '"');
@@ -126,6 +135,15 @@ async function enterOnce(slug: string, size: string, email: string, card: string
       'two waitlist entries pending, on ' + acct);
     const onPlatform = await Promise.all(all.map((e) => stripe.paymentMethods.retrieve(String(e.payment_method_ref)).then(() => true).catch(() => false)));
     check(onPlatform.every((x) => !x), 'no saved card exists on the platform account');
+    console.log('\nThe store\'s "you\'re entered" emails (lib/tenant-email.ts)');
+    const name = await storeName();
+    for (const e of all) {
+      const mails = await sentTo(getDb, String(e.email));
+      const want = e.entry_type === 'raffle' ? "You're entered: Connect Test Raffle (Standard)" : "You're on the waitlist: Connect Test Preorder (One Size)";
+      const m = mails.find((x: any) => x.subject === want);
+      check(mails.length === 1 && Boolean(m) && String(m.from).startsWith('"' + name + '" <') && !/<img/i.test(String(m.html)) && /charged only if/.test(String(m.html)),
+        e.email + ': exactly one "' + want + '" from ' + (m ? m.from : '(none)') + ' (' + mails.length + ' email(s))');
+    }
     writeFileSync(STATE, JSON.stringify({ run, raffleEntrants, waitlisters, raffleStock: await stockOf(raffleVariant), preStock: await stockOf(preVariant) }, null, 2));
   } else if (stage === 'draw') {
     const st = JSON.parse(readFileSync(STATE, 'utf8'));
@@ -182,12 +200,30 @@ async function enterOnce(slug: string, size: string, email: string, card: string
     const ours = await Promise.all(charged.map(async (e) => (await stripe.paymentIntents.search({ query: `metadata['entry_id']:'${e.id}'` }, { stripeAccount: acct })).data[0]?.id));
     check(!defaultOrders.some((o) => ours.includes(o.stripe_payment_intent_id)), 'nothing written for the default store');
 
+    console.log('\nThe store\'s "you won / it\'s yours" emails');
+    const name = await storeName();
+    for (const e of all) {
+      const mails = await sentTo(getDb, String(e.email), { waitMs: e.status === 'charged' ? 20_000 : 3_000 });
+      const chargedMail = mails.filter((x: any) => /^(You won|It's yours): /.test(String(x.subject)));
+      if (e.status === 'charged') {
+        const price = e.variant_id === raffleVariant ? '$30.00' : '$15.00';
+        const want = e.variant_id === raffleVariant ? 'You won: Connect Test Raffle (Standard)' : "It's yours: Connect Test Preorder (One Size)";
+        const m = chargedMail[0];
+        check(chargedMail.length === 1 && m.subject === want && String(m.from).startsWith('"' + name + '" <') && String(m.html).includes(price) && /Order /.test(String(m.html)),
+          e.email + ': exactly one "' + want + '", ' + price + ', from ' + (m ? m.from : '(none)'));
+      } else {
+        check(chargedMail.length === 0, e.email + ' (declined, back in the pool): no "charged" email (' + chargedMail.length + ')');
+      }
+    }
+
     console.log('\nA third trigger (nothing left to do)');
     const r3 = await fire();
     console.log('  ' + JSON.stringify(r3));
     await sleep(3000);
     const after3 = await entriesFor(emails);
     check((await drawsSinceEntry()) === 1 && after3.filter((e) => e.status === 'charged').length === charged.length, 'no new draw and no new charge');
+    const again = await Promise.all(charged.map(async (e) => (await sentTo(getDb, String(e.email), { waitMs: 0 })).filter((x: any) => /^(You won|It's yours): /.test(String(x.subject))).length));
+    check(again.every((n) => n === 1), 'and no second "charged" email to anyone: ' + again.join(','));
   } else {
     console.log('usage: verify-tenant-drops.ts enter | draw');
     process.exit(2);

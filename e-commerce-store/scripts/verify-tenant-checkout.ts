@@ -37,6 +37,7 @@ const CARD = process.argv.slice(2).find((a) => /^\d{16}$/.test(a)) || '424242424
 const REFUND = process.argv.includes('--refund');
 const OUT = join(process.cwd(), 'tenant-checkout-out');
 
+import { testInbox, sentTo } from './resend-readback';
 let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -76,7 +77,7 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const page = await ctx.newPage();
   // Resend's test inbox (a unique label per run): accepts the confirmation
   // email without delivering it anywhere, so it can be read back.
-  const email = 'delivered+tc' + Date.now() + '@resend.dev';
+  const email = testInbox('tc' + Date.now());
   let sessionId = '';
   try {
     await page.goto(STORE + '/' + PRODUCT_SLUG, { waitUntil: 'load', timeout: 90_000 });
@@ -182,12 +183,9 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   check(mailClaim?.status === 'done', 'sent, once, after the order was written (claim ' + (mailClaim?.status || 'missing') + ')');
   const usageRows = (await getDb().select('usage_events', { where: { reference: eq('contact:' + email) }, select: ['tenant_id'] })) as any[];
   check(usageRows.length === 1 && usageRows[0].tenant_id === TENANT, 'counted as test4\'s email, not the original store\'s: ' + JSON.stringify(usageRows));
-  const settingsRow = ((await getDb().select('global_platform_settings', { select: ['mail_provider', 'mail_api_key'], limit: 1 }).catch(() => [])) as any[])[0];
-  const resendKey = settingsRow?.mail_provider === 'resend' && settingsRow?.mail_api_key ? settingsRow.mail_api_key : process.env.RESEND_API_KEY;
-  const rs = (path: string) => fetch('https://api.resend.com' + path, { headers: { authorization: 'Bearer ' + resendKey } }).then((r) => r.json() as Promise<any>);
-  const listed = await rs('/emails?limit=50').catch(() => null);
-  const hit = (listed?.data || []).find((m: any) => (Array.isArray(m.to) ? m.to : [m.to]).includes(email));
-  const msg = hit ? await rs('/emails/' + hit.id) : null;
+  const sent = await sentTo(getDb, email);
+  check(sent.length === 1, 'exactly one email to the customer: ' + sent.length);
+  const msg = sent[0] || null;
   const storeRow = ((await getDb().select('tenant_store_config', { where: { tenant_id: eq(TENANT) }, select: ['config'], limit: 1 })) as any[])[0];
   const storeName = String(storeRow?.config?.branding?.brandName || 'test4');
   const support = String(storeRow?.config?.legal?.supportEmail || '');

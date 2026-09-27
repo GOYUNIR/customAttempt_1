@@ -219,9 +219,12 @@ export async function recordTenantEntryFromSetupSession(session: any, tenantId: 
 // left is reported as `more` for the next trigger. Database calls are counted
 // by the meter (lib/subrequest-meter.ts); Stripe calls are counted here.
 
-// Measured worst case of one chargeEntry (28, with margin) plus its customer
-// email (STORE_EMAIL_CALLS): a charge only starts if its email fits too.
-const PER_CHARGE_CALLS = 28 + STORE_EMAIL_CALLS;
+// Measured worst case of one chargeEntry, with margin. The customer's email
+// is NOT in here: it is sent by the run's email pass (sendDueChargeEmails)
+// with whatever budget is left, so an email can never starve a charge. (It
+// was once added here, 28 -> 35, and on the 50-call plan no run could afford
+// a single charge any more: every trigger deferred. Caught by the live proof.)
+const PER_CHARGE_CALLS = 28;
 const SAFETY_CALLS = 4;
 
 class Budget {
@@ -233,7 +236,8 @@ class Budget {
   readonly limit = Math.max(20, Number(process.env.WORKER_SUBREQUEST_LIMIT) || SUBREQUEST_LIMIT_FREE);
   stripe(n = 1) { this.stripeCalls += n; }
   used() { return subrequestCount() - this.startDb + this.stripeCalls; }
-  canAffordCharge() { return this.used() + PER_CHARGE_CALLS <= this.limit - SAFETY_CALLS; }
+  canAffordCharge() { return this.canAfford(PER_CHARGE_CALLS); }
+  canAfford(calls: number) { return this.used() + calls <= this.limit - SAFETY_CALLS; }
 }
 
 /** A Stripe card error: the only failure that means "declined". Anything else
@@ -341,15 +345,13 @@ async function chargeEntry(input: {
     }
 
     await markRaffleEntryOutcome(tenantId, entryId, 'charged');
+    // The customer's "you won / it's yours" email is DUE: recorded here (one
+    // insert), sent by the run's email pass with leftover budget, or by the
+    // next run. Never inside the charge, never able to fail it.
+    await claimWebhookKey(chargeEmailScope(tenantId), entryId).catch((err) =>
+      console.error('[tenant-drops] could not mark the charged email due for ' + entryId, (err as Error)?.message || err));
     await completeWebhookKey('tenant_charge', attempt);
-    // The customer hears only once everything above is done. Keyed by the
-    // attempt, like the charge. Best-effort: never throws, never undoes.
-    budget.stripe(1); // the email provider call is not metered
-    const mail = await sendStoreEmailOnce({
-      tenantId, kind: 'charged', key: attempt, to: email,
-      build: (store) => renderEntryCharged(store, { kind, product: variant.productName, size: variant.size, amountCents: variant.priceCents, currency, orderRef }),
-    });
-    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + feeCharged + ', order ' + orderRef + ', email ' + mail.status, calls: budget.used() - before };
+    return { entryId, status: 'charged', note: 'pi ' + pi.id + ', fee ' + feeCharged + ', order ' + orderRef, calls: budget.used() - before };
   } catch (err) {
     await releaseWebhookKey('tenant_charge', attempt).catch(() => {});
     console.error('[tenant-drops] ' + kind + ' entry ' + entryId + ' incomplete, will retry: ' + ((err as Error)?.message || err));
@@ -357,9 +359,60 @@ async function chargeEntry(input: {
   }
 }
 
+// ── The customer's email for a charge ───────────────────────────────────────
+
+/** Per-store marker scope: key = entry id, 'claimed' = the email is due. */
+const chargeEmailScope = (tenantId: string) => 'tenant_email_due:' + tenantId;
+
+/**
+ * Send the "you won / it's yours" emails that are DUE for this store, with the
+ * budget the run has left (charges always come first). Only entries charged
+ * since this existed have a marker, so older charges are never emailed. The
+ * amount and order come from the recorded order, not today's price. Sent,
+ * already-sent or undeliverable = marker done; a transient failure stays due.
+ */
+async function sendDueChargeEmails(tenantId: string, tenantSlug: string | null, budget: Budget, infoByVariant: Map<string, VariantInfo>): Promise<number> {
+  const scope = chargeEmailScope(tenantId);
+  if (!budget.canAfford(2 + STORE_EMAIL_CALLS)) return 0;
+  const due = (await getDb().select<any>('webhook_dedupe', { where: { scope: eq(scope), status: eq('claimed') }, select: ['dedupe_key'], limit: 20 })) as any[];
+  if (due.length === 0) return 0;
+  const entries = (await getDb().select<any>('raffle_entries', {
+    where: { tenant_id: eq(tenantId), id: inList(due.map((d) => String(d.dedupe_key))) }, select: ['id', 'email', 'entry_type', 'variant_id', 'status'],
+  })) as any[];
+  const byId = new Map(entries.map((e) => [String(e.id), e]));
+  const refFor = (e: any, v: VariantInfo) => buildOrderRef(String(e.email || ''), v.productId, v.size, normalizeRefPrefix(tenantSlug || 'ORD'), String(e.id));
+  const refs = entries.map((e) => { const v = infoByVariant.get(String(e.variant_id)); return v ? refFor(e, v) : ''; }).filter(Boolean);
+  const orders = refs.length === 0 ? [] : (await getDb().select<any>('orders', {
+    where: { tenant_id: eq(tenantId), order_ref: inList(refs) }, select: ['order_ref', 'total_cents', 'currency'],
+  })) as any[];
+  const orderOf = new Map(orders.map((o) => [String(o.order_ref), o]));
+  let sent = 0;
+  for (const d of due) {
+    const entryId = String(d.dedupe_key);
+    const e = byId.get(entryId);
+    const v = e ? infoByVariant.get(String(e.variant_id)) : undefined;
+    const order = e && v ? orderOf.get(refFor(e, v)) : undefined;
+    if (!e || e.status !== 'charged' || !v || !order) {
+      // Nothing to say (entry gone, product gone, or no order): not due any more.
+      await completeWebhookKey(scope, entryId);
+      continue;
+    }
+    if (!budget.canAfford(STORE_EMAIL_CALLS + 1)) break;
+    budget.stripe(1); // the email provider call is not metered
+    const kind: Kind = e.entry_type === 'waitlist' ? 'waitlist' : 'raffle';
+    const m = await sendStoreEmailOnce({
+      tenantId, kind: 'charged', key: entryId, to: String(e.email || ''),
+      build: (store) => renderEntryCharged(store, { kind, product: v.productName, size: v.size, amountCents: Number(order.total_cents), currency: String(order.currency || ''), orderRef: String(order.order_ref) }),
+    });
+    if (m.status !== 'failed') await completeWebhookKey(scope, entryId);
+    if (m.status === 'sent') sent += 1;
+  }
+  return sent;
+}
+
 // ── Draws and waitlist conversion ───────────────────────────────────────────
 
-export type TenantDropRun = { tenantId: string; draws: any[]; waitlist: any[]; more: boolean; calls: number; skipped?: string };
+export type TenantDropRun = { tenantId: string; draws: any[]; waitlist: any[]; more: boolean; calls: number; skipped?: string; emails?: number };
 
 /**
  * Run whatever is DUE for this store, within this invocation's call budget:
@@ -460,6 +513,20 @@ export async function runTenantDueDrops(tenantId: string, tenantSlug: string | n
       if (out.more) return done();
     }
   }
+  // Charges are done for this run; with what budget is left, tell the
+  // customers who were charged (this run's, or an earlier busy run's).
+  const infoByVariant = new Map<string, VariantInfo>();
+  for (const product of Object.values(products) as any[]) {
+    for (const cat of (product.priceCategories || []) as any[]) {
+      const size = String(cat.size || '');
+      const variantId = variantIdOf.get(String(product.id) + '|' + size);
+      if (size && variantId) infoByVariant.set(variantId, { variantId, productId: String(product.id), productName: String(product.name || product.id), size, priceCents: Math.round(Number(cat.price) * 100) });
+    }
+  }
+  out.emails = await sendDueChargeEmails(tenantId, tenantSlug, budget, infoByVariant).catch((err) => {
+    console.error('[tenant-drops] email pass failed for ' + tenantId, (err as Error)?.message || err);
+    return 0;
+  });
   return done();
 }
 

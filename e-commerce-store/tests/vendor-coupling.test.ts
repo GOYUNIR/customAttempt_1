@@ -47,7 +47,7 @@ const ALLOWED: Record<string, string> = {
   // A verification script READING BACK what production sent (sender, reply-to,
   // body of a store's order email). The email driver only sends; there is no
   // port for inspecting a provider's sent log, and business code never does.
-  'scripts/verify-tenant-checkout.ts': 'proof read-back of the sent email (not business logic)',
+  'scripts/resend-readback.ts': 'proof read-back of sent emails (verification scripts only, not business logic)',
 };
 
 /**
