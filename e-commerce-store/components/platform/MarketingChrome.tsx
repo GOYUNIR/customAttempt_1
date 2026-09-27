@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { staffLoginUrl } from '@/lib/staff-realms';
+import { getPlatformName } from '@/lib/env';
 
 /**
  * The platform's own header and footer.
@@ -49,7 +50,7 @@ export function MarketingHeader({ rootDomain }: { rootDomain: string | null }) {
           prefetch={false}
           style={{ color: INK.text, textDecoration: 'none', fontWeight: 800, letterSpacing: '3px', fontSize: 13, textTransform: 'uppercase', flex: '0 0 auto' }}
         >
-          GOYUNIR
+          {getPlatformName()}
         </Link>
 
         {/* On a phone the section links do not fit beside Sign in and the CTA
@@ -120,7 +121,7 @@ export function MarketingFooter({ rootDomain }: { rootDomain: string | null }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 32 }}>
           <div>
             <div style={{ fontWeight: 800, letterSpacing: '3px', fontSize: 12, textTransform: 'uppercase', color: INK.text }}>
-              GOYUNIR
+              {getPlatformName()}
             </div>
             <p style={{ color: INK.muted, fontSize: 13, lineHeight: 1.6, margin: '10px 0 0', maxWidth: 260 }}>
               Commerce infrastructure for brands that sell in drops, waitlists and trade orders —
@@ -151,7 +152,7 @@ export function MarketingFooter({ rootDomain }: { rootDomain: string | null }) {
         </div>
 
         <div style={{ borderTop: `1px solid ${INK.border}`, marginTop: 34, paddingTop: 20, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-          <span style={{ color: INK.muted, fontSize: 12.5 }}>© {new Date().getFullYear()} GOYUNIR</span>
+          <span style={{ color: INK.muted, fontSize: 12.5 }}>© {new Date().getFullYear()} {getPlatformName()}</span>
           <span style={{ color: INK.muted, fontSize: 12.5 }}>Built on Postgres, Stripe and object storage you can walk away with.</span>
         </div>
       </div>

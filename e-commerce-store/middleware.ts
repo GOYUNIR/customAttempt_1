@@ -345,6 +345,12 @@ export async function middleware(request: NextRequest) {
   // PLATFORM_STOREFRONT_HOST nothing is redirected — guessing a hostname would
   // send customers nowhere at all.
   if (platformRootDomain && portal === 'marketing' && marketingRootEnabled()) {
+    // The platform's own legal pages, never a store's (lib/platform-legal.ts).
+    if (pathname === '/terms' || pathname === '/privacy') {
+      const legalUrl = new URL(request.url);
+      legalUrl.pathname = '/platform' + pathname;
+      return NextResponse.redirect(legalUrl, { status: 308, headers: { 'Cache-Control': 'no-store' } });
+    }
     if (isStrayMarketingPath(pathname, portal)) {
       const shopHost = storefrontHostFor();
       if (shopHost) {

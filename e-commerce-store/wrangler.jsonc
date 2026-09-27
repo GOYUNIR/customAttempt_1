@@ -135,6 +135,9 @@
     // The platform's public contact inbox (pricing "Talk to us", signup help).
     // Cloudflare Email Routing forwards it to the owner (2026-09-27).
     "SUPPORT_EMAIL": "support@goyunir.com",
+    // The PLATFORM's name on its own pages (stand-in until the platform has
+    // its own name and domain; GOYUNIR is a tenant, STRATEGY.md §4).
+    "PLATFORM_NAME": "GOYUNIR",
 
     // TENANCY.md T2 — the hosts that ARE the original (default) store, checked
     // before any merchant slug. A bare label means <label>.<PLATFORM_ROOT_DOMAIN>.

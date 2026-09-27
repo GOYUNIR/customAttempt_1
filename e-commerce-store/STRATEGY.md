@@ -193,6 +193,28 @@ Add an item whenever a gap is found; tick it only with evidence, recorded in
   mode with real sales at 0% and graduated (PRICING.md §9, 2026-09-27).
 
 **Pending:**
+- **PLATFORM-IDENTITY (own session, not a quick fix).** GOYUNIR is a
+  tenant, not the platform; goyunir.com is a stand-in for both. Audit
+  2026-09-27:
+  - No platform domain is hardcoded in code: it comes from
+    `PLATFORM_ROOT_DOMAIN` (the `goyunir.com` literals are only in comments
+    and wrangler routes, which are config).
+  - The platform's name is now config (`PLATFORM_NAME`, marketing chrome).
+  - Still tangled:
+    (a) The root layout's metadata and title suffix, the staff sign-in
+        header, and the `/og` share image take the ORIGINAL STORE's
+        settings, so platform pages say "| GOYUNIR" from store data.
+    (b) admin.<root> is BOTH the platform admin and the original store's
+        admin (`app/admin/page.tsx` seeds from `GOYUNIR_STORE_SUITE`).
+    (c) The original store is the "default tenant" in code paths
+        (`DEFAULT_TENANT_ID`, `ensureDefaultTenant`) rather than an
+        ordinary tenant.
+    (d) System emails' from-name and auth pages (`app/auth/*`) use store
+        branding.
+    (e) Platform Terms/Privacy name the operator only by domain; the
+        platform's legal entity name must replace that at legal review.
+  - Target: the platform on its own domain, and GOYUNIR at
+    goyunir.<platform-domain> or its own custom domain.
 - 🛑 Cloudflare Workers Paid (50-subrequest ceiling on Free): the first
   go-live action; staying on Free until then is deliberate (owner).
 - 🛑 Live-mode Stripe webhooks (platform + Connect) must subscribe to

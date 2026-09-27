@@ -136,3 +136,12 @@ export function neutralBrandName(): string {
 export function fallbackSiteUrl(): string {
   return getSiteUrl() || 'https://example.com';
 }
+
+/**
+ * The PLATFORM's own name on its own surfaces (marketing site, platform
+ * legal). Not a store's brand: the original store is a tenant like any other
+ * (STRATEGY.md §4). Falls back to the platform's root domain.
+ */
+export function getPlatformName(): string {
+  return readEnv('PLATFORM_NAME') || String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
+}
