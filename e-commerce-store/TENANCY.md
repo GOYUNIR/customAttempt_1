@@ -1,6 +1,51 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-27, merchant dashboard: first proven slice live)
+> ## ▶ RESUME HERE (2026-09-27, later: dashboard slice 2 + order emails + a critical auth fix)
+>
+> **Live and proven since the note below** (all on production):
+> - **Raffles & waitlists tab** (list, entries, remove a pending entry, run
+>   due draws), **sign-out**, **staff** (owner only: invite as staff of THIS
+>   store, revoke, remove = account deleted, store-scoped), **platform
+>   support sessions** (sales/super admin via `/api/admin/impersonate` ->
+>   one-time fragment code -> `app.<root>/app/support`; same gate, re-checked
+>   each call, refused on payments/staff, audited as support).
+> - **Merchant audit** goes to the store-tagged `audit_logs` only;
+>   `appendAudit` never writes another store's event into the original
+>   store's KV audit view (one rule for all callers).
+> - **Policy "Last updated"** = when that policy's text last changed, or no
+>   line (`stampLegalUpdated`), never today.
+> - **Order emails** (`lib/tenant-email.ts`): order confirmed (after the
+>   Connect webhook marks the event done), entry received (new entries
+>   only), won / it's yours (a charge marks it DUE; each run's email pass
+>   sends with leftover budget). Sent AS the store, reply-to its own support
+>   address, nothing of the original store; once per event.
+> - **CRITICAL, fixed + proven:** super-admin sign-in trusted self-editable
+>   GoTrue `user_metadata` whenever the `profiles` read failed, and on
+>   production it always fails (42P17 recursive RLS policy). Any account
+>   could become super admin. Now server-side data only
+>   (`readSuperAdminFlag`); `scripts/verify-no-metadata-escalation.ts` 5/5.
+>   The same failing read made every sales rep's impersonation 401 (fixed).
+> - **Owner action:** apply `supabase/migrations/00036_audit_staff_id_no_fk.sql`
+>   (a person referenced in the append-only audit log cannot be deleted;
+>   removal falls back to revoking the role until then). The `profiles`
+>   RLS recursion itself is unfixed but nothing relies on that read now.
+>
+> Proofs (production, 2026-09-27): `verify-merchant-isolation.ts` **78/78**
+> (drops, sign-out, staff, support + handoff, audit placement added),
+> `verify-merchant-dashboard-ui.ts` **20/20**, `verify-tenant-checkout.ts`
+> **ALL PASS** (order email read back from Resend), `verify-tenant-drops.ts`
+> enter + draw **ALL PASS** (entry and won/it's-yours emails, exactly once),
+> `verify-no-metadata-escalation.ts` **5/5**. Proof shoppers use Resend's
+> test inbox (`delivered+label@resend.dev`, `scripts/resend-readback.ts`).
+>
+> Caught by the proofs this round (all fixed before reporting): the email's
+> calls added to the per-charge budget starved every charge (28 -> 35 on a
+> 50-call plan); a webhook email guard using the process-wide meter skipped
+> the order email. Leftover test data: two `iso-sales-*` accounts, role
+> revoked (deletable once 00036 is applied).
+>
+> ---
+> *(Earlier note, kept for history:)*
 >
 > **The merchant dashboard is live at `app.goyunir.com`.** It is built
 > security-first: a separate `/api/merchant/*` tree whose ONE gate

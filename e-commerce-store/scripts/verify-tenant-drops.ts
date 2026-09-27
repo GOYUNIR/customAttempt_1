@@ -181,10 +181,15 @@ async function enterOnce(slug: string, size: string, email: string, card: string
 
     console.log('\nStripe + database, per charge');
     const charged = all.filter((e) => e.status === 'charged');
+    // LIST (strongly consistent), not search: Stripe's search index lags by
+    // seconds, and once reported a just-made charge as "no PI" (2026-09-27).
+    const recentPIs = (await stripe.paymentIntents.list({ limit: 100 }, { stripeAccount: acct })).data as any[];
+    const piFor = (entryId: string) => recentPIs.filter((p) => p.metadata?.entry_id === entryId);
     for (const e of charged) {
       const price = e.variant_id === raffleVariant ? RAFFLE.priceCents : PREORDER.priceCents;
-      const pis = await stripe.paymentIntents.search({ query: `metadata['entry_id']:'${e.id}'` }, { stripeAccount: acct });
-      const pi = pis.data[0];
+      const mine = piFor(String(e.id));
+      check(mine.length === 1, e.email + ': exactly one PaymentIntent (' + mine.length + ')');
+      const pi = mine[0];
       const order = pi ? ((await getDb().select('orders', { where: { tenant_id: eq(TENANT), stripe_payment_intent_id: eq(pi.id) }, select: ['order_ref', 'total_cents', 'platform_fee_cents', 'checkout_mode'] })) as any[]) : [];
       const billing = pi ? ((await getDb().select('tenant_billing_charges', { where: { payment_intent_id: eq(pi.id) } })) as any[]) : [];
       const onPlat = pi ? await stripe.paymentIntents.retrieve(pi.id).then(() => true).catch(() => false) : true;
@@ -197,7 +202,7 @@ async function enterOnce(slug: string, size: string, email: string, card: string
     const preStock = await stockOf(preVariant);
     check(raffleStock === st.raffleStock - 2 && preStock === st.preStock - 2, 'stock raffle ' + st.raffleStock + ' -> ' + raffleStock + ', preorder ' + st.preStock + ' -> ' + preStock);
     const defaultOrders = (await getDb().select('orders', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['stripe_payment_intent_id'] }) as any[]);
-    const ours = await Promise.all(charged.map(async (e) => (await stripe.paymentIntents.search({ query: `metadata['entry_id']:'${e.id}'` }, { stripeAccount: acct })).data[0]?.id));
+    const ours = charged.map((e) => piFor(String(e.id))[0]?.id);
     check(!defaultOrders.some((o) => ours.includes(o.stripe_payment_intent_id)), 'nothing written for the default store');
 
     console.log('\nThe store\'s "you won / it\'s yours" emails');
@@ -222,7 +227,8 @@ async function enterOnce(slug: string, size: string, email: string, card: string
     await sleep(3000);
     const after3 = await entriesFor(emails);
     check((await drawsSinceEntry()) === 1 && after3.filter((e) => e.status === 'charged').length === charged.length, 'no new draw and no new charge');
-    const again = await Promise.all(charged.map(async (e) => (await sentTo(getDb, String(e.email), { waitMs: 0 })).filter((x: any) => /^(You won|It's yours): /.test(String(x.subject))).length));
+    const again: number[] = [];
+    for (const e of charged) again.push((await sentTo(getDb, String(e.email), { waitMs: 0 })).filter((x: any) => /^(You won|It's yours): /.test(String(x.subject))).length);
     check(again.every((n) => n === 1), 'and no second "charged" email to anyone: ' + again.join(','));
   } else {
     console.log('usage: verify-tenant-drops.ts enter | draw');
