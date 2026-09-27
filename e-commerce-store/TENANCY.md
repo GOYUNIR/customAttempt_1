@@ -1,6 +1,61 @@
 # TENANCY — which store is this request for?
 
-> ## ▶ RESUME HERE (2026-09-26, phase 4 proven live)
+> ## ▶ RESUME HERE (2026-09-27, merchant dashboard: first proven slice live)
+>
+> **The merchant dashboard is live at `app.goyunir.com`.** It is built
+> security-first: a separate `/api/merchant/*` tree whose ONE gate
+> (`lib/merchant-session.ts`) takes the store from the session and
+> re-checks membership in the database on every call.
+> `tests/merchant-routes.test.ts` fails if any merchant handler skips the gate
+> or reaches for the original store's data. The old admin tree stays the
+> original store's only, and merchant sessions are refused there
+> (`lib/default-tenant.ts`).
+>
+> **Proven on production:**
+>
+> `scripts/verify-merchant-isolation.ts`: **27/27 PASS**
+> - Two real owners of two stores: test4, and goyunir-test-1, created through
+>   the real invite + accept-invite flow.
+> - Each sees only its own store info, catalog, orders and payments.
+> - A write lands only in the session's store; a smuggled `tenantId` is
+>   ignored.
+> - Another store's product can't be edited (404).
+> - The original store's catalog rows are byte-identical before and after.
+> - The original store's own admin session is not a merchant session (403);
+>   no session gets 401.
+> - Revocation takes effect at once.
+> - The API answers only on the merchant host; cross-site writes are blocked.
+> - Payments give each store ITS OWN connected account, and a double click
+>   makes one account.
+>
+> `scripts/verify-merchant-dashboard-ui.ts`: **11/11 PASS**
+> - Real Chrome at 390px.
+> - A signed-out visitor goes to sign-in.
+> - test4 sees only its products, orders and payments status.
+> - A product created through store B's form is in store B's catalog and live
+>   on `goyunir-test-1.goyunir.com`, and nowhere else.
+>
+> **Routes in the dashboard so far:** store, orders (read), products (list,
+> create, edit), payments onboarding. **Public merchant signup is CLOSED**
+> (owner, 2026-09-26: `ALLOW_MERCHANT_SIGNUP=false`, verified: GET shows
+> `enabled: false`, POST gets 403).
+>
+> **Found on the way:** Stripe answered 500 to every v2 account create for
+> ~6 minutes (00:49–00:55 UTC) while still creating half-made accounts. The
+> store-only idempotency key would have replayed a broken account for 24h.
+> The key is now store + hour. The broken and probe accounts are closed.
+>
+> **Next, each feature only after its route's isolation proof:**
+> 1. Legal pages and store settings (per-store config).
+> 2. Raffle draw controls and entries view.
+> 3. Stock changes: WAIT for the stock-set + reservation-holds design pass
+>    (STRATEGY §9).
+> 4. Sign-out.
+> 5. Order emails.
+> 6. Staff impersonation of a merchant (refused until proven).
+
+> _Previous note (phase 4 proven):_
+>
 >
 > **Phase 4 (merchant raffles + waitlists) is live and proven on test4**
 > (`scripts/verify-tenant-drops.ts enter|draw`, 00035 applied by the owner).

@@ -168,7 +168,7 @@ export default function MerchantDashboard() {
               <div key={p.id} style={{ borderTop: `1px solid ${C.line}`, padding: '12px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{p.name} <span style={{ fontSize: 12, color: p.isActive ? C.good : C.muted, marginLeft: 6 }}>{p.isActive ? (p.isUpcoming ? 'coming soon' : 'on sale') : p.isUpcoming ? 'coming soon' : 'hidden'}</span></div>
-                  <div style={{ color: C.muted, fontSize: 13 }}>{p.sizes.map((s) => `${s.size} · ${Number(s.price).toFixed(2)} · ${s.mode === 'RAFFLE' ? 'raffle' : 'instant buy'} · ${s.stock ?? '?'} left`).join('   ')}</div>
+                  {p.sizes.map((s) => <div key={s.size} style={{ color: C.muted, fontSize: 13 }}>{`${s.size} · ${Number(s.price).toFixed(2)} · ${s.mode === 'RAFFLE' ? 'raffle' : 'instant buy'} · ${s.stock ?? '?'} left`}</div>)}
                 </div>
                 <button style={ghost} onClick={() => setEditing({ ...p, releaseEndsAt: toLocalInput(p.releaseEndsAt), sizes: p.sizes.map((s) => ({ ...s })) })}>Edit</button>
               </div>
