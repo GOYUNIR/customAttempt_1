@@ -100,3 +100,18 @@ test('settings: bounded, store never from the input, empty policies allowed (= n
     { legal: { terms: 'x'.repeat(20001) } },
   ]) assert.equal(validateMerchantSettings(bad).ok, false, JSON.stringify(bad).slice(0, 60));
 });
+
+test('stock input: whole units, a real size id, the store never from the input', async () => {
+  const { validateStockSet, validateStockAdjust, validateVariantParam } = await import('../lib/merchant-stock-input.ts');
+  const V = '1e02eebc-af34-4f52-b57d-5227b6633589';
+  assert.deepEqual(validateStockSet({ variantId: V, count: 12, note: '  shelf   count ', tenantId: 'x' }), { ok: true, value: { variantId: V, count: 12, note: 'shelf count' } });
+  for (const count of [-1, 1.5, 'abc', null, undefined, '', '  ', 1_000_001]) assert.equal(validateStockSet({ variantId: V, count }).ok, false, 'count ' + count);
+  assert.equal(validateStockSet({ variantId: 'not-a-uuid', count: 1 }).ok, false);
+  const a = validateStockAdjust({ variantId: V, delta: 5 });
+  assert.ok(a.ok && a.value.reason === 'restock');
+  const d = validateStockAdjust({ variantId: V, delta: -2 });
+  assert.ok(d.ok && d.value.reason === 'adjust');
+  for (const delta of [0, 2.5, 'x', 2_000_000]) assert.equal(validateStockAdjust({ variantId: V, delta }).ok, false, 'delta ' + delta);
+  assert.equal(validateStockAdjust({ variantId: V, delta: 1, reason: 'sale' }).ok, false, 'a sale is never a manual reason');
+  assert.equal(validateVariantParam("1' or 1=1"), null);
+});

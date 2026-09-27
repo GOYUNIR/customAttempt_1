@@ -15,6 +15,7 @@
  * Structured QuerySpecs only. Raw PostgREST would not pass the fence.
  */
 import { getDb } from '@/lib/db/client';
+import { setStock } from '@/lib/stock';
 import { eq, inList } from '@/lib/db/query';
 
 /** Fields that get their own column — everything else falls into `config`. */
@@ -142,12 +143,11 @@ async function writeInventoryRows(
         }
         continue;
       }
-      await db.insert('inventory_levels', {
-        tenant_id: tenantId,
-        variant_id: row.id,
-        quantity_available: configured,
-        quantity_reserved: 0,
-      });
+      // Through the stock ledger (00037): the row is created by the same
+      // function every later change goes through, with its first movement,
+      // so a size's history starts at its first number.
+      const first = await setStock(tenantId, row.id, configured, 'catalog', 'stock when the size was created');
+      if (!first.ok) throw new Error('first stock for ' + row.option_label + ': ' + first.reason);
     }
   } catch (err) {
     console.error(

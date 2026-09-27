@@ -19,6 +19,9 @@ type Drop = { variantId: string; product: string; size: string; kind: 'raffle' |
 type Drops = { drops: Drop[]; recentDraws: { item: string; winners: number; entries: number; at: string }[] };
 type Entry = { id: string; email: string; type: string; status: string; submittedAt: string; decidedAt: string | null };
 type Staff = { people: { email: string; role: string; name: string | null; since: string; you: boolean }[]; invites: { id: string; email: string; role: string; status: string; expiresAt: string }[] };
+type StockSize = { size: string; variantId: string | null; onHand: number; held: number; available: number; tracked: boolean };
+type StockView = { products: { productId: string; name: string; sizes: StockSize[] }[]; oversold: { variantId: string; item: string; shortfall: number; reference: string; at: string }[] };
+type StockMove = { reason: string; change: number; after: number; shortfall: number; by: string | null; note: string | null; reference: string | null; at: string };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -53,6 +56,9 @@ export default function MerchantDashboard() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [running, setRunning] = useState(false);
   const [staff, setStaff] = useState<Staff | null>(null);
+  const [stock, setStock] = useState<StockView | null>(null);
+  const [stockEdit, setStockEdit] = useState<Record<string, { count: string; delta: string; reason: string; note: string }>>({});
+  const [history, setHistory] = useState<{ variantId: string; rows: StockMove[] } | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -73,11 +79,40 @@ export default function MerchantDashboard() {
     if (d.ok) setDrops(d.body);
     if (p.ok) setProducts(p.body.products || []);
     if (o.ok) setOrders(o.body.orders || []);
+    const sk = await api<StockView>('/api/merchant/stock');
+    if (sk.ok) setStock(sk.body);
     if (s.body.you.role === 'owner') {
       const sf = await api<Staff>('/api/merchant/staff');
       if (sf.ok) setStaff(sf.body);
     }
   }, []);
+
+  const stockFor = (productId: string, size: string) => stock?.products.find((p) => p.productId === productId)?.sizes.find((z) => z.size === size) || null;
+  const editOf = (variantId: string) => stockEdit[variantId] || { count: '', delta: '', reason: 'restock', note: '' };
+  const putEdit = (variantId: string, patch: Partial<{ count: string; delta: string; reason: string; note: string }>) => setStockEdit({ ...stockEdit, [variantId]: { ...editOf(variantId), ...patch } });
+  const refreshStock = async () => { const sk = await api<StockView>('/api/merchant/stock'); if (sk.ok) setStock(sk.body); };
+
+  const countStock = async (variantId: string) => {
+    const e = editOf(variantId);
+    const r = await api<{ onHand: number; held: number; available: number; before: number }>('/api/merchant/stock/set', { method: 'POST', body: JSON.stringify({ variantId, count: e.count, note: e.note }) });
+    setNotice(r.ok ? `Count saved: ${r.body.onHand} on hand${r.body.held ? `, ${r.body.held} in open checkouts` : ''}, ${r.body.available} available.` : (r.body.error || 'The count could not be saved.'));
+    if (r.ok) { putEdit(variantId, { count: '', note: '' }); await refreshStock(); }
+  };
+
+  const adjust = async (variantId: string, sign: 1 | -1) => {
+    const e = editOf(variantId);
+    const n = Math.abs(Number(e.delta));
+    const reason = sign > 0 ? 'restock' : (e.reason === 'restock' ? 'adjust' : e.reason);
+    const r = await api<{ onHand: number; held: number; available: number }>('/api/merchant/stock/adjust', { method: 'POST', body: JSON.stringify({ variantId, delta: sign * n, reason, note: e.note }) });
+    setNotice(r.ok ? `Stock ${sign > 0 ? 'added' : 'removed'}: ${r.body.onHand} on hand, ${r.body.available} available.` : (r.body.error || 'Stock could not be changed.'));
+    if (r.ok) { putEdit(variantId, { delta: '', note: '' }); await refreshStock(); }
+  };
+
+  const showHistory = async (variantId: string) => {
+    if (history?.variantId === variantId) { setHistory(null); return; }
+    const r = await api<{ history: StockMove[] }>('/api/merchant/stock/history?variantId=' + encodeURIComponent(variantId));
+    if (r.ok) setHistory({ variantId, rows: r.body.history || [] }); else setNotice(r.body.error || 'History could not be loaded.');
+  };
 
   const signOut = async () => {
     await api('/api/merchant/signout', { method: 'POST' }).catch(() => null);
@@ -316,12 +351,19 @@ export default function MerchantDashboard() {
               <div style={{ fontWeight: 700 }}>Products</div>
               <button style={btn} onClick={() => setEditing(blankProduct())}>New product</button>
             </div>
+            {stock && stock.oversold.length > 0 && (
+              <div role="alert" style={{ border: `1px solid ${C.bad}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, color: C.bad }}>Oversold in the last 30 days</div>
+                <p style={{ margin: '4px 0 6px', color: C.muted, fontSize: 13 }}>A customer paid after their checkout hold ran out and the last units had gone. The sale is recorded; you decide whether to find a unit, substitute, or refund in Stripe.</p>
+                {stock.oversold.map((o, i) => <div key={i} style={{ fontSize: 13 }}>{`${o.item}: oversold by ${o.shortfall} · ${new Date(o.at).toLocaleString()} · ${o.reference}`}</div>)}
+              </div>
+            )}
             {products.length === 0 && <p style={{ color: C.muted }}>No products yet.</p>}
             {products.map((p) => (
               <div key={p.id} style={{ borderTop: `1px solid ${C.line}`, padding: '12px 0', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{p.name} <span style={{ fontSize: 12, color: p.isActive ? C.good : C.muted, marginLeft: 6 }}>{p.isActive ? (p.isUpcoming ? 'coming soon' : 'on sale') : p.isUpcoming ? 'coming soon' : 'hidden'}</span></div>
-                  {p.sizes.map((s) => <div key={s.size} style={{ color: C.muted, fontSize: 13 }}>{`${s.size} · ${Number(s.price).toFixed(2)} · ${s.mode === 'RAFFLE' ? 'raffle' : 'instant buy'} · ${s.stock ?? '?'} left`}</div>)}
+                  {p.sizes.map((s) => { const st = stockFor(p.id, s.size); return <div key={s.size} style={{ color: C.muted, fontSize: 13 }}>{`${s.size} · ${Number(s.price).toFixed(2)} · ${s.mode === 'RAFFLE' ? 'raffle' : 'instant buy'} · ${st ? st.available + ' available' + (st.held ? ` (${st.held} in checkout)` : '') : (s.stock ?? '?') + ' left'}`}</div>; })}
                 </div>
                 <button style={ghost} onClick={() => setEditing({ ...p, releaseEndsAt: toLocalInput(p.releaseEndsAt), sizes: p.sizes.map((s) => ({ ...s })) })}>Edit</button>
               </div>
@@ -351,13 +393,53 @@ export default function MerchantDashboard() {
                   <option value="FCFS">Instant buy</option><option value="RAFFLE">Raffle</option>
                 </select>
                 {editing.id
-                  ? <div style={{ ...input, display: 'flex', alignItems: 'center', color: C.muted }}>{s.stock ?? 0} in stock</div>
+                  ? <div style={{ ...input, display: 'flex', alignItems: 'center', color: C.muted }}>{(stockFor(editing.id, s.size)?.available ?? 0) + ' available'}</div>
                   : <input aria-label="Starting stock" type="number" min="0" placeholder="Stock" style={input} value={s.stock ?? ''} onChange={(e) => { const sizes = [...editing.sizes]; sizes[i] = { ...s, stock: e.target.value }; setEditing({ ...editing, sizes }); }} />}
                 {s.mode === 'RAFFLE' && <input aria-label="Winners per draw" type="number" min="1" placeholder="Winners" style={input} value={s.winners ?? ''} onChange={(e) => { const sizes = [...editing.sizes]; sizes[i] = { ...s, winners: e.target.value }; setEditing({ ...editing, sizes }); }} />}
               </div>
             ))}
             {!editing.id && editing.sizes.length < 10 && <button style={ghost} onClick={() => setEditing({ ...editing, sizes: [...editing.sizes, { size: '', price: '', mode: 'FCFS', stock: '' }] })}>Add a size</button>}
-            {editing.id && <p style={{ color: C.muted, fontSize: 13 }}>Changing stock after creation is coming with the stock tools.</p>}
+            {editing.id && (
+              <div aria-label="Stock" style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 700 }}>Stock</div>
+                <p style={{ color: C.muted, fontSize: 13, margin: '4px 0 8px' }}>Count what is on the shelf, or add and remove units. Units in someone&apos;s open checkout stay set aside for 30 minutes; set a size to 0 to stop selling it.</p>
+                {editing.sizes.map((s) => {
+                  const st = stockFor(editing.id, s.size);
+                  if (!st || !st.variantId) return <div key={s.size} style={{ color: C.muted, fontSize: 13 }}>{s.size}: save the product first.</div>;
+                  const v = st.variantId;
+                  const e = editOf(v);
+                  return (
+                    <div key={s.size} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0' }}>
+                      <div style={{ fontWeight: 600 }}>{s.size} <span style={{ color: C.muted, fontWeight: 400, fontSize: 13 }}>{`${st.onHand} on hand · ${st.held} in checkout · ${st.available} available`}</span></div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                        <input aria-label={'Counted units for ' + s.size} type="number" min="0" inputMode="numeric" placeholder="Count" style={{ ...input, width: 110 }} value={e.count} onChange={(ev) => putEdit(v, { count: ev.target.value })} />
+                        <button style={ghost} disabled={e.count.trim() === ''} onClick={() => countStock(v)}>Set count</button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                        <input aria-label={'Units to add or remove for ' + s.size} type="number" min="1" inputMode="numeric" placeholder="Units" style={{ ...input, width: 110 }} value={e.delta} onChange={(ev) => putEdit(v, { delta: ev.target.value })} />
+                        <button style={ghost} disabled={!(Number(e.delta) > 0)} onClick={() => adjust(v, 1)}>Add</button>
+                        <select aria-label={'Reason for removing ' + s.size} style={{ ...input, width: 'auto' }} value={e.reason === 'restock' ? 'adjust' : e.reason} onChange={(ev) => putEdit(v, { reason: ev.target.value })}>
+                          <option value="adjust">Damaged / lost</option><option value="correction">Correction</option>
+                        </select>
+                        <button style={ghost} disabled={!(Number(e.delta) > 0)} onClick={() => adjust(v, -1)}>Remove</button>
+                        <button style={ghost} onClick={() => showHistory(v)}>{history?.variantId === v ? 'Hide history' : 'History'}</button>
+                      </div>
+                      <input aria-label={'Note for ' + s.size} placeholder="Note (optional)" maxLength={200} style={{ ...input, marginTop: 8 }} value={e.note} onChange={(ev) => putEdit(v, { note: ev.target.value })} />
+                      {history?.variantId === v && (
+                        <div style={{ marginTop: 8 }}>
+                          {history.rows.length === 0 && <div style={{ color: C.muted, fontSize: 13 }}>No changes yet.</div>}
+                          {history.rows.map((m, i) => (
+                            <div key={i} style={{ fontSize: 13, color: C.muted, padding: '3px 0', overflowWrap: 'anywhere' }}>
+                              {`${new Date(m.at).toLocaleString()} · ${({ opening: 'starting stock', sale: 'sold', restock: 'added', adjust: 'removed', count: 'counted', correction: 'correction' } as Record<string, string>)[m.reason] || m.reason} ${m.change > 0 ? '+' : ''}${m.change} → ${m.after}${m.shortfall ? ` · OVERSOLD by ${m.shortfall}` : ''}${m.by ? ' · ' + m.by : ''}${m.note ? ' · ' + m.note : ''}`}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button style={btn} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
               <button style={ghost} onClick={() => setEditing(null)}>Cancel</button>
