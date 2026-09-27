@@ -276,10 +276,17 @@ export default async function RootLayout({
       <head>
         {/* Load the Google Fonts referenced by the admin font pickers so a
             selected typeface actually renders on the storefront + admin preview
-            (system fonts in the catalog need no download). */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+            (system fonts in the catalog need no download). The platform's own
+            marketing and legal pages (/platform...) use the system font only, so
+            they skip the whole catalog. The staff portals keep it: the admin font
+            pickers preview these typefaces. */}
+        {!requestPathname.startsWith('/platform') && (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+            <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+          </>
+        )}
         {/* Every storefront page renders from /api/store, but the components
             only ask for it once the JS has downloaded and hydrated — on a phone
             on 4G that put the first real content ~2s behind the HTML. Start the
@@ -311,7 +318,7 @@ export default async function RootLayout({
         {/* Inline theme blob: applies the live colors synchronously before paint
             (covers cached HTML) and exposes window.__GOYUNIR_THEME__ for any
             client module that needs the saved theme before hydration. */}
-        {!platformSurface && (
+        {!requestPathname.startsWith('/platform') && (
           <script id="goyunir-theme-json" type="application/json" dangerouslySetInnerHTML={{ __html: safeJson }} />
         )}
         {!platformSurface && <script
