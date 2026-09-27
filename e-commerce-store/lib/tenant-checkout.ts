@@ -184,7 +184,11 @@ export async function startTenantCheckout(input: {
     console.error('[tenant-checkout] stock for ' + tenantId + '/' + product.id + '/' + size + ' is ' + stock.reason + ' — refusing (fail closed)');
     return json({ error: 'Sold out for this size.' }, 409);
   }
-  if (stock.stock <= 0) return json({ error: 'Sold out for this size.' }, 409);
+  // No numeric pre-check: the HOLD below is the only stock gate. A count
+  // here reads sellable stock, which already excludes this buyer's own hold,
+  // so a second tap was told "sold out" about the unit they were holding
+  // (caught by scripts/verify-stock-checkout.ts). The hold treats a retry as
+  // the same checkout and replaces the buyer's older attempt.
 
   const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
   let bought: number;
@@ -489,7 +493,8 @@ export async function startTenantCartCheckout(input: {
       console.error('[tenant-cart] stock for ' + tenantId + '/' + product.id + '/' + item.size + ' is ' + stock.reason + ' — refusing (fail closed)');
       return json({ error: `${product.name} (${item.size}) is sold out.` }, 409);
     }
-    if (stock.stock < item.quantity) return json({ error: `Only ${Math.max(0, stock.stock)} of ${product.name} (${item.size}) left.` }, 409);
+    // Quantity is decided by the hold (all lines or none), not here: see
+    // startTenantCheckout for why a pre-count refuses the buyer's own retry.
     const maxPerEmail = Math.max(1, Number(product.maxPerEmail || 1));
     let bought: number;
     try {
