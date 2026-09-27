@@ -30,7 +30,7 @@ import { defaultAiHeroSettings, type AiHeroSettings } from '@/lib/shaders/preset
 import EnterprisePanel from '@/components/admin/EnterprisePanel';
 import PortalShell from '@/components/admin/PortalShell';
 import TelemetryDashboard from '@/components/admin/TelemetryDashboard';
-import InventoryAllocationMatrix from '@/components/admin/InventoryAllocationMatrix';
+import StockTool from '@/components/admin/StockTool';
 import TenantOnboardingWizard from '@/components/admin/TenantOnboardingWizard';
 import ThemeEditor from '@/components/admin/ThemeEditor';
 
@@ -4654,7 +4654,7 @@ export default function AdminPortal() {
 
   const tabs: { id: Tab; label: string; group: string; badge?: number }[] = [
     { id: 'telemetry', label: 'Telemetry', group: 'Dashboard' },
-    { id: 'inventory', label: 'Inventory Matrix', group: 'Dashboard' },
+    { id: 'inventory', label: 'Stock', group: 'Dashboard' },
     { id: 'tenants', label: 'Tenant Onboarding', group: 'Dashboard' },
     { id: 'theme', label: 'Theme Editor', group: 'Dashboard' },
     { id: 'overview', label: 'Overview', group: 'Store' },
@@ -5484,7 +5484,7 @@ export default function AdminPortal() {
         {/* ============ ENTERPRISE (B2B quotes / custom domains / AI assistant) ============ */}
         {tab === 'enterprise' && <EnterprisePanel password={password} />}
         {tab === 'telemetry' && <div style={cardStyle}><TelemetryDashboard /></div>}
-        {tab === 'inventory' && <div style={cardStyle}><InventoryAllocationMatrix /></div>}
+        {tab === 'inventory' && <div style={cardStyle}><StockTool /></div>}
         {tab === 'tenants' && <div style={cardStyle}><TenantOnboardingWizard /></div>}
         {tab === 'theme' && <div style={cardStyle}><ThemeEditor /></div>}
 
