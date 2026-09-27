@@ -66,6 +66,30 @@ payments, holdout-based attribution for honest marketing numbers. Don't reinvent
 solved problems. Differentiate on the parts nobody does well: the wedge in §2
 and the honesty in §5.
 
+### Business type is data, never code (owner, 2026-09-27; standing constraint)
+
+Read this before any commerce-mode or industry-specific work.
+
+- **No code path knows a business type, industry or legal entity.** The
+  platform is generic, composable primitives: products, variants, checkout
+  modes, inventory, pricing and customer records. Every business type
+  configures those. Nothing branches on "farmer", "perfume brand" or "LLC".
+- **Legal entity type is Stripe's concern.** LLC, sole proprietor, nonprofit
+  and so on are collected and verified by Stripe Connect during KYC. The
+  platform passes that through and never builds logic on it.
+- **Industry is data.** Starter templates, catalog presets and example copy
+  are chosen by, or suggested to, the merchant. A "bookings" business and a
+  "drops" business run on the same checkout-mode infrastructure, configured
+  differently.
+- **AI's role is narrow and bounded.** It helps a merchant reach a sensible
+  starting configuration and copy during onboarding (for example, "you sell
+  candles; here is a suggested catalog structure"). It never runs business
+  logic. It is optional, cost-capped and metered, on the same pattern as
+  ImageProvider, and never load-bearing.
+- **The test before building anything new here:** is this a genuinely new
+  configuration primitive, or a preset or template on top of what exists?
+  Always prefer the preset.
+
 ## 5. Business model
 
 | Plan | Monthly | Platform fee | Notes |
@@ -177,6 +201,24 @@ evidence, and write the evidence next to it.
   Stripe session is created and decrements only after payment, so two buyers
   can both pay for the last unit. §4 requires a real hold. Same design pass as
   the item above.
+  - **Design approved (owner, 2026-09-27).** Holds plus an append-only
+    movement ledger, each change one atomic Postgres function (migration
+    00037, `lib/stock.ts`).
+    - Holds last 30 minutes (the Stripe session is 31 minutes, the hold 36).
+    - A payment that lands after its hold lapsed is recorded: stock stops at
+      0 and the merchant sees "oversold by N". No automatic refund.
+    - The storefront shows sold out while units are held.
+    - The original store is included (as the last step).
+  - **Rollout, each step proven live before the next:**
+    1. migration + race proof;
+    2. merchant stock tools;
+    3. merchant checkout and cart;
+    4. raffles and waitlist;
+    5. the original store.
+  - **Status:** 00037 has been run in real Postgres by
+    `tests/stock-sql.test.ts` (13/13). The live race proof,
+    `scripts/verify-stock-race.ts`, is waiting for the migration to be
+    applied.
 - [ ] **🛑 Stripe Connect.** Each merchant sells through their own connected
   account (Accounts v2 with direct charges), with the platform fee collected as
   an application fee. Today every tenant shares one Stripe account, so a second
