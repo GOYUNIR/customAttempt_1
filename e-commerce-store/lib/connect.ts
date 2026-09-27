@@ -127,7 +127,14 @@ export async function ensureConnectedAccount(
       },
       include: [...ACCOUNT_INCLUDE],
     },
-    { idempotencyKey: 'connect-account:' + tenantId },
+    // Keyed by the store AND the hour. Within the hour a double click replays
+    // one create (one account). Across hours a retry gets a FRESH create: on
+    // 2026-09-26 Stripe answered 500 for ~6 minutes while still creating
+    // half-made accounts behind the error; a key on the store alone replayed
+    // that broken account (no onboarding link possible) for 24 hours. A stored
+    // account is returned above before this is ever reached, so a later hour
+    // cannot make a second one for a store that already has its account.
+    { idempotencyKey: 'connect-account:' + tenantId + ':' + Math.floor(Date.now() / 3_600_000) },
   ));
 
   const status = connectStatusFromAccount(account);
