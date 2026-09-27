@@ -521,6 +521,36 @@ checkout (B1, lib/stock-gate.ts) because Postgres stock ignores
 `shared_pool_id`. Remove the claim in the same copy pass, or build real pool
 support first. PRICING.md §8 carries the full pricing-page change list.
 
+*RESOLVED 2026-09-27:* the fee schedule is now derived from the plan data and
+stated on the Free card and in the footnote, with the attribution promise kept
+as a separate sentence. Starter and "shared stock pools" are gone from the page
+(D2). `tests/pricing-copy.test.ts` pins it.
+
+**DEFERRED-10: merchant dashboard gaps before a real store can run on it.**
+Condition to pick up: the owner picks from this list (OBJECTIONS.md §3). Each
+item ships with its own isolation proof, like every /api/merchant route.
+
+| Gap | Size | Notes |
+|---|---|---|
+| Product photos (upload + gallery in the editor) | Medium | Highest value. The media storage (R2, presign) exists for the original store; merchant products save `images: []`. |
+| Order fulfilment (mark shipped, tracking, "shipped" email) | Medium | The email goes through lib/tenant-email.ts. |
+| Refunds from the dashboard | Cheap–medium | The Connect webhook already returns our fee (D5); needs the UI and an owner-only route. Stock is NOT put back automatically (a merchant decision). |
+| Discount codes for merchant stores | Medium | Refused today ("Promo codes aren't available in this store yet"). |
+| Customer list | Medium | Per-store `customers` rows exist. |
+| Product archive / delete | Cheap | Create and edit only today. |
+| Read-only audit list for owners | Cheap | Rows exist in `audit_logs`, tagged by store. |
+| Data export (CSV/JSON of products, orders, customers) | Medium | The page now says "on request, self-serve coming". |
+| CSV catalog import | Medium | |
+| Starter presets as DATA (STRATEGY §4) | Medium | Industry templates are presets, never code paths. |
+| Release a hold when a shopper cancels checkout | Cheap | Today an abandoned session holds for up to 31 minutes. |
+| Clear "card declined" on the original store's direct charge | Cheap | It returns a generic 500 today. |
+
+Real projects, logged here so they are not lost: merchant custom domains, the
+growth modules for merchants (cart recovery, back-in-stock that is
+store-aware, control-group reporting), B2B for merchants, shipping and tax,
+shared stock pools, multi-store accounts, and plan billing (scoped in
+PRICING.md §9).
+
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
 
