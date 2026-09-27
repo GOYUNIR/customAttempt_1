@@ -22,7 +22,8 @@ import {
   poolKey,
 } from '@/lib/server-config';
 import { markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
-import { claimStripeSession, completeStripeSession } from '@/lib/webhook-dedupe';
+import { claimStripeSession, completeStripeSession, claimWebhookKey, completeWebhookKey, releaseWebhookKey } from '@/lib/webhook-dedupe';
+import { PLAN_EVENTS, subscriptionIdOf, syncPlanSubscription } from '@/lib/plan-billing';
 import { sendEntryConfirmedEmail } from '@/lib/email';
 import { resolveStripeClient, resolvePaymentWebhookSecret } from '@/services/payment/factory';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
@@ -222,6 +223,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
   }
 
+  // PLAN BILLING (lib/plan-billing.ts): a store's subscription to a paid plan
+  // changed. The subscription is re-read from Stripe and applied only to the
+  // store whose billing customer it is. Once per event; a failure answers 500
+  // so Stripe retries (the sync is idempotent).
+  if (PLAN_EVENTS.has(event.type)) {
+    const subscriptionId = subscriptionIdOf(event);
+    if (!subscriptionId) return NextResponse.json({ received: true, ignored: 'no subscription' });
+    let planClaim: Awaited<ReturnType<typeof claimWebhookKey>>;
+    try {
+      planClaim = await claimWebhookKey('stripe_platform_event', String(event.id));
+    } catch {
+      return NextResponse.json({ error: 'Temporarily unable to process' }, { status: 503 });
+    }
+    if (planClaim === 'duplicate') return NextResponse.json({ received: true, skipped: 'already_processed' });
+    try {
+      const r = await syncPlanSubscription(subscriptionId);
+      await completeWebhookKey('stripe_platform_event', String(event.id));
+      console.log('[webhook] ' + event.type + ' ' + event.id + ': ' + r.note);
+      return NextResponse.json({ received: true, ...r });
+    } catch (err) {
+      await releaseWebhookKey('stripe_platform_event', String(event.id));
+      console.error('[webhook] plan sync failed for ' + event.id + ' — 500 so Stripe retries', (err as Error)?.message || err);
+      return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
+    }
+  }
+
   // Nobody paid in time: the units this (original-store) checkout held go
   // back on sale now rather than when the hold lapses (00037). Idempotent: a
   // redelivery releases nothing more, and a paid (converted) hold is untouched.
@@ -239,6 +266,11 @@ export async function POST(request: Request) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const sessionId = session.id;
+    // A plan purchase (lib/plan-billing.ts) is not an order: the plan follows
+    // the subscription events above, so this session writes nothing here.
+    if (session.mode === 'subscription') {
+      return NextResponse.json({ received: true, ignored: 'plan subscription checkout' });
+    }
     // Atomic claim, decided by the database in one INSERT (lib/webhook-dedupe,
     // 00031): closes the window where a Stripe redelivery arriving while the
     // first delivery is still mid-flight could double-fulfill an order. The

@@ -253,22 +253,34 @@ export const PLANS: Plan[] = [
  * actually charged. DEFERRED-9: the page used to imply there was no
  * percentage fee at all.
  */
-export function feeSummary(): { freeLine: string; footnote: string } {
-  const plans: FeePlan[] = PLANS
-    .filter((p) => p.monthlyUsd !== null && p.platformFeeBps !== undefined)
-    .map((p) => ({ id: p.id, monthlyCents: Math.round((p.monthlyUsd as number) * 100), feeBps: p.platformFeeBps as number }));
+const usd = (cents: number) => '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+/**
+ * The graduated fee in words, from any set of plans (the marketing PLANS
+ * below, or the database's plans rows on the merchant dashboard).
+ */
+export function graduatedFeeWords(plans: (FeePlan & { name: string })[]): { bands: string; cap: string; capPlan: { name: string; monthlyCents: number } | null } {
   const tiers = graduatedSchedule(plans);
   const pct = (bps: number) => (bps / 100).toFixed(bps % 100 === 0 ? 0 : 1) + '%';
-  const usd = (cents: number) => '$' + (cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
-  const capPlan = PLANS.filter((p) => p.monthlyUsd !== null && p.platformFeeBps === 0).sort((a, b) => (a.monthlyUsd as number) - (b.monthlyUsd as number))[0];
+  const capPlan = plans
+    .filter((p): p is typeof p & { monthlyCents: number } => p.feeBps === 0 && (p.monthlyCents ?? 0) > 0)
+    .sort((a, b) => a.monthlyCents - b.monthlyCents)[0] || null;
   const paid = tiers.filter((t) => t.bps > 0);
-  const bands = paid.map((t, i) => (i === 0 ? pct(t.bps) + ' of your sales each month' : 'then ' + pct(t.bps) + ' above ' + usd(t.fromCents)));
-  const cap = capPlan ? ', and never more than ' + usd((capPlan.monthlyUsd as number) * 100) + ' a month in total — the price of ' + capPlan.name : '';
-  const freeLine = 'Per-sale fee: ' + bands.join(', ') + cap + '.';
+  const bands = paid.map((t, i) => (i === 0 ? pct(t.bps) + ' of your sales each month' : 'then ' + pct(t.bps) + ' above ' + usd(t.fromCents))).join(', ');
+  const cap = capPlan ? ', and never more than ' + usd(capPlan.monthlyCents) + ' a month in total — the price of ' + capPlan.name : '';
+  return { bands, cap, capPlan: capPlan ? { name: capPlan.name, monthlyCents: capPlan.monthlyCents } : null };
+}
+
+export function feeSummary(): { freeLine: string; footnote: string } {
+  const plans = PLANS
+    .filter((p) => p.monthlyUsd !== null && p.platformFeeBps !== undefined)
+    .map((p) => ({ id: p.id, name: p.name, monthlyCents: Math.round((p.monthlyUsd as number) * 100), feeBps: p.platformFeeBps as number }));
+  const { bands, cap, capPlan } = graduatedFeeWords(plans);
+  const freeLine = 'Per-sale fee: ' + bands + cap + '.';
   const footnote =
     'Free has no monthly price: we take a small fee from each sale instead, collected by Stripe when the sale happens — ' +
-    bands.join(', ') + cap + '. ' +
-    (capPlan ? capPlan.name + ' is a flat ' + usd((capPlan.monthlyUsd as number) * 100) + ' a month with no per-sale fee. ' : '') +
+    bands + cap + '. ' +
+    (capPlan ? capPlan.name + ' is a flat ' + usd(capPlan.monthlyCents) + ' a month with no per-sale fee. ' : '') +
     'Separately, and always: we never charge a share of the revenue our own marketing tools claim to have generated.';
   return { freeLine, footnote };
 }

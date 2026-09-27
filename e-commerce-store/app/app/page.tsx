@@ -22,6 +22,7 @@ type Staff = { people: { email: string; role: string; name: string | null; since
 type StockSize = { size: string; variantId: string | null; onHand: number; held: number; available: number; tracked: boolean };
 type StockView = { products: { productId: string; name: string; sizes: StockSize[] }[]; oversold: { variantId: string; item: string; shortfall: number; reference: string; at: string }[] };
 type StockMove = { reason: string; change: number; after: number; shortfall: number; by: string | null; note: string | null; reference: string | null; at: string };
+type Billing = { planId: string; planName: string; status: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; graceUntil: string | null; hasBillingAccount: boolean; feeLine: string; upgrade: { planId: string; name: string; monthlyCents: number } | null };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -50,12 +51,14 @@ export default function MerchantDashboard() {
   const [fatal, setFatal] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tab, setTab] = useState<'products' | 'drops' | 'orders' | 'settings' | 'staff'>('products');
+  const [tab, setTab] = useState<'products' | 'drops' | 'orders' | 'settings' | 'staff' | 'billing'>('products');
   const [drops, setDrops] = useState<Drops | null>(null);
   const [openDrop, setOpenDrop] = useState<Drop | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [running, setRunning] = useState(false);
   const [staff, setStaff] = useState<Staff | null>(null);
+  const [billing, setBilling] = useState<Billing | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
   const [stock, setStock] = useState<StockView | null>(null);
   const [stockEdit, setStockEdit] = useState<Record<string, { count: string; delta: string; reason: string; note: string }>>({});
   const [history, setHistory] = useState<{ variantId: string; rows: StockMove[] } | null>(null);
@@ -84,6 +87,8 @@ export default function MerchantDashboard() {
     if (s.body.you.role === 'owner') {
       const sf = await api<Staff>('/api/merchant/staff');
       if (sf.ok) setStaff(sf.body);
+      const bl = await api<Billing>('/api/merchant/billing');
+      if (bl.ok) setBilling(bl.body);
     }
   }, []);
 
@@ -171,9 +176,20 @@ export default function MerchantDashboard() {
       const q = new URLSearchParams(window.location.search).get('payments');
       if (q === 'return') setNotice('Thanks. Stripe is checking your details; payments switch on as soon as it finishes.');
       if (q === 'refresh') setNotice('That Stripe link expired. Start again below.');
-      if (q) window.history.replaceState(null, '', '/app');
+      const b = new URLSearchParams(window.location.search).get('billing');
+      if (b === 'success') { setTab('billing'); setNotice('Payment received. Your plan switches as soon as Stripe confirms it, usually within a minute.'); setTimeout(() => { load(); }, 5000); }
+      if (b === 'cancel') { setTab('billing'); setNotice('No change made. You are still on your current plan.'); }
+      if (q || b) window.history.replaceState(null, '', '/app');
     } catch { /* ignore */ }
   }, [load]);
+
+  const billingGo = async (path: string) => {
+    setBillingBusy(true);
+    const r = await api<{ url?: string }>(path, { method: 'POST' });
+    setBillingBusy(false);
+    if (r.ok && r.body.url) { window.location.assign(r.body.url); return; }
+    setNotice(r.body.error || 'Stripe could not be reached. Try again.');
+  };
 
   const connect = async () => {
     setConnecting(true);
@@ -270,8 +286,8 @@ export default function MerchantDashboard() {
         </section>
 
         <nav style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const] : [])] as const).map((t) => (
-            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : 'Settings'}</button>
+          {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const, 'billing' as const] : [])] as const).map((t) => (
+            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
           ))}
         </nav>
 
@@ -318,6 +334,27 @@ export default function MerchantDashboard() {
                 {e.status === 'pending' && <button style={ghost} onClick={() => cancelEntry(e)}>Remove</button>}
               </div>
             ))}
+          </section>
+        )}
+
+        {tab === 'billing' && billing && (
+          <section style={card} aria-label="Plan and billing">
+            <div style={{ fontWeight: 700 }}>Your plan: {billing.planName}</div>
+            <div style={{ color: C.muted, fontSize: 14, marginTop: 4 }}>{billing.feeLine}</div>
+            {billing.status === 'past_due' && billing.graceUntil && (
+              <div role="alert" style={{ color: C.warn, fontSize: 14, marginTop: 10 }}>{`Your last payment for ${billing.planName} failed. Update your card by ${new Date(billing.graceUntil).toLocaleDateString()} or the store moves to Free and per-sale fees apply again.`}</div>
+            )}
+            {billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
+              <div style={{ color: C.muted, fontSize: 14, marginTop: 10 }}>{`Cancelled. ${billing.planName} stays on until ${new Date(billing.currentPeriodEnd).toLocaleDateString()}, then the store moves to Free.`}</div>
+            )}
+            {!billing.cancelAtPeriodEnd && billing.status === 'active' && billing.currentPeriodEnd && (
+              <div style={{ color: C.muted, fontSize: 14, marginTop: 10 }}>{`Renews ${new Date(billing.currentPeriodEnd).toLocaleDateString()}.`}</div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {billing.upgrade && <button style={btn} disabled={billingBusy} onClick={() => billingGo('/api/merchant/billing/checkout')}>{`Switch to ${billing.upgrade.name}: ${money(billing.upgrade.monthlyCents, 'usd')}/month, no per-sale fee`}</button>}
+              {billing.hasBillingAccount && <button style={ghost} disabled={billingBusy} onClick={() => billingGo('/api/merchant/billing/portal')}>Manage billing</button>}
+            </div>
+            {billing.upgrade && <p style={{ color: C.muted, fontSize: 13, margin: '10px 0 0' }}>Billed monthly by card; cancel any time from Manage billing. The switch applies from your next sale.</p>}
           </section>
         )}
 

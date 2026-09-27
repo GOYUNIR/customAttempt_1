@@ -78,10 +78,15 @@ export function envelopeOf(plans: PlanTerms[]): FeePlan[] {
 /** The plan a tenant is on. Throws if the tenant or plan cannot be read. */
 export async function tenantPlan(tenantId: string): Promise<PlanTerms> {
   const db = getDb();
-  const tenant = ((await db.select<any>('tenants', { where: { id: eq(tenantId) }, select: ['plan_id'], limit: 1 })) as any[])[0];
+  const tenant = ((await db.select<any>('tenants', { where: { id: eq(tenantId) }, select: ['plan_id', 'plan_grace_until'], limit: 1 })) as any[])[0];
   if (!tenant) throw new Error('[billing] unknown tenant ' + tenantId);
-  const plan = ((await db.select<any>('plans', { where: { id: eq(String(tenant.plan_id)) }, select: PLAN_COLUMNS, limit: 1 })) as any[])[0];
-  if (!plan) throw new Error('[billing] tenant ' + tenantId + ' is on unknown plan ' + tenant.plan_id);
+  // A paid plan whose renewal failed keeps its terms through the grace period
+  // (lib/plan-billing.ts, 00038); after it, the store is billed as Free even
+  // though plan_id still names the paid plan. Same read, no extra call.
+  const graceOver = tenant.plan_grace_until && Date.parse(String(tenant.plan_grace_until)) <= Date.now();
+  const planId = graceOver ? 'free' : String(tenant.plan_id);
+  const plan = ((await db.select<any>('plans', { where: { id: eq(planId) }, select: PLAN_COLUMNS, limit: 1 })) as any[])[0];
+  if (!plan) throw new Error('[billing] tenant ' + tenantId + ' is on unknown plan ' + planId);
   return toTerms(plan);
 }
 
