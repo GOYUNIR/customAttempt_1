@@ -108,8 +108,8 @@ export function MarketingFooter({ rootDomain }: { rootDomain: string | null }) {
     {
       heading: 'Legal',
       links: [
-        { label: 'Terms', href: '/terms' },
-        { label: 'Privacy', href: '/privacy' },
+        { label: 'Terms', href: '/platform/terms' },
+        { label: 'Privacy', href: '/platform/privacy' },
       ],
     },
   ];
