@@ -7,7 +7,7 @@ import { StripeDriver } from '@/services/payment/stripe.driver';
 import { buildOrderRef, formatOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { validateShippingAddress } from '@/lib/address-validation';
 import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config';
-import { isSyncedSourceReleased } from '@/lib/checkout-mode';
+import { isSyncedSourceReleased, isHiddenFromSale } from '@/lib/checkout-mode';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
@@ -111,6 +111,8 @@ export async function POST(request: Request) {
     const allProducts = await loadProducts(redis);
     const product = allProducts[productId];
     if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    // A hidden (draft) product is not for sale, whoever knows its id.
+    if (isHiddenFromSale(product, String(size || ''), Object.values(allProducts))) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
     const priceCat = (product.priceCategories || []).find((c: any) => c.size === size);
     if (!priceCat || !isConfiguredPrice(priceCat.price)) {

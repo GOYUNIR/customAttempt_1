@@ -299,3 +299,17 @@ export function isSyncedSourceReleased(
       : false;
   });
 }
+
+/**
+ * A DRAFT product (not live, not upcoming, not archived) is hidden from the
+ * storefront and must not be sold either: the original store's checkout
+ * routes used to accept any product id, so anyone who knew a hidden
+ * product's id could buy it (found 2026-09-27; merchant stores already
+ * refused it). Upcoming and archived products are NOT hidden: they route to
+ * the waitlist / re-entry flows. A synced size whose source product is
+ * released stays sellable, as isSyncedSourceReleased intends.
+ */
+export function isHiddenFromSale(product: any, size?: string | null, catalog?: any[] | null): boolean {
+  const draft = product?.isActive !== true && product?.isArchived !== true && product?.isUpcoming !== true;
+  return draft && !isSyncedSourceReleased(product, size, catalog);
+}

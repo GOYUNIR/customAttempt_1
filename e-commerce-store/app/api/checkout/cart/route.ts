@@ -21,6 +21,7 @@ import { isConfiguredPrice, getSizeCheckoutMode } from '@/lib/storefront-config'
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { readLiveStock } from '@/lib/stock-gate';
+import { isHiddenFromSale } from '@/lib/checkout-mode';
 import { reserveForBuyer, releaseStock, CHECKOUT_HOLD_SECONDS, CHECKOUT_SESSION_SECONDS, type StockItem } from '@/lib/stock';
 import { resolveVariantId } from '@/lib/inventory';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
@@ -170,7 +171,8 @@ export async function POST(request: Request) {
 
     for (const item of normalizedItems) {
       const product = allProducts[item.productId];
-      if (!product) {
+      // A hidden (draft) product is not for sale, whoever knows its id.
+      if (!product || isHiddenFromSale(product, item.size, Object.values(allProducts))) {
         return NextResponse.json({ error: 'A cart item no longer exists.' }, { status: 404 });
       }
       const category = (product.priceCategories || []).find((c: any) => String(c.size) === item.size);

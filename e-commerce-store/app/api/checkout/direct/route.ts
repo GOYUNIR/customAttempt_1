@@ -14,6 +14,7 @@ import { resolveStripeClient } from '@/services/payment/factory';
 import { resolveStripePriceIdWithSettings } from '@/services/config/platform-settings';
 import { buildOrderRef, normalizeRefPrefix } from '@/lib/order-ref';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { isHiddenFromSale } from '@/lib/checkout-mode';
 import { isValidEmail } from '@/lib/validation';
 import { rateLimitedResponse } from '@/lib/rate-limit';
 import { withRedisLock } from '@/lib/redis-lock';
@@ -101,7 +102,8 @@ export async function POST(request: Request) {
     // Fetch the product from Redis – this gives us the live priceCategories.
     const allProducts = await loadProducts(redis);
     const product = allProducts[productId];
-    if (!product) {
+    // A hidden (draft) product is not for sale, whoever knows its id.
+    if (!product || isHiddenFromSale(product, String(size), Object.values(allProducts))) {
       return NextResponse.json({ error: 'Product not found.' }, { status: 404 });
     }
 

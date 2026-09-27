@@ -315,3 +315,14 @@ test('shared inventory: isSyncedSourceReleased also accepts a product-slug sourc
   };
   assert.equal(isSyncedSourceReleased(synced, 'Standard', [synced, liveSource]), true);
 });
+
+import { isHiddenFromSale } from '../lib/checkout-mode.ts';
+
+test('a draft product is hidden from sale; live, upcoming and archived are not', () => {
+  const size = 'M';
+  assert.equal(isHiddenFromSale({ isActive: false, isArchived: false, isUpcoming: false, priceCategories: [{ size }] }, size, []), true, 'draft');
+  assert.equal(isHiddenFromSale({ isActive: true, priceCategories: [{ size }] }, size, []), false, 'live');
+  assert.equal(isHiddenFromSale({ isActive: false, isUpcoming: true, priceCategories: [{ size }] }, size, []), false, 'upcoming -> waitlist');
+  assert.equal(isHiddenFromSale({ isActive: false, isArchived: true, priceCategories: [{ size }] }, size, []), false, 'archived -> re-entry');
+  assert.equal(isHiddenFromSale(null as any, size, []), true, 'nothing is not for sale');
+});
