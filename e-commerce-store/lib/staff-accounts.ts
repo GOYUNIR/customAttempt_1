@@ -141,7 +141,17 @@ export async function removeTenantStaff(email: string, tenantId: string): Promis
     const rows = (await getDb().select<{ id: string }>('users', { where: scope, select: ['id'], limit: 1 })) as Array<{ id: string }>;
     const id = rows?.[0]?.id;
     if (!id) return 'not_found';
-    await getDb().remove('users', { where: { ...scope, id: eq(id) } });
+    try {
+      await getDb().remove('users', { where: { ...scope, id: eq(id) } });
+    } catch (err) {
+      // The row cannot be deleted while the append-only audit log references
+      // it (until 00036 drops that foreign key). Access is revoked anyway:
+      // take the staff role away (same store-scoped match), then delete the
+      // login below. The gate refuses any role but owner/staff at once.
+      console.warn('[staff-accounts] could not delete the users row; revoking the role instead', normalized, (err as Error)?.message || err);
+      const demoted = (await getDb().update<{ id: string }>('users', { where: { ...scope, id: eq(id) } }, { role: 'customer' })) as Array<{ id: string }>;
+      if (!Array.isArray(demoted) || demoted.length === 0) return 'error';
+    }
     try {
       const { serviceRoleKey } = readSupabaseEnv();
       await supabaseAuthFetch('/admin/users/' + id, { key: serviceRoleKey, method: 'DELETE' });

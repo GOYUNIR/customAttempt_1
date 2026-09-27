@@ -325,7 +325,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const kvAudit = ((await kv.lrange('admin:audit_log', -200, -1)) || [])
       .map((r: any) => (typeof r === 'string' ? r : JSON.stringify(r)))
       .filter((r: string) => { try { return String(JSON.parse(r).at) >= runStart; } catch { return false; } });
-    const leaked = kvAudit.filter((r: string) => /MERCHANT_|iso-entry|iso-staff-a|iso-sales|isolation-owner-b|delivered@resend|test4|goyunir test 1/i.test(r));
+    // A PLATFORM sales account joining is a platform event (no store): it belongs
+    // in the platform owner's view. Only store-specific markers count here.
+    const leaked = kvAudit.filter((r: string) => /MERCHANT_|iso-entry|iso-staff-a|isolation-owner-b|delivered@resend|test4|goyunir test 1/i.test(r));
     check(leaked.length === 0, 'nothing about a merchant store reached it during this run (' + kvAudit.length + ' new entries, ' + leaked.length + ' about merchants)' + (leaked.length ? ': ' + leaked.join(' | ').slice(0, 300) : ''));
 
     console.log('\nRevocation');
@@ -338,7 +340,17 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     // Throwaway people and rows from this run (store B's owner is kept for re-runs).
     const { deleteStaffAccount } = await import('../lib/staff-accounts');
     if (entryEmail) await db.remove('raffle_entries', { where: { tenant_id: eq(A), email: eq(entryEmail) } }).catch(() => null);
-    for (const e of [staffEmail, salesEmail]) if (e) await deleteStaffAccount(e).catch(() => false);
+    for (const e of [staffEmail, salesEmail]) {
+      if (!e || (await deleteStaffAccount(e).catch(() => false))) continue;
+      // Referenced by the append-only audit log (until 00036): revoke instead.
+      const u = ((await db.select<any>('users', { where: { email: eq(e) }, select: ['id'] })) as any[])[0];
+      if (u) {
+        await db.update('users', { where: { id: eq(u.id) } }, { role: 'customer', tenant_id: null }, { returning: 'minimal' } as any).catch(() => null);
+        const sc: any = await import('../services/config/supabase-client');
+        const loginGone = await sc.supabaseAuthFetch('/admin/users/' + u.id, { key: sc.readSupabaseEnv().serviceRoleKey, method: 'DELETE' }).then(() => true, () => false);
+        console.log('cleanup: ' + e + ' is referenced by the append-only audit log (00036 not applied): role revoked' + (loginGone ? ', login deleted' : '; login kept (same reference) but it has no role'));
+      }
+    }
     for (const t of [sA, sB, sOwn]) await kv.hdel(ADMIN_DEVICES_KEY, t);
     console.log('\nsessions deleted');
   }
