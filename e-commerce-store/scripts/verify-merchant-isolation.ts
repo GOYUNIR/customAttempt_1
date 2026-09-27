@@ -296,8 +296,11 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
       (await call('/api/merchant/staff/invite', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'x@goyunir.invalid' }) })).status,
       (await call('/api/merchant/staff/remove', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: aOwner }) })).status,
       (await call('/api/merchant/payments', sS, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ country: 'US' }) })).status,
+      (await call('/api/merchant/billing', sS)).status,
+      (await call('/api/merchant/billing/checkout', sS, { method: 'POST' })).status,
+      (await call('/api/merchant/billing/portal', sS, { method: 'POST' })).status,
     ];
-    check(staffRefusals.every((s) => s === 403), 'staff cannot see or change staff, or touch payments: ' + staffRefusals.join(','));
+    check(staffRefusals.every((s) => s === 403), 'staff cannot see or change staff, or touch payments or billing: ' + staffRefusals.join(','));
     const rmB = await call('/api/merchant/staff/remove', sB, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: staffEmail }) });
     check(rmB.status === 404 && (await tenantOfEmail(staffEmail))?.tenant_id === A, 'store B cannot remove test4\'s staff: ' + rmB.status);
     check((await call('/api/merchant/staff/remove', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: B_OWNER }) })).status === 404 && (await tenantOfEmail(B_OWNER))?.tenant_id === B, 'test4 cannot remove store B\'s owner');
@@ -337,8 +340,11 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     const supRefusals = [
       (await call('/api/merchant/staff', sSup)).status,
       (await call('/api/merchant/payments', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ country: 'US' }) })).status,
+      (await call('/api/merchant/billing', sSup)).status,
+      (await call('/api/merchant/billing/checkout', sSup, { method: 'POST' })).status,
+      (await call('/api/merchant/billing/portal', sSup, { method: 'POST' })).status,
     ];
-    check(supRefusals.every((s) => s === 403), 'support cannot touch staff or payments: ' + supRefusals.join(','));
+    check(supRefusals.every((s) => s === 403), 'support cannot touch staff, payments or billing: ' + supRefusals.join(','));
     const cur = await call('/api/merchant/settings', sSup);
     const supSave = await call('/api/merchant/settings', sSup, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cur.body) });
     const supAudit = (await auditRows('MERCHANT_SETTINGS_SAVED', salesEmail))[0];

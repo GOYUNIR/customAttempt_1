@@ -64,9 +64,14 @@ async function stripePriceFor(stripe: any, p: PlanRow): Promise<string> {
 /** This store as a customer of the platform's Stripe account (created once, remembered). */
 async function billingCustomer(stripe: any, tenantId: string, email: string): Promise<string> {
   const row = ((await getDb().select<any>('tenant_subscriptions', { where: { tenant_id: eq(tenantId) }, select: ['stripe_customer_id'], limit: 1 })) as any[])[0];
-  if (row?.stripe_customer_id) return String(row.stripe_customer_id);
-  const customer = await stripe.customers.create({ email, metadata: { tenant_id: tenantId } }, { idempotencyKey: 'plan-customer:' + tenantId });
-  await getDb().insert('tenant_subscriptions', { tenant_id: tenantId, stripe_customer_id: customer.id }, { onConflict: 'tenant_id', returning: 'minimal' } as any);
+  if (row?.stripe_customer_id) {
+    // Still there? (A customer deleted in Stripe would fail every checkout.)
+    const existing = await stripe.customers.retrieve(String(row.stripe_customer_id)).catch(() => null);
+    if (existing && !existing.deleted) return String(row.stripe_customer_id);
+  }
+  const customer = await stripe.customers.create({ email, metadata: { tenant_id: tenantId } }, { idempotencyKey: 'plan-customer:' + tenantId + ':' + (row?.stripe_customer_id || 'first') });
+  if (row) await getDb().update('tenant_subscriptions', { where: { tenant_id: eq(tenantId) } }, { stripe_customer_id: customer.id, stripe_subscription_id: null, status: null, plan_id: null, current_period_end: null, cancel_at_period_end: false, updated_at: new Date().toISOString() }, { returning: 'minimal' } as any);
+  else await getDb().insert('tenant_subscriptions', { tenant_id: tenantId, stripe_customer_id: customer.id }, { onConflict: 'tenant_id', returning: 'minimal' } as any);
   return customer.id;
 }
 
