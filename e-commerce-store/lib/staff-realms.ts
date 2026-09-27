@@ -66,11 +66,10 @@ export const STAFF_REALMS: Record<StaffRealmKey, StaffRealm> = {
   merchant: {
     key: 'merchant',
     loginPath: '/app/login',
-    // The merchant hub is served by the SAME route tree as the platform admin
-    // portal today (see lib/edge-router.ts's header) — the difference is the
-    // ROLE required, enforced in app/admin/layout.tsx, not the path. When a
-    // dedicated merchant tree exists, this is the one line that moves.
-    home: '/admin',
+    // The merchant dashboard (app/app/page.tsx, /api/merchant/*): a merchant's
+    // own store, taken from the session. The original store's staff who sign
+    // in here are sent on to /admin by that page.
+    home: '/app',
     title: 'Merchant sign-in',
     subtitle: 'For store owners and staff.',
     audience: 'merchant',

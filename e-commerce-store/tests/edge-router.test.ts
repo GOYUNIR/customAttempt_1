@@ -151,7 +151,7 @@ test('portalIsolationStatus: local dev without the var is fine, never misconfigu
 
 test('portalHomeRewrite: staff hosts map / to their real entry point', () => {
   assert.equal(portalHomeRewrite('/', 'admin'), '/admin');
-  assert.equal(portalHomeRewrite('/', 'merchant'), '/admin');
+  assert.equal(portalHomeRewrite('/', 'merchant'), '/app'); // the merchant dashboard
   assert.equal(portalHomeRewrite('/', 'sales'), '/sales');
 });
 

@@ -273,7 +273,10 @@ export function portalIsolationStatus(
  */
 export function portalHomeRewrite(pathname: string, portal: Portal): string | null {
   if (pathname !== '/') return null;
-  if (portal === 'admin' || portal === 'merchant') return '/admin';
+  if (portal === 'admin') return '/admin';
+  // The merchant dashboard (app/app/page.tsx). It sends the original store's
+  // own staff on to /admin, so nobody loses their way in.
+  if (portal === 'merchant') return '/app';
   if (portal === 'sales') return '/sales';
   return null;
 }
