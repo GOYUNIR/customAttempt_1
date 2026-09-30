@@ -105,6 +105,12 @@ function isSharedStaffAuthPath(pathname: string): boolean {
   return (
     pathname === '/api/admin/login' ||
     pathname.startsWith('/api/admin/login/') ||
+    // The emailed-code step of the SAME sign-in (components/staff/
+    // StaffLoginForm.tsx). Left out, every realm but admin/merchant 404'd on
+    // it: a sales rep's password was accepted and then "Could not send the
+    // verification code", forever (found by verify-core-journey, 2026-09-30).
+    pathname === '/api/admin/verify-send' ||
+    pathname === '/api/admin/verify-confirm' ||
     pathname === '/admin/setup' ||
     pathname.startsWith('/admin/setup/') ||
     pathname === '/api/admin/setup' ||

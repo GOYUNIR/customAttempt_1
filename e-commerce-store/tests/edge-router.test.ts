@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
@@ -406,4 +407,16 @@ test('REGRESSION: a staff sign-in link on the marketing page must name the porta
   assert.equal(staffLoginUrl('admin', ROOT), 'https://admin.site.com/admin/login');
   // Single-domain: no portal subdomains exist, so the relative path is right.
   assert.equal(staffLoginUrl('merchant', null), '/app/login');
+});
+
+// Every request the staff sign-in form makes must answer on every staff host:
+// the form is the same on all three, so a step fenced off one host strands
+// that realm after the password (sales, 2026-09-30).
+test('every sign-in step the staff form calls is reachable on every staff host', () => {
+  const src = readFileSync('components/staff/StaffLoginForm.tsx', 'utf8');
+  const paths = [...new Set([...src.matchAll(/fetch\('(\/api\/[a-z0-9/-]+)/g)].map((m) => m[1]))];
+  assert.ok(paths.length >= 3 && paths.includes('/api/admin/verify-send'), 'found the form\'s requests: ' + paths.join(', '));
+  for (const portal of ['admin', 'merchant', 'sales'] as const) {
+    for (const p of paths) assert.ok(isPortalPathAllowed(p, portal, 'example.com'), p + ' must be reachable on the ' + portal + ' host');
+  }
 });

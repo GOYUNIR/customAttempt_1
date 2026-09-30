@@ -1,5 +1,5 @@
 import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
-import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl, getBrandLogo } from '@/lib/env';
+import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl, getBrandLogo, getPlatformName } from '@/lib/env';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { EmailFactory } from '@/services/email';
 import type { EmailDriver } from '@/services/email';
@@ -827,7 +827,8 @@ export async function sendWelcomeEmail(opts: {
   }
 }
 
-/** Admin portal two-step verification code (sent to ADMIN_VERIFY_EMAIL / SUPPORT_EMAIL). */
+/** The emailed step of EVERY staff sign-in (merchant owners and staff, sales,
+ *  admins). It speaks for the platform, not one store's admin portal. */
 export async function sendAdminVerificationEmail(opts: { to: string; code: string; siteUrl?: string }) {
   const driver = await getEmailDriver();
   if (!driver) return { ok: false, skipped: true };
@@ -835,9 +836,9 @@ export async function sendAdminVerificationEmail(opts: { to: string; code: strin
   // preview (and the mailbox list) — the operator can read and type it without
   // opening the email. iOS Mail + Android Gmail also use it for OTP autofill.
   return driver.send2FA(opts.to, opts.code, {
-    subject: `${emailBrandName()} — Admin sign-in code: ${opts.code}`,
-    headline: 'Admin sign-in verification',
-    body: 'A request was made to open the store admin portal. Enter this one-time code to finish signing in.',
+    subject: `${getPlatformName() || emailBrandName()} — Your sign-in code: ${opts.code}`,
+    headline: 'Your sign-in code',
+    body: 'Someone is signing in to your account with your password. Enter this one-time code to finish. If it was not you, ignore this email: your password alone is not enough to get in.',
     logoUrl: emailBrandLogo(),
   });
 }
