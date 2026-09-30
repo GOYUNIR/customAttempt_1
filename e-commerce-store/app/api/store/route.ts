@@ -485,6 +485,35 @@ type StorePayload = {
  * existing Redis path unchanged. See lib/postgres-catalog-read.ts's header
  * for exactly what this covers (and doesn't).
  */
+/**
+ * The original store's settings + overrides from KV, exactly as the KV path
+ * reads them. null = unavailable or empty (the caller then uses Postgres and
+ * says so): an empty settings blob is a missing one, never "no settings".
+ */
+async function readDefaultStoreSettingsFromKv(): Promise<{ config: Record<string, any>; scheduleOverride: Record<string, unknown>; socialOverride: Record<string, unknown> } | null> {
+  const redis = createKvClient();
+  if (!redis) return null;
+  try {
+    const config = await loadStoreConfigCached(redis);
+    if (!config || Object.keys(config).length === 0) {
+      console.error('[store] original store settings are EMPTY in KV — serving the Postgres copy instead (check the admin settings key)');
+      return null;
+    }
+    const [scheduleRaw, socialRaw] = await Promise.all([
+      redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD),
+      redis.hget(OVERRIDES_KEY, OVERRIDE_SOCIAL_PROOF_FIELD),
+    ]);
+    return {
+      config,
+      scheduleOverride: safeParseKvItem<any>(scheduleRaw) || {},
+      socialOverride: safeParseKvItem<any>(socialRaw) || {},
+    };
+  } catch (err) {
+    console.error('[store] original store settings unreadable in KV — serving the Postgres copy instead', (err as Error)?.message || err);
+    return null;
+  }
+}
+
 async function tryBuildStorePayloadFromPostgres(
   requestedSlug: string,
   sortProducts: (items: PublicStoreProduct[]) => PublicStoreProduct[],
@@ -494,11 +523,23 @@ async function tryBuildStorePayloadFromPostgres(
     const pg = await readCatalogFromPostgres(tenantId);
     if (!pg) return null;
 
-    const config = mergePublicConfig(pg.config);
+    // SETTINGS come from where they are WRITTEN. The original store's admin
+    // saves settings, the AI helper's edits, the catalog preview and the
+    // schedule/social overrides to the KV store, and every other server reader
+    // (layout, checkout, accounts, draws) reads them there. tenant_store_config
+    // only ever received a one-off copy (the SEV-2 restore), so reading it
+    // here served settings frozen at that copy: admin saves never reached the
+    // storefront (found 2026-09-29). Products and live stock still come from
+    // Postgres. The Postgres copy is the fallback only when KV is unreadable
+    // or empty (an empty settings blob is a missing one, not a real config).
+    const kv = await readDefaultStoreSettingsFromKv();
+    const config = mergePublicConfig(kv?.config ?? pg.config);
+    const scheduleOverride = kv ? kv.scheduleOverride : pg.scheduleOverride;
+    const socialOverride = kv ? kv.socialOverride : pg.socialOverride;
     const globalSchedule = {
       ...GOYUNIR_STORE_SUITE.dropSchedule,
       ...(config?.dropSchedule || {}),
-      ...pg.scheduleOverride,
+      ...scheduleOverride,
     };
 
     let allProducts = pg.productsRaw.map((raw) => sanitizeProduct(raw));
@@ -512,8 +553,8 @@ async function tryBuildStorePayloadFromPostgres(
       config,
       allProducts: lifecycleProducts,
       product,
-      scheduleOverride: pg.scheduleOverride,
-      socialOverride: pg.socialOverride,
+      scheduleOverride,
+      socialOverride,
       timestamp: Date.now(),
     };
   } catch (err) {
