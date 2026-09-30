@@ -30,6 +30,7 @@ import {
 import { samplerPresentation, formatMoneyCents, isSamplerSize } from '@/lib/sampler-config';
 import { isVideoMedia, pickCrop, coverStyle, DEFAULT_CROP } from '@/lib/media';
 import { visibleProductCategories } from '@/lib/storefront-config';
+import { buyLabel, entryLabel } from '@/lib/buy-labels';
 
 /** Fixed preview card + gallery-box widths (300px card − 2×1px borders). */
 const CARD_W = 300;
@@ -346,8 +347,8 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
                 >
                   {soldOut ? 'Sold out' : (canCheckoutDirect
                     // Same one-action rule as the storefront: unreleased → reserve.
-                    ? (product.isArchived ? 'Reserve for next opening' : product.isUpcoming ? 'Reserve for launch' : `Secure piece · $${price.toFixed(2)}`)
-                    : (String(copy.entryCta || '').trim() || 'Enter allocation'))}
+                    ? (product.isArchived ? 'Reserve for next opening' : product.isUpcoming ? 'Reserve for launch' : buyLabel(copy, price))
+                    : entryLabel(copy, product.isArchived === true))}
                 </button>
               </div>
               {notes.length > 0 && (

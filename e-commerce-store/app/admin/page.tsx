@@ -1298,6 +1298,7 @@ const DEFAULT_GALLERY_SETTINGS = {
 const DEFAULT_COPY_SETTINGS = {
   heroTitle: '',
   heroSubtitle: '',
+  buyCta: '',
   entryCta: '',
   cartTitle: '',
   footerTagline: '',
@@ -8417,7 +8418,8 @@ export default function AdminPortal() {
                     {([
                       ['heroTitle', 'Hero title (overrides the Hero Content headline)'],
                       ['heroSubtitle', 'Hero subtitle (overrides the Hero Content body)'],
-                      ['entryCta', '"Enter allocation" button label'],
+                      ['buyCta', 'Instant-buy button word (default "Buy now"; the price is added: "Buy now · $19.00")'],
+                      ['entryCta', 'Raffle entry button label (default "Enter the raffle")'],
                       ['cartTitle', 'Cart drawer title ("Review items")'],
                       ['footerTagline', 'Footer tagline'],
                       ['supportEmail', 'Support email (footer link)'],

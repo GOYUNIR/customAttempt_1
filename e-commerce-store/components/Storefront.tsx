@@ -13,6 +13,7 @@ import { notifyDropDue } from '@/lib/client-auto-draw';
 import { isVideoMedia, coverStyle, pickCrop, DEFAULT_CROP } from '@/lib/media';
 import { formatMoneyCents, categorySampleBadge, categorySamplerPresentation } from '@/lib/sampler-config';
 import NotFoundView from '@/components/NotFoundView';
+import { buyLabel, entryLabel } from '@/lib/buy-labels';
 
 const CART_KEY = 'goyunir-cart';
 const CHECKOUT_DETAILS_KEY = 'goyunir-checkout-details';
@@ -1464,9 +1465,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   const primaryCtaLabel = soldOut
     ? 'Sold out'
     : isRaffleProduct
-      ? (product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation'))
+      ? entryLabel(copySettings, product.isArchived === true)
       : canCheckoutDirect
-        ? (sellsNow ? `Secure piece · $${price.toFixed(2)}` : waitlistLabel)
+        ? (sellsNow ? buyLabel(copySettings, price) : waitlistLabel)
         : '';
   const handlePrimaryCta = () => {
     if (isSubmitting || checkoutDisabled) return;
@@ -1810,12 +1811,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {isRaffleProduct && (
               <button className="goyunir-pdp-inline-primary" onClick={handleRaffleSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation')}
+                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : entryLabel(copySettings, product.isArchived === true)}
               </button>
             )}
             {canCheckoutDirect && (
               <button className="goyunir-pdp-inline-primary" onClick={sellsNow ? handleDirectCheckout : handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
-                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : sellsNow ? `Secure piece · $${price.toFixed(2)}` : waitlistLabel}
+                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : sellsNow ? buyLabel(copySettings, price) : waitlistLabel}
               </button>
             )}
             {(canCheckoutDirect || isRaffleProduct) && <button className="goyunir-pdp-add-bag" onClick={addToCart} disabled={checkoutDisabled || cartBusy} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled || cartBusy ? 'not-allowed' : 'pointer', opacity: checkoutDisabled || cartBusy ? 0.6 : 1 }}>{cartBusy ? (<><ButtonSpinner light={false} /> Checking…</>) : `Add to ${actionLabel}`}</button>}
