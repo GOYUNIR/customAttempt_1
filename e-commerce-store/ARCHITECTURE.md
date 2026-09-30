@@ -719,6 +719,10 @@ Gaps logged (not fixed; outside this week's scope):
     `GOYUNIR_STORE_SUITE` is merged under every store's config, e.g. the
     countdown's "ALLOCATION. CLOSED • VARIANT ARCHIVED" and the default
     theme.
+21. **Payments status does not refresh itself.** After Stripe onboarding
+    the dashboard says "checking your details". The webhook does record the
+    moment Stripe clears it (demo store: within a second, 2026-09-30), but
+    the page shows it only after a reload. Poll every ~20 s while pending.
 20. **Admin simplicity** (items 2 and 11–16 still stand). The Settings page
     and admin navigation need the Jobs-level pass; nothing was simplified
     in this batch by design.
