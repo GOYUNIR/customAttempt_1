@@ -178,7 +178,24 @@ export default function MerchantDashboard() {
     load();
     try {
       const q = new URLSearchParams(window.location.search).get('payments');
-      if (q === 'return') setNotice('Thanks. Stripe is checking your details; payments switch on as soon as it finishes.');
+      if (q === 'return') {
+        setNotice('Thanks. Stripe is checking your details; this page updates by itself when it finishes (usually a few minutes).');
+        // Poll for about 2 minutes so "checking your details" never has to be
+        // cleared by a reload. Stops as soon as payments are on.
+        let tries = 0;
+        const timer = window.setInterval(async () => {
+          tries += 1;
+          const s = await api<Store>('/api/merchant/store').catch(() => null);
+          if (s?.ok) setStore(s.body);
+          if (s?.ok && s.body.payments.connected) {
+            window.clearInterval(timer);
+            setNotice('Payments are on. Your store can take orders.');
+          } else if (tries >= 24) {
+            window.clearInterval(timer);
+            setNotice('Stripe is still checking your details. Payments switch on as soon as it finishes; reload this page later to see it.');
+          }
+        }, 5000);
+      }
       if (q === 'refresh') setNotice('That Stripe link expired. Start again below.');
       const b = new URLSearchParams(window.location.search).get('billing');
       if (b === 'success') { setTab('billing'); setNotice('Payment received. Your plan switches as soon as Stripe confirms it, usually within a minute.'); setTimeout(() => { load(); }, 5000); }
