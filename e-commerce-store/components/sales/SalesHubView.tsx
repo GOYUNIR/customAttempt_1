@@ -13,7 +13,9 @@ type SalesTab = 'pipeline' | 'quotes' | 'pricing' | 'impersonate';
  *  that page can be a Server Component doing the RBAC redirect (see its
  *  header) before any client JS for the portal ships. */
 export default function SalesHubView() {
-  const [tab, setTab] = useState<SalesTab>('pipeline');
+  // Opens on a tool that works today; the in-development pipeline is last
+  // (a rep's first screen should not be a placeholder).
+  const [tab, setTab] = useState<SalesTab>('quotes');
 
   return (
     <PortalShell
@@ -23,13 +25,13 @@ export default function SalesHubView() {
         {
           label: 'Deal Desk',
           items: [
-            { label: 'Pipeline', href: '#', icon: '📥', active: tab === 'pipeline', onClick: () => setTab('pipeline') },
             { label: 'Quote Builder', href: '#', icon: '📝', active: tab === 'quotes', onClick: () => setTab('quotes') },
             { label: 'Volume Pricing', href: '#', icon: '📊', active: tab === 'pricing', onClick: () => setTab('pricing') },
             { label: 'Impersonation', href: '#', icon: '🔑', active: tab === 'impersonate', onClick: () => setTab('impersonate') },
+            { label: 'Pipeline (coming)', href: '#', icon: '📥', active: tab === 'pipeline', onClick: () => setTab('pipeline') },
           ],
         },
-        { label: 'Other Portals', items: [{ label: 'Admin Panel', href: '/admin', icon: '⚙️' }] },
+        // No "Admin Panel" link: /admin does not exist on the sales host (404).
       ]}
     >
       <div style={{ marginBottom: 18 }}>
@@ -46,27 +48,8 @@ export default function SalesHubView() {
               : 'Assist a merchant by acting on their tenant directly.'}
         </p>
       </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
-        {(['pipeline', 'quotes', 'pricing', 'impersonate'] as SalesTab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            style={{
-              padding: '7px 14px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              border: tab === t ? '1px solid #3b82f6' : '1px solid #303036',
-              background: tab === t ? '#3b82f622' : 'transparent',
-              color: tab === t ? '#93c5fd' : '#ccc',
-            }}
-          >
-            {t === 'pipeline' ? 'Pipeline' : t === 'quotes' ? 'Quotes' : t === 'pricing' ? 'Volume Pricing' : 'Impersonation'}
-          </button>
-        ))}
-      </div>
+      {/* One navigation: the sidebar. (A second row of tab pills to the same four
+          places doubled every choice.) */}
       {tab === 'pipeline' && (
         <InDevelopment
           title="Inbound pipeline and speed to lead"
