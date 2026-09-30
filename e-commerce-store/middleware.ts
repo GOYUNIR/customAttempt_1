@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, retiredHostRedirect, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 import { classifyStorefrontHost, parseLegacyHosts, merchantHostAllowsPath } from '@/lib/storefront-host';
 import { isForeignTenantSession } from '@/lib/default-tenant';
@@ -290,6 +290,17 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.host,
   );
   const portal = classifyHost(publicHost, platformRootDomain);
+
+  // A retired store address (e.g. shop.) redirects its pages to the store's
+  // one address rather than mirroring it. Host header only (x-forwarded-host is
+  // client-settable).
+  const retiredTo = retiredHostRedirect({
+    host: String(request.headers.get('host') || ''),
+    pathname, search: request.nextUrl.search, method: request.method,
+    retiredHosts: parseLegacyHosts(process.env.STOREFRONT_REDIRECT_HOSTS, platformRootDomain),
+    storefrontHost: storefrontHostFor(),
+  });
+  if (retiredTo) return NextResponse.redirect(retiredTo, { status: 301, headers: { 'Cache-Control': 'public, max-age=3600' } });
 
   // TENANCY — default-deny on a MERCHANT's address (TENANCY.md T10). Only
   // paths proven tenant-aware are served there; everything else would read

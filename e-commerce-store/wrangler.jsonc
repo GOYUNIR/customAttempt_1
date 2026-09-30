@@ -144,7 +144,13 @@
     // With this set, an unknown subdomain is a 404 instead of the default store.
     // Removing it restores the old behaviour (every subdomain = default store)
     // rather than taking the store offline.
-    "STOREFRONT_LEGACY_HOSTS": "shop,www,api",
+    "STOREFRONT_LEGACY_HOSTS": "shop,www,api,goyunir",
+    // The original store's ONE address (it is a tenant like any other, slug
+    // "goyunir"). Old links on the bare root and on retired hosts go here.
+    "PLATFORM_STOREFRONT_HOST": "goyunir.goyunir.com",
+    // Retired store addresses: their PAGES 301 to PLATFORM_STOREFRONT_HOST
+    // (their /api/* still answers, so nothing in flight breaks).
+    "STOREFRONT_REDIRECT_HOSTS": "shop",
 
     // PHASE G — Postgres is the authoritative catalog store.
     // The relational schema (00009 -> 00019) is applied; lib/catalog-write.ts

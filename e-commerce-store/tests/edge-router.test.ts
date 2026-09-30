@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
+import { classifyHost, cookieDomainForPortal, corsOriginAllowed, isPortalPathAllowed, retiredHostRedirect, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, portalHomeRewrite, portalIsolationStatus, resolveRequestHost } from '../lib/edge-router.ts';
 import { STAFF_REALMS, isStaffLoginPath, loginPathForPortal, staffLoginUrl } from '../lib/staff-realms.ts';
 
 const ROOT = 'site.com';
@@ -419,4 +419,14 @@ test('every sign-in step the staff form calls is reachable on every staff host',
   for (const portal of ['admin', 'merchant', 'sales'] as const) {
     for (const p of paths) assert.ok(isPortalPathAllowed(p, portal, 'example.com'), p + ' must be reachable on the ' + portal + ' host');
   }
+});
+
+test('a retired store host 301s its pages to the one store address; its API keeps answering', () => {
+  const base = { search: '?a=1', method: 'GET', retiredHosts: new Set(['shop.example.com']), storefrontHost: 'goyunir.example.com' };
+  assert.equal(retiredHostRedirect({ ...base, host: 'shop.example.com', pathname: '/black-solstice' }), 'https://goyunir.example.com/black-solstice?a=1');
+  assert.equal(retiredHostRedirect({ ...base, host: 'SHOP.example.com:443', pathname: '/' }), 'https://goyunir.example.com/?a=1');
+  assert.equal(retiredHostRedirect({ ...base, host: 'shop.example.com', pathname: '/api/store' }), null, 'API calls are not redirected');
+  assert.equal(retiredHostRedirect({ ...base, host: 'shop.example.com', pathname: '/x', method: 'POST' }), null, 'only page loads');
+  assert.equal(retiredHostRedirect({ ...base, host: 'www.example.com', pathname: '/x' }), null, 'other hosts untouched');
+  assert.equal(retiredHostRedirect({ ...base, storefrontHost: null, host: 'shop.example.com', pathname: '/x' }), null, 'no configured address: nothing is guessed');
 });

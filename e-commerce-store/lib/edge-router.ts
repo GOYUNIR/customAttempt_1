@@ -448,3 +448,22 @@ export function clientIpFromHeaders(
   }
   return 'unknown';
 }
+
+/**
+ * A RETIRED storefront host (STOREFRONT_REDIRECT_HOSTS, e.g. "shop") sends its
+ * pages to the store's one address (PLATFORM_STOREFRONT_HOST) with a 301,
+ * path and query kept, instead of silently mirroring it. Only page loads:
+ * /api/* keeps answering there, so an in-flight checkout return or an older
+ * email link that calls an API is never broken mid-flow. Null = serve as usual.
+ */
+export function retiredHostRedirect(input: {
+  host: string; pathname: string; search: string; method: string;
+  retiredHosts: Set<string> | null; storefrontHost: string | null;
+}): string | null {
+  const host = String(input.host || '').toLowerCase().split(':')[0];
+  if (!input.retiredHosts || !input.storefrontHost || !input.retiredHosts.has(host)) return null;
+  if (host === input.storefrontHost) return null;
+  if (input.method !== 'GET' && input.method !== 'HEAD') return null;
+  if (input.pathname === '/api' || input.pathname.startsWith('/api/')) return null;
+  return 'https://' + input.storefrontHost + input.pathname + (input.search || '');
+}
