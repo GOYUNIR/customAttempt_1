@@ -678,8 +678,50 @@ Needs design work (Jobs-level simplification, with 2 and 11):
     home page. It should start from what the store shows today, and preview
     before activating.
 
-Not yet reviewed in depth: Stock (proven separately by verify-admin-stock),
-Drops automation settings, Products editor (admin side), Settings (item 11).
+Fourth batch, the "working version" pass (2026-09-30). Fixed:
+- **Sales reps could not sign in.** The emailed-code step 404'd on the sales
+  host (portal fence), so every rep was stuck after the password. The code
+  step is now a shared sign-in path, with a test that every request the
+  sign-in form makes is reachable on every staff host.
+- The sign-in code email said "Admin sign-in" / "the store admin portal" to
+  every merchant, staff member and rep. It now speaks for the platform.
+- **The original store is a tenant with a real address.** Its row was
+  "Store" / "default" because `ensureDefaultTenant()` overwrote it on every
+  call. It now creates only; the row is renamed GOYUNIR / `goyunir`, and the
+  store answers at goyunir.<root> as well as www. and shop.
+- Merchant products can carry photos (platform media host only, max 8); an
+  edit without photos keeps them.
+- The home and catalog cards said "Enter allocation" on every product,
+  instant-buy included. They now say what the product page offers.
+- Self-test: the drop schedule is judged as the storefront uses it
+  (Automation override); the dead "available sizes" check is gone (41/41).
+
+Exercised and working:
+- The admin Products editor (partial save, round trip).
+- Drops → Automation (the draw engine and the storefront read the same
+  schedule).
+- Admin Settings save (proven to reach the live storefront; a partial save
+  changes nothing else).
+- `scripts/verify-core-journey.ts`: staff and sales invite → email →
+  password → emailed code → portal home, ALL PASS.
+- verify-tenant-checkout (a real purchase) and verify-merchant-isolation:
+  ALL PASS.
+
+Gaps logged (not fixed; outside this week's scope):
+17. **No photo upload in the merchant dashboard.** The API accepts photos
+    now; the upload UI and a store-scoped presign route (with an isolation
+    proof) are the missing half, about half a day. Until then a merchant's
+    products show no photos unless the platform adds them.
+18. **Tenant storefronts log 404s for shop-level endpoints:** /icon (no
+    favicon), /api/auth/me, /api/analytics/heartbeat,
+    /api/ai/hero-animation. Invisible except the missing tab icon.
+19. **GOYUNIR's voice in shared defaults** (PLATFORM-IDENTITY):
+    `GOYUNIR_STORE_SUITE` is merged under every store's config, e.g. the
+    countdown's "ALLOCATION. CLOSED • VARIANT ARCHIVED" and the default
+    theme.
+20. **Admin simplicity** (items 2 and 11–16 still stand). The Settings page
+    and admin navigation need the Jobs-level pass; nothing was simplified
+    in this batch by design.
 
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
