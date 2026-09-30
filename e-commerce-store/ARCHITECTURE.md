@@ -629,11 +629,57 @@ Needs design work:
     generate buttons, layout choices) on one scrolling page. Needs sections
     with one save per section, or a settings sub-navigation.
 
-Not yet reviewed:
-- Admin tabs in depth. The pass captured each tab's first screen: primary
-  action, control count, errors (none); none was opened into its forms.
-- The Ledger, Users, Promotions, Growth, System, Setup, Enterprise,
-  Telemetry and Theme Editor flows themselves.
+Third batch: admin tabs, core actions exercised (2026-09-30). Fixed:
+- **TRUTHFULNESS: Users tab.** "+ Add User", edit and delete all posted to
+  a route that no longer has POST: 405 on every click, shown live. The tab
+  is now the working role manager (the only copy; the duplicate Roles
+  sub-tab in Enterprise is gone), and the dead handlers are removed.
+- **TRUTHFULNESS: System self-test reported a working raffle as broken.** It
+  judged every size of a "raffle product", including instant-buy sizes
+  that have no winners by design. It now checks per raffle size, and skips
+  hidden drafts for "card will be blank".
+- **Safety: two one-click irreversible actions now ask first, naming the
+  consequence.**
+  - Growth "Notify Release List" emails every subscriber: the confirmation
+    shows the count and the product.
+  - A first Theme Editor "Save & Activate" replaces the store's built-in
+    home page for every visitor: the confirmation says so.
+
+Exercised and truthful:
+- Promotions: create → listed → storefront validates 10% → delete → invalid.
+- Ledger: the newest events are exactly the newest real orders.
+- Telemetry and System health: plausible, live values.
+
+Left as the owner's settings, not code: GOYUNIR has no drop schedule and no
+"available sizes" set (self-test 40/42); the storefront uses built-in
+defaults.
+
+Needs design work (Jobs-level simplification, with 2 and 11):
+12. **Admin information architecture.** 15 top-level tabs, several of them
+    platform-level (Tenant Onboarding, Enterprise, Telemetry, Setup) mixed
+    with store-level ones (Products, Drops, Stock, Promotions).
+    - Split platform from store (PLATFORM-IDENTITY), then group the store
+      side into about 5 areas.
+    - The AI helper and Streamer Mode sit on every tab above the tab's own
+      primary.
+13. **System tab: a destructive "Wipe & Rebuild Supabase" sits beside the
+    self-test** at the same visual weight. Put it in a separate danger zone
+    behind a disclosure, with a typed confirmation.
+14. **Promotions form: 19 controls up front.** Code, promoter name/email,
+    discount %, payout %, per-email and total limits, fixed discount,
+    minimum subtotal and item count, shareable, eligible products and
+    sizes. A first code needs about three (code, % off, optional limit);
+    everything else is progressive disclosure.
+15. **Setup tab mixes 4 unrelated jobs** (API keys, Cloudflare variables,
+    environment variables, launch checklist). The launch checklist is the
+    one a first-time operator needs; lead with it.
+16. **Theme Editor has no preview**, and opens on a generic template
+    ("Welcome" / "Shop now") that looks nothing like the store's current
+    home page. It should start from what the store shows today, and preview
+    before activating.
+
+Not yet reviewed in depth: Stock (proven separately by verify-admin-stock),
+Drops automation settings, Products editor (admin side), Settings (item 11).
 
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
