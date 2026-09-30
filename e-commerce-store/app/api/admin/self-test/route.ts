@@ -21,6 +21,7 @@ import { toPublicSummary } from '@/services/config/types';
 import { TIDY_REDIS_ACTION_LABEL } from '@/lib/admin-action-labels';
 import { detectStorageProvider } from '@/lib/env-discovery';
 import { isConfiguredPrice } from '@/lib/storefront-config';
+import { getCategoryCheckoutMode, isHiddenFromSale } from '@/lib/checkout-mode';
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 
 export const dynamic = 'force-dynamic';
@@ -376,7 +377,8 @@ export async function GET(request: Request) {
         if (behavior !== 'stay_visible') activeNoInventory += 1;
       }
       const images = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
-      push(
+      // A draft is never shown to shoppers, so its card cannot be blank.
+      if (!isHiddenFromSale(product, null, productList)) push(
         `${name}: images`,
         images.length > 0,
         images.length > 0 ? `${images.length} image(s)` : 'no images (product card will be blank)'
@@ -399,11 +401,12 @@ export async function GET(request: Request) {
     );
 
     // Winner tiers sanity for raffle products
+    // Per SIZE: a product can mix raffle and instant-buy sizes, and an
+    // instant-buy size has no winners by design. Judging every size of a
+    // "raffle product" reported working raffles as broken (2026-09-30).
     const raffleWithBadTiers = productList.filter((product: any) => {
-      const isRaffle = product?.isRaffle !== false && String(product?.checkoutMode || 'raffle').toUpperCase() !== 'FCFS';
-      if (!isRaffle) return false;
       const cats = Array.isArray(product?.priceCategories) ? product.priceCategories : [];
-      return cats.some((cat: any) => {
+      return cats.filter((cat: any) => getCategoryCheckoutMode(product, cat) === 'RAFFLE').some((cat: any) => {
         const tiers = typeof cat?.winnerTiers === 'string' ? cat.winnerTiers : Array.isArray(cat?.winnerTiers) ? cat.winnerTiers.join(',') : '0';
         const parsed = String(tiers).split(',').map((n) => Number(n)).filter((n) => Number.isFinite(n));
         return parsed.length === 0 || parsed.every((n) => n === 0);

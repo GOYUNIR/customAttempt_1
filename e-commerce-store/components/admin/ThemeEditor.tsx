@@ -47,6 +47,9 @@ export default function ThemeEditor() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedAt, setSavedAt] = useState('');
+  // No saved theme yet = the store shows its built-in home page, and the
+  // sections below are only a starting template.
+  const [firstTheme, setFirstTheme] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +62,7 @@ export default function ThemeEditor() {
         return;
       }
       setSections(sortSections(data?.theme?.sections || []));
+      setFirstTheme(!data?.theme?.id);
     } catch (err: any) {
       setError(err?.message || 'Network error.');
     } finally {
@@ -72,6 +76,8 @@ export default function ThemeEditor() {
 
   const save = async () => {
     if (!sections) return;
+    // The first save REPLACES the store's current home page for every visitor.
+    if (firstTheme && !window.confirm('Your store uses its built-in home page today. Saving replaces it with this layout for every visitor, right away. Continue?')) return;
     setSaving(true);
     setError('');
     try {
@@ -86,6 +92,7 @@ export default function ThemeEditor() {
         return;
       }
       setSavedAt(new Date().toLocaleTimeString());
+      setFirstTheme(false);
     } catch (err: any) {
       setError(err?.message || 'Network error.');
     } finally {

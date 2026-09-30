@@ -32,6 +32,7 @@ import PortalShell from '@/components/admin/PortalShell';
 import TelemetryDashboard from '@/components/admin/TelemetryDashboard';
 import StockTool from '@/components/admin/StockTool';
 import TenantOnboardingWizard from '@/components/admin/TenantOnboardingWizard';
+import UserRoleManager from '@/components/admin/UserRoleManager';
 import ThemeEditor from '@/components/admin/ThemeEditor';
 
 type Tab = 'overview' | 'drops' | 'ledger' | 'growth' | 'system' | 'settings' | 'products' | 'users' | 'promotions' | 'catalog' | 'setup' | 'enterprise' | 'telemetry' | 'inventory' | 'tenants' | 'theme';
@@ -3616,78 +3617,6 @@ export default function AdminPortal() {
   // ============================================================
   // USER FUNCTIONS (unchanged)
   // ============================================================
-  const saveUser = async () => {
-    if (!requireUnlocked()) return;
-    if (!userForm.email) { showToast('Email is required'); return; }
-    setProductActionLoading(true);
-    try {
-      const body: any = {
-        password: password,
-        action: editingUser ? 'update' : 'create',
-        email: userForm.email,
-        role: userForm.role,
-        rewards: userForm.rewards,
-      };
-      if (userForm.password) {
-        body.userPassword = userForm.password;
-      }
-      if (editingUser) {
-        body.id = editingUser;
-      }
-
-      let res = await adminFetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      let data = await res.json();
-      if (!res.ok && data?.code === 'STEP_UP_REQUIRED') {
-        if (await attemptStepUp(password)) {
-          res = await adminFetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          data = await res.json();
-        }
-      }
-      if (res.ok) {
-        setUserMsg('✅ User saved successfully!');
-        showToast('UPDATED · User');
-        await fetchUsers();
-        setShowUserForm(false);
-        setUserForm({ email: '', password: '', role: 'customer', rewards: 0 });
-        setEditingUser(null);
-      } else {
-        setUserMsg('❌ Error: ' + (data.error || 'Unknown error'));
-      }
-    } catch (err: any) {
-      setUserMsg('❌ Error: ' + err.message);
-    }
-    setProductActionLoading(false);
-  };
-
-  const deleteUser = async (id: string) => {
-    if (!requireUnlocked()) return;
-    if (!confirm('Delete this user?')) return;
-    try {
-      const res = await adminFetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, action: 'delete', id }),
-      });
-      if (res.ok) {
-        showToast('DELETED · User');
-        await fetchUsers();
-      }
-    } catch (err: any) {
-      showToast('Error: ' + err.message);
-    }
-  };
-
-  // ============================================================
-  // CATALOG FUNCTIONS (unchanged)
-  // ============================================================
   const saveCatalogSettings = async () => {
     if (!requireUnlocked()) return;
     setCatalogLoading(true);
@@ -4272,6 +4201,11 @@ export default function AdminPortal() {
   const notifyReleaseList = async () => {
     if (!requireUnlocked()) return;
     if (!selectedAlertProductId) return showToast('Choose a product first');
+    // Emails real people and cannot be undone: say how many and about what
+    // first. The server skips anyone already told about this product, so the
+    // list size is the most that will go out.
+    const alertProductName = (allProducts.find((p: any) => p.id === selectedAlertProductId) as any)?.name || 'this product';
+    if (!confirm(`Email up to ${alerts.length} ${alerts.length === 1 ? 'person' : 'people'} on your release list about ${alertProductName}? This sends real emails now and cannot be undone.`)) return;
     setAlertsMsg('Sending release emails…');
     try {
       const res = await adminFetch('/api/admin/alerts', {
@@ -7104,71 +7038,13 @@ export default function AdminPortal() {
           </div>
         )}
 
-        {/* ============ USERS (unchanged) ============ */}
-        {tab === 'users' && (
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>User Accounts</h2>
-              <button onClick={() => { setShowUserForm(true); setEditingUser(null); setUserForm({ email: '', password: '', role: 'customer', rewards: 0 }); }} style={buttonPrimary}>
-                + Add User
-              </button>
-            </div>
-            <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 12 }}>
-              Manage user accounts. Users can log in to track entries, manage payment methods, and earn rewards.
-            </p>
-            
-            {userMsg && (
-              <p style={{ fontSize: 12, color: userMsg.includes('Error') ? '#f87171' : '#34d399', marginBottom: 10 }}>{userMsg}</p>
-            )}
-
-            {showUserForm && (
-              <div style={{ background: '#09090b', padding: 16, borderRadius: 12, marginBottom: 16 }}>
-                <h4 style={{ margin: '0 0 8px', fontSize: 12, color: '#aaa' }}>{editingUser ? 'Edit User' : 'New User'}</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <input type="email" placeholder="Email *" value={userForm.email} onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))} style={inputStyle} />
-                  <input type="password" placeholder="Password (leave blank to keep current)" value={userForm.password} onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))} style={inputStyle} />
-                  <select value={userForm.role} onChange={(e) => setUserForm((f) => ({ ...f, role: e.target.value }))} style={inputStyle}>
-                    <option value="customer">Customer</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <input type="number" placeholder="Rewards Points" value={userForm.rewards} onChange={(e) => setUserForm((f) => ({ ...f, rewards: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button onClick={saveUser} disabled={productActionLoading} style={buttonPrimary}>{productActionLoading ? 'Saving…' : 'Save User'}</button>
-                  <button onClick={() => { setShowUserForm(false); setEditingUser(null); }} style={buttonGhost}>Cancel</button>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {users.length === 0 && !usersLoading && (
-                <EmptyState
-                  icon="👤"
-                  title="No customer accounts yet"
-                  hint="Accounts are created automatically when someone signs up or enters a drop. You can also create one manually below."
-                />
-              )}
-              {users.map((user) => (
-                <div key={user.id} style={{ background: '#09090b', padding: 12, borderRadius: 8, border: '1px solid #1c1c1e' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{pii(user.email, 'email', streamerMode)}</div>
-                      <div style={{ fontSize: 10, color: '#666' }}>
-                        Role: {user.role} · Rewards: {user.rewards || 0}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button onClick={() => {
-                        setEditingUser(user.id); setUserForm({ email: user.email, password: '', role: user.role, rewards: user.rewards || 0 }); setShowUserForm(true);
-                      }} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10 }}>Edit</button>
-                      <button onClick={() => deleteUser(user.id)} style={{ ...buttonGhost, padding: '4px 10px', fontSize: 10, color: '#f87171', borderColor: '#f87171' }}>Delete</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* ============ USERS ============ */}
+        {/* Who can run the platform and which role they hold, on the route
+            that actually exists (GET list, PATCH role). The old customer-account
+            form here posted create/update/delete to a route with no POST: every
+            button failed with 405 (2026-09-30). Shoppers' own accounts are made
+            by signing up, not here. */}
+        {tab === 'users' && <div style={cardStyle}><UserRoleManager /></div>}
 
         {/* ============ PROMOTIONS (unchanged) ============ */}
         {tab === 'promotions' && (

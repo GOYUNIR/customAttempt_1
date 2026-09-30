@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import QuoteDeskPanel from '@/components/sales/QuoteDeskPanel';
 import DomainProvisioningCard from '@/components/admin/DomainProvisioningCard';
-import UserRoleManager from '@/components/admin/UserRoleManager';
 import { panelStyle, inputStyle, buttonPrimary, buttonGhost, statusPill, adminApiFetch } from '@/components/admin/portalStyles';
 
 /**
@@ -21,12 +20,11 @@ import { panelStyle, inputStyle, buttonPrimary, buttonGhost, statusPill, adminAp
  * pattern lib/cloudflare-saas.ts uses for missing Cloudflare credentials.
  */
 
-type EnterpriseSubTab = 'quotes' | 'domains' | 'roles' | 'assistant' | 'health';
+type EnterpriseSubTab = 'quotes' | 'domains' | 'assistant' | 'health';
 
 const SUB_TAB_LABEL: Record<EnterpriseSubTab, string> = {
   quotes: 'B2B Quotes',
   domains: 'Custom Domains',
-  roles: 'Roles',
   assistant: 'AI Assistant',
   health: 'Health & Security',
 };
@@ -39,7 +37,7 @@ export default function EnterprisePanel({ password }: { password: string }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ margin: 0, fontSize: 13, textTransform: 'uppercase' }}>Enterprise</h2>
         <div style={{ display: 'flex', gap: 6 }}>
-          {(['quotes', 'domains', 'roles', 'assistant', 'health'] as EnterpriseSubTab[]).map((t) => (
+          {(['quotes', 'domains', 'assistant', 'health'] as EnterpriseSubTab[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -56,7 +54,6 @@ export default function EnterprisePanel({ password }: { password: string }) {
       </div>
       {subTab === 'quotes' && <QuoteDeskPanel password={password} />}
       {subTab === 'domains' && <DomainProvisioningCard password={password} />}
-      {subTab === 'roles' && <UserRoleManager />}
       {subTab === 'assistant' && <AssistantPanel />}
       {subTab === 'health' && <HealthPanel />}
     </div>
