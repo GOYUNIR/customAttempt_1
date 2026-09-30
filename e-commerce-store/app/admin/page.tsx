@@ -5092,7 +5092,7 @@ export default function AdminPortal() {
               {(['run', 'automation'] as const).map((s) => (
                 <button key={s} onClick={() => { setDrawsSub(s); if (s === 'automation') fetchConfig(); if (s === 'run') fetchDrawHistory(); }}
                   style={{ ...buttonGhost, border: drawsSub === s ? '1px solid #fff' : '1px solid #333', background: drawsSub === s ? '#1c1c1e' : 'transparent', textTransform: 'capitalize' }}>
-                  {s === 'run' ? 'Run Draw' : 'Automation'}
+                  {s === 'run' ? 'Manual draw' : 'Automation'}
                 </button>
               ))}
             </div>
