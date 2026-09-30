@@ -23,7 +23,7 @@
  * Never throws: a miss or an error returns null so a broken asset can never
  * 500 a page — the same contract app/media/[...parts] already had for base64.
  */
-import { readMediaS3Config, presignGet } from './media-s3.ts';
+import { readMediaS3Config, presignGet, presignPut } from './media-s3.ts';
 
 export interface MediaObject {
   body: ArrayBuffer;
@@ -52,6 +52,7 @@ async function r2Binding(): Promise<R2BucketLike | null> {
 }
 
 interface R2BucketLike {
+  put?(key: string, value: ArrayBuffer | Uint8Array, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   get(key: string): Promise<{
     arrayBuffer(): Promise<ArrayBuffer>;
     httpMetadata?: { contentType?: string };
@@ -100,4 +101,27 @@ export async function readMediaObject(key: string): Promise<MediaObject | null> 
 export async function mediaReadPath(): Promise<'binding' | 'signed-get' | 'unavailable'> {
   if (await r2Binding()) return 'binding';
   return readMediaS3Config() ? 'signed-get' : 'unavailable';
+}
+
+/**
+ * Write one object (server-side: the caller has already checked what it is
+ * and chosen the key). The binding in production; a signed PUT from this
+ * server elsewhere. Returns false on any failure, never throws.
+ */
+export async function writeMediaObject(key: string, body: Uint8Array, contentType: string): Promise<boolean> {
+  const cleanKey = String(key || '').replace(/^\/+/, '');
+  if (!cleanKey) return false;
+  const bucket = await r2Binding();
+  if (bucket?.put) {
+    try { await bucket.put(cleanKey, body, { httpMetadata: { contentType } }); return true; } catch { return false; }
+  }
+  const config = readMediaS3Config();
+  if (!config) return false;
+  try {
+    const { uploadUrl } = presignPut({ config, key: cleanKey, expiresSeconds: 300 });
+    const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'content-type': contentType }, body: body as unknown as BodyInit });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

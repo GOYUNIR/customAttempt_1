@@ -49,12 +49,16 @@ export async function POST(request: Request) {
   const limited = await rateLimitedResponse('merchant_products', request, 30, 60);
   if (limited) return limited;
   const body = await request.json().catch(() => null);
-  const check = validateMerchantProduct(body, { mediaBase: process.env.MEDIA_S3_PUBLIC_BASE_URL });
+  const tenantId = gate.session.tenantId;
+  const existing = await loadProducts(null, { tenantId });
+  // Photos already on THIS store's product (when editing) may stay; any new
+  // one must be this store's own upload.
+  const editingId = typeof body?.id === 'string' ? body.id : '';
+  const currentImages: string[] = editingId && Array.isArray((existing as any)[editingId]?.images) ? (existing as any)[editingId].images : [];
+  const check = validateMerchantProduct(body, { mediaBase: process.env.MEDIA_S3_PUBLIC_BASE_URL, tenantId, currentImages });
   if (!check.ok) return merchantJson({ error: check.error }, 400);
   const input = check.value;
-  const tenantId = gate.session.tenantId;
 
-  const existing = await loadProducts(null, { tenantId });
   let id = input.id;
   if (id) {
     const current = existing[id];

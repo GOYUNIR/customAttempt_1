@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Store = { store: { name: string | null; slug: string | null; address: string | null; plan: string | null }; you: { email: string; role: string }; payments: { connected: boolean; status: string; hasAccount: boolean; outstandingRequirements: number } };
 type Size = { size: string; price: number | string; mode: 'FCFS' | 'RAFFLE'; stock?: number | string | null; winners?: number | string | null };
-type Product = { id: string; name: string; slug: string; tagline: string; description: string; isActive: boolean; isUpcoming: boolean; releaseEndsAt: string; maxPerEmail: number; sizes: Size[] };
+type Product = { id: string; name: string; slug: string; tagline: string; description: string; isActive: boolean; isUpcoming: boolean; releaseEndsAt: string; maxPerEmail: number; sizes: Size[]; images?: string[] };
 type Settings = { brandName: string; hero: { eyebrow: string; headline: string; body: string }; legal: { companyName: string; supportEmail: string; terms: string; privacy: string; shipping: string } };
 type Drop = { variantId: string; product: string; size: string; kind: 'raffle' | 'waitlist'; drawAt: string | null; stock: number | null; entries: Record<'pending' | 'winner' | 'charged' | 'declined' | 'cancelled', number> };
 type Drops = { drops: Drop[]; recentDraws: { item: string; winners: number; entries: number; at: string }[] };
@@ -42,7 +42,7 @@ const label: React.CSSProperties = { display: 'block', fontSize: 13, color: C.mu
 const money = (cents: number, currency: string) => {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: (currency || 'usd').toUpperCase() }).format(cents / 100); } catch { return (cents / 100).toFixed(2) + ' ' + currency; }
 };
-const blankProduct = (): Product => ({ id: '', name: '', slug: '', tagline: '', description: '', isActive: false, isUpcoming: false, releaseEndsAt: '', maxPerEmail: 1, sizes: [{ size: 'One Size', price: '', mode: 'FCFS', stock: '' }] });
+const blankProduct = (): Product => ({ id: '', name: '', slug: '', tagline: '', description: '', isActive: false, isUpcoming: false, releaseEndsAt: '', maxPerEmail: 1, sizes: [{ size: 'One Size', price: '', mode: 'FCFS', stock: '' }], images: [] });
 
 async function api<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: T & { error?: string; code?: string } }> {
   const res = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'content-type': 'application/json', ...(init?.headers || {}) } });
@@ -204,12 +204,32 @@ export default function MerchantDashboard() {
     setNotice(r.body.error || 'Stripe could not be reached. Try again.');
   };
 
+  // Photos go through the server (checked, stored in this store's own folder);
+  // the returned address is added to the product, which is saved with Save.
+  const [uploading, setUploading] = useState(false);
+  const addPhotos = async (files: FileList | null) => {
+    if (!editing || !files || files.length === 0) return;
+    setUploading(true);
+    let images = [...(editing.images || [])];
+    for (const f of Array.from(files)) {
+      if (images.length >= 8) { setNotice('A product can have up to 8 photos.'); break; }
+      const fd = new FormData(); fd.append('file', f);
+      const res = await fetch('/api/merchant/media', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.url) images = [...images, body.url];
+      else { setNotice((body.error || 'That photo could not be uploaded.') + ' (' + f.name + ')'); break; }
+    }
+    setEditing((cur) => (cur ? { ...cur, images } : cur));
+    setUploading(false);
+  };
+
   const save = async () => {
     if (!editing) return;
     setSaving(true);
     const payload = {
       ...(editing.id ? { id: editing.id } : {}),
       name: editing.name, slug: editing.slug || undefined, tagline: editing.tagline, description: editing.description,
+      images: editing.images || [],
       isActive: editing.isActive, isUpcoming: editing.isUpcoming, maxPerEmail: Number(editing.maxPerEmail) || 1,
       releaseEndsAt: editing.releaseEndsAt ? new Date(editing.releaseEndsAt).toISOString() : '',
       sizes: editing.sizes.map((s) => ({
@@ -406,7 +426,7 @@ export default function MerchantDashboard() {
                   <div style={{ fontWeight: 600 }}>{p.name} <span style={{ fontSize: 12, color: p.isActive ? C.good : C.muted, marginLeft: 6 }}>{p.isActive ? (p.isUpcoming ? 'coming soon' : 'on sale') : p.isUpcoming ? 'coming soon' : 'hidden'}</span></div>
                   {p.sizes.map((s) => { const st = stockFor(p.id, s.size); return <div key={s.size} style={{ color: C.muted, fontSize: 13 }}>{`${s.size} · ${Number(s.price).toFixed(2)} · ${s.mode === 'RAFFLE' ? 'raffle' : 'instant buy'} · ${st ? st.available + ' available' + (st.held ? ` (${st.held} in checkout)` : '') : (s.stock ?? '?') + ' left'}`}</div>; })}
                 </div>
-                <button style={ghost} onClick={() => setEditing({ ...p, releaseEndsAt: toLocalInput(p.releaseEndsAt), sizes: p.sizes.map((s) => ({ ...s })) })}>Edit</button>
+                <button style={ghost} onClick={() => setEditing({ ...p, releaseEndsAt: toLocalInput(p.releaseEndsAt), sizes: p.sizes.map((s) => ({ ...s })), images: [...(p.images || [])] })}>Edit</button>
               </div>
             ))}
           </section>
@@ -419,6 +439,21 @@ export default function MerchantDashboard() {
             {!editing.id && <label style={label}>Web address (optional; made from the name)<input style={input} value={editing.slug} placeholder="summer-tee" onChange={(e) => setEditing({ ...editing, slug: e.target.value })} /></label>}
             <label style={label}>Tagline<input style={input} value={editing.tagline} onChange={(e) => setEditing({ ...editing, tagline: e.target.value })} /></label>
             <label style={label}>Description<textarea style={{ ...input, minHeight: 90, paddingTop: 10 }} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></label>
+            <div style={label}>Photos {(editing.images || []).length > 0 && <span style={{ color: C.muted }}>· the first one is the cover</span>}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(editing.images || []).map((src, i) => (
+                <div key={src} style={{ position: 'relative', width: 84, height: 84, borderRadius: 10, overflow: 'hidden', border: `1px solid ${C.line}` }}>
+                  <img src={src} alt={'Photo ' + (i + 1)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button aria-label={'Remove photo ' + (i + 1)} onClick={() => setEditing({ ...editing, images: (editing.images || []).filter((x) => x !== src) })} style={{ position: 'absolute', top: 4, right: 4, width: 26, height: 26, borderRadius: 999, border: 'none', background: 'rgba(0,0,0,0.7)', color: '#fff', cursor: 'pointer', fontSize: 14, lineHeight: '26px', padding: 0 }}>×</button>
+                </div>
+              ))}
+              {(editing.images || []).length < 8 && (
+                <label style={{ ...ghost, display: 'inline-flex', alignItems: 'center', cursor: uploading ? 'wait' : 'pointer' }}>
+                  {uploading ? 'Uploading…' : 'Add photos'}
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple disabled={uploading} onChange={(e) => { addPhotos(e.target.files); e.currentTarget.value = ''; }} style={{ display: 'none' }} />
+                </label>
+              )}
+            </div>
             {/* One status, not two checkboxes that combine four ways for three
                 real states. A stored product with both flags reads as coming
                 soon, which is what the storefront shows for it. */}

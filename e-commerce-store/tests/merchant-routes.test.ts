@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateMerchantProduct } from '../lib/merchant-product-input.ts';
+import { sniffImage } from '../lib/image-sniff.ts';
 
 // STRUCTURAL GUARD for the merchant dashboard's API (TENANCY.md). Every
 // /api/merchant handler must pass the ONE session gate before anything else,
@@ -116,16 +117,30 @@ test('stock input: whole units, a real size id, the store never from the input',
   assert.equal(validateVariantParam("1' or 1=1"), null);
 });
 
-test('product photos: only files on the platform media host, at most 8; absent leaves them alone', () => {
+test('product photos: a new photo must be THIS store\'s own upload; photos already on the product may stay', () => {
   const mediaBase = 'https://media.example.com/media/r2';
-  const ok = validateMerchantProduct({ ...good, images: [mediaBase + '/products/a.jpg'] }, { mediaBase });
-  assert.ok(ok.ok && ok.value.images?.length === 1);
-  const hotlink = validateMerchantProduct({ ...good, images: ['https://evil.example/x.jpg'] }, { mediaBase });
-  assert.ok(!hotlink.ok, 'a photo from another site is refused');
-  const lookalike = validateMerchantProduct({ ...good, images: [mediaBase + '.evil.example/x.jpg'] }, { mediaBase });
-  assert.ok(!lookalike.ok, 'a host that merely starts with the media address is refused');
-  assert.ok(!validateMerchantProduct({ ...good, images: Array(9).fill(mediaBase + '/p/a.jpg') }, { mediaBase }).ok, 'more than 8 is refused');
-  assert.ok(!validateMerchantProduct({ ...good, images: [mediaBase + '/p/a.jpg'] }).ok, 'no configured media host: photos refused');
-  const untouched = validateMerchantProduct(good, { mediaBase });
+  const mine = mediaBase + '/tenants/store-a/products/abc.jpg';
+  const theirs = mediaBase + '/tenants/store-b/products/xyz.jpg';
+  const opts = { mediaBase, tenantId: 'store-a' };
+  const ok = validateMerchantProduct({ ...good, images: [mine] }, opts);
+  assert.ok(ok.ok && ok.value.images?.length === 1, 'own upload accepted');
+  assert.ok(!validateMerchantProduct({ ...good, images: [theirs] }, opts).ok, "another store's upload is refused");
+  assert.ok(!validateMerchantProduct({ ...good, images: ['https://evil.example/x.jpg'] }, opts).ok, 'a hotlink is refused');
+  assert.ok(!validateMerchantProduct({ ...good, images: [mediaBase + '/tenants/store-a-evil/products/x.jpg'] }, opts).ok, 'a lookalike store id is refused');
+  assert.ok(validateMerchantProduct({ ...good, images: [theirs] }, { ...opts, currentImages: [theirs] }).ok, 'a photo already on this product may stay');
+  assert.ok(!validateMerchantProduct({ ...good, images: Array(9).fill(mine) }, opts).ok, 'more than 8 is refused');
+  assert.ok(!validateMerchantProduct({ ...good, images: [mine] }, { tenantId: 'store-a' }).ok, 'no configured media host: refused');
+  const untouched = validateMerchantProduct(good, opts);
   assert.ok(untouched.ok && untouched.value.images === undefined, 'no images field = keep current photos');
+});
+
+test('an upload is judged by its bytes, not its name or claimed type', () => {
+  const pad = (a: number[]) => new Uint8Array([...a, ...Array(16).fill(0)]);
+  assert.equal(sniffImage(pad([0xff, 0xd8, 0xff, 0xe0]))?.contentType, 'image/jpeg');
+  assert.equal(sniffImage(pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))?.contentType, 'image/png');
+  assert.equal(sniffImage(new Uint8Array([...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBPVP8 ')]))?.contentType, 'image/webp');
+  assert.equal(sniffImage(new Uint8Array([0, 0, 0, 0x1c, ...Buffer.from('ftypavif'), 0, 0, 0, 0]))?.contentType, 'image/avif');
+  assert.equal(sniffImage(pad([...Buffer.from('<svg xmlns=')])), null, 'SVG (can carry script) is refused');
+  assert.equal(sniffImage(pad([...Buffer.from('<!DOCTYPE html>')])), null, 'HTML renamed .jpg is refused');
+  assert.equal(sniffImage(new Uint8Array([0xff, 0xd8])), null, 'too short to be an image');
 });

@@ -38,7 +38,15 @@ export function slugifyProductName(name: string): string {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
 
-export function validateMerchantProduct(raw: any, opts: { mediaBase?: string } = {}): { ok: true; value: MerchantProductInput } | { ok: false; error: string } {
+/** Where a store's own uploaded photos live (app/api/merchant/media). */
+export function merchantPhotoPrefix(tenantId: string): string {
+  return 'tenants/' + tenantId + '/products/';
+}
+
+export function validateMerchantProduct(
+  raw: any,
+  opts: { mediaBase?: string; tenantId?: string; currentImages?: string[] } = {},
+): { ok: true; value: MerchantProductInput } | { ok: false; error: string } {
   const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max + 1);
   const name = str(raw?.name, 120);
   if (!name || name.length > 120) return { ok: false, error: 'A product name (up to 120 characters) is required.' };
@@ -88,7 +96,12 @@ export function validateMerchantProduct(raw: any, opts: { mediaBase?: string } =
     const base = String(opts.mediaBase || '').replace(/\/+$/, '');
     if (!Array.isArray(raw.images) || raw.images.length > 8) return { ok: false, error: 'Up to 8 photos per product.' };
     const urls: string[] = (raw.images as unknown[]).map((u) => String(u || '').trim()).filter(Boolean);
-    if (!base || urls.some((u) => !u.startsWith(base + '/') || u.length > 500)) return { ok: false, error: 'Photos must be uploaded to your store first.' };
+    // A NEW photo must be one of THIS store's uploads; a photo the product
+    // already has may stay. So no store can put another store's photo on its
+    // own products by pasting the address.
+    const own = base && opts.tenantId ? base + '/' + merchantPhotoPrefix(opts.tenantId) : '';
+    const kept = new Set(opts.currentImages || []);
+    if (!base || urls.some((u) => u.length > 500 || !(kept.has(u) || (own && u.startsWith(own))))) return { ok: false, error: 'Photos must be uploaded to your store first.' };
     images = urls;
   }
   return { ok: true, value: { ...(id ? { id } : {}), name, slug, tagline, description, isActive, isUpcoming, releaseEndsAt, maxPerEmail, sizes, ...(images ? { images } : {}) } };
