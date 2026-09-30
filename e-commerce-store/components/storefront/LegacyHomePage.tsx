@@ -19,6 +19,7 @@ import HeroShaderCanvas from '@/components/HeroShaderCanvas';
 import { fetchStoreJson } from '@/lib/client-store-cache';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
+import { cardLabel } from '@/lib/buy-labels';
 import { surfaceBackground, themeRadius, themeRadiusNumber, cardShadowStyle, contentSpacingScale, cardSheen, hasMixedCheckoutModes, visibleProductCategories } from '@/lib/storefront-config';
 import { dropTimestampToMsOrNaN } from '@/lib/drop-timestamps';
 import { isImageMedia, isVideoMedia, zeroImageStyle } from '@/lib/media';
@@ -562,7 +563,7 @@ export default function LegacyHomePage() {
                       </div>
                       <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: configPalette.accentBlue }}>
-                          {product.soldOut ? 'Sold out' : product.isUpcoming ? 'Reserve your place' : 'Enter allocation'}
+                          {cardLabel(liveCtx?.copy, product)}
                         </span>
                         <span style={{ fontSize: 13, color: configPalette.accentBlue }}>→</span>
                       </div>

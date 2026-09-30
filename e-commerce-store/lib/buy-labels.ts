@@ -19,3 +19,13 @@ export function entryLabel(copy: Copy, archived: boolean): string {
   if (archived) return 'Enter the next raffle';
   return own(copy?.entryCta) || 'Enter the raffle';
 }
+
+/**
+ * A product card that LINKS to the product page (home, catalog). It says what
+ * the product page will offer: an instant-buy product is not an "allocation".
+ */
+export function cardLabel(copy: Copy, product: { soldOut?: boolean; isUpcoming?: boolean; checkoutMode?: string } | null | undefined): string {
+  if (product?.soldOut) return 'Sold out';
+  if (product?.isUpcoming) return 'Reserve your place';
+  return String(product?.checkoutMode || '').toUpperCase() === 'RAFFLE' ? entryLabel(copy, false) : 'Shop now';
+}

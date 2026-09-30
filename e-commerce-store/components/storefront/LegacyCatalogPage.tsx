@@ -567,7 +567,7 @@ export default function LegacyCatalogPage() {
                           <div style={{ fontSize: '10px', color: configPalette.cardTextMuted, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{drop.tagline}</div>
                           <div style={{ fontSize: '10px', color: drop.soldOut ? '#eab308' : configPalette.cardTextMuted, marginTop: 6 }}>{drop.soldOut ? 'Sold out — fully spoken for. Stays visible as proof of demand.' : `Limited handmade supply. Open while allocation remains.${drop.isRaffle !== undefined ? ` · ${drop.isRaffle ? 'Raffle' : 'FCFS'}` : ''}`}</div>
                           <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: configPalette.accentBlue }}>
-                            {drop.soldOut ? 'View release story' : 'Enter allocation'} <span>→</span>
+                            {drop.soldOut ? 'View release story' : 'View release'} <span>→</span>
                           </div>
                         </div>
                       </div>
