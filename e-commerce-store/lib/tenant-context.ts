@@ -38,8 +38,10 @@ export async function ensureDefaultTenant(): Promise<string> {
   if (!getDb().configured) {
     throw new Error('Supabase is not configured — the B2B engine requires SUPABASE_SERVICE_ROLE_KEY.');
   }
-  // returning: 'default' reproduces the pre-port request exactly — the legacy
-  // call sent Prefer: resolution=merge-duplicates with no return directive.
+  // Create the row if it is missing; NEVER overwrite it. It used to merge on
+  // every call, which reset the store's own name and address to "Store" /
+  // "default" each time, so the original store could not have a real name
+  // or live at <its-slug>.<root> like every other tenant (2026-09-30).
   await getDb().insert(
     'tenants',
     {
@@ -48,7 +50,7 @@ export async function ensureDefaultTenant(): Promise<string> {
       name: neutralBrandName(),
       license_status: 'active',
     },
-    { mergeDuplicates: true, returning: 'default' },
+    { ignoreDuplicates: true, returning: 'default' } as any,
   );
   return DEFAULT_TENANT_ID;
 }
