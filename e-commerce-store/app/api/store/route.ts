@@ -15,7 +15,7 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories, normalizeSizeConfigs, resolveSizeNextAnchorMs, sizeConfigKey, resolveSizeReleaseEndsAt, normalizeInventorySyncSlug } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
-import { isSyncedSourceReleased } from '@/lib/checkout-mode';
+import { isSyncedSourceReleased, isHiddenFromSale } from '@/lib/checkout-mode';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { brandLogoRef, publicMediaRef } from '@/lib/media';
@@ -410,6 +410,23 @@ function withReleasedSizes(product: PublicStoreProduct | null, catalog: PublicSt
   return { ...product, releasedSizes };
 }
 
+/**
+ * A DRAFT product (not live, upcoming or archived) is not public: not in the
+ * catalog, not openable by its address. Same rule checkout refuses a sale by
+ * (isHiddenFromSale), so a draft size that sells through a live shared-stock
+ * source stays. Lifecycle only ever moves products TO live or archived, so
+ * nothing scheduled is caught here.
+ */
+function withoutDrafts(payload: StorePayload): StorePayload {
+  const all = payload.allProducts || [];
+  const isPublic = (p: PublicStoreProduct) => {
+    const sizes = (p.priceCategories || []).map((c) => String(c.size || ''));
+    return sizes.length ? sizes.some((s) => !isHiddenFromSale(p, s, all)) : !isHiddenFromSale(p, null, all);
+  };
+  const visible = all.filter(isPublic);
+  return { ...payload, allProducts: visible, product: payload.product && isPublic(payload.product) ? payload.product : null };
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -423,8 +440,8 @@ export async function GET(request: Request) {
 
     // The tenant is IN the cache key: one isolate serves every host, and a
     // key without it would hand one store's catalog to another's customers.
-    const payload = await withTtlCache(`store:${who.tenantId}:${requestedSlug || '*'}:v3`, 10_000, () =>
-      who.isDefault ? buildStorePayload(requestedSlug) : buildTenantStorePayload(who.tenantId, who.name, requestedSlug));
+    const payload = withoutDrafts(await withTtlCache(`store:${who.tenantId}:${requestedSlug || '*'}:v3`, 10_000, () =>
+      who.isDefault ? buildStorePayload(requestedSlug) : buildTenantStorePayload(who.tenantId, who.name, requestedSlug)));
 
     // Slim the product-page payload: a slug request only needs the ONE product
     // + config (the page never reads the other products). Before this change a
