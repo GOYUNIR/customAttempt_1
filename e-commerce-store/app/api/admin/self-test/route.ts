@@ -11,6 +11,8 @@ import {
   liveStateFieldFor,
   PROCESSED_SESSIONS_KEY,
   ENTRY_EMAIL_SENT_KEY,
+  OVERRIDES_KEY,
+  OVERRIDE_SCHEDULE_FIELD,
   type LiveStateRecord,
 } from '@/lib/server-config';
 import { adminAuthorized } from '@/lib/admin-verify';
@@ -231,7 +233,6 @@ export async function GET(request: Request) {
       configReadError || (config ? 'ok' : 'missing or invalid JSON'),
     );
 
-    let availableSizes: string[] = [];
     if (config) {
       const storedTheme = config.themeColors || {};
       // The storefront merges stored themeColors over the build-time defaults
@@ -261,18 +262,21 @@ export async function GET(request: Request) {
         Number.isFinite(radius) && radius >= 0,
         Number.isFinite(radius) ? `${radius}px` : 'not a valid number'
       );
-      const ds = config.dropSchedule;
+      // The schedule the storefront and the draw engine actually use:
+      // Drops → Automation (the override) over the store settings. Checking
+      // the settings alone failed stores whose schedule was saved in
+      // Automation, the only screen that edits it (2026-09-30).
+      let scheduleOverride: any = {};
+      try { scheduleOverride = safeParseKvItem<any>(await redis.hget(OVERRIDES_KEY, OVERRIDE_SCHEDULE_FIELD)) || {}; } catch {}
+      const ds = { ...(config.dropSchedule || {}), ...scheduleOverride };
       push(
         'Drop schedule configured',
         Boolean(ds?.mode && ds?.timezone),
-        ds ? `mode=${ds.mode} tz=${ds.timezone}` : 'dropSchedule missing in store:config'
+        ds?.mode && ds?.timezone ? `mode=${ds.mode} tz=${ds.timezone}` : 'not set — save one in /admin → Drops → Automation'
       );
-      availableSizes = Array.isArray(config.availableSizes) ? config.availableSizes : [];
-      push(
-        'Available sizes configured',
-        availableSizes.length > 0,
-        availableSizes.length > 0 ? availableSizes.join(', ') : 'MISSING — set in /admin → Settings → Available Sizes'
-      );
+      // (No "available sizes" check: sizes live on each product, and nothing
+      // reads a store-wide list — the old check pointed to a screen that does
+      // not exist.)
     }
 
     // ------------------------------------------------------------------
