@@ -589,11 +589,51 @@ Needs design work:
    entry button only; the buy label should be per-store too, defaulting to
    a plain "Buy now · $X".
 
+Second batch (2026-09-29). Fixed:
+- Buy labels default to "Buy now · $X" / "Enter the raffle" for every store
+  (`lib/buy-labels.ts`). GOYUNIR's "Secure piece" / "Enter allocation" is
+  its own override in `settings.copy.buyCta` / `entryCta`.
+- **TRUTHFULNESS: the original store's admin settings never reached its
+  storefront.** Admin saves (settings, AI-helper edits, catalog preview,
+  schedule and social overrides) go to the KV settings key, but the
+  Postgres storefront path read `tenant_store_config`, a copy last synced by
+  hand on 2026-09-16. It now reads KV, with Postgres as the fallback only
+  (`tests/store-settings-source.test.ts`).
+  - Consolidating the original store onto Postgres (the admin writing
+    `tenant_store_config`, as the merchant dashboard does) is part of
+    PLATFORM-IDENTITY.
+- **TRUTHFULNESS: admin "Tenant Onboarding" created stores nobody could
+  sign in to.** The form never sent an owner email. It now requires one
+  and invites the owner in the same step, with truthful copy and the invite
+  result shown.
+- The Drops sub-tab "Run Draw" is renamed "Manual draw", so it no longer
+  reads as a second run button.
+
+Needs design work:
+6. **Sales Volume Pricing and Impersonation take a raw UUID** (company id /
+   tenant id). Impersonation also re-asks the rep's email and password. Both
+   need a picker (the rep's assigned stores / companies).
+7. **New-store first run: no setup checklist** (connect payments → add a
+   product → choose a plan). The payments card leads, but the rest is
+   undirected.
+8. **No order detail in the merchant dashboard.** Orders are a flat list
+   (ref, status, total, fee, email, item): no line items, address or refund
+   action.
+9. **Proof scripts leave data behind.** Store B has 19 products, mostly
+   "Isolation B Tee …" and "Form Made Cap …" from repeated
+   verify-merchant-isolation and verify-merchant-dashboard-ui runs. The
+   proofs should clean up what they create.
+10. **The AI helper and Streamer Mode repeat at the top of EVERY admin tab**
+    (three filled controls above each tab's own primary). Same fix as item 2.
+11. **Admin Settings: 197 controls, 29 filled** (design-preset chips, AI
+    generate buttons, layout choices) on one scrolling page. Needs sections
+    with one save per section, or a settings sub-navigation.
+
 Not yet reviewed:
-- Admin tabs past the overview.
-- Sales: Volume Pricing and Impersonation screens.
-- Merchant dashboard: order detail, and a new store's first-run
-  (Connect payments) screen.
+- Admin tabs in depth. The pass captured each tab's first screen: primary
+  action, control count, errors (none); none was opened into its forms.
+- The Ledger, Users, Promotions, Growth, System, Setup, Enterprise,
+  Telemetry and Theme Editor flows themselves.
 
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
