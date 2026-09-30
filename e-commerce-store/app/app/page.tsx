@@ -33,6 +33,10 @@ const card: React.CSSProperties = { background: C.panel, border: `1px solid ${C.
 const input: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: '#0e0e11', border: `1px solid ${C.line}`, borderRadius: 10, color: C.text, padding: '0 12px', minHeight: 44, fontSize: 16 };
 const btn: React.CSSProperties = { minHeight: 44, padding: '0 16px', borderRadius: 999, border: 'none', background: C.accent, color: '#0b0b0d', fontWeight: 700, fontSize: 15, cursor: 'pointer' };
 const ghost: React.CSSProperties = { ...btn, background: 'transparent', color: C.text, border: `1px solid ${C.line}` };
+// Navigation, not an action: the selected tab must never look like the screen's
+// one primary (filled) button, or every screen shows two "do this" pills.
+const tabOff: React.CSSProperties = { ...ghost, border: '1px solid transparent', color: C.muted, fontWeight: 600 };
+const tabOn: React.CSSProperties = { ...ghost, background: C.panel, borderColor: C.line, color: C.text };
 const label: React.CSSProperties = { display: 'block', fontSize: 13, color: C.muted, margin: '10px 0 6px' };
 
 const money = (cents: number, currency: string) => {
@@ -287,7 +291,7 @@ export default function MerchantDashboard() {
 
         <nav style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const, 'billing' as const] : [])] as const).map((t) => (
-            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} style={tab === t ? btn : ghost}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
+            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} aria-current={tab === t ? 'page' : undefined} style={tab === t ? tabOn : tabOff}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
           ))}
         </nav>
 
@@ -415,10 +419,17 @@ export default function MerchantDashboard() {
             {!editing.id && <label style={label}>Web address (optional; made from the name)<input style={input} value={editing.slug} placeholder="summer-tee" onChange={(e) => setEditing({ ...editing, slug: e.target.value })} /></label>}
             <label style={label}>Tagline<input style={input} value={editing.tagline} onChange={(e) => setEditing({ ...editing, tagline: e.target.value })} /></label>
             <label style={label}>Description<textarea style={{ ...input, minHeight: 90, paddingTop: 10 }} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></label>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 44 }}><input type="checkbox" checked={editing.isActive} onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })} style={{ width: 20, height: 20 }} /> On sale</label>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 44 }}><input type="checkbox" checked={editing.isUpcoming} onChange={(e) => setEditing({ ...editing, isUpcoming: e.target.checked })} style={{ width: 20, height: 20 }} /> Coming soon (takes waitlist sign-ups)</label>
-            </div>
+            {/* One status, not two checkboxes that combine four ways for three
+                real states. A stored product with both flags reads as coming
+                soon, which is what the storefront shows for it. */}
+            <label style={label}>Status
+              <select style={input} value={editing.isUpcoming ? 'upcoming' : editing.isActive ? 'live' : 'draft'}
+                onChange={(e) => setEditing({ ...editing, isActive: e.target.value === 'live', isUpcoming: e.target.value === 'upcoming' })}>
+                <option value="draft">Draft: hidden from your store</option>
+                <option value="upcoming">Coming soon: shown, takes waitlist sign-ups</option>
+                <option value="live">On sale</option>
+              </select>
+            </label>
             <label style={label}>Limit per customer<input type="number" min={1} max={100} style={input} value={editing.maxPerEmail} onChange={(e) => setEditing({ ...editing, maxPerEmail: Number(e.target.value) })} /></label>
             {editing.sizes.some((s) => s.mode === 'RAFFLE') && <label style={label}>Raffle draw date<input type="datetime-local" style={input} value={editing.releaseEndsAt} onChange={(e) => setEditing({ ...editing, releaseEndsAt: e.target.value })} /></label>}
             <div style={{ ...label, marginTop: 16 }}>Sizes</div>

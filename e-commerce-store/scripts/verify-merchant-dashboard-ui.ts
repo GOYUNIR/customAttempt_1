@@ -120,7 +120,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
       await page.getByLabel('Name', { exact: true }).fill(name);
       await page.getByLabel('Price').first().fill('17.50');
       await page.getByLabel('Starting stock').first().fill('6');
-      await page.getByText('On sale', { exact: true }).tap();
+      await page.getByLabel('Status').selectOption('live');
       await page.screenshot({ path: join(OUT, 'dash-b-form.png'), fullPage: true });
       await page.getByRole('button', { name: 'Save' }).tap();
       // Wait for the refreshed list rather than a fixed sleep (a fixed 3.5s
