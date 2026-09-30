@@ -551,6 +551,50 @@ store-aware, control-group reporting), B2B for merchants, shipping and tax,
 shared stock pools, multi-store accounts, and plan billing (scoped in
 PRICING.md §9).
 
+**DEFERRED-11: click-through findings that need real design work (Hick's
+Law pass, 2026-09-29).** Fixed in that pass:
+- The product page shows one buy action per state. An unreleased
+  direct-sale size shows only "Reserve for launch"; before, "Secure piece"
+  sat beside it and silently made a waitlist entry.
+- Draft products are no longer public.
+- The dashboard's selected tab no longer looks like a primary button.
+- Product status is one choice instead of two combinable checkboxes.
+- The sales hub has one navigation, opens on a live tool, and has no dead
+  admin link.
+
+Needs design work:
+1. **Stock panel in the product editor.** Five equal-weight controls per
+   size: count and Set count; units, Add, a reason and Remove; History; a
+   note. Suggest one "Adjust stock" action that opens a small form (new
+   count, or add/remove with a reason), with History as a link.
+2. **Admin overview (admin.<root>).**
+   - 15 top-level tabs.
+   - A two-mode AI helper sits ABOVE the store overview, asking for a
+     choice before any context.
+   - Several filled controls compete with the one real primary ("+ Add
+     Product").
+   - Suggest: overview first, AI helper collapsed or moved down, and the
+     tabs grouped (Catalog / Orders & stock / Customers / Settings /
+     System).
+   - Belongs with PLATFORM-IDENTITY, since this page is both the platform
+     admin and the GOYUNIR store's admin.
+3. **Portal shell (PortalShell) on phones.** A fixed 240px sidebar leaves
+   about 135px for content at 375px: the sales and staff portals are not
+   usable on a phone.
+4. **"Limit per customer" defaults to 1 and sits upfront** in the product
+   editor. That's right for drops, surprising for everyday retail; it
+   should be an advanced option with a sensible default.
+5. **"Secure piece" / "Enter allocation"** are the original store's brand
+   voice, used for every store's buy button. Per-store copy exists for the
+   entry button only; the buy label should be per-store too, defaulting to
+   a plain "Buy now · $X".
+
+Not yet reviewed:
+- Admin tabs past the overview.
+- Sales: Volume Pricing and Impersonation screens.
+- Merchant dashboard: order detail, and a new store's first-run
+  (Connect payments) screen.
+
 **DEFERRED-5: separate tenant settings from the storefront payload.**
 Condition to pick up: when the merchant panel's SETTINGS screens are built.
 
