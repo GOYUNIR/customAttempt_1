@@ -115,3 +115,17 @@ test('stock input: whole units, a real size id, the store never from the input',
   assert.equal(validateStockAdjust({ variantId: V, delta: 1, reason: 'sale' }).ok, false, 'a sale is never a manual reason');
   assert.equal(validateVariantParam("1' or 1=1"), null);
 });
+
+test('product photos: only files on the platform media host, at most 8; absent leaves them alone', () => {
+  const mediaBase = 'https://media.example.com/media/r2';
+  const ok = validateMerchantProduct({ ...good, images: [mediaBase + '/products/a.jpg'] }, { mediaBase });
+  assert.ok(ok.ok && ok.value.images?.length === 1);
+  const hotlink = validateMerchantProduct({ ...good, images: ['https://evil.example/x.jpg'] }, { mediaBase });
+  assert.ok(!hotlink.ok, 'a photo from another site is refused');
+  const lookalike = validateMerchantProduct({ ...good, images: [mediaBase + '.evil.example/x.jpg'] }, { mediaBase });
+  assert.ok(!lookalike.ok, 'a host that merely starts with the media address is refused');
+  assert.ok(!validateMerchantProduct({ ...good, images: Array(9).fill(mediaBase + '/p/a.jpg') }, { mediaBase }).ok, 'more than 8 is refused');
+  assert.ok(!validateMerchantProduct({ ...good, images: [mediaBase + '/p/a.jpg'] }).ok, 'no configured media host: photos refused');
+  const untouched = validateMerchantProduct(good, { mediaBase });
+  assert.ok(untouched.ok && untouched.value.images === undefined, 'no images field = keep current photos');
+});

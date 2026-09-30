@@ -13,6 +13,7 @@ function publicShape(p: any) {
     slug: String(p.slug || ''),
     tagline: String(p.tagline || ''),
     description: String(p.desc || p.description || ''),
+    images: Array.isArray(p.images) ? p.images : [],
     isActive: p.isActive === true,
     isUpcoming: p.isUpcoming === true,
     releaseEndsAt: String(p.releaseEndsAt || ''),
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
   const limited = await rateLimitedResponse('merchant_products', request, 30, 60);
   if (limited) return limited;
   const body = await request.json().catch(() => null);
-  const check = validateMerchantProduct(body);
+  const check = validateMerchantProduct(body, { mediaBase: process.env.MEDIA_S3_PUBLIC_BASE_URL });
   if (!check.ok) return merchantJson({ error: check.error }, 400);
   const input = check.value;
   const tenantId = gate.session.tenantId;
@@ -87,7 +88,9 @@ export async function POST(request: Request) {
     // Create-if-missing in catalog-write: never overwrites live stock.
     inventoryPerSize: Object.fromEntries(input.sizes.map((s) => [s.size, s.stock || 0])),
     priceCategories: input.sizes.map((s) => ({ size: s.size, price: s.price, checkoutMode: s.mode, ...(s.winners ? { winnerTiers: String(s.winners) } : {}) })),
-    notes: [], images: [], categories: [],
+    // Photos: the ones sent, else the product's current ones (an edit that
+    // does not touch photos must not wipe them), else none.
+    notes: [], images: input.images ?? (input.id && Array.isArray((existing as any)[id!]?.images) ? (existing as any)[id!].images : []), categories: [],
   });
   if (!result.ok) {
     console.error('[merchant/products] write failed for ' + tenantId + ': ' + result.error);

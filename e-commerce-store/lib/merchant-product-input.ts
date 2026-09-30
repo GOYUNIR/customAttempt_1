@@ -23,6 +23,8 @@ export type MerchantProductInput = {
   releaseEndsAt: string;
   maxPerEmail: number;
   sizes: MerchantSizeInput[];
+  /** Photo URLs on the platform's own media host; undefined = leave as is. */
+  images?: string[];
 };
 
 /** Paths the storefront already uses; a product slug may not shadow them. */
@@ -36,7 +38,7 @@ export function slugifyProductName(name: string): string {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
 
-export function validateMerchantProduct(raw: any): { ok: true; value: MerchantProductInput } | { ok: false; error: string } {
+export function validateMerchantProduct(raw: any, opts: { mediaBase?: string } = {}): { ok: true; value: MerchantProductInput } | { ok: false; error: string } {
   const str = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max + 1);
   const name = str(raw?.name, 120);
   if (!name || name.length > 120) return { ok: false, error: 'A product name (up to 120 characters) is required.' };
@@ -79,5 +81,15 @@ export function validateMerchantProduct(raw: any): { ok: true; value: MerchantPr
 
   const id = raw?.id === undefined || raw?.id === null || raw?.id === '' ? undefined : str(raw.id, 80);
   if (id !== undefined && !/^[A-Za-z0-9_-]{1,80}$/.test(id)) return { ok: false, error: 'Unknown product.' };
-  return { ok: true, value: { ...(id ? { id } : {}), name, slug, tagline, description, isActive, isUpcoming, releaseEndsAt, maxPerEmail, sizes } };
+  // Photos: only files already on the platform's own media host (no hotlinks
+  // to arbitrary sites), at most 8. Absent = keep the product's current ones.
+  let images: string[] | undefined;
+  if (raw?.images !== undefined) {
+    const base = String(opts.mediaBase || '').replace(/\/+$/, '');
+    if (!Array.isArray(raw.images) || raw.images.length > 8) return { ok: false, error: 'Up to 8 photos per product.' };
+    const urls: string[] = (raw.images as unknown[]).map((u) => String(u || '').trim()).filter(Boolean);
+    if (!base || urls.some((u) => !u.startsWith(base + '/') || u.length > 500)) return { ok: false, error: 'Photos must be uploaded to your store first.' };
+    images = urls;
+  }
+  return { ok: true, value: { ...(id ? { id } : {}), name, slug, tagline, description, isActive, isUpcoming, releaseEndsAt, maxPerEmail, sizes, ...(images ? { images } : {}) } };
 }
