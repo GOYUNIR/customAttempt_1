@@ -15,6 +15,7 @@ import {
 import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import { mergeOrbsConfig, isLegacyHeroContent, resolveNextRaffleAnchorMs, normalizeCategories, normalizeSizeConfigs, resolveSizeNextAnchorMs, sizeConfigKey, resolveSizeReleaseEndsAt, normalizeInventorySyncSlug } from '@/lib/storefront-config';
 import { normalizeSamplerSizes } from '@/lib/sampler-config';
+import { isSyncedSourceReleased } from '@/lib/checkout-mode';
 import { dropTimestampToMs, formatStoreWallClock } from '@/lib/drop-timestamps';
 import { withTtlCache } from '@/lib/ttl-cache';
 import { brandLogoRef, publicMediaRef } from '@/lib/media';
@@ -392,6 +393,23 @@ function applyLifecycle(
   });
 }
 
+/**
+ * The product page's slim payload carries no catalog, but one fact needs it:
+ * which sizes of a NOT-YET-RELEASED product still sell right now, because
+ * their shared-stock source product is live. Checkout sells exactly those
+ * directly (app/api/checkout, isSyncedSourceReleased) and turns every other
+ * unreleased size into a waitlist entry, so the page must know which button
+ * is honest.
+ */
+function withReleasedSizes(product: PublicStoreProduct | null, catalog: PublicStoreProduct[] | undefined) {
+  if (!product) return product;
+  if (!product.isArchived && !product.isUpcoming) return product;
+  const releasedSizes = (product.priceCategories || [])
+    .map((c) => String(c.size || ''))
+    .filter((size) => size && isSyncedSourceReleased(product, size, catalog || []));
+  return { ...product, releasedSizes };
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -414,7 +432,7 @@ export async function GET(request: Request) {
     const body = requestedSlug
       ? {
           config: payload.config,
-          product: payload.product,
+          product: withReleasedSizes(payload.product, payload.allProducts),
           scheduleOverride: payload.scheduleOverride,
           socialOverride: payload.socialOverride,
           timestamp: payload.timestamp,

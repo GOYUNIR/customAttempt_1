@@ -344,7 +344,10 @@ export default function ProductLivePreview({ product, theme, copy, categories }:
                   disabled
                   style={{ padding: '8px 12px', borderRadius: 999, border: 'none', background: `linear-gradient(135deg, ${cta}, color-mix(in srgb, ${cta} 72%, #000))`, color: '#fff', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 9, opacity: priceConfigured && !soldOut ? 1 : 0.55 }}
                 >
-                  {soldOut ? 'Sold out' : (canCheckoutDirect ? `Secure piece · $${price.toFixed(2)}` : (String(copy.entryCta || '').trim() || 'Enter allocation'))}
+                  {soldOut ? 'Sold out' : (canCheckoutDirect
+                    // Same one-action rule as the storefront: unreleased → reserve.
+                    ? (product.isArchived ? 'Reserve for next opening' : product.isUpcoming ? 'Reserve for launch' : `Secure piece · $${price.toFixed(2)}`)
+                    : (String(copy.entryCta || '').trim() || 'Enter allocation'))}
                 </button>
               </div>
               {notes.length > 0 && (

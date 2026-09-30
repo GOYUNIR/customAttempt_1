@@ -1368,7 +1368,18 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
         ? String(product.statusArchived || copySettings.statusArchived || '').trim() || 'Archive placement preserves the release as proof of demand and collectability.'
         : String(product.statusLive || copySettings.statusLive || '').trim() || 'Reserved for collectors moving early, before the allocation tightens further.';
   const checkoutDisabled = soldOut || !selectedSize || !isConfiguredPrice(price);
-  const showWaitlistOption = !isRaffleProduct && (product.isArchived || product.isUpcoming);
+  // ONE canonical action per product state (Hick's Law). A direct-sale size
+  // that is released sells now; an unreleased one (upcoming or archived) can
+  // only be reserved, because checkout turns it into a waitlist entry whatever
+  // button was pressed. The one exception checkout makes, a size whose shared
+  // stock source is live, arrives from /api/store as `releasedSizes`. Showing
+  // "Secure piece · $X" beside "Reserve for launch" offered a purchase that
+  // was not one.
+  const unreleased = product.isArchived === true || product.isUpcoming === true;
+  const sellsNow = canCheckoutDirect
+    && (!unreleased || (Array.isArray(product.releasedSizes) && product.releasedSizes.includes(selectedSize)));
+  const showWaitlistOption = canCheckoutDirect && !sellsNow;
+  const waitlistLabel = product.isArchived ? 'Reserve for next opening' : 'Reserve for launch';
 
   // ── Adaptive trial-card palette ─────────────────────────────────────────────
   // The sampler card previously used hardcoded light-green text that vanished on
@@ -1455,12 +1466,13 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     : isRaffleProduct
       ? (product.isArchived ? 'Re-enter for future return' : (String(copySettings.entryCta || '').trim() || 'Enter allocation'))
       : canCheckoutDirect
-        ? `Secure piece · $${price.toFixed(2)}`
+        ? (sellsNow ? `Secure piece · $${price.toFixed(2)}` : waitlistLabel)
         : '';
   const handlePrimaryCta = () => {
     if (isSubmitting || checkoutDisabled) return;
     if (isRaffleProduct) handleRaffleSubmit();
-    else if (canCheckoutDirect) handleDirectCheckout();
+    else if (sellsNow) handleDirectCheckout();
+    else if (showWaitlistOption) handleWaitlistSubmit();
   };
   const primaryCtaStyle: React.CSSProperties = {
     flex: 1,
@@ -1802,16 +1814,9 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
               </button>
             )}
             {canCheckoutDirect && (
-              <>
-                <button className="goyunir-pdp-inline-primary" onClick={handleDirectCheckout} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
-                  {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : `Secure piece · $${price.toFixed(2)}`}
-                </button>
-                {showWaitlistOption && (
-                  <button onClick={handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 999, background: configPalette.cardBackground, color: configPalette.cardTextMain, border: `1px solid ${configPalette.cardBorder}`, fontWeight: 700, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
-                    {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : product.isArchived ? 'Reserve for next opening' : 'Reserve for launch'}
-                  </button>
-                )}
-              </>
+              <button className="goyunir-pdp-inline-primary" onClick={sellsNow ? handleDirectCheckout : handleWaitlistSubmit} disabled={isSubmitting || checkoutDisabled} style={{ flex: 1, minWidth: 140, padding: '13px 16px', borderRadius: 999, background: `linear-gradient(135deg, ${configPalette.checkoutCtaButton || '#635bff'}, color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 72%, #000))`, color: '#ffffff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 800, letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: 12, boxShadow: `0 10px 28px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08), 0 0 24px color-mix(in srgb, ${configPalette.checkoutCtaButton || '#635bff'} 45%, transparent)`, cursor: isSubmitting || checkoutDisabled ? 'not-allowed' : 'pointer', opacity: isSubmitting || checkoutDisabled ? 0.6 : 1 }}>
+                {soldOut ? 'Sold out' : isSubmitting ? (<><ButtonSpinner /> Processing</>) : sellsNow ? `Secure piece · $${price.toFixed(2)}` : waitlistLabel}
+              </button>
             )}
             {(canCheckoutDirect || isRaffleProduct) && <button className="goyunir-pdp-add-bag" onClick={addToCart} disabled={checkoutDisabled || cartBusy} style={{ padding: '12px 16px', borderRadius: 999, background: configPalette.cardBorder, color: configPalette.cardTextMain, border: 'none', cursor: checkoutDisabled || cartBusy ? 'not-allowed' : 'pointer', opacity: checkoutDisabled || cartBusy ? 0.6 : 1 }}>{cartBusy ? (<><ButtonSpinner light={false} /> Checking…</>) : `Add to ${actionLabel}`}</button>}
           </div>
