@@ -28,11 +28,12 @@ process.env.USE_POSTGRES_PRIMARY = process.env.USE_POSTGRES_PRIMARY || 'true'; /
 import { chromium } from 'playwright-core';
 import { CHROME, IPHONE_UA } from './mobile-audit';
 
-const TENANT = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
+// Defaults: test4. Any connected store: TENANT_ID, TENANT_STORE_URL, PRODUCT_SLUG, PRODUCT_ID, PRODUCT_SIZE (a $19.00 instant-buy size).
+const TENANT = process.env.TENANT_ID || '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const STORE = process.env.TENANT_STORE_URL || 'https://test4.goyunir.com';
-const PRODUCT_SLUG = 'connect-test-item';
-const PRODUCT_ID = 'prod_tenant_test_1';
-const SIZE = 'One Size';
+const PRODUCT_SLUG = process.env.PRODUCT_SLUG || 'connect-test-item';
+const PRODUCT_ID = process.env.PRODUCT_ID || 'prod_tenant_test_1';
+const SIZE = process.env.PRODUCT_SIZE || 'One Size';
 const CARD = process.argv.slice(2).find((a) => /^\d{16}$/.test(a)) || '4242424242424242';
 const REFUND = process.argv.includes('--refund');
 const OUT = join(process.cwd(), 'tenant-checkout-out');
@@ -155,7 +156,7 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
     order = ((await getDb().select('orders', { where: { tenant_id: eq(TENANT), order_ref: eq(orderRef) }, select: ['id', 'order_ref', 'total_cents', 'currency', 'platform_fee_cents', 'payment_status', 'stripe_payment_intent_id', 'checkout_mode'], limit: 1 })) as any[])[0] || null;
     if (!order) await sleep(2000);
   }
-  check(Boolean(order), 'order ' + orderRef + ' written for test4: ' + JSON.stringify(order));
+  check(Boolean(order), 'order ' + orderRef + ' written for this store: ' + JSON.stringify(order));
   if (order) {
     check(order.total_cents === 1900 && order.platform_fee_cents === expectedFee && order.currency === String(session.currency) && order.stripe_payment_intent_id === pi.id,
       'order total 1900, platform_fee_cents ' + order.platform_fee_cents + ', currency ' + order.currency + ', PaymentIntent matches');
@@ -188,7 +189,10 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   check(sent.length === 1, 'exactly one email to the customer: ' + sent.length);
   const msg = sent[0] || null;
   const storeRow = ((await getDb().select('tenant_store_config', { where: { tenant_id: eq(TENANT) }, select: ['config'], limit: 1 })) as any[])[0];
-  const storeName = String(storeRow?.config?.branding?.brandName || 'test4');
+  // The store's own brand name, else its name on the tenants row (what the
+  // email uses when no brand name is set).
+  const tenantName = ((await getDb().select('tenants', { where: { id: eq(TENANT) }, select: ['name'], limit: 1 })) as any[])[0]?.name;
+  const storeName = String(storeRow?.config?.branding?.brandName || tenantName || '');
   const support = String(storeRow?.config?.legal?.supportEmail || '');
   const originalBrand = String(process.env.BRAND_NAME || process.env.NEXT_PUBLIC_SITE_NAME || '').trim();
   check(Boolean(msg) && String(msg.from).startsWith('"' + storeName + '" <'), 'from the STORE: ' + (msg ? msg.from : '(not found in Resend)'));
