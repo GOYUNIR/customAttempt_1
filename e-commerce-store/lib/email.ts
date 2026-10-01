@@ -956,9 +956,15 @@ const plainEmail = (heading: string, paragraphs: string[], cta?: { label: string
 async function sendPlatformEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
+  // The validated platform sending address (the one store emails use), named
+  // for the platform; a malformed RESEND_FROM cannot break signup mail.
+  const address = platformSendingAddress();
+  const sender = address ? storeFromHeader(platformBrand(), address) : from();
   try {
-    const { error } = await resend.emails.send({ from: from(), to, replyTo: replyTo(), subject, html });
-    return error ? { ok: false, error } : { ok: true };
+    const { error } = await resend.emails.send({ from: sender, to, replyTo: replyTo(), subject, html });
+    if (error) return { ok: false, error };
+    await recordPlatformEmail(to);  // counts toward the email-allowance headroom
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err };
   }

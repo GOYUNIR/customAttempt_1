@@ -2,6 +2,7 @@ import { merchantSession, merchantJson } from '@/lib/merchant-session';
 import { chargeRouteForTenant } from '@/lib/connect';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
+import { getSupportEmail } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,8 @@ export async function GET(request: Request) {
   const t = (rows as any[])[0] || {};
   const root = String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
   return merchantJson({
+    // Where a stuck merchant can write (the platform inbox, not the store's own).
+    support: getSupportEmail() || null,
     store: { name: s.tenantName, slug: s.tenantSlug, address: root && s.tenantSlug ? 'https://' + s.tenantSlug + '.' + root : null, plan: t.plan_id || null },
     you: { email: s.email, role: s.role },
     payments: {

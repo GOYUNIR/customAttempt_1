@@ -83,8 +83,11 @@ export async function POST(request: Request) {
 
     const existing = ((await getDb().select<any>('users', { where: { email: eq(email) }, select: ['id'], limit: 1 })) as any[]).length > 0;
     if (existing) {
+      // Counted whether or not it was delivered: a flaky provider must not
+      // turn the cooldown and the daily cap into unlimited retries.
+      await noteSignupEmailSent(email);
       const sent = await sendSignupExistingAccountEmail({ to: email, signInUrl: 'https://app.' + root() + '/app/login' });
-      if (sent.ok) await noteSignupEmailSent(email);
+      if (!sent.ok) console.error('[signup] existing-account email failed');
       return NextResponse.json(SAME_REPLY);
     }
 
@@ -103,9 +106,9 @@ export async function POST(request: Request) {
     if (r?.result !== 'claimed') return fail(500, 'Your store could not be started. Please try again.');
 
     const url = 'https://' + root() + '/api/signup/merchant/complete?token=' + token;
+    await noteSignupEmailSent(email);  // counted even if delivery fails (see above)
     const sent = await sendSignupVerifyEmail({ to: email, storeName, url, holdHours: policy.holdHours });
-    if (sent.ok) await noteSignupEmailSent(email);
-    else console.error('[signup] verify email failed for signup ' + r.signup_id);
+    if (!sent.ok) console.error('[signup] verify email failed for signup ' + r.signup_id);
     await recordPlatformAudit({ action: 'merchant_signup_started', actor: email, detail: { slug: address.slug, signupId: r.signup_id, ip, emailed: sent.ok === true, termsVersion: policy.termsVersion } });
     return NextResponse.json(SAME_REPLY);
   } catch (err: any) {

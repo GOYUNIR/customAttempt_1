@@ -95,20 +95,26 @@ async function tripBreaker(kv: any, policy: SignupPolicy, why: string): Promise<
   if ((await bump(kv, 'signup:alert:' + hourKey(), 3700)) === 1) {
     try {
       const { sendOperatorAlertEmail } = await import('@/lib/email');
-      await sendOperatorAlertEmail({ subject: 'Signup paused itself', lines: [
+      const sent = await sendOperatorAlertEmail({ subject: 'Signup paused itself', lines: [
         'The signup circuit breaker tripped: ' + why + '.',
         'New signups are paused until ' + new Date(until).toISOString() + ' and resume by themselves after that.',
         'To stop signups entirely, set ALLOW_MERCHANT_SIGNUP to false. This alert is sent at most once an hour.',
       ] });
-    } catch (err) { console.error('[signup-guard] breaker alert failed', (err as Error)?.message || err); }
+      // Not sent? Release the once-an-hour slot so the next trip tries again.
+      if (!sent.ok) await kv.del('signup:alert:' + hourKey());
+    } catch (err) {
+      await kv.del('signup:alert:' + hourKey()).catch(() => null);
+      console.error('[signup-guard] breaker alert failed', (err as Error)?.message || err);
+    }
   }
   console.error('[signup-guard] BREAKER TRIPPED: ' + why);
   return until;
 }
 
 /**
- * Count one signup attempt against every limit. Order matters: the breaker
- * first, then the visible per-IP friction, then the silent per-email/domain.
+ * Count one signup attempt against every limit. Order matters: a pause
+ * in force, then the visible per-IP friction, then the global breaker (so one
+ * network cannot trip it for everyone), then the silent per-email/domain.
  */
 export async function guardSignupAttempt(input: { ip: string; email: string }): Promise<GuardResult> {
   const kv: any = createKvClient();
@@ -117,28 +123,33 @@ export async function guardSignupAttempt(input: { ip: string; email: string }): 
   const paused = await signupPausedUntil();
   if (paused) return { ok: false, status: 503, message: 'New signups are paused for a short while. Please try again later.', retryAfterSeconds: Math.ceil((paused - Date.now()) / 1000) };
 
+  const ip = input.ip || 'unknown';
+  const ipDay = await bump(kv, 'signup:ip:d:' + dayKey() + ':' + ip, 90_000);
+  if (ipDay > policy.ipHardPerDay) return { ok: false, status: 429, message: 'Too many signups from your network today. Please try again tomorrow, or email us.' };
+  const ipHour = await bump(kv, 'signup:ip:h:' + hourKey() + ':' + ip, 3700);
+  // The last attempt is remembered on EVERY attempt, so the first one over
+  // the soft limit already has to wait (it slipped through before).
+  const lastKey = 'signup:ip:last:' + ip;
+  const last = Number(await kv.get(lastKey).catch(() => 0)) || 0;
+  const since = (Date.now() - last) / 1000;
+  await kv.setex(lastKey, 3700, String(Date.now()));
+  if (ipHour > policy.ipSoftPerHour) {
+    // Escalating wait between attempts, not a block: 1, 2, 4 ... minutes.
+    const wait = Math.min(3600, 60 * 2 ** (ipHour - policy.ipSoftPerHour - 1));
+    if (last && since < wait) {
+      const left = Math.ceil(wait - since);
+      return { ok: false, status: 429, message: 'Lots of signups from your network. Please wait ' + Math.ceil(left / 60) + ' minute' + (left > 60 ? 's' : '') + ' and try again.', retryAfterSeconds: left };
+    }
+  }
+
+  // The global breaker counts only attempts that got past the per-IP limits:
+  // counting first let ONE network hammering the form pause signup for
+  // everyone (found while writing the attack proof, 2026-10-01).
   const gh = await bump(kv, 'signup:g:h:' + hourKey(), 3700);
   const gd = await bump(kv, 'signup:g:d:' + dayKey(), 90_000);
   if (gh > policy.globalPerHour || gd > policy.globalPerDay) {
     const until = await tripBreaker(kv, policy, gh > policy.globalPerHour ? gh + ' signups in an hour (limit ' + policy.globalPerHour + ')' : gd + ' signups today (limit ' + policy.globalPerDay + ')');
     return { ok: false, status: 503, message: 'New signups are paused for a short while. Please try again later.', retryAfterSeconds: Math.ceil((until - Date.now()) / 1000) };
-  }
-
-  const ip = input.ip || 'unknown';
-  const ipDay = await bump(kv, 'signup:ip:d:' + dayKey() + ':' + ip, 90_000);
-  if (ipDay > policy.ipHardPerDay) return { ok: false, status: 429, message: 'Too many signups from your network today. Please try again tomorrow, or email us.' };
-  const ipHour = await bump(kv, 'signup:ip:h:' + hourKey() + ':' + ip, 3700);
-  if (ipHour > policy.ipSoftPerHour) {
-    // Escalating wait between attempts, not a block: 1, 2, 4 ... minutes.
-    const wait = Math.min(3600, 60 * 2 ** (ipHour - policy.ipSoftPerHour - 1));
-    const lastKey = 'signup:ip:last:' + ip;
-    const last = Number(await kv.get(lastKey).catch(() => 0)) || 0;
-    const since = (Date.now() - last) / 1000;
-    await kv.setex(lastKey, 3700, String(Date.now()));
-    if (last && since < wait) {
-      const left = Math.ceil(wait - since);
-      return { ok: false, status: 429, message: 'Lots of signups from your network. Please wait ' + Math.ceil(left / 60) + ' minute' + (left > 60 ? 's' : '') + ' and try again.', retryAfterSeconds: left };
-    }
   }
 
   const email = input.email.toLowerCase();

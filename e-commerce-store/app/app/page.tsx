@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-type Store = { store: { name: string | null; slug: string | null; address: string | null; plan: string | null }; you: { email: string; role: string }; payments: { connected: boolean; status: string; hasAccount: boolean; outstandingRequirements: number } };
+type Store = { support?: string | null; store: { name: string | null; slug: string | null; address: string | null; plan: string | null }; you: { email: string; role: string }; payments: { connected: boolean; status: string; hasAccount: boolean; outstandingRequirements: number } };
 type Size = { size: string; price: number | string; mode: 'FCFS' | 'RAFFLE'; stock?: number | string | null; winners?: number | string | null };
 type Product = { id: string; name: string; slug: string; tagline: string; description: string; isActive: boolean; isUpcoming: boolean; releaseEndsAt: string; maxPerEmail: number; sizes: Size[]; images?: string[] };
 type Settings = { brandName: string; hero: { eyebrow: string; headline: string; body: string }; legal: { companyName: string; supportEmail: string; terms: string; privacy: string; shipping: string } };
@@ -349,6 +349,30 @@ export default function MerchantDashboard() {
         {store.you.role === 'support' && <div role="note" style={{ ...card, borderColor: C.warn }}>Support session: you are acting inside this store. Everything you change is recorded under your name. Payments and staff stay with the owner.</div>}
 
         {notice && <div role="status" style={{ ...card, borderColor: C.warn, color: C.text }}>{notice} <button onClick={() => setNotice('')} style={{ ...ghost, minHeight: 32, padding: '0 10px', marginLeft: 8 }}>Dismiss</button></div>}
+
+        {/* First-run checklist: the hands-off path for a new store, one action
+            per step, gone once the store can sell. Owner only (staff cannot
+            connect payments or pick a plan). */}
+        {store.you.role === 'owner' && !(pay.connected && products.length > 0) && (
+          <section style={{ ...card, borderColor: C.text }} aria-label="Get your store ready">
+            <div style={{ fontWeight: 700 }}>Get your store ready to sell</div>
+            {[
+              { done: pay.connected, label: 'Connect payments', note: pay.hasAccount && !pay.connected ? 'Stripe is checking your details, or needs a few more. Continue where you left off.' : 'Customers pay straight into your own Stripe account.', action: !pay.connected ? { text: pay.hasAccount ? 'Continue with Stripe' : 'Connect payments', go: () => connect() } : null },
+              { done: products.length > 0, label: 'Add your first product', note: 'A name, a price, a photo. You can add more later.', action: products.length === 0 ? { text: 'Add a product', go: () => { setTab('products'); setEditing(blankProduct()); } } : null },
+              { done: false, optional: true, label: 'Choose your store address (optional)', note: address ? 'Now ' + address.current.url.replace('https://', '') + '. Change it any time in Settings.' : 'Change it any time in Settings.', action: { text: 'Settings', go: () => setTab('settings') } },
+              { done: Boolean(billing && billing.planId !== 'free'), optional: true, label: 'Pick a plan (optional)', note: billing ? 'You are on ' + billing.planName + '. ' + billing.feeLine : 'Free to start; you pay a small fee only when you sell.', action: { text: 'Plans', go: () => setTab('billing') } },
+            ].map((s, i) => (
+              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', borderTop: `1px solid ${C.line}`, marginTop: 10, paddingTop: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: s.done ? C.good : C.text }}>{s.done ? '✓ ' : (i + 1) + '. '}{s.label}</div>
+                  <div style={{ color: C.muted, fontSize: 13 }}>{s.note}</div>
+                </div>
+                {!s.done && s.action && <button style={(s as any).optional ? ghost : btn} disabled={connecting} onClick={s.action.go}>{s.action.text}</button>}
+              </div>
+            ))}
+            <div style={{ color: C.muted, fontSize: 13, marginTop: 10 }}>Stuck? {store.support ? <>Email <a href={'mailto:' + store.support} style={{ color: C.text }}>{store.support}</a></> : 'Email us'} and we will help.</div>
+          </section>
+        )}
 
         <section style={card} aria-label="Payments">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
