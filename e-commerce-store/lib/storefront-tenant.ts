@@ -11,7 +11,7 @@
  * site read /api/store from them. A merchant can never be served there.
  */
 import { getDb } from '@/lib/db/client';
-import { eq, type FilterOp } from '@/lib/db/query';
+import { eq, gt, type FilterOp } from '@/lib/db/query';
 import { DEFAULT_TENANT_ID } from '@/lib/tenant-context';
 import { classifyStorefrontHost, parseLegacyHosts } from '@/lib/storefront-host';
 export { withNeutralHero } from '@/lib/storefront-host';
@@ -52,6 +52,38 @@ async function lookup(where: Record<string, FilterOp>): Promise<StorefrontTenant
   const tenantId = String(row.id);
   return { kind: 'store', tenantId, isDefault: tenantId === DEFAULT_TENANT_ID, slug: row.slug ?? null, name: row.name ?? null };
 }
+
+/**
+ * Has the store at this address MOVED? An old address inside its 90-day hold
+ * (00039) returns the store's current origin, for pages to 301 to. Kept apart
+ * from storefrontTenantForHost on purpose: to every data path an old address
+ * is simply not a store (no reads, no checkout); only page rendering asks this.
+ */
+export async function storefrontMovedTo(hostHeader: string | null | undefined): Promise<string | null> {
+  const cls = classifyStorefrontHost({ host: String(hostHeader || ''), rootDomain: process.env.PLATFORM_ROOT_DOMAIN, legacyHosts: legacyHosts() });
+  if (cls.kind !== 'slug') return null;
+  const root = String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
+  if (!root) return null;
+  const key = 'moved:' + cls.slug;
+  const hit = movedCache.get(key);
+  if (hit && Date.now() - hit.at < MISS_TTL_MS) return hit.to;
+  let to: string | null = null;
+  try {
+    const alias = ((await getDb().select<any>('tenant_slug_aliases', {
+      where: { slug: eq(cls.slug), expires_at: gt(new Date().toISOString()) }, select: ['tenant_id'], limit: 1,
+    })) as any[])[0];
+    if (alias) {
+      const now = await lookup({ id: eq(String(alias.tenant_id)) });
+      if (now.kind === 'store' && now.slug) to = 'https://' + now.slug + '.' + root;
+    }
+  } catch (err) {
+    console.error('[storefront-tenant] moved lookup failed for ' + cls.slug, (err as Error)?.message || err);
+    return null;
+  }
+  movedCache.set(key, { to, at: Date.now() });
+  return to;
+}
+const movedCache = new Map<string, { to: string | null; at: number }>();
 
 /** The tenant for a Host header value. */
 export async function storefrontTenantForHost(hostHeader: string | null | undefined): Promise<StorefrontTenant> {
@@ -101,3 +133,16 @@ export async function refuseUnlessDefaultStore(request: Request): Promise<Respon
   return new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
 }
 
+
+/**
+ * For a page whose host is not a store: an old address still in its hold
+ * 301s to the store's current address (same path); anything else is a 404.
+ * Only called on the miss path, so a normal page view costs no extra query.
+ */
+export async function notFoundOrMoved(pathname: string): Promise<never> {
+  const { headers } = await import('next/headers');
+  const { notFound, permanentRedirect } = await import('next/navigation');
+  const to = await storefrontMovedTo((await headers()).get('host'));
+  if (to) permanentRedirect(to + (pathname.startsWith('/') ? pathname : '/' + pathname));
+  return notFound();
+}

@@ -3,7 +3,7 @@ import Storefront from '@/components/Storefront';
 import ThemePageSections from '@/components/storefront/ThemeBlocks';
 import { readThemePage } from '@/lib/theme-page-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { storefrontTenantFromHeaders } from '@/lib/storefront-tenant';
+import { storefrontTenantFromHeaders, notFoundOrMoved } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
 import { createKvClient, loadProducts } from '@/lib/server-config';
 
@@ -38,7 +38,7 @@ export default async function ProductPage({
   // store gets them until they are tenant-aware; other stores render the
   // standard product page, which reads the tenant-aware /api/store.
   const who = await storefrontTenantFromHeaders();
-  if (who.kind === 'none') notFound();
+  if (who.kind === 'none') return notFoundOrMoved('/' + slug);
   if (who.kind === 'unavailable') throw new Error('[storefront] store lookup unavailable');
   const tenantId = who.isDefault ? await ensureDefaultTenant().catch(() => null) : null;
   const sections = tenantId ? await readThemePage(tenantId, 'product') : [];

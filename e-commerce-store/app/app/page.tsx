@@ -23,6 +23,7 @@ type StockSize = { size: string; variantId: string | null; onHand: number; held:
 type StockView = { products: { productId: string; name: string; sizes: StockSize[] }[]; oversold: { variantId: string; item: string; shortfall: number; reference: string; at: string }[] };
 type StockMove = { reason: string; change: number; after: number; shortfall: number; by: string | null; note: string | null; reference: string | null; at: string };
 type Billing = { planId: string; planName: string; status: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; graceUntil: string | null; hasBillingAccount: boolean; feeLine: string; upgrade: { planId: string; name: string; monthlyCents: number } | null };
+type AddressView = { current: { slug: string; url: string }; changesLeft: number; holdDays: number; candidate?: { slug: string; url: string; available: boolean; reason: string } };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -73,6 +74,9 @@ export default function MerchantDashboard() {
   const [notice, setNotice] = useState('');
   const [country, setCountry] = useState('US');
   const [connecting, setConnecting] = useState(false);
+  const [address, setAddress] = useState<AddressView | null>(null);
+  const [addressInput, setAddressInput] = useState('');
+  const [addressBusy, setAddressBusy] = useState(false);
 
   const load = useCallback(async () => {
     const s = await api<Store>('/api/merchant/store');
@@ -91,6 +95,8 @@ export default function MerchantDashboard() {
     if (s.body.you.role === 'owner') {
       const sf = await api<Staff>('/api/merchant/staff');
       if (sf.ok) setStaff(sf.body);
+      const ad = await api<AddressView>('/api/merchant/address');
+      if (ad.ok) setAddress(ad.body);
       const bl = await api<Billing>('/api/merchant/billing');
       if (bl.ok) setBilling(bl.body);
     }
@@ -238,6 +244,30 @@ export default function MerchantDashboard() {
     }
     setEditing((cur) => (cur ? { ...cur, images } : cur));
     setUploading(false);
+  };
+
+  // Live availability, 300 ms after typing stops.
+  useEffect(() => {
+    if (!address || !addressInput.trim()) return;
+    const t = window.setTimeout(async () => {
+      const r = await api<AddressView>('/api/merchant/address?slug=' + encodeURIComponent(addressInput));
+      if (r.ok) setAddress((cur) => (cur ? { ...cur, candidate: r.body.candidate, changesLeft: r.body.changesLeft } : r.body));
+    }, 300);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressInput]);
+
+  const changeAddress = async () => {
+    const next = address?.candidate;
+    if (!next?.available) return;
+    setAddressBusy(true);
+    const r = await api<{ url: string; previous: string; holdDays: number }>('/api/merchant/address', { method: 'POST', body: JSON.stringify({ slug: next.slug }) });
+    setAddressBusy(false);
+    if (r.ok) {
+      setNotice(`Your store is now at ${r.body.url}. ${r.body.previous} sends visitors there for ${r.body.holdDays} days. It can take a minute to reach everyone.`);
+      setAddressInput('');
+      load();
+    } else setNotice(r.body.error || 'The address could not be changed.');
   };
 
   const save = async () => {
@@ -562,6 +592,33 @@ export default function MerchantDashboard() {
               <label key={k} style={label}>{k === 'terms' ? 'Terms of service' : k === 'privacy' ? 'Privacy policy' : 'Shipping & sales policy'}<textarea style={{ ...input, minHeight: 120, paddingTop: 10 }} value={settings.legal[k]} onChange={(e) => setSettings({ ...settings, legal: { ...settings.legal, [k]: e.target.value } })} /></label>
             ))}
             <div style={{ marginTop: 14 }}><button style={btn} onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>
+          </section>
+        )}
+
+        {tab === 'settings' && address && store.you.role === 'owner' && (
+          <section style={card} aria-label="Store address">
+            <div style={{ fontWeight: 700 }}>Store address</div>
+            <div style={{ color: C.muted, fontSize: 14, marginTop: 4 }}>Now: <a href={address.current.url} style={{ color: C.text }}>{address.current.url.replace('https://', '')}</a></div>
+            <label style={label}>New address
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input style={{ ...input, flex: 1 }} value={addressInput} placeholder={address.current.slug} autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                  onChange={(e) => setAddressInput(e.target.value.toLowerCase().replace(/[\s_]+/g, '-'))} />
+                <span style={{ color: C.muted, whiteSpace: 'nowrap' }}>{'.' + address.current.url.split('.').slice(1).join('.')}</span>
+              </div>
+            </label>
+            {addressInput.trim() && address.candidate && address.candidate.slug === addressInput.trim() && (
+              <div role="status" style={{ fontSize: 14, marginTop: 8, color: address.candidate.available ? C.good : C.warn }}>
+                {address.candidate.available ? '✓ ' : ''}{address.candidate.reason}{address.candidate.available ? ' Your store will be at ' + address.candidate.url.replace('https://', '') + '.' : ''}
+              </div>
+            )}
+            <p style={{ color: C.muted, fontSize: 13, margin: '10px 0 0' }}>
+              {`Your current address keeps working for ${address.holdDays} days (it sends visitors to the new one), and you can switch back. ${address.changesLeft} change${address.changesLeft === 1 ? '' : 's'} left this month.`}
+            </p>
+            <div style={{ marginTop: 12 }}>
+              <button style={btn} onClick={changeAddress} disabled={addressBusy || !address.candidate?.available || address.candidate.slug !== addressInput.trim() || address.changesLeft === 0}>
+                {addressBusy ? 'Changing…' : address.candidate?.available && address.candidate.slug === addressInput.trim() ? 'Move my store to ' + address.candidate.url.replace('https://', '') : 'Change address'}
+              </button>
+            </div>
           </section>
         )}
 

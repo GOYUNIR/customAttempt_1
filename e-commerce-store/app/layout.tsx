@@ -14,6 +14,7 @@ import { contentSpacingScale } from '@/lib/storefront-config';
 import { GOOGLE_FONTS_HREF } from '@/lib/font-catalog';
 import { MapFactory } from '@/services/maps/factory';
 import { headers } from 'next/headers';
+import { storefrontHostFor } from '@/lib/edge-router';
 import { isPlatformSurface, hidesStorefrontChrome } from '@/lib/platform-surface';
 import { storefrontTenantFromHeaders, withNeutralHero, type StorefrontTenant } from '@/lib/storefront-tenant';
 import { getDb } from '@/lib/db/client';
@@ -108,6 +109,21 @@ async function buildLiveTheme(config: Record<string, any>) {
   return liveValue;
 }
 
+/**
+ * The canonical URL of THIS page: the store's one primary address + the page's
+ * own path. Every other address a store answers on (www., an old address, the
+ * <slug>. address once a custom domain is primary) points here, so mirrors are
+ * never duplicate content. (It used to point every page at the home page.)
+ */
+async function canonicalFor(who: StorefrontTenant, fallbackOrigin: string): Promise<string> {
+  const path = ((await headers()).get('x-pathname') || '/').split('?')[0] || '/';
+  const root = String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
+  let origin = fallbackOrigin;
+  if (who.kind === 'store' && who.isDefault) { const h = storefrontHostFor(); if (h) origin = 'https://' + h; }
+  else if (who.kind === 'store' && who.slug && root) origin = 'https://' + who.slug + '.' + root;
+  return origin.replace(/[/]+$/, '') + (path.startsWith('/') ? path : '/' + path);
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const who = await storefrontTenantFromHeaders();
   if (!(who.kind === 'store' && who.isDefault)) {
@@ -121,6 +137,7 @@ export async function generateMetadata(): Promise<Metadata> {
       metadataBase: new URL(requestBase),
       title: { default: name, template: `%s | ${name}` },
       description: String(config.branding?.shareDescription || GOYUNIR_STORE_SUITE.heroContent?.body || ''),
+      alternates: { canonical: await canonicalFor(who, requestBase) },
     };
   }
   const redis = createKvClient();
@@ -161,7 +178,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description: shareDescription,
     alternates: {
-      canonical: canonicalUrl,
+      canonical: await canonicalFor(who, canonicalUrl),
     },
     icons: {
       icon: '/icon',
