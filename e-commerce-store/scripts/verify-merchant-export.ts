@@ -5,7 +5,7 @@
  *
  *   npx tsx scripts/verify-merchant-export.ts
  *
- * Sets `export.page_rows` to 50 for the run (so paging is exercised) and
+ * Sets `export.page_rows` to 10 for the run (so paging is exercised) and
  * removes it afterwards.
  */
 import { readFileSync, existsSync } from 'node:fs';
@@ -57,7 +57,7 @@ const same = (a: string[], b: string[]) => a.length === b.length && [...a].sort(
     return lines.slice(1).map((l) => l.split(',')[idx]);
   };
   const startedAt = new Date(Date.now() - 5000).toISOString();
-  await db.insert('platform_policies', { key: 'export.page_rows', value: 50, description: 'Rows per export page (verify-merchant-export sets this temporarily).' }, { onConflict: 'key', returning: 'minimal' } as any);
+  await db.insert('platform_policies', { key: 'export.page_rows', value: 10, description: 'Rows per export page (verify-merchant-export sets this temporarily).' }, { onConflict: 'key', returning: 'minimal' } as any);
 
   try {
     for (const [name, tenant, tok, other] of [['test4', A, sA, B], ['store B', B, sB, A]] as const) {

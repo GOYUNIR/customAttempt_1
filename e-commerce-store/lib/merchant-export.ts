@@ -18,7 +18,7 @@ export async function exportPageRows(): Promise<number> {
   try {
     const row = ((await getDb().select<any>('platform_policies', { where: { key: eq('export.page_rows') }, select: ['value'], limit: 1 })) as any[])[0];
     const n = Number(row?.value);
-    return Number.isInteger(n) && n >= 50 && n <= 2000 ? n : 500;
+    return Number.isInteger(n) && n >= 10 && n <= 2000 ? n : 500;
   } catch { return 500; }
 }
 
