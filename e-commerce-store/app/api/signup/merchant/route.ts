@@ -25,15 +25,18 @@ export const dynamic = 'force-dynamic';
  *   input rules             terms accepted; reserved and lookalike names
  *                           refused (the store-address rules); no disposable email
  *   throttles               per IP (escalating), per email, per domain, global
- *                           breaker (lib/signup-guard; numbers are policy data)
- *   email budget            resend cooldown, daily signup-email cap, monthly
- *                           allowance reserve
+ *   email budget            resend cooldown; signup mail may use only its share
+ *                           of the daily email limit, then "try again tomorrow"
  * NO ENUMERATION: for a valid request the reply is the same whether the email
  * is new, already has an account (it gets a "you already have an account"
  * email instead), or was silently throttled. Only a taken store name, a
  * disposable address or visible throttling get their own message.
  */
 const SAME_REPLY = { ok: true, message: 'Check your email: we sent a link to open your store. It can take a minute to arrive.' };
+// Signup's share of today's email is used up (the rest is kept for sign-in
+// codes and orders). A calm pause, not an error; the same for everyone, so it
+// says nothing about any one address.
+const FULL_TODAY = { ok: false, full: true, message: 'Lots of new stores opened today, so we have paused signups until tomorrow. Please come back then: your store name is not held, so check it again when you return.' };
 const root = () => String(process.env.PLATFORM_ROOT_DOMAIN || '').trim().toLowerCase();
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -75,11 +78,7 @@ export async function POST(request: Request) {
     // Resend cooldown BEFORE reserving: a cooldown must not replace (and so
     // void) the link already sent.
     const allowed = await signupEmailAllowed(email);
-    if (!allowed.ok) {
-      return allowed.why === 'budget'
-        ? fail(503, 'We cannot send email right now. Please try again later, or email us.')
-        : NextResponse.json(SAME_REPLY);
-    }
+    if (!allowed.ok) return allowed.why === 'full' ? NextResponse.json(FULL_TODAY) : NextResponse.json(SAME_REPLY);
 
     const existing = ((await getDb().select<any>('users', { where: { email: eq(email) }, select: ['id'], limit: 1 })) as any[]).length > 0;
     if (existing) {
@@ -88,7 +87,9 @@ export async function POST(request: Request) {
       await noteSignupEmailSent(email);
       const sent = await sendSignupExistingAccountEmail({ to: email, signInUrl: 'https://app.' + root() + '/app/login' });
       if (!sent.ok) console.error('[signup] existing-account email failed');
-      return NextResponse.json(SAME_REPLY);
+      // The share filled between the check and the send: same pause for both
+      // branches, so it still says nothing about the address.
+      return NextResponse.json(sent.limited ? FULL_TODAY : SAME_REPLY);
     }
 
     const policy = await signupPolicy();
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
     const sent = await sendSignupVerifyEmail({ to: email, storeName, url, holdHours: policy.holdHours });
     if (!sent.ok) console.error('[signup] verify email failed for signup ' + r.signup_id);
     await recordPlatformAudit({ action: 'merchant_signup_started', actor: email, detail: { slug: address.slug, signupId: r.signup_id, ip, emailed: sent.ok === true, termsVersion: policy.termsVersion } });
-    return NextResponse.json(SAME_REPLY);
+    return NextResponse.json(sent.limited ? FULL_TODAY : SAME_REPLY);
   } catch (err: any) {
     console.error('[merchant-signup] failed', err?.message || err);
     return fail(500, 'Your store could not be started. Please try again.');

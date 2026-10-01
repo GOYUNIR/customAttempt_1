@@ -38,6 +38,7 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
   const [error, setError] = useState('');
   const [done, setDone] = useState<string | null>(null);
   const [resent, setResent] = useState('');
+  const [full, setFull] = useState('');
   const box = useRef<HTMLDivElement | null>(null);
   const widget = useRef<string | null>(null);
 
@@ -81,6 +82,8 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
     });
     const data = await res.json().catch(() => ({}));
     resetCheck(); // tokens are single-use
+    // Today's signups are full: a calm notice instead of the form, not an error.
+    if (data?.full === true) { setFull(String(data.message || '')); return { ok: false, message: '' }; }
     return { ok: res.ok && data?.ok === true, message: String(data?.error || data?.message || 'Your store could not be started. Please try again.') };
   }
 
@@ -94,7 +97,7 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
     setBusy(true);
     try {
       const r = await send();
-      if (r.ok) { widget.current = null; setDone(r.message); } else setError(r.message);
+      if (r.ok) { widget.current = null; setDone(r.message); } else if (r.message) setError(r.message);
     } catch {
       setError('Network error. Check your connection and try again.');
     } finally {
@@ -106,7 +109,7 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
     setResent('');
     if (!token) { setResent('Complete the check below first.'); return; }
     setBusy(true);
-    try { const r = await send(); setResent(r.ok ? 'Sent again. Check your inbox and spam folder.' : r.message); }
+    try { const r = await send(); setResent(r.ok ? 'Sent again. Check your inbox and spam folder.' : (r.message || 'We cannot send more signup emails today. The link we already sent still works; please try again tomorrow.')); }
     catch { setResent('Network error. Try again.'); }
     finally { setBusy(false); }
   }
@@ -126,6 +129,16 @@ export default function MerchantSignupForm({ contactEmail = null }: { contactEma
           and we will get yours started.
         </p>
         {contactEmail && <a href={'mailto:' + contactEmail + '?subject=' + encodeURIComponent('Set up my store')} style={{ color: PALETTE.text, fontWeight: 700, fontSize: 14 }}>Email {contactEmail}</a>}
+      </div>
+    );
+  }
+
+  if (full && !done) {
+    return (
+      <div style={card} role="status">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: PALETTE.text }}>Please come back tomorrow</h3>
+        <p style={{ color: PALETTE.muted, fontSize: 14, lineHeight: 1.6, margin: 0 }}>{full}</p>
+        {contactEmail && <p style={{ color: PALETTE.muted, fontSize: 13, margin: 0 }}>In a hurry? <a href={'mailto:' + contactEmail} style={{ color: PALETTE.text }}>{contactEmail}</a></p>}
       </div>
     );
   }

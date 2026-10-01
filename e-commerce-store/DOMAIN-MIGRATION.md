@@ -62,9 +62,17 @@ unless marked **CODE**. Nothing is hardcoded to a specific new name.
    wildcard (`*`).
 2. **Email first, so nothing goes out unauthenticated:**
    - Cloudflare Email Routing for `support@NEWROOT`;
-   - verify NEWROOT in Resend (SPF, DKIM);
+   - **onboard NEWROOT for SENDING with every provider that is active** in
+     `email_provider_plans`: Cloudflare Email Service (the primary: onboard
+     the domain to Email Service) AND Resend (the fallback: verify the domain,
+     SPF and DKIM). Resend's free plan allows only ONE verified sending domain,
+     so moving it to NEWROOT means removing goyunir.com there (or Resend Pro);
    - add a DMARC record (`v=DMARC1; p=none`, tighten later);
-   - send a test to Gmail and check SPF/DKIM/DMARC all PASS.
+   - send a test to Gmail through EACH provider and check SPF/DKIM/DMARC all
+     PASS ("Show original") and that it lands in the inbox.
+   - `EMAIL_SINK_DOMAINS` (the proofs' never-mailed domain, today
+     `proof.goyunir.com`): may stay, or move to `proof.NEWROOT`; it needs no
+     DNS and must never get an MX record.
 3. **Worker routes:** add `NEWROOT/*` and `*.NEWROOT/*` ALONGSIDE the
    goyunir.com routes (both zones served during the transition). Deploy.
 4. **Stripe:**
@@ -109,6 +117,13 @@ unless marked **CODE**. Nothing is hardcoded to a specific new name.
    records that still answer for a merchant, so nothing dangles.
 
 ## Third parties to update the same day
+- **Cloudflare Turnstile (signup's human check):** the widget only issues
+  tokens on its listed hostnames (today `goyunir.com`). Add NEWROOT to the
+  widget's hostname list (Cloudflare dashboard → Turnstile → the existing
+  widget → Hostname management; do NOT create a new widget, the site key in
+  wrangler.jsonc stays), and add NEWROOT to `TURNSTILE_EXPECTED_HOSTNAMES`
+  (the server refuses tokens solved on any other host). Without both, signup
+  fails closed on the new domain.
 - Supabase Auth: site URL and redirect allow-list, if password-reset links
   are used.
 - Mapbox: token URL restrictions.

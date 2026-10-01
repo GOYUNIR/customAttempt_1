@@ -10,8 +10,8 @@
  *   per domain daily cap, except big shared providers         } same reply
  *   global     hourly and daily circuit breaker: pauses signup by itself,
  *              recovers by itself, alerts the operator at most once an hour
- *   email      daily cap on signup emails, and none when the month's email
- *              allowance is down to its reserve (orders keep their room)
+ *   email      signup mail uses at most its share of each provider's DAILY
+ *              limit (the governed email driver); then "try again tomorrow"
  * Counters live in the KV store with expiries; the real IP is cf-connecting-ip.
  */
 import { getDb } from '@/lib/db/client';
@@ -23,21 +23,21 @@ export type SignupPolicy = {
   holdHours: number; ownerAcceptDays: number; activationDays: number;
   ipSoftPerHour: number; ipHardPerDay: number; emailPerDay: number; emailResendCooldownSeconds: number;
   domainPerDay: number; freemailDomains: string[]; globalPerHour: number; globalPerDay: number; breakerPauseMinutes: number;
-  dailyEmailCap: number; emailHeadroomReservePercent: number; termsVersion: string;
+  termsVersion: string;
 };
 
 const DEFAULTS: SignupPolicy = {
   holdHours: 48, ownerAcceptDays: 7, activationDays: 14, ipSoftPerHour: 5, ipHardPerDay: 50, emailPerDay: 3,
   emailResendCooldownSeconds: 60, domainPerDay: 20, freemailDomains: ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'],
-  globalPerHour: 40, globalPerDay: 300, breakerPauseMinutes: 60, dailyEmailCap: 200, emailHeadroomReservePercent: 20, termsVersion: 'unknown',
+  globalPerHour: 40, globalPerDay: 300, breakerPauseMinutes: 60, termsVersion: 'unknown',
 };
 const KEYMAP: Record<string, keyof SignupPolicy> = {
   'signup.hold_hours': 'holdHours', 'signup.owner_accept_days': 'ownerAcceptDays', 'signup.activation_days': 'activationDays',
   'signup.ip_soft_per_hour': 'ipSoftPerHour', 'signup.ip_hard_per_day': 'ipHardPerDay', 'signup.email_per_day': 'emailPerDay',
   'signup.email_resend_cooldown_seconds': 'emailResendCooldownSeconds', 'signup.domain_per_day': 'domainPerDay',
   'signup.freemail_domains': 'freemailDomains', 'signup.global_per_hour': 'globalPerHour', 'signup.global_per_day': 'globalPerDay',
-  'signup.breaker_pause_minutes': 'breakerPauseMinutes', 'signup.daily_email_cap': 'dailyEmailCap',
-  'signup.email_headroom_reserve_percent': 'emailHeadroomReservePercent', 'signup.terms_version': 'termsVersion',
+  'signup.breaker_pause_minutes': 'breakerPauseMinutes',
+  'signup.terms_version': 'termsVersion',
 };
 
 let cached: { at: number; policy: SignupPolicy } | null = null;
@@ -162,35 +162,32 @@ export async function guardSignupAttempt(input: { ip: string; email: string }): 
 }
 
 /**
- * May we send a signup email to this address now? Resend cooldown (doubling
- * per address per day), the daily signup-email cap, and the month's email
- * allowance reserve. 'cooldown' is silent; 'budget' is told to the visitor.
+ * May we send a signup email to this address now?
+ *   'cooldown'  resend cooldown, doubling per address per day (silent);
+ *   'full'      signup's share of today's email is spent (the governed driver,
+ *               services/email/governor.ts: ~40% of each provider's DAILY
+ *               limit, the rest kept for sign-in codes, orders, winners and
+ *               alerts). Told to the visitor as "try again tomorrow".
  */
-export async function signupEmailAllowed(email: string): Promise<{ ok: true } | { ok: false; why: 'cooldown' | 'budget' }> {
+export async function signupEmailAllowed(email: string): Promise<{ ok: true } | { ok: false; why: 'cooldown' | 'full' }> {
   const kv: any = createKvClient();
-  if (!kv) return { ok: false, why: 'budget' };
+  if (!kv) return { ok: false, why: 'full' };
   const policy = await signupPolicy();
   const e = email.toLowerCase();
   const sentToday = Number(await kv.get('signup:sent:d:' + dayKey() + ':' + e).catch(() => 0)) || 0;
   const last = Number(await kv.get('signup:sent:last:' + e).catch(() => 0)) || 0;
   const cooldown = policy.emailResendCooldownSeconds * 2 ** Math.max(0, sentToday - 1);
   if (last && (Date.now() - last) / 1000 < cooldown) return { ok: false, why: 'cooldown' };
-  const total = Number(await kv.get('signup:sent:total:' + dayKey()).catch(() => 0)) || 0;
-  if (total >= policy.dailyEmailCap) return { ok: false, why: 'budget' };
-  try {
-    const { usageHeadroom } = await import('@/lib/growth/ledger');
-    const h = await usageHeadroom('email');
-    if (h && h.includedUnits > 0 && (h.remaining / h.includedUnits) * 100 < policy.emailHeadroomReservePercent) return { ok: false, why: 'budget' };
-  } catch { /* headroom unknown: the daily cap still applies */ }
+  const { emailRoomFor } = await import('@/services/email/factory');
+  if (!(await emailRoomFor('signup', e))) return { ok: false, why: 'full' };
   return { ok: true };
 }
 
-/** Record a signup email actually sent (cooldown + daily cap). */
+/** Record a signup email attempt for this address (its resend cooldown). */
 export async function noteSignupEmailSent(email: string): Promise<void> {
   const kv: any = createKvClient();
   if (!kv) return;
   const e = email.toLowerCase();
   await bump(kv, 'signup:sent:d:' + dayKey() + ':' + e, 90_000);
-  await bump(kv, 'signup:sent:total:' + dayKey(), 90_000);
   await kv.setex('signup:sent:last:' + e, 90_000, String(Date.now()));
 }

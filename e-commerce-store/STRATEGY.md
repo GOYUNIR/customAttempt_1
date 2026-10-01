@@ -217,6 +217,21 @@ Add an item whenever a gap is found; tick it only with evidence, recorded in
     goyunir.<platform-domain> or its own custom domain.
 - 🛑 Cloudflare Workers Paid (50-subrequest ceiling on Free): the first
   go-live action; staying on Free until then is deliberate (owner).
+- 🛑 **Workers Paid AND a verified, working email path, with a MEASURED daily
+  limit big enough for signup** (owner, 2026-10-01). Hard blocker for opening
+  signup and for go-live. Found 2026-10-01: Resend Free caps at 100/day as well
+  as 3,000/month, and our proof runs used the whole day.
+  - Primary: Cloudflare Email Service (needs Workers Paid; public beta;
+    3,000/month included then $0.35 per 1,000; the daily quota is per account
+    and not published). Fallback: Resend. Both behind the governed driver
+    (services/email/governor.ts); limits are data (`email_provider_plans`).
+  - Done only when: the sending domain is onboarded to Email Service; a test
+    send to the owner's verified address passes SPF, DKIM and DMARC in Gmail
+    "Show original" and lands in the inbox; the account's real daily limit is
+    known and entered in `email_provider_plans`; signup's 40% share of it covers
+    the expected signups.
+  - Resend Pro ($20/month, 50,000/month, no daily cap) only if Cloudflare's
+    limit turns out too low.
 - 🛑 Live-mode Stripe webhooks (platform + Connect) must subscribe to
   `checkout.session.expired`, as the test-mode ones do. The live PLATFORM
   webhook must also subscribe to `customer.subscription.created/updated/deleted`

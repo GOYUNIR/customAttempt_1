@@ -78,13 +78,16 @@ type RateRow = {
 const RATE_CACHE_MS = 60_000;
 const rateCache = new Map<string, { at: number; rate: ProviderRate | null }>();
 
-export async function readRate(unit: string): Promise<ProviderRate | null> {
+export async function readRate(unit: string, provider?: string): Promise<ProviderRate | null> {
   if (!unit) return null;
-  const cached = rateCache.get(unit);
+  // Per provider when known (email has several: Cloudflare, Resend, the
+  // sink); the newest row for the unit otherwise.
+  const cacheKey = unit + '|' + (provider || '');
+  const cached = rateCache.get(cacheKey);
   if (cached && Date.now() - cached.at < RATE_CACHE_MS) return cached.rate;
   try {
     const rows = (await getDb().select<RateRow>('provider_rates', {
-      where: { unit: eq(unit) },
+      where: provider ? { unit: eq(unit), provider: eq(provider) } : { unit: eq(unit) },
       select: ['provider', 'unit', 'unit_cost_micros', 'included_units', 'period', 'source_url'],
       order: { column: 'effective_from', ascending: false },
       limit: 1,
@@ -100,7 +103,7 @@ export async function readRate(unit: string): Promise<ProviderRate | null> {
           sourceUrl: row.source_url,
         }
       : null;
-    rateCache.set(unit, { at: Date.now(), rate });
+    rateCache.set(cacheKey, { at: Date.now(), rate });
     return rate;
   } catch (err) {
     console.error('[growth-ledger] rate lookup failed for ' + unit, (err as Error)?.message || err);
@@ -121,6 +124,8 @@ export type RecordUsageInput = {
   unit: string;
   quantity?: number;
   reference?: string | null;
+  /** Which provider carried it (email): picks the rate, and is stored. */
+  provider?: string | null;
 };
 
 /**
@@ -131,7 +136,7 @@ export async function recordUsage(input: RecordUsageInput): Promise<Micros | nul
   const quantity = Math.max(0, Math.floor(Number(input.quantity ?? 1)));
   if (!input.tenantId || !input.moduleId || !input.unit || quantity === 0) return null;
 
-  const rate = await readRate(input.unit);
+  const rate = await readRate(input.unit, input.provider || undefined);
   if (!rate) {
     console.error(
       '[growth-ledger] NO RATE CONFIGURED for unit "' + input.unit + '" (module ' + input.moduleId +
@@ -140,19 +145,23 @@ export async function recordUsage(input: RecordUsageInput): Promise<Micros | nul
   }
   const costMicros = (rate?.unitCostMicros ?? 0) * quantity;
 
+  const row = {
+    tenant_id: input.tenantId,
+    module_id: input.moduleId,
+    unit: input.unit,
+    quantity,
+    cost_micros: costMicros,
+    reference: input.reference || null,
+  };
   try {
-    await getDb().insert(
-      'usage_events',
-      {
-        tenant_id: input.tenantId,
-        module_id: input.moduleId,
-        unit: input.unit,
-        quantity,
-        cost_micros: costMicros,
-        reference: input.reference || null,
-      },
-      { returning: 'minimal' },
-    );
+    try {
+      await getDb().insert('usage_events', { ...row, ...(input.provider ? { provider: input.provider } : {}) }, { returning: 'minimal' });
+    } catch (err) {
+      // A database without the provider column (before 00042) still gets the
+      // cost row; only which provider carried it is lost.
+      if (!input.provider || !/provider/i.test(String((err as Error)?.message || err))) throw err;
+      await getDb().insert('usage_events', row, { returning: 'minimal' });
+    }
     return costMicros;
   } catch (err) {
     console.error(
@@ -175,16 +184,20 @@ export async function recordUsage(input: RecordUsageInput): Promise<Micros | nul
  * merchant's. A per-tenant view would show three merchants each comfortably
  * under "their" limit while the account as a whole had already stopped sending.
  */
-export async function usageHeadroom(unit: string): Promise<Headroom | null> {
-  const rate = await readRate(unit);
+export async function usageHeadroom(unit: string, provider?: string): Promise<Headroom | null> {
+  const rate = await readRate(unit, provider);
   if (!rate) return null;
   try {
-    const rows = (await getDb().select<{ quantity: number | string }>('usage_events', {
+    const rows = (await getDb().select<{ quantity: number | string; provider: string | null }>('usage_events', {
       where: { unit: eq(unit), occurred_at: gte(currentPeriodStart()) },
-      select: ['quantity'],
+      select: ['quantity', 'provider'],
       limit: 10000,
-    })) as Array<{ quantity: number | string }>;
-    const used = rows.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+    })) as Array<{ quantity: number | string; provider: string | null }>;
+    // A provider's allowance counts that provider's sends. Rows from before
+    // the provider was recorded (00042) were all the configured provider's.
+    const used = rows
+      .filter((r) => !provider || r.provider === provider || r.provider == null)
+      .reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
     return computeHeadroom({
       unit,
       provider: rate.provider,

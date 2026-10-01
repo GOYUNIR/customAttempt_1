@@ -143,6 +143,9 @@
     // here. The host the widget renders on; a token solved elsewhere is refused.
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFKwZW0C3QaCrhxK",
     "TURNSTILE_EXPECTED_HOSTNAMES": "goyunir.com",
+    // Recipients on these domains are never mailed: the governed email driver
+    // records them in the email_sink table for the proofs (no mailbox exists).
+    "EMAIL_SINK_DOMAINS": "proof.goyunir.com",
 
     // TENANCY.md T2 — the hosts that ARE the original (default) store, checked
     // before any merchant slug. A bare label means <label>.<PLATFORM_ROOT_DOMAIN>.

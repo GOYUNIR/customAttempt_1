@@ -28,7 +28,8 @@ const B_OWNER = 'isolation-owner-b@goyunir.invalid';
 const SALES = 'https://sales.goyunir.com';
 const RAFFLE_VARIANT_A = '1e02eebc-af34-4f52-b57d-5227b6633589'; // test4's raffle size (already drawn)
 // Resend's official test inbox: accepts mail without delivering it anywhere.
-const INVITE_PROBE = 'delivered@resend.dev';
+// On the sink domain: the governed driver records it, never sends it.
+const INVITE_PROBE = 'inviteprobe@' + (String(process.env.EMAIL_SINK_DOMAINS || '').split(',')[0].trim() || 'proof.invalid');
 let entryEmail = '';
 let staffEmail = '';
 let salesEmail = '';

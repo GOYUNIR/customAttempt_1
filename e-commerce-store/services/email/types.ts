@@ -19,6 +19,27 @@
 
 import type { MailProvider } from '../config/types.ts';
 
+/** Wizard providers, plus Cloudflare Email Service and the test sink (not wizard choices). */
+export type EmailProviderId = MailProvider | 'cloudflare' | 'sink';
+
+/**
+ * What kind of email this is, for capacity (services/email/governor.ts):
+ * 'signup' may use only its share of the daily limit; 'standard' (sign-in
+ * codes, orders, winners, alerts, everything else) keeps the rest.
+ */
+export type EmailCategory = 'standard' | 'signup';
+
+/** Who a send is for, so the governed driver can count and cost it once. */
+export interface EmailMeta {
+  category?: EmailCategory;
+  /** The store the email is for (cost ledger); the platform's when absent. */
+  tenantId?: string;
+  /** Ledger bucket: a Growth module id, or 'platform' (default). */
+  moduleId?: string;
+  /** Ledger reference; Growth frequency caps count `contact:<email>`. */
+  reference?: string;
+}
+
 /** A normalized transactional email message (provider-agnostic). */
 export interface EmailMessage {
   to: string;
@@ -27,6 +48,7 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text?: string;
+  meta?: EmailMeta;
 }
 
 /** Overrides for the standardized 2FA code email. */
@@ -41,15 +63,23 @@ export interface CodeEmailOptions {
   brandName?: string;
   /** Sender logo image URL shown in the masthead (e.g. the store logo). */
   logoUrl?: string;
+  meta?: EmailMeta;
 }
 
 /** Unified result shape every caller can switch on. */
 export type EmailSendResult =
-  | { ok: true; id?: string; provider: MailProvider }
-  | { ok: false; error?: unknown; provider: MailProvider; skipped?: boolean };
+  | { ok: true; id?: string; provider: EmailProviderId }
+  | {
+      ok: false; error?: unknown; provider: EmailProviderId; skipped?: boolean;
+      /** For failover: 'full' (provider's own limit), 'transient' (try the
+       *  next provider), 'rejected' (the message itself; do not retry). */
+      failure?: 'full' | 'transient' | 'rejected';
+      /** Set by the governed driver when OUR limits stopped the send. */
+      limited?: 'capacity' | 'signup_share';
+    };
 
 export interface EmailDriver {
-  readonly provider: MailProvider;
+  readonly provider: EmailProviderId;
   /** Whether the driver has the secrets it needs to send. */
   readonly configured: boolean;
   /** Standardized one-time-code email (admin 2FA / customer verification). */

@@ -78,12 +78,26 @@ export class ResendDriver implements EmailDriver {
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
-        return { ok: false, error: `Resend error ${res.status}: ${detail.slice(0, 300)}`, provider: this.provider };
+        return { ok: false, error: `Resend error ${res.status}: ${detail.slice(0, 300)}`, provider: this.provider, failure: resendFailureKind(res.status, detail) };
       }
       const data = (await res.json().catch(() => null)) as { id?: string } | null;
       return { ok: true, id: data?.id, provider: this.provider };
     } catch (err) {
-      return { ok: false, error: err, provider: this.provider };
+      return { ok: false, error: err, provider: this.provider, failure: 'transient' };
     }
   }
+}
+
+/**
+ * How a Resend failure is treated by the governed driver
+ * (https://resend.com/docs/api-reference/errors):
+ *   429 daily_quota_exceeded / monthly_quota_exceeded  -> 'full' (stop for today)
+ *   400 / 422 (bad recipient, bad fields)              -> 'rejected' (the message)
+ *   anything else (5xx, 429 rate limit, 401/403 key or
+ *   sender not set up on this provider)                -> 'transient' (next provider)
+ */
+export function resendFailureKind(status: number, body: string): 'full' | 'transient' | 'rejected' {
+  if (status === 429 && /quota/i.test(body)) return 'full';
+  if (status === 400 || status === 422) return 'rejected';
+  return 'transient';
 }

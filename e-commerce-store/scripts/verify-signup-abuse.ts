@@ -1,8 +1,13 @@
 /**
  * SIGNUP ABUSE SIMULATION — the real signup route code, in this process,
- * against the PRODUCTION database, KV counters and email provider, with
- * Cloudflare's published Turnstile TEST secrets (always pass / always fail /
- * already spent). Production's own ALLOW_MERCHANT_SIGNUP is not touched.
+ * against the PRODUCTION database and KV counters, with Cloudflare's
+ * published Turnstile TEST secrets (always pass / always fail / already
+ * spent). Production's own ALLOW_MERCHANT_SIGNUP is not touched.
+ *
+ * SENDS NO REAL EMAIL. EMAIL_DRIVER=record makes the governed email driver
+ * (services/email/governor.ts) record every message in the `email_sink` table
+ * on the sink's own counters, so the run spends nothing of any provider's
+ * daily allowance (on 2026-10-01 earlier runs used Resend's whole 100/day).
  *
  *   npx tsx scripts/verify-signup-abuse.ts
  *
@@ -24,7 +29,7 @@ process.env.PLATFORM_ROOT_DOMAIN = 'goyunir.com';
 process.env.STOREFRONT_LEGACY_HOSTS = 'shop,www,api,goyunir';
 process.env.ALLOW_MERCHANT_SIGNUP = 'true';           // this process only
 process.env.SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@goyunir.com'; // production's (wrangler vars): breaker alerts go there
-process.env.SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@goyunir.com'; // production's (wrangler vars): breaker alerts go there
+process.env.EMAIL_DRIVER = 'record';                   // never real mail (see above)
 process.env.TURNSTILE_EXPECTED_HOSTNAMES = 'example.com'; // what Cloudflare's test keys report
 const PASS = '1x0000000000000000000000000000000AA', FAIL = '2x0000000000000000000000000000000AA', SPENT = '3x0000000000000000000000000000000AA';
 process.env.TURNSTILE_SECRET_KEY = PASS;
@@ -33,7 +38,8 @@ let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 const run = Date.now().toString(36);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '').toLowerCase() + run + '@resend.dev';
+const SINK_DOMAIN = String(process.env.EMAIL_SINK_DOMAINS || '').split(',')[0].trim() || 'proof.invalid';
+const inbox = (label: string) => label.replace(/[^a-z0-9]/gi, '').toLowerCase() + run + '@' + SINK_DOMAIN;
 
 (async () => {
   const { POST } = await import('../app/api/signup/merchant/route');
@@ -56,7 +62,7 @@ const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '')
   const policyBefore = Object.fromEntries(((await db.select<any>('platform_policies', { select: ['key', 'value'] })) as any[]).map((r) => [r.key, r.value]));
   const clearProofCounters = async () => {
     const day = new Date().toISOString().slice(0, 10), hour = new Date().toISOString().slice(0, 13);
-    await kv.del('signup:domain:d:' + day + ':resend.dev', 'signup:alert:' + hour).catch(() => null);
+    await kv.del('signup:domain:d:' + day + ':' + SINK_DOMAIN, 'signup:alert:' + hour).catch(() => null);
     for (const e of emails) await kv.del('signup:email:d:' + day + ':' + e, 'signup:sent:d:' + day + ':' + e, 'signup:sent:last:' + e).catch(() => null);
     // Every proof IP is in the reserved documentation ranges (never a real
     // visitor). Clear them ALL, not just this run's: a run that died part-way
@@ -73,8 +79,16 @@ const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '')
   let tempUserId = '';
 
   // Earlier runs today leave per-domain counters: every proof address is on
-  // resend.dev, which the per-domain limit counts. Start (and end) clean.
+  // the sink domain, which the per-domain limit counts. Start (and end) clean.
   await clearProofCounters();
+  // The sink's limits are data like any provider's. Roomy for the run (so the
+  // email share is not what stops the earlier sections), tight for the budget
+  // section; restored afterwards.
+  const { clearEmailPlanCache } = await import('../services/email/factory');
+  const sinkPlanBefore = ((await db.select<any>('email_provider_plans', { where: { provider: eq('sink'), active: eq(true) }, select: ['plan', 'daily_limit'], limit: 1 })) as any[])[0];
+  if (!sinkPlanBefore) throw new Error('migration 00042 (email_provider_plans) is not applied');
+  const setSinkDaily = async (n: number) => { await db.update('email_provider_plans', { where: { provider: eq('sink'), plan: eq(sinkPlanBefore.plan) } }, { daily_limit: n }, { returning: 'minimal' } as any); clearEmailPlanCache(); };
+  await setSinkDaily(100_000);
   try {
     console.log('\nTurnstile (server-side, fail closed)');
     process.env.TURNSTILE_SECRET_KEY = FAIL;
@@ -164,23 +178,34 @@ const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '')
     await resetGlobal();
     console.log('\nPer-domain limit (a non-shared domain)');
     const dayK = new Date().toISOString().slice(0, 10);
-    await kv.del('signup:domain:d:' + dayK + ':resend.dev');
+    await kv.del('signup:domain:d:' + dayK + ':' + SINK_DOMAIN);
     const dom = [];
     for (let i = 0; i < 22; i++) dom.push(await signup({ email: inbox('dom' + i), storeName: 'Proof Dom ' + run + ' ' + i, ip: '192.0.2.' + (10 + i) }));
     const held = ((await db.select<any>('merchant_signups', { where: { slug: like('proof-dom-' + run + '%') }, select: ['slug'], limit: 50 })) as any[]).length;
     check(dom.every((r) => r.status === 200) && held === 20, '22 signups from one non-shared domain: all get the same reply, but only 20 hold a name (the rest are dropped quietly): ' + held);
-    await kv.del('signup:domain:d:' + dayK + ':resend.dev');
+    await kv.del('signup:domain:d:' + dayK + ':' + SINK_DOMAIN);
 
     await resetGlobal();
-    console.log('\nSignup-email budget');
-    const dayKey = new Date().toISOString().slice(0, 10);
-    const total = Number(await kv.get('signup:sent:total:' + dayKey).catch(() => 0)) || 0;
-    await setPolicy('signup.daily_email_cap', total);
-    await sleep(31000);
+    console.log('\nSignup\'s share of the daily email limit');
+    // Make signup's share EXACTLY what is already used today (share 10% of a
+    // daily limit of 10x the signup count), leaving room for other mail.
+    const today = new Date().toISOString().slice(0, 10);
+    const counts = (await db.select<any>('email_send_counts', { where: { provider: eq('sink'), period: eq('day'), period_key: eq(today) }, select: ['category', 'sent'] })) as any[];
+    const signupUsed = Number(counts.find((c) => c.category === 'signup')?.sent || 0);
+    const allUsed = Number(counts.find((c) => c.category === 'all')?.sent || 0);
+    check(signupUsed > 0, 'this run\'s signup mail was counted as signup: ' + signupUsed + ' of ' + allUsed + ' today on the sink');
+    await setPolicy('email.signup_daily_share_percent', 10);
+    await setSinkDaily(10 * signupUsed);  // 10% of it = exactly what signup used
+    check(10 * signupUsed > allUsed, 'the day itself still has room (' + allUsed + ' of ' + 10 * signupUsed + ' used)');
     const capped = await signup({ email: inbox('budget'), storeName: 'Proof Budget ' + run, ip: '203.0.113.60' });
-    check(capped.status === 503 && /cannot send email/.test(capped.body?.error), 'daily signup-email cap reached: no send, and the visitor is told: ' + capped.body?.error);
+    check(capped.status === 200 && capped.body?.full === true && /tomorrow/.test(capped.body?.message), 'signup\'s share spent: a calm "come back tomorrow" (200, not an error): ' + capped.body?.message);
+    check(((await db.select<any>('merchant_signups', { where: { slug: like('proof-budget-' + run + '%') }, select: ['slug'] })) as any[]).length === 0, 'and no store name was taken for it');
+    const { sendOperatorAlertEmail } = await import('../lib/email');
+    const critical = await sendOperatorAlertEmail({ subject: 'Proof ' + run + ': critical mail still goes', lines: ['Sent by verify-signup-abuse while signup\'s share is spent (to the sink, never delivered).'] });
+    check(critical.ok === true, 'while signup is paused, other mail (sign-in codes, orders, alerts) still has room and goes');
   } finally {
     for (const k of Object.keys(policyBefore)) await setPolicy(k, policyBefore[k]).catch(() => null);
+    await setSinkDaily(sinkPlanBefore.daily_limit).catch(() => null);
     await kv.del('signup:paused_until').catch(() => null);
     await clearProofCounters();
     const hourKey = new Date().toISOString().slice(0, 13), dayKey = new Date().toISOString().slice(0, 10);

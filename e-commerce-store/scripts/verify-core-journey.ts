@@ -15,7 +15,7 @@
  * automated; its form and refusal are checked.
  *
  * Writes, and removes at the end: one staff account on test4, one sales
- * account (both @resend.dev test inboxes).
+ * account (both on the sink domain: recorded, never sent).
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

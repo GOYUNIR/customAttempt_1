@@ -27,7 +27,12 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
 const run = Date.now().toString(36);
 const NAMES = ['Kestrel', 'Juniper', 'Marrow', 'Tidewater', 'Lumen', 'Corvid', 'Saffron', 'Hollow Oak'];
 const storeName = NAMES[parseInt(run.slice(-2), 36) % NAMES.length] + ' Ceramics ' + run.slice(-4);
-const email = 'delivered+stranger' + run + '@resend.dev';
+// The ONE proof that sends real email: to an address the owner controls,
+// given explicitly (STRANGER_EMAIL=you+tag@example.com). Two sends expected
+// (signup link, sign-in code); more than 3 fails the run.
+const email = String(process.env.STRANGER_EMAIL || '').trim().toLowerCase();
+if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { console.error('Set STRANGER_EMAIL to an address the owner controls (this run sends real email to it).'); process.exit(2); }
+const MAX_REAL_SENDS = 3;
 const password = 'Stranger-' + crypto.randomUUID() + '-Aa1!';
 
 async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
@@ -42,7 +47,7 @@ async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
 
 (async () => {
   const { getDb } = await import('../lib/db/client');
-  const { sentTo } = await import('./resend-readback');
+  const { resendSentTo: sentTo } = await import('./resend-readback');
   const browser = await chromium.launch({ executablePath: CHROME, headless: false });
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   try {
@@ -124,6 +129,9 @@ async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
   } finally {
     await browser.close();
   }
+  const realSends = (await sentTo(getDb, email, { waitMs: 0 }).catch(() => [])).length;
+  check(realSends >= 1 && realSends <= MAX_REAL_SENDS, 'real emails sent to ' + email + ': ' + realSends + ' (at most ' + MAX_REAL_SENDS + ')');
+  console.log('Next, by hand: open the delivered message in Gmail, "Show original", and read SPF / DKIM / DMARC and the folder it landed in.');
   console.log('\n' + (failures ? failures + ' FAILED' : 'ALL PASS'));
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

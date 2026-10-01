@@ -30,11 +30,11 @@
  * first: it recovers money before it costs anything.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { EmailFactory } from '@/services/email/factory';
+import { EmailFactory, primaryEmailProvider } from '@/services/email/factory';
 import { createKvClient } from '@/lib/server-config';
 import { markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { canSend, withinDailyCap } from '@/lib/growth/consent';
-import { recordUsage, usageHeadroom } from '@/lib/growth/ledger';
+import { usageHeadroom } from '@/lib/growth/ledger';
 import { headroomMessage } from '@/lib/growth/units';
 import { moduleById, assertLaunchable } from '@/lib/growth/registry';
 import { getSiteUrl } from '@/lib/env';
@@ -50,7 +50,7 @@ export type DeclinedWinner = {
 };
 
 export type DunningResult =
-  | { sent: true; costMicros: number | null }
+  | { sent: true }
   | { sent: false; reason: string; detail: string };
 
 /** Escape anything interpolated into the email's HTML. */
@@ -120,7 +120,7 @@ export async function notifyDeclinedWinner(
   // ── 4. does the PLATFORM have room this month? ────────────────────────────
   // Checked before the send, so the warning arrives while there is still room
   // to act rather than as sends that quietly stop.
-  const headroom = await usageHeadroom('email');
+  const headroom = await usageHeadroom('email', (await primaryEmailProvider()) || undefined);
   if (headroom) {
     const message = headroomMessage(headroom);
     if (message) console.warn('[dunning] ' + message);
@@ -176,6 +176,9 @@ export async function notifyDeclinedWinner(
         ', but the payment did not go through.\n\n' +
         'Your entry is still active. Update your payment method and you will be included in the ' +
         'next draw for this release: ' + site + '/account\n',
+      // Counted (capacity and cost ledger) once by the governed driver, only
+      // when sent; the reference is what the frequency cap counts.
+      meta: { tenantId, moduleId: growthModule.id, reference: 'contact:' + email },
     });
 
     if (!result?.ok) {
@@ -190,17 +193,7 @@ export async function notifyDeclinedWinner(
   }
 
   // ── 6. bookkeeping, after the send ────────────────────────────────────────
-  // The reference is `contact:<email>` because that is what the frequency cap
-  // counts (lib/growth/consent.ts). Recorded AFTER a successful send so a
-  // failed one does not consume the customer's cap.
-  const costMicros = await recordUsage({
-    tenantId,
-    moduleId: growthModule.id,
-    unit: 'email',
-    quantity: 1,
-    reference: 'contact:' + email,
-  });
-
+  // The cost ledger row was written by the governed driver (meta above).
   if (kv) {
     try {
       await markEntryEmailSent(kv, dedupeKey);
@@ -209,7 +202,7 @@ export async function notifyDeclinedWinner(
     }
   }
 
-  return { sent: true, costMicros };
+  return { sent: true };
 }
 
 /**

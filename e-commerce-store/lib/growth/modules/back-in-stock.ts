@@ -23,9 +23,10 @@
  * comparison reliable, so the number stays honest while the list grows.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { EmailFactory } from '@/services/email/factory';
+import { EmailFactory, primaryEmailProvider } from '@/services/email/factory';
+import type { EmailMeta } from '@/services/email/types';
 import { canSend, withinDailyCap } from '@/lib/growth/consent';
-import { recordUsage, usageHeadroom } from '@/lib/growth/ledger';
+import { usageHeadroom } from '@/lib/growth/ledger';
 import { headroomMessage } from '@/lib/growth/units';
 import { moduleById, assertLaunchable } from '@/lib/growth/registry';
 import { isHeldOut } from '@/lib/growth/holdout';
@@ -86,7 +87,7 @@ export async function notifyBackInStock(
 
   // Marketing, so it stops when the free allowance is gone rather than quietly
   // spending. Same rule as cart recovery, opposite of dunning.
-  const headroom = await usageHeadroom('email');
+  const headroom = await usageHeadroom('email', (await primaryEmailProvider()) || undefined);
   if (headroom) {
     const message = headroomMessage(headroom);
     if (message) console.warn('[back-in-stock] ' + message);
@@ -144,18 +145,13 @@ export async function notifyBackInStock(
       continue;
     }
 
-    if (!(await sendRestockEmail(driver, subscriber, product, site))) {
+    // Counted once, by the governed driver, against this store and module;
+    // the reference is what the frequency cap counts.
+    if (!(await sendRestockEmail(driver, subscriber, product, site, { tenantId, moduleId: growthModule.id, reference: 'contact:' + subscriber.email }))) {
       outcome.skipped.push({ email: subscriber.email, reason: 'send_failed' });
       continue;
     }
 
-    await recordUsage({
-      tenantId,
-      moduleId: growthModule.id,
-      unit: 'email',
-      quantity: 1,
-      reference: 'contact:' + subscriber.email,
-    });
     // Marked only after a successful send: marking first would suppress a
     // retry of an announcement that never went out.
     await markNotified(tenantId, subscriber, product.slug);
@@ -170,6 +166,7 @@ async function sendRestockEmail(
   subscriber: AlertSubscriber,
   product: RestockedProduct,
   site: string,
+  meta: EmailMeta,
 ): Promise<boolean> {
   const name = escapeHtml(product.name || 'A product you wanted');
   try {
@@ -192,6 +189,7 @@ async function sendRestockEmail(
       text:
         (product.name || 'A product you wanted') + ' is available again.\n\n' +
         'You asked to hear when this came back: ' + site + '/' + product.slug + '\n',
+      meta,
     });
     return result?.ok === true;
   } catch {

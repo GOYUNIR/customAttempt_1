@@ -2,7 +2,7 @@ import { buildOrderRef, formatOrderRef } from '@/lib/order-ref';
 import { getBrandName, getSupportEmail, getSiteUrl, fallbackSiteUrl, getBrandLogo, getPlatformName } from '@/lib/env';
 import { normalizeSiteBase } from '@/lib/url-utils';
 import { EmailFactory } from '@/services/email';
-import type { EmailDriver } from '@/services/email';
+import type { EmailDriver, EmailMeta, EmailCategory } from '@/services/email';
 import { storeFromHeader, sendingAddressOf } from '@/lib/tenant-email-render';
 
 
@@ -40,6 +40,7 @@ function getResend() {
         subject: string;
         html: string;
         text?: string;
+        meta?: EmailMeta;
       }): Promise<{ data: { id?: string } | null; error: unknown }> => {
         const driver = await getEmailDriver();
         if (!driver) {
@@ -55,11 +56,10 @@ function getResend() {
           // masthead. No logo configured → emailLogoHtml() is '' (no-op).
           html: emailLogoHtml() + payload.html,
           text: payload.text,
+          meta: payload.meta,
         });
-        if (result.ok) {
-          await recordPlatformEmail(payload.to);
-          return { data: { id: result.id }, error: null };
-        }
+        // Counted (capacity and cost ledger) by the governed driver, once.
+        if (result.ok) return { data: { id: result.id }, error: null };
         console.error('[email] send failed via driver', result.error);
         return { data: null, error: result.error ?? new Error('Email send failed') };
       },
@@ -71,47 +71,13 @@ function getResend() {
  * (BRAND_NAME / NEXT_PUBLIC_SITE_NAME) and falls back to a neutral 'Store' so
  * template buyers can rename the brand without touching email markup. Set
  * BRAND_NAME in the platform for production sends. */
-/**
- * Count a platform email against the free tier.
- *
- * THE ALLOWANCE IS ONE POOL. Resend's 3,000/month is per account, not per
- * feature, but until now only Growth modules wrote to `usage_events` — so
- * `usageHeadroom('email')` reported the tier as almost untouched while
- * verification codes, order confirmations and password resets quietly consumed
- * it. Back-in-stock stops sending when that check says the allowance is gone,
- * which meant it was making its most important decision on a number that
- * excluded most of our email. Every send is counted here, at the single point
- * they all pass through.
- *
- * `platform` is not a registry module and is not meant to be: these are sends
- * the store makes to do its job, not a growth feature anybody enables. It is a
- * bucket in the cost rollup so the total is honest.
- *
- * Best-effort, and deliberately after a successful send: a missing cost record
- * is a reporting problem, while a password reset that failed because the ledger
- * was unreachable is a person locked out of their account.
+/*
+ * COUNTING lives in ONE place: the governed driver (services/email/governor.ts)
+ * reserves capacity and records the cost ledger for every send, including
+ * sign-in codes. It used to be done here, per call site, which double-counted
+ * signup mail and never counted sign-in codes (found 2026-10-01). Call sites
+ * only say WHO the email is for (`meta`: tenantId, category).
  */
-async function recordPlatformEmail(to: string, tenantId?: string): Promise<void> {
-  try {
-    const { recordUsage } = await import('@/lib/growth/ledger');
-    const { DEFAULT_TENANT_ID } = await import('@/lib/tenant-context');
-    await recordUsage({
-      // A merchant store's email is that store's usage (and its customer is
-      // that store's contact), never the original store's.
-      tenantId: tenantId || DEFAULT_TENANT_ID,
-      moduleId: 'platform',
-      unit: 'email',
-      quantity: 1,
-      // Same `contact:` shape the Growth modules use, so these rows are
-      // traceable and removable per person. It does NOT feed a module's
-      // frequency cap — `canSend` filters those by module_id, and a password
-      // reset should not use up somebody's back-in-stock allowance.
-      reference: 'contact:' + String(to || '').trim().toLowerCase(),
-    });
-  } catch (err) {
-    console.error('[email] send not recorded in the cost ledger', (err as Error)?.message || err);
-  }
-}
 
 /**
  * Send an email ON BEHALF OF ONE STORE (a merchant store, or a merchant's
@@ -139,9 +105,10 @@ export async function sendStoreEmail(payload: {
       subject: payload.subject.replace(/[\r\n]+/g, ' '),
       html: payload.html,
       text: payload.text,
+      // A merchant store's email is that store's usage, never the original store's.
+      meta: { tenantId: payload.tenantId },
     });
     if (!result.ok) return { ok: false, error: result.error ?? new Error('Email send failed') };
-    await recordPlatformEmail(payload.to, payload.tenantId);
     return { ok: true, id: result.id };
   } catch (error) {
     return { ok: false, error };
@@ -953,18 +920,17 @@ const plainEmail = (heading: string, paragraphs: string[], cta?: { label: string
     ${footer ? `<p style="margin:0;color:#9ca3af;font-size:12px">${footer}</p>` : ''}
   </div>`;
 
-async function sendPlatformEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
-  const resend = getResend();
-  if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
+/** Mail FROM THE PLATFORM (signup, operator alerts): no store's logo or brand. */
+async function sendPlatformEmail(to: string, subject: string, html: string, category: EmailCategory = 'standard'): Promise<{ ok: boolean; skipped?: boolean; error?: unknown; limited?: 'capacity' | 'signup_share' }> {
+  const driver = await getEmailDriver();
+  if (!driver) return { ok: false, skipped: true, error: 'No email provider configured.' };
   // The validated platform sending address (the one store emails use), named
   // for the platform; a malformed RESEND_FROM cannot break signup mail.
   const address = platformSendingAddress();
   const sender = address ? storeFromHeader(platformBrand(), address) : from();
   try {
-    const { error } = await resend.emails.send({ from: sender, to, replyTo: replyTo(), subject, html });
-    if (error) return { ok: false, error };
-    await recordPlatformEmail(to);  // counts toward the email-allowance headroom
-    return { ok: true };
+    const result = await driver.sendTransactional({ from: sender, to, replyTo: replyTo(), subject, html, meta: { category } });
+    return result.ok ? { ok: true } : { ok: false, error: result.error, limited: result.limited };
   } catch (err) {
     return { ok: false, error: err };
   }
@@ -977,7 +943,7 @@ export async function sendSignupVerifyEmail(opts: { to: string; storeName: strin
     [`You asked to open <strong>${escapeHtml(opts.storeName)}</strong>. Confirm this is your email to create it; you will choose a password next.`],
     { label: 'Confirm and open my store', url: opts.url },
     `We hold the store name for ${opts.holdHours} hours. If you did not ask for this, ignore this email: nothing is created until the link is used.`,
-  ));
+  ), 'signup');
 }
 
 /** Signup with an email that already has an account: point to sign-in (on screen the reply is the same either way). */
@@ -987,7 +953,7 @@ export async function sendSignupExistingAccountEmail(opts: { to: string; signInU
     ['Someone (hopefully you) tried to open a new store with this email. This email already has an account, so no new store was created.'],
     { label: 'Sign in', url: opts.signInUrl },
     'Forgot your password? Use "Forgot password" on the sign-in page. If this was not you, you can ignore this email.',
-  ));
+  ), 'signup');
 }
 
 /** To the operator (SUPPORT_EMAIL) — e.g. the signup circuit breaker tripped. */

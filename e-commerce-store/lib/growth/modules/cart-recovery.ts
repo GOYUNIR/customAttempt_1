@@ -27,11 +27,11 @@
  */
 import { getDb } from '@/lib/db/client';
 import { eq, lt } from '@/lib/db/query';
-import { EmailFactory } from '@/services/email/factory';
+import { EmailFactory, primaryEmailProvider } from '@/services/email/factory';
 import { createKvClient } from '@/lib/server-config';
 import { markEntryEmailSent, isEntryEmailSent } from '@/lib/redis-maintenance';
 import { canSend, withinDailyCap } from '@/lib/growth/consent';
-import { recordUsage, usageHeadroom } from '@/lib/growth/ledger';
+import { usageHeadroom } from '@/lib/growth/ledger';
 import { headroomMessage } from '@/lib/growth/units';
 import { moduleById, assertLaunchable } from '@/lib/growth/registry';
 import { isHeldOut } from '@/lib/growth/holdout';
@@ -136,7 +136,7 @@ export async function recoverAbandonedCarts(tenantId: string): Promise<RecoveryO
   // failed-payment notice is worth paying overage for; a marketing reminder is
   // not, and quietly spending money on it is exactly what the budget rule
   // exists to prevent.
-  const headroom = await usageHeadroom('email');
+  const headroom = await usageHeadroom('email', (await primaryEmailProvider()) || undefined);
   if (headroom) {
     const message = headroomMessage(headroom);
     if (message) console.warn('[cart-recovery] ' + message);
@@ -205,6 +205,9 @@ export async function recoverAbandonedCarts(tenantId: string): Promise<RecoveryO
         text:
           'Still thinking it over?\n\nYou have ' + cart.itemCount + ' ' + itemWord +
           ' waiting in your cart: ' + site + '/catalog\n',
+        // Counted once, by the governed driver, only when sent, so a failure
+        // does not consume the customer's frequency cap (it counts the reference).
+        meta: { tenantId, moduleId: growthModule.id, reference: 'contact:' + cart.email },
       });
       if (!result?.ok) {
         outcome.skipped.push({ cartId: cart.cartId, reason: 'send_failed' });
@@ -215,15 +218,6 @@ export async function recoverAbandonedCarts(tenantId: string): Promise<RecoveryO
       continue;
     }
 
-    // Recorded after a successful send, so a failure does not consume the
-    // customer's frequency cap. The reference is what that cap counts.
-    await recordUsage({
-      tenantId,
-      moduleId: growthModule.id,
-      unit: 'email',
-      quantity: 1,
-      reference: 'contact:' + cart.email,
-    });
     if (kv) {
       try {
         await markEntryEmailSent(kv, dedupeKey);
