@@ -116,15 +116,45 @@ per month. Effectively free at our scale.
 - **Removal:** removing a domain deletes the Cloudflare hostname, which stops
   its billing.
 
-### Owner setup (one time, about 30 minutes)
-1. Enable Cloudflare for SaaS on the zone.
-2. Create the fallback origin (`stores.<root>`).
-3. Add a Worker route for custom hostnames.
-4. Create an API token scoped to SSL and Certificates + Custom Hostnames.
+### Owner setup to switch custom domains on (one time, about 30 minutes)
+Cloudflare charges $0.10 per hostname per month after the first 100, on every
+plan including Free (Cloudflare docs: cloudflare-for-saas/plans).
+1. Cloudflare → goyunir.com → SSL/TLS → **Custom Hostnames** → enable
+   Cloudflare for SaaS.
+2. **DNS:** add a proxied A record `stores` → `192.0.2.1`, and set
+   `stores.goyunir.com` as the **Fallback Origin** on that page.
+3. **Workers Routes:** add the route `*/*` → Worker `customattempt-1`, so
+   custom hostnames reach the app.
+4. **API token:** My Profile → API Tokens → Create. Permissions:
+   Zone → SSL and Certificates → Edit; Zone → Zone → Read. Scope: the
+   goyunir.com zone.
+5. **Worker secrets:** add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID`
+   (Overview → Zone ID). `CUSTOM_DOMAIN_CNAME_TARGET` is optional; the
+   default is `stores.<root>`.
+6. Then the end-to-end proof runs with a real domain: connect → records →
+   live → main address → disconnect.
 
-## Decisions for the owner
-1. **Custom domains:** on every plan (recommended), or Growth and Scale only?
-2. **Build order:** subdomain first (recommended: smaller, no infrastructure),
-   then custom domains.
-3. **www.goyunir.com:** it still mirrors GOYUNIR's store, as shop. did.
-   Redirect it to goyunir.goyunir.com too, or keep it?
+### As built (differences from the plan above)
+- **Ownership is proven twice:** the CNAME (Cloudflare) AND a TXT record
+  `_store-verify.<host>` holding a per-claim token. A domain serves only
+  when both hold, so a dangling CNAME cannot be claimed by another store.
+- **Caps are plan data** (`plans.custom_domain_limit`): Free 1, Growth 3,
+  Scale unlimited.
+  - On a plan change and on every listing, domains above the cap are
+    released, newest first, keeping the main address.
+  - Cloudflare's hostname is deleted first, so nothing dangles.
+- **Primary domain:**
+  - every other address of the store 301s to it (same path), and the
+    canonical tag follows;
+  - GOYUNIR's www. mirror keeps serving, with a canonical tag to its primary
+    (`PLATFORM_STOREFRONT_HOST`).
+- **HTTPS only** on every host (middleware).
+- **The old admin-only domain panel is retired** (its route answers 410).
+
+## Owner decisions (answered 2026-09-30)
+1. **Custom domains:** every plan, with caps as above and verified payments
+   required.
+2. **Order:** subdomain first, then custom domains. Both built.
+3. **www.goyunir.com:** keeps serving GOYUNIR's store, canonical to the
+   primary address. When custom domains are live, dogfood them by
+   connecting GOYUNIR's own domain as primary.
