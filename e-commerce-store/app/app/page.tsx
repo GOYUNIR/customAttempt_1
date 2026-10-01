@@ -94,6 +94,32 @@ export default function MerchantDashboard() {
   const [domainsView, setDomainsView] = useState<DomainsView | null>(null);
   const [domainInput, setDomainInput] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
+  const [exp, setExp] = useState({ dataset: 'orders', format: 'csv', busy: false, done: 0 });
+  // Pages are fetched one by one and joined here: a big store never times a request out.
+  const runExport = async () => {
+    setExp((x) => ({ ...x, busy: true, done: 0 }));
+    const parts: string[] = []; const rows: unknown[] = [];
+    try {
+      for (let page = 0; page < 100_000; page++) {
+        const r = await api<{ more: boolean; count: number; csv?: string; rows?: unknown[] }>('/api/merchant/export?dataset=' + exp.dataset + '&format=' + exp.format + '&page=' + page);
+        if (!r.ok) { setNotice(r.body.error || 'The export stopped. Try again.'); return; }
+        if (exp.format === 'csv') parts.push(r.body.csv || ''); else rows.push(...(r.body.rows || []));
+        setExp((x) => ({ ...x, done: x.done + (r.body.count || 0) }));
+        if (!r.body.more) break;
+      }
+      const day = new Date().toISOString().slice(0, 10);
+      const blob = exp.format === 'csv'
+        ? new Blob(['﻿' + parts.join('')], { type: 'text/csv;charset=utf-8' })
+        : new Blob([JSON.stringify({ store: store?.store.name, dataset: exp.dataset, exportedAt: new Date().toISOString(), rows }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (store?.store.slug || 'store') + '-' + exp.dataset + '-' + day + '.' + exp.format;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    } finally {
+      setExp((x) => ({ ...x, busy: false }));
+    }
+  };
   const [openOrder, setOpenOrder] = useState<OrderDetail | null>(null);
   const [ship, setShip] = useState({ carrier: 'usps', carrierName: '', trackingNumber: '' });
   const [shipBusy, setShipBusy] = useState(false);
@@ -705,6 +731,22 @@ export default function MerchantDashboard() {
                 <button style={btn} disabled={domainBusy || !domainInput.trim()} onClick={async () => { if (await domainCall('POST', { hostname: domainInput })) setDomainInput(''); }}>{domainBusy ? 'Connecting…' : 'Connect domain'}</button>
               </div>
             )}
+          </section>
+        )}
+
+        {tab === 'settings' && store.you.role === 'owner' && (
+          <section style={card} aria-label="Export your data">
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Export your data</div>
+            <p style={{ color: C.muted, fontSize: 13, margin: '0 0 10px' }}>Your products, orders (one row per item) or customers (with whether they agreed to marketing). Yours to keep or move.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+              <select aria-label="What to export" value={exp.dataset} onChange={(e) => setExp({ ...exp, dataset: e.target.value })} style={input}>
+                <option value="orders">Orders</option><option value="customers">Customers</option><option value="products">Products</option>
+              </select>
+              <select aria-label="File type" value={exp.format} onChange={(e) => setExp({ ...exp, format: e.target.value })} style={input}>
+                <option value="csv">CSV (spreadsheets)</option><option value="json">JSON</option>
+              </select>
+            </div>
+            <button onClick={runExport} disabled={exp.busy} style={{ ...ghost, marginTop: 10 }}>{exp.busy ? 'Exporting… ' + exp.done + ' rows' : 'Download'}</button>
           </section>
         )}
 
