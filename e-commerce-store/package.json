@@ -13,6 +13,7 @@
     "deploy:cf": "npm run build:cloudflare && npx wrangler deploy",
     "migrate:backfill": "tsx scripts/migrate-redis-to-supabase.ts",
     "check:production-readiness": "tsx scripts/production-readiness-check.ts",
+    "release:gate": "tsx scripts/release-gate.ts",
     "simulate:concurrency": "tsx scripts/simulate-concurrency.ts",
     "verify:idempotency": "tsx scripts/verify-idempotency-replay.ts",
     "verify:db-timeouts": "tsx scripts/verify-db-timeouts.ts",

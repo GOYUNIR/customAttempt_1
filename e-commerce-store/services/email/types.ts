@@ -64,6 +64,8 @@ export interface CodeEmailOptions {
   /** Sender logo image URL shown in the masthead (e.g. the store logo). */
   logoUrl?: string;
   meta?: EmailMeta;
+  /** Sender ("Name <address>"); the deployment default when absent. */
+  from?: string;
 }
 
 /** Unified result shape every caller can switch on. */

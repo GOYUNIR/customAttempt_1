@@ -16,6 +16,7 @@ import { MapFactory } from '@/services/maps/factory';
 import { headers } from 'next/headers';
 import { storefrontHostFor } from '@/lib/edge-router';
 import { isPlatformSurface, hidesStorefrontChrome } from '@/lib/platform-surface';
+import { platformName, platformDescription } from '@/lib/platform-identity';
 import { storefrontTenantFromHeaders, withNeutralHero, type StorefrontTenant } from '@/lib/storefront-tenant';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
@@ -126,6 +127,23 @@ async function canonicalFor(who: StorefrontTenant, fallbackOrigin: string): Prom
 }
 
 export async function generateMetadata(): Promise<Metadata> {
+  // Platform pages (marketing root, sign-in portals, invites, legal) carry the
+  // PLATFORM's name from config, never the original store's branding, share
+  // card or tagline (they used to: "by our hands. to your hands.").
+  // Same definition as the chrome below (lib/platform-surface): the marketing
+  // site and the staff portals.
+  if (hidesStorefrontChrome((await headers()).get('x-pathname') || '')) {
+    const name = platformName();
+    const description = platformDescription();
+    const requestBase = normalizeSiteBase((await getRequestSiteUrl()) || '');
+    return {
+      metadataBase: new URL(requestBase),
+      title: { default: name, template: `%s | ${name}` },
+      ...(description ? { description } : {}),
+      openGraph: { title: name, siteName: name, ...(description ? { description } : {}), type: 'website' },
+      twitter: { card: 'summary', title: name, ...(description ? { description } : {}) },
+    };
+  }
   const who = await storefrontTenantFromHeaders();
   if (!(who.kind === 'store' && who.isDefault)) {
     // Another store (or none): its own name on its own address. The site URL

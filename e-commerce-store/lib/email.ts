@@ -4,6 +4,7 @@ import { normalizeSiteBase } from '@/lib/url-utils';
 import { EmailFactory } from '@/services/email';
 import type { EmailDriver, EmailMeta, EmailCategory } from '@/services/email';
 import { storeFromHeader, sendingAddressOf } from '@/lib/tenant-email-render';
+import { platformName } from '@/lib/platform-identity';
 
 
 export { normalizeSiteBase };
@@ -802,11 +803,14 @@ export async function sendAdminVerificationEmail(opts: { to: string; code: strin
   // The code lives in the SUBJECT so it shows in the phone's push-notification
   // preview (and the mailbox list) — the operator can read and type it without
   // opening the email. iOS Mail + Android Gmail also use it for OTP autofill.
+  // From the PLATFORM, by name, with no store's logo (it used to carry the
+  // original store's logo and the raw RESEND_FROM sender).
   return driver.send2FA(opts.to, opts.code, {
-    subject: `${getPlatformName() || emailBrandName()} — Your sign-in code: ${opts.code}`,
+    subject: `${platformBrand()} — Your sign-in code: ${opts.code}`,
     headline: 'Your sign-in code',
     body: 'Someone is signing in to your account with your password. Enter this one-time code to finish. If it was not you, ignore this email: your password alone is not enough to get in.',
-    logoUrl: emailBrandLogo(),
+    brandName: platformBrand(),
+    from: platformSender(),
   });
 }
 
@@ -872,7 +876,8 @@ export async function sendStaffInviteEmail(opts: {
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
   const storeName = String(opts.storeName || '').replace(/\s+/g, ' ').trim();
-  const brandText = storeName || emailBrandName();
+  // No store: a PLATFORM invite (sales, admin), so the platform's name.
+  const brandText = storeName || platformBrand();
   const brand = escapeHtml(brandText);
   const subject = `You have been invited to join ${brandText}`;
   try {
@@ -900,15 +905,16 @@ export async function sendStaffInviteEmail(opts: {
       if (!address) return { ok: false, skipped: true, error: 'No platform sending address configured.' };
       return await sendStoreEmail({ tenantId: opts.tenantId, from: storeFromHeader(storeName, address), to: opts.to, replyTo: opts.invitedBy, subject, html });
     }
-    const { error } = await resend.emails.send({ from: from(), to: opts.to, replyTo: replyTo(), subject, html });
-    if (error) return { ok: false, error };
-    return { ok: true };
+    return await sendPlatformEmail(opts.to, subject, html);
   } catch (error) {
     return { ok: false, error };
   }
 }
 
-const platformBrand = () => getPlatformName() || emailBrandName();
+// The PLATFORM's name (config), never a store's: lib/platform-identity.ts.
+const platformBrand = () => platformName();
+/** "<platform name>" <validated platform address>; a malformed RESEND_FROM cannot break it. */
+const platformSender = () => { const a = platformSendingAddress(); return a ? storeFromHeader(platformBrand(), a) : from(); };
 const plainEmail = (heading: string, paragraphs: string[], cta?: { label: string; url: string }, footer?: string) => `
   <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
     <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${escapeHtml(platformBrand()).toUpperCase()}</p>
@@ -927,7 +933,7 @@ async function sendPlatformEmail(to: string, subject: string, html: string, cate
   // The validated platform sending address (the one store emails use), named
   // for the platform; a malformed RESEND_FROM cannot break signup mail.
   const address = platformSendingAddress();
-  const sender = address ? storeFromHeader(platformBrand(), address) : from();
+  const sender = platformSender();
   try {
     const result = await driver.sendTransactional({ from: sender, to, replyTo: replyTo(), subject, html, meta: { category } });
     return result.ok ? { ok: true } : { ok: false, error: result.error, limited: result.limited };

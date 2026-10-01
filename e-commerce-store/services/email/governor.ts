@@ -138,7 +138,7 @@ export class GovernedEmailDriver implements EmailDriver {
   async send2FA(to: string, code: string, options?: CodeEmailOptions): Promise<EmailSendResult> {
     return this.sendTransactional({
       to,
-      from: '',
+      from: options?.from || '',
       subject: options?.subject || `Your verification code: ${code}`,
       html: buildCodeEmailHtml({
         code, headline: options?.headline, body: options?.body, ctaLabel: options?.ctaLabel, ctaUrl: options?.ctaUrl,
