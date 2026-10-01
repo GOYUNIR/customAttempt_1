@@ -1,7 +1,15 @@
-# Store addresses: self-serve subdomain and custom domains (DESIGN, not built)
+# Store addresses: self-serve subdomain and custom domains
 
-Status: proposed 2026-09-30, awaiting the owner's decisions (see the end).
-Nothing here is built yet except what "Already in place" says.
+**Status (2026-09-30): BOTH BUILT.**
+- §A self-serve address: live and proven (scripts/verify-store-address.ts).
+- §B custom domains: built and proven up to Cloudflare (scripts/verify-custom-domains.ts). It switches on when the owner completes "Owner setup" below; until then, connecting a domain answers "not switched on yet".
+
+**Owner decisions (2026-09-30):**
+- Custom domains on every plan, capped as plan data (Free 1, Growth 3, Scale unlimited).
+- A domain activates only with payments connected and verified.
+- Subdomain first.
+- www.goyunir.com keeps serving GOYUNIR, with a canonical tag to the primary address.
+- Ownership: our own TXT proof is required in addition to Cloudflare's check (dangling-CNAME takeover protection).
 
 ## Already in place
 - Every store lives at `<slug>.<root>`: `tenants.slug`, wildcard route,
