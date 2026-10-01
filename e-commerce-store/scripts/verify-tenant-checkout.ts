@@ -66,6 +66,13 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const acct = route.stripeAccount;
   const on = { stripeAccount: acct };
 
+  // Each run sells one unit; earlier runs leave the fixture empty (no Buy
+  // button). Restock it through the stock ledger, as a merchant would.
+  if ((await stockNow(getDb, eq, resolveVariantId)) === 0) {
+    const { adjustStock } = await import('../lib/stock');
+    const vid = await resolveVariantId(TENANT, PRODUCT_ID, SIZE);
+    if (vid) await adjustStock(TENANT, vid, 3, 'restock', 'verify-tenant-checkout', 'proof fixture restock');
+  }
   const stockBefore = await stockNow(getDb, eq, resolveVariantId);
   const volumeBefore = await billingMonthVolume(TENANT);
   const expectedFee = (await platformFeeForCharge(TENANT, 1900)).feeCents;
