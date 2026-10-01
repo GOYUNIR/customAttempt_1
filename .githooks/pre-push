@@ -1,0 +1,22 @@
+#!/bin/sh
+# Blocks any push (a push to main deploys production) unless the typecheck is
+# clean and the full test suite reports zero failures. Installed with:
+#   git config core.hooksPath .githooks
+# Bypass only in an emergency, knowingly: git push --no-verify
+set -u
+cd "$(git rev-parse --show-toplevel)/e-commerce-store" || exit 1
+echo "[pre-push] typecheck..."
+if ! npx tsc --noEmit -p . > /tmp/prepush-tsc.txt 2>&1; then
+  cat /tmp/prepush-tsc.txt | head -30
+  echo "[pre-push] BLOCKED: typecheck failed."
+  exit 1
+fi
+echo "[pre-push] tests..."
+npm test > /tmp/prepush-test.txt 2>&1
+if ! grep -q "^ℹ fail 0$" /tmp/prepush-test.txt; then
+  grep -E "^ℹ (pass|fail)|^✖" /tmp/prepush-test.txt | head -30
+  echo "[pre-push] BLOCKED: tests failed (or did not report)."
+  exit 1
+fi
+grep -E "^ℹ (pass|fail)" /tmp/prepush-test.txt
+echo "[pre-push] OK"
