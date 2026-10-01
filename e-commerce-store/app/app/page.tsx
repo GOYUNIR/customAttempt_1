@@ -25,7 +25,20 @@ type StockMove = { reason: string; change: number; after: number; shortfall: num
 type Billing = { planId: string; planName: string; status: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; graceUntil: string | null; hasBillingAccount: boolean; feeLine: string; upgrade: { planId: string; name: string; monthlyCents: number } | null };
 type AddressView = { current: { slug: string; url: string }; changesLeft: number; holdDays: number; candidate?: { slug: string; url: string; available: boolean; reason: string } };
 type DomainsView = { plan: string; limit: number | null; used: number; domains: { hostname: string; status: string; ssl: string; ownershipVerified: boolean; primary: boolean; checkedAt: string | null; records: { type: string; name: string; value: string; why: string }[] }[] };
-type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
+type Stage = 'to_ship' | 'shipped' | 'refunded' | 'unpaid';
+type Order = { ref: string; status: string; paymentStatus: string; stage: Stage; totalCents: number; refundedCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; shippedAt: string | null; customerEmail: string | null; item: string | null };
+type OrderDetail = {
+  ref: string; createdAt: string; paymentStatus: string; stage: Stage; mode: string | null;
+  customer: { email: string | null; name: string | null; shippingAddress: string | null };
+  lines: { productName: string; size: string; quantity: number; unitCents: number; lineCents: number }[];
+  totals: { currency: string; subtotalCents: number; discountCents: number; taxCents: number; totalCents: number; platformFeeCents: number; refundedCents: number };
+  fulfilment: { carrier: string; trackingNumber: string; trackingUrl: string | null; shippedAt: string; shippedBy: string; customerEmailedAt: string | null } | null;
+  stripePaymentUrl: string | null;
+  timeline: { at: string; what: string }[];
+};
+// The carriers the server accepts (lib/fulfilment-rules.ts); "Other" asks for a name.
+const CARRIER_OPTIONS = [['usps', 'USPS'], ['ups', 'UPS'], ['fedex', 'FedEx'], ['dhl', 'DHL'], ['other', 'Other']] as const;
+const STAGE_LABEL: Record<Stage, string> = { to_ship: 'To ship', shipped: 'Shipped', refunded: 'Refunded', unpaid: 'Unpaid' };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
 const COUNTRIES = ['US', 'CA', 'GB', 'IE', 'AU', 'NZ', 'DE', 'FR', 'NL', 'BE', 'LU', 'ES', 'IT', 'PT', 'AT', 'CH', 'SE', 'NO', 'DK', 'FI', 'PL', 'CZ', 'GR', 'EE', 'LV', 'LT', 'SK', 'SI', 'HU', 'RO', 'BG', 'HR', 'CY', 'MT', 'JP', 'SG', 'HK', 'MY', 'TH', 'MX', 'BR', 'AE'];
@@ -81,6 +94,25 @@ export default function MerchantDashboard() {
   const [domainsView, setDomainsView] = useState<DomainsView | null>(null);
   const [domainInput, setDomainInput] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
+  const [openOrder, setOpenOrder] = useState<OrderDetail | null>(null);
+  const [ship, setShip] = useState({ carrier: 'usps', carrierName: '', trackingNumber: '' });
+  const [shipBusy, setShipBusy] = useState(false);
+
+  const showOrder = async (ref: string) => {
+    const r = await api<{ order: OrderDetail }>('/api/merchant/orders?ref=' + encodeURIComponent(ref));
+    if (r.ok) { setOpenOrder(r.body.order); setShip({ carrier: 'usps', carrierName: '', trackingNumber: '' }); } else setNotice(r.body.error || 'That order could not be opened.');
+  };
+  const markShipped = async (emailOnly = false) => {
+    if (!openOrder) return;
+    setShipBusy(true);
+    const r = await api<{ result: string; email: string; order: OrderDetail }>('/api/merchant/orders/ship', { method: 'POST', body: JSON.stringify(emailOnly ? { ref: openOrder.ref, emailOnly: true } : { ref: openOrder.ref, ...ship }) });
+    setShipBusy(false);
+    if (!r.ok) { setNotice(r.body.error || 'The order could not be marked shipped.'); return; }
+    setOpenOrder(r.body.order);
+    setNotice(/^sent/.test(r.body.email) ? 'Marked shipped. The customer has been emailed the tracking number.' : 'Marked shipped. The customer email did not go out yet; press the button again later to retry.');
+    const o = await api<{ orders: Order[] }>('/api/merchant/orders');
+    if (o.ok) setOrders(o.body.orders || []);
+  };
 
   const load = useCallback(async () => {
     const s = await api<Store>('/api/merchant/store');
@@ -397,7 +429,7 @@ export default function MerchantDashboard() {
 
         <nav style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const, 'billing' as const] : [])] as const).map((t) => (
-            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); }} aria-current={tab === t ? 'page' : undefined} style={tab === t ? tabOn : tabOff}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
+            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); setOpenOrder(null); }} aria-current={tab === t ? 'page' : undefined} style={tab === t ? tabOn : tabOff}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
           ))}
         </nav>
 
@@ -703,22 +735,82 @@ export default function MerchantDashboard() {
           </section>
         )}
 
-        {tab === 'orders' && (
+        {tab === 'orders' && !openOrder && (
           <section style={card} aria-label="Orders">
             <div style={{ fontWeight: 700, marginBottom: 10 }}>Orders</div>
             {orders.length === 0 && <p style={{ color: C.muted }}>No orders yet.</p>}
             {orders.map((o) => (
-              <div key={o.ref} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <button key={o.ref} onClick={() => showOrder(o.ref)} aria-label={'Open order ' + o.ref}
+                style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', borderTop: `1px solid ${C.line}`, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{o.ref} <span style={{ color: C.muted, fontWeight: 400, fontSize: 13 }}>{o.mode || ''}</span></div>
+                  <div style={{ fontWeight: 600 }}>{o.ref} <span style={{ color: o.stage === 'to_ship' ? C.warn : C.muted, fontWeight: 600, fontSize: 13 }}>{STAGE_LABEL[o.stage]}</span></div>
                   <div style={{ color: C.muted, fontSize: 13 }}>{o.item || ''}{o.customerEmail ? ' · ' + o.customerEmail : ''}</div>
                   <div style={{ color: C.muted, fontSize: 12 }}>{new Date(o.createdAt).toLocaleString()}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontWeight: 700 }}>{money(o.totalCents, o.currency)}</div>
-                  <div style={{ color: C.muted, fontSize: 12 }}>{o.paymentStatus}{o.platformFeeCents ? ' · fee ' + money(o.platformFeeCents, o.currency) : ''}</div>
+                  {o.refundedCents > 0 && <div style={{ color: C.muted, fontSize: 12 }}>{money(o.refundedCents, o.currency)} refunded</div>}
                 </div>
+              </button>
+            ))}
+          </section>
+        )}
+
+        {tab === 'orders' && openOrder && (
+          <section style={card} aria-label={'Order ' + openOrder.ref}>
+            <button onClick={() => setOpenOrder(null)} style={{ ...ghost, minHeight: 36, padding: '0 12px', fontSize: 14, marginBottom: 12 }}>← All orders</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{openOrder.ref}</div>
+              <div style={{ color: openOrder.stage === 'to_ship' ? C.warn : openOrder.stage === 'shipped' ? C.good : C.muted, fontWeight: 700 }}>{STAGE_LABEL[openOrder.stage]}</div>
+            </div>
+            <div style={{ color: C.muted, fontSize: 13 }}>{new Date(openOrder.createdAt).toLocaleString()}</div>
+
+            <div style={{ ...label, marginTop: 16 }}>Customer</div>
+            <div>{openOrder.customer.name ? openOrder.customer.name + ' · ' : ''}{openOrder.customer.email || 'No email on file'}</div>
+            <div style={{ color: openOrder.customer.shippingAddress ? C.text : C.muted, whiteSpace: 'pre-wrap' }}>{openOrder.customer.shippingAddress || 'No shipping address recorded for this order (see the payment in Stripe).'}</div>
+
+            <div style={{ ...label, marginTop: 16 }}>Items</div>
+            {openOrder.lines.map((l, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span>{l.productName}{l.size ? ' (' + l.size + ')' : ''}{l.quantity > 1 ? ' × ' + l.quantity : ''}</span>
+                <span>{money(l.lineCents, openOrder.totals.currency)}</span>
               </div>
+            ))}
+            <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 8, paddingTop: 8, display: 'grid', gap: 2, fontSize: 14 }}>
+              {openOrder.totals.discountCents > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: C.muted }}>Discount</span><span>−{money(openOrder.totals.discountCents, openOrder.totals.currency)}</span></div>}
+              {openOrder.totals.taxCents > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: C.muted }}>Tax</span><span>{money(openOrder.totals.taxCents, openOrder.totals.currency)}</span></div>}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}><span>Total paid</span><span>{money(openOrder.totals.totalCents, openOrder.totals.currency)}</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: C.muted }}>Our fee</span><span>{money(openOrder.totals.platformFeeCents, openOrder.totals.currency)}</span></div>
+              {openOrder.totals.refundedCents > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: C.muted }}>Refunded</span><span>{money(openOrder.totals.refundedCents, openOrder.totals.currency)}</span></div>}
+            </div>
+            <p style={{ color: C.muted, fontSize: 13, margin: '8px 0 0' }}>
+              Payment: {openOrder.paymentStatus.replace('_', ' ')}. Refunds are made in your Stripe account{openOrder.stripePaymentUrl ? <>: <a href={openOrder.stripePaymentUrl} target="_blank" rel="noreferrer" style={{ color: C.text }}>open this payment in Stripe</a></> : ''}. They show here once Stripe reports them.
+            </p>
+
+            <div style={{ ...label, marginTop: 16 }}>Shipping</div>
+            {openOrder.fulfilment ? (
+              <div>
+                Shipped {new Date(openOrder.fulfilment.shippedAt).toLocaleDateString()} with {openOrder.fulfilment.carrier}:{' '}
+                {openOrder.fulfilment.trackingUrl ? <a href={openOrder.fulfilment.trackingUrl} target="_blank" rel="noreferrer" style={{ color: C.text }}>{openOrder.fulfilment.trackingNumber}</a> : openOrder.fulfilment.trackingNumber}
+                <div style={{ color: C.muted, fontSize: 13 }}>{openOrder.fulfilment.customerEmailedAt ? 'The customer was emailed the tracking number.' : 'The customer has not been emailed yet.'}</div>
+                {!openOrder.fulfilment.customerEmailedAt && <button onClick={() => markShipped(true)} disabled={shipBusy} style={{ ...ghost, marginTop: 8 }}>{shipBusy ? 'Sending…' : 'Email the customer now'}</button>}
+              </div>
+            ) : openOrder.stage === 'to_ship' ? (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <select aria-label="Carrier" value={ship.carrier} onChange={(e) => setShip({ ...ship, carrier: e.target.value })} style={input}>
+                  {CARRIER_OPTIONS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+                {ship.carrier === 'other' && <input aria-label="Carrier name" placeholder="Carrier name" value={ship.carrierName} onChange={(e) => setShip({ ...ship, carrierName: e.target.value })} style={input} />}
+                <input aria-label="Tracking number" placeholder="Tracking number" value={ship.trackingNumber} onChange={(e) => setShip({ ...ship, trackingNumber: e.target.value })} style={input} />
+                <button onClick={() => markShipped()} disabled={shipBusy || !ship.trackingNumber.trim()} style={btn}>{shipBusy ? 'Saving…' : 'Mark as shipped and email the customer'}</button>
+              </div>
+            ) : (
+              <div style={{ color: C.muted }}>{openOrder.stage === 'refunded' ? 'Refunded, nothing to ship.' : 'Not paid, nothing to ship.'}</div>
+            )}
+
+            <div style={{ ...label, marginTop: 16 }}>Timeline</div>
+            {openOrder.timeline.map((t, i) => (
+              <div key={i} style={{ fontSize: 14 }}><span style={{ color: C.muted }}>{new Date(t.at).toLocaleString()}</span> · {t.what}</div>
             ))}
           </section>
         )}

@@ -74,6 +74,8 @@ export type RecordOrderInput = {
   currency?: string | null;
   /** What the platform took on this sale (Connect application fee), 00032. */
   platformFeeCents?: number | null;
+  /** The buyer's shipping address as entered (one line), for fulfilment. */
+  shippingAddress?: string | null;
 } & (
   // Single-line callers (direct checkout, the raffle draw, the webhook's
   // non-cart branch) sell exactly one thing and keep the original shape.
@@ -132,7 +134,14 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
       ? normalizedMode
       : null;
 
-    const orderRows = (await db.insert<{ id: string }>(
+    // An order that already exists is LEFT ALONE. A webhook retry (Stripe
+    // retries for days) used to upsert it again, resetting status and payment
+    // status: an order already shipped or refunded went back to "confirmed,
+    // paid". Only its line items are rewritten below (same values).
+    const existing = ((await db.select<{ id: string }>('orders', {
+      where: { tenant_id: eq(input.tenantId), order_ref: eq(orderRef) }, select: ['id'], limit: 1,
+    })) as Array<{ id: string }>)[0];
+    const orderRows = existing ? [existing] : (await db.insert<{ id: string }>(
       'orders',
       {
         tenant_id: input.tenantId,
@@ -157,6 +166,10 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
           ...(lines.length > 1
             ? { lines: lines.map((l) => ({ productName: l.productName, size: l.size, quantity: l.quantity, amountCents: l.amountCents })) }
             : {}),
+          // Where to send it. Taken at checkout (or with the raffle entry) and
+          // until now left only in Stripe's session metadata, so a merchant
+          // could not ship from the dashboard (found 2026-10-01).
+          ...(input.shippingAddress ? { shippingAddress: String(input.shippingAddress).slice(0, 480) } : {}),
         },
       },
       // A retried webhook delivery reuses the same order_ref (unique per
@@ -192,8 +205,7 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
     }));
 
     // Replace the line items rather than appending, so a webhook RETRY does not
-    // double the order's contents while the upsert above correctly leaves the
-    // order itself alone.
+    // double the order's contents (the order row itself is left alone above).
     await db.remove('order_line_items', { where: { tenant_id: eq(input.tenantId), order_id: eq(orderId) } });
     await db.insert('order_line_items', resolved.map((line) => ({
       tenant_id: input.tenantId,

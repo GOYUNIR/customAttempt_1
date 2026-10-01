@@ -26,7 +26,7 @@ export const STORE_EMAIL_CALLS = 7;
 
 export type { StoreIdentity, StoreEmail } from '@/lib/tenant-email-render';
 import { EMAIL_RE, type StoreIdentity, type StoreEmail } from '@/lib/tenant-email-render';
-export { esc, money, renderOrderConfirmed, renderEntryReceived, renderEntryCharged } from '@/lib/tenant-email-render';
+export { esc, money, renderOrderConfirmed, renderOrderShipped, renderEntryReceived, renderEntryCharged } from '@/lib/tenant-email-render';
 
 const cache = new Map<string, { at: number; id: StoreIdentity }>();
 

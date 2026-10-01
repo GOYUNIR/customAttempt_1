@@ -66,6 +66,13 @@ export async function resolveStripeClient(): Promise<Stripe | null> {
   return null;
 }
 
+/** Is the platform's Stripe key a TEST key? (Merchant links to the Stripe Dashboard need /test/.) */
+export async function stripeIsTestMode(): Promise<boolean> {
+  const settings = await getPlatformSettings().catch(() => null);
+  const key = settings?.payment_provider === 'stripe' && settings.payment_api_key ? settings.payment_api_key : process.env.STRIPE_SECRET_KEY || '';
+  return /^(sk|rk)_test_/.test(String(key));
+}
+
 /** Stripe webhook signing secret (wizard → env fallback). */
 export async function resolvePaymentWebhookSecret(): Promise<string> {
   const driver = await PaymentFactory.getDriver();

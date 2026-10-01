@@ -153,13 +153,16 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
   const orderRef = String(session.metadata?.orderRef || '');
   let order: any = null;
   for (let i = 0; i < 30 && !order; i++) {
-    order = ((await getDb().select('orders', { where: { tenant_id: eq(TENANT), order_ref: eq(orderRef) }, select: ['id', 'order_ref', 'total_cents', 'currency', 'platform_fee_cents', 'payment_status', 'stripe_payment_intent_id', 'checkout_mode'], limit: 1 })) as any[])[0] || null;
+    order = ((await getDb().select('orders', { where: { tenant_id: eq(TENANT), order_ref: eq(orderRef) }, select: ['id', 'order_ref', 'total_cents', 'currency', 'platform_fee_cents', 'payment_status', 'stripe_payment_intent_id', 'checkout_mode', 'metadata'], limit: 1 })) as any[])[0] || null;
     if (!order) await sleep(2000);
   }
-  check(Boolean(order), 'order ' + orderRef + ' written for this store: ' + JSON.stringify(order));
+  check(Boolean(order), 'order ' + orderRef + ' written for this store: ' + JSON.stringify(order && { ...order, metadata: undefined }));
   if (order) {
     check(order.total_cents === 1900 && order.platform_fee_cents === expectedFee && order.currency === String(session.currency) && order.stripe_payment_intent_id === pi.id,
       'order total 1900, platform_fee_cents ' + order.platform_fee_cents + ', currency ' + order.currency + ', PaymentIntent matches');
+    // Found 2026-10-01: the address lived only in Stripe's session metadata.
+    check(Boolean(session.metadata?.address) && order.metadata?.shippingAddress === String(session.metadata.address),
+      'the shipping address is on the order, so the merchant can ship from the dashboard: ' + String(order.metadata?.shippingAddress || '(missing)').slice(0, 60));
   }
   const billing = (await getDb().select('tenant_billing_charges', { where: { payment_intent_id: eq(pi.id) } }).catch(async () =>
     getDb().select('tenant_billing_charges', { where: { stripe_payment_intent_id: eq(pi.id) } }))) as any[];
@@ -224,6 +227,13 @@ async function stockNow(getDb: any, eq: any, resolveVariantId: any): Promise<num
     let volumeRefunded = await billingMonthVolume(TENANT);
     for (let i = 0; i < 15 && volumeRefunded !== volumeBefore; i++) { await sleep(2000); volumeRefunded = await billingMonthVolume(TENANT); }
     check(volumeRefunded === volumeBefore, 'month volume back to ' + volumeRefunded + ' (was ' + volumeBefore + ')');
+    // The ORDER shows the refund too (00043): it used to stay "paid".
+    let ro: any = null;
+    for (let i = 0; i < 15 && ro?.payment_status !== 'refunded'; i++) {
+      ro = ((await getDb().select('orders', { where: { tenant_id: eq(TENANT), order_ref: eq(orderRef) }, select: ['payment_status', 'refunded_cents', 'refunded_at'], limit: 1 })) as any[])[0];
+      if (ro?.payment_status !== 'refunded') await sleep(2000);
+    }
+    check(ro?.payment_status === 'refunded' && Number(ro.refunded_cents) === 1900 && Boolean(ro.refunded_at), 'the order now says refunded, 1900, with when: ' + JSON.stringify(ro));
   }
 
   console.log('\n' + (failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'));

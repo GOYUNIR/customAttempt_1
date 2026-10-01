@@ -88,3 +88,21 @@ export function renderEntryCharged(store: StoreIdentity, c: { kind: 'raffle' | '
     text: store.name + '\n\n' + line + textHelp(store),
   };
 }
+
+/** The order is on its way (fulfilment v1: the whole order, once). */
+export function renderOrderShipped(store: StoreIdentity, s: {
+  orderRef: string; carrier: string; trackingNumber: string; trackingUrl: string | null;
+  lines: Array<{ productName: string; size: string; quantity: number }>;
+}): StoreEmail {
+  const items = s.lines.map((l) => esc(l.productName) + (l.size ? ' (' + esc(l.size) + ')' : '') + (l.quantity > 1 ? ' &times; ' + l.quantity : '')).join('<br>');
+  const track = s.trackingUrl
+    ? `<p style="margin:0 0 16px"><a href="${esc(s.trackingUrl)}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 20px;border-radius:999px;font-weight:700;font-size:14px">Track your package</a></p>`
+    : '';
+  const html = frame(store, 'Your order is on its way', `
+<p style="margin:0 0 14px;color:#374151">Order <strong>${esc(s.orderRef)}</strong> has shipped with ${esc(s.carrier)}. Tracking number: <strong>${esc(s.trackingNumber)}</strong>.</p>
+${track}<p style="margin:0;color:#374151;font-size:15px">${items}</p>`);
+  const text = store.name + '\n\nYour order is on its way. Order ' + s.orderRef + ' has shipped with ' + s.carrier +
+    '. Tracking number: ' + s.trackingNumber + '.' + (s.trackingUrl ? '\nTrack it: ' + s.trackingUrl : '') + '\n\n' +
+    s.lines.map((l) => '- ' + l.productName + (l.size ? ' (' + l.size + ')' : '') + (l.quantity > 1 ? ' x' + l.quantity : '')).join('\n') + textHelp(store);
+  return { subject: 'Your order from ' + store.name + ' has shipped (' + s.orderRef + ')', html, text };
+}

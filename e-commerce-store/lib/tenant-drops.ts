@@ -353,6 +353,7 @@ async function chargeEntry(input: {
       stripePaymentIntentId: pi.id,
       currency,
       platformFeeCents: feeCharged,
+      shippingAddress: entry.shipping_address ? String(entry.shipping_address) : null,
     });
     if (!recorded.ok) throw new Error('CHARGED BUT NOT RECORDED (will retry) — entry ' + entryId + ' pi ' + pi.id + ': ' + recorded.message);
     await recordBillingCharge({ paymentIntentId: pi.id, tenantId, volumeCents: variant.priceCents, feeCents: feeCharged, orderId: recorded.orderId });

@@ -47,8 +47,9 @@ async function countTenantPurchases(tenantId: string, email: string, externalPro
     where: { tenant_id: eq(tenantId), email: eq(email) }, select: ['id'], limit: 1,
   })) as any[])[0];
   if (!customer) return 0;
+  // A partly refunded order still counts toward the cap (00043 started marking them).
   const orders = (await db.select<any>('orders', {
-    where: { tenant_id: eq(tenantId), customer_id: eq(String(customer.id)), payment_status: eq('paid') }, select: ['id'],
+    where: { tenant_id: eq(tenantId), customer_id: eq(String(customer.id)), payment_status: inList(['paid', 'partially_refunded']) }, select: ['id'],
   })) as any[];
   if (orders.length === 0) return 0;
   const variantId = await resolveVariantId(tenantId, externalProductId, size);
@@ -344,6 +345,7 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
     stripePaymentIntentId: piId,
     currency: String(session.currency || ''),
     platformFeeCents: feeCents,
+    shippingAddress: String(md.address || '') || null,
   });
   // Retry rather than acknowledge a payment with no order behind it.
   if (!recorded.ok) throw new Error('CHARGED BUT NOT RECORDED ' + session.id + ': ' + recorded.message);
@@ -402,7 +404,7 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
  * was refunded (all of it on a full refund). Cumulative and keyed by the
  * target, so a redelivered event refunds nothing twice.
  */
-export async function handleConnectChargeRefunded(charge: any, account: string): Promise<{ handled: boolean; note: string }> {
+export async function handleConnectChargeRefunded(charge: any, account: string, tenantId: string): Promise<{ handled: boolean; note: string }> {
   const stripe: any = await resolveStripeClient();
   if (!stripe) throw new Error('Stripe is not configured');
   const piId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
@@ -421,7 +423,17 @@ export async function handleConnectChargeRefunded(charge: any, account: string):
   }
   const ok = piId ? await setBillingRefund(piId, refunded, feeRefunded) : false;
   if (!ok) console.error('[connect-webhook] refund on ' + account + ' charge ' + charge.id + ' had no recorded billing charge — reconcile');
-  return { handled: true, note: 'refunded ' + refunded + '/' + amount + ', fee returned ' + feeRefunded + (ok ? '' : ' (no billing row)') };
+  // The ORDER shows it too (payment status, amount, when), for THIS store
+  // only (00043). It used to stay "paid" after a refund in the Dashboard.
+  let orderNote = '';
+  if (piId) {
+    const { readSupabaseEnv, supabaseRestFetch } = await import('@/services/config/supabase-client');
+    const marked = await supabaseRestFetch('/rpc/set_order_refund', {
+      key: readSupabaseEnv().serviceRoleKey, method: 'POST', body: { p_tenant: tenantId, p_payment_intent: piId, p_refunded_cents: refunded },
+    });
+    if (marked !== true) { orderNote = ' (no order row)'; console.error('[connect-webhook] refund on ' + account + ' ' + piId + ': no order of tenant ' + tenantId + ' to mark — reconcile'); }
+  }
+  return { handled: true, note: 'refunded ' + refunded + '/' + amount + ', fee returned ' + feeRefunded + (ok ? '' : ' (no billing row)') + orderNote };
 }
 
 // ── CART (TENANCY.md phase 3) ──────────────────────────────────────────────

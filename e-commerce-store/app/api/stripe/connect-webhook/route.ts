@@ -136,7 +136,7 @@ export async function POST(request: Request) {
         // Nobody paid in time: the checkout's held units go back on sale.
         result = await handleConnectCheckoutExpired(object, who.tenantId);
       } else if (event.type === 'charge.refunded') {
-        result = await handleConnectChargeRefunded(object, String(eventAccount));
+        result = await handleConnectChargeRefunded(object, String(eventAccount), who.tenantId);
       } else if (event.type === 'charge.dispute.created') {
         console.error('[connect-webhook] DISPUTE ' + object?.id + ' on ' + eventAccount + ' (tenant ' + who.tenantId + '), ' +
           object?.amount + ' ' + object?.currency + ', reason ' + object?.reason + ' — debits the merchant; platform fee kept (T11)');
