@@ -102,6 +102,32 @@ const run = Date.now().toString(36);
     await page.waitForTimeout(3000);
     const saved = (await products(sA)).find((p) => p.id === pA.id);
     check((saved?.images || []).length === 1 && String(saved.images[0]).includes('/tenants/' + A + '/'), 'Save puts it on the product: ' + JSON.stringify(saved?.images));
+
+    console.log('\nStored as a domain-free key, resolved when read (lib/media-key)');
+    const row0 = ((await getDb().select<any>('products', { where: { tenant_id: eq(A), slug: eq('stock-race-fixture') }, select: ['media_gallery'], limit: 1 })) as any[])[0];
+    const stored = String(row0?.media_gallery?.[0]?.url || '');
+    check(/^media:tenants\/[0-9a-f-]+\/products\/[0-9a-f]+\.png$/.test(stored) && stored.includes(A) && !/https?:/.test(stored), 'the database holds the key, no domain: ' + stored);
+    const shown = String(saved?.images?.[0] || '');
+    const viaRead = await fetch(shown);
+    check(viaRead.status === 200 && Buffer.compare(Buffer.from(new Uint8Array(await viaRead.arrayBuffer())), Buffer.from(png)) === 0, 'read back, it resolves to a working URL serving the same bytes: ' + shown.replace(/\/tenants\/.*/, '/…'));
+    const keyA = stored.slice('media:'.length);
+    const base = shown.slice(0, shown.indexOf('/' + keyA));
+    for (const [what, img] of [
+      ['test4\'s key, by name', stored],
+      ['a ".." walk out of store B\'s own folder', 'media:tenants/' + B + '/products/../../' + A + '/products/' + keyA.split('/').pop()],
+      ['the same walk as a URL', base + '/tenants/' + B + '/products/../../' + A + '/products/' + keyA.split('/').pop()],
+      ['an encoded walk', base + '/tenants/' + B + '/products/%2e%2e/%2e%2e/' + A + '/products/' + keyA.split('/').pop()],
+    ] as const) check((await save(sB, pB, { images: [img] })).status === 400, 'store B cannot use ' + what);
+    check(JSON.stringify(((await products(sB)).find((p) => p.id === pB.id) || {}).images || []) === beforeB, 'store B\'s product is still unchanged');
+    // Older photos: the demo store's were saved as full URLs before keys existed.
+    const DEMO = '3b6f7db1-7645-4c52-aefe-cc8be563c359';
+    const legacy = ((await getDb().select<any>('products', { where: { tenant_id: eq(DEMO), status: eq('live') }, select: ['media_gallery'] })) as any[])
+      .flatMap((p) => (p.media_gallery || []).map((m: any) => String(m?.url || ''))).filter((u: string) => /^https:\/\//.test(u));
+    const demoPage = await (await fetch('https://demo.goyunir.com/api/store')).text();
+    check(legacy.length > 0 && legacy.every((u: string) => demoPage.includes(u)) && (await fetch(legacy[0])).status === 200, 'older photos stored as full URLs are served exactly as stored (' + legacy.length + ' on the demo storefront)');
+    const bShown = (await products(sB)).flatMap((p) => p.images || []);
+    check(!bShown.some((u: string) => u.includes('/tenants/' + A + '/')) && !demoPage.includes(A), 'nothing of test4\'s appears in another store\'s catalog');
+
     const keep = await save(sA, saved, {});
     check(keep.status === 200 && ((await products(sA)).find((p) => p.id === pA.id)?.images || []).length === 1, 'a later edit that does not touch photos keeps them');
     const clear = await save(sA, saved, { images: pA.images || [] });

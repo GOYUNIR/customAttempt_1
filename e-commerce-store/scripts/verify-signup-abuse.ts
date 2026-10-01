@@ -58,6 +58,15 @@ const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '')
     const day = new Date().toISOString().slice(0, 10), hour = new Date().toISOString().slice(0, 13);
     await kv.del('signup:domain:d:' + day + ':resend.dev', 'signup:alert:' + hour).catch(() => null);
     for (const e of emails) await kv.del('signup:email:d:' + day + ':' + e, 'signup:sent:d:' + day + ':' + e, 'signup:sent:last:' + e).catch(() => null);
+    // Every proof IP is in the reserved documentation ranges (never a real
+    // visitor). Clear them ALL, not just this run's: a run that died part-way
+    // left its per-IP day count, and the next run's "50 from one IP" then hit
+    // the daily limit early (found 2026-10-01).
+    for (const net of ['192.0.2.', '198.51.100.', '203.0.113.']) {
+      const keys: string[] = [];
+      for (let i = 0; i < 100; i++) keys.push('signup:ip:h:' + hour + ':' + net + i, 'signup:ip:d:' + day + ':' + net + i, 'signup:ip:last:' + net + i);
+      for (let i = 0; i < keys.length; i += 50) await kv.del(...keys.slice(i, i + 50)).catch(() => null);
+    }
   };
   const emails = new Set<string>();
   const tempEmail = inbox('existing');
@@ -125,7 +134,11 @@ const inbox = (label: string) => 'delivered+' + label.replace(/[^a-z0-9]/gi, '')
     for (let i = 0; i < 50; i++) flood.push(await signup({ email: inbox('ipflood' + i), storeName: 'Proof IP ' + run + ' ' + i, ip: '198.51.100.99' }));
     const okN = flood.filter((r) => r.status === 200).length;
     const waits = flood.filter((r) => r.status === 429 && /wait \d+ minute/.test(r.body?.error)).length;
-    check(okN === 5 && waits === 45, 'the first 5 go through, then escalating waits (not a hard block): ' + okN + ' ok, ' + waits + ' asked to wait');
+    const other = flood.filter((r) => r.status !== 200 && !(r.status === 429 && /wait \d+ minute/.test(r.body?.error))).map((r) => r.status + ' ' + (r.body?.error || ''));
+    check(okN === 5 && waits === 45, 'the first 5 go through, then escalating waits (not a hard block): ' + okN + ' ok, ' + waits + ' asked to wait' + (other.length ? '; other: ' + [...new Set(other)].join(' | ') : ''));
+    // The daily ceiling, from a clean slate: attempt 51 of the day is told "tomorrow".
+    const fiftyFirst = await signup({ email: inbox('ipflood50'), storeName: 'Proof IP ' + run + ' 50', ip: '198.51.100.99' });
+    check(fiftyFirst.status === 429 && /tomorrow/.test(fiftyFirst.body?.error), 'attempt 51 of the day from that network: ' + fiftyFirst.body?.error);
     check(!(Number(await kv.get('signup:paused_until').catch(() => 0)) > Date.now()), 'one network hammering the form does NOT pause signup for everyone');
 
     console.log('\nCircuit breaker (flood across many IPs)');

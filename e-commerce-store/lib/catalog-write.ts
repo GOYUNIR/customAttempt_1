@@ -17,6 +17,7 @@
 import { getDb } from '@/lib/db/client';
 import { setStock } from '@/lib/stock';
 import { eq, inList } from '@/lib/db/query';
+import { toMediaRef } from '@/lib/media-key';
 
 /** Fields that get their own column — everything else falls into `config`. */
 const COLUMN_FIELDS = new Set([
@@ -98,7 +99,10 @@ function buildMediaGallery(product: Record<string, unknown>): Array<{ url: strin
   const images = Array.isArray(product.images) ? product.images : [];
   const crops = Array.isArray(product.crops) ? product.crops : [];
   return images
-    .map((url, i) => ({ url: String(url || ''), crop: crops[i] }))
+    // A photo on our own media host is stored as its key, not its URL, so a
+    // domain move never touches stored photos (lib/media-key). Anything else
+    // (seed paths, older URLs) is stored as given.
+    .map((url, i) => ({ url: toMediaRef(url) ?? String(url || ''), crop: crops[i] }))
     .filter((m) => Boolean(m.url));
 }
 

@@ -132,6 +132,15 @@ test('product photos: a new photo must be THIS store\'s own upload; photos alrea
   assert.ok(!validateMerchantProduct({ ...good, images: [mine] }, { tenantId: 'store-a' }).ok, 'no configured media host: refused');
   const untouched = validateMerchantProduct(good, opts);
   assert.ok(untouched.ok && untouched.value.images === undefined, 'no images field = keep current photos');
+  // Found 2026-10-01: these passed the old "starts with my prefix" check.
+  for (const sneaky of [
+    mediaBase + '/tenants/store-a/products/../../store-b/products/xyz.jpg',
+    mediaBase + '/tenants/store-a/products/%2e%2e/%2e%2e/store-b/products/xyz.jpg',
+    mediaBase + '/tenants/store-a/products//xyz.jpg',
+    'media:tenants/store-a/products/../../store-b/products/xyz.jpg',
+    'media:tenants/store-b/products/xyz.jpg',
+  ]) assert.ok(!validateMerchantProduct({ ...good, images: [sneaky] }, opts).ok, 'refused: ' + sneaky);
+  assert.ok(validateMerchantProduct({ ...good, images: ['media:tenants/store-a/products/abc.jpg'] }, opts).ok, 'own key accepted');
 });
 
 test('an upload is judged by its bytes, not its name or claimed type', () => {

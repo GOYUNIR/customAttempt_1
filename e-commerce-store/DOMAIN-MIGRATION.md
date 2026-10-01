@@ -33,15 +33,29 @@ unless marked **CODE**. Nothing is hardcoded to a specific new name.
 2. **CODE: proof scripts.** They name `https://app.goyunir.com` etc. Read the
    root from `PLATFORM_ROOT_DOMAIN` instead, so every proof can run against
    NEWROOT on the day.
-3. **Decide the media URLs.** Product photos are stored as absolute URLs on
-   `media.goyunir.com`. Either:
-   - keep `media.goyunir.com` serving forever (simplest; it is just a Worker
-     path), or
-   - rewrite the stored URLs. That is a data migration, destructive, and the
-     owner approves the SQL first.
-
-   New uploads use whatever `MEDIA_S3_PUBLIC_BASE_URL` says; existing photos
-   stay valid on edit (a product may keep the photos it already has).
+3. **Media URLs: DECIDED (owner, 2026-10-01), and the code is DONE.**
+   - **`media.goyunir.com` keeps answering forever.** Never remove its route
+     or DNS, even after the move.
+   - **Photos are stored as domain-free keys** (`media:tenants/<id>/products/<file>`),
+     resolved against `MEDIA_S3_PUBLIC_BASE_URL` when read
+     (`lib/media-key.ts`):
+     - written at one place, `lib/catalog-write.ts` (a URL on our media host
+       becomes its key);
+     - read at one place, `lib/postgres-catalog-read.ts` (a key becomes a URL).
+       Every reader (storefront, dashboard, emails) sees URLs.
+   - **Older photos stay as stored.** The 12 photos saved before this (the
+     original store and the demo) are full `media.goyunir.com` URLs and are
+     served as they are. Each one becomes a key the next time its product is
+     saved, so no data migration is needed.
+   - **On the day:** set `MEDIA_S3_PUBLIC_BASE_URL` to the new media host
+     (the same R2 bucket behind it). Every key-stored photo follows
+     automatically, and the older URLs keep working because
+     `media.goyunir.com` stays up.
+   - **Isolation:** a key must pass a strict check (no `..`, no empty or `.`
+     segments, letters, digits and `/._-` only). A new photo must be under
+     the saving store's own folder. Proof: `tests/media-key.test.ts`,
+     `tests/merchant-routes.test.ts`, live `scripts/verify-merchant-photos.ts`
+     ("Stored as a domain-free key").
 
 ## The move, in order
 1. **Add the NEWROOT zone to Cloudflare.** Proxied DNS for the apex and a
@@ -65,7 +79,7 @@ unless marked **CODE**. Nothing is hardcoded to a specific new name.
 5. **The config flip (one deploy):**
    - `PLATFORM_ROOT_DOMAIN=NEWROOT`, `PLATFORM_NAME=<new name>`;
    - `SUPPORT_EMAIL`, `RESEND_FROM` / `TENANT_EMAIL_FROM`;
-   - `MEDIA_S3_PUBLIC_BASE_URL` (if moving media);
+   - `MEDIA_S3_PUBLIC_BASE_URL` to the new media host (photos stored as keys follow it; media.goyunir.com stays up for older URLs);
    - `PLATFORM_OLD_ROOT_DOMAINS=goyunir.com`;
    - wrangler.jsonc routes for NEWROOT.
 

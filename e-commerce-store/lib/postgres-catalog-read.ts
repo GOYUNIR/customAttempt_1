@@ -44,6 +44,7 @@ import { getDb } from '@/lib/db/client';
 import { eq, inList } from '@/lib/db/query';
 import { isPostgresPrimaryEnabled } from '@/lib/feature-flags';
 import { sizeConfigKey } from '@/lib/size-configs';
+import { resolveMediaRef } from '@/lib/media-key';
 import type { LiveStateRecord } from '@/lib/server-config';
 
 export type PostgresCatalogRead = {
@@ -173,7 +174,11 @@ export async function readProductsFromPostgres(
         const inv = inventoryByVariant.get(v.id);
         return sum + (inv ? Math.max(0, Number(inv.quantity_available) || 0) : 0);
       }, 0);
-      const media = Array.isArray(p.media_gallery) ? p.media_gallery : [];
+      // Stored photos may be `media:<key>` (domain-free): resolved to a URL
+      // HERE, once, so every reader gets URLs (lib/media-key).
+      const media = (Array.isArray(p.media_gallery) ? p.media_gallery : [])
+        .map((m) => ({ ...m, url: resolveMediaRef(m?.url) }))
+        .filter((m) => Boolean(m.url));
       const sizeConfigs: Record<string, { customDropSchedule?: Record<string, unknown> }> = {};
       for (const v of myVariants) {
         if (v.custom_schedule && typeof v.custom_schedule === 'object' && Object.keys(v.custom_schedule).length > 0) {

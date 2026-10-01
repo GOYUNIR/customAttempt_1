@@ -1,7 +1,7 @@
 /**
  * MERCHANT PRODUCT INPUT — what a merchant may send to create or edit a
  * product (/api/merchant/products), checked before anything is written.
- * Pure (no imports), so every rule is unit-tested.
+ * Pure (its one import is pure too), so every rule is unit-tested.
  *
  * The store is NEVER part of the input: the route takes it from the session.
  * The product id is never chosen by a merchant for a new product (the server
@@ -9,6 +9,7 @@
  * route checks that. A slug is a URL path on the store's own address, so it
  * may not be one of the app's own routes.
  */
+import { MEDIA_KEY_PREFIX, toMediaRef } from './media-key.ts';
 
 export type MerchantSizeInput = { size: string; price: number; mode: 'FCFS' | 'RAFFLE'; stock?: number; winners?: number };
 
@@ -99,9 +100,13 @@ export function validateMerchantProduct(
     // A NEW photo must be one of THIS store's uploads; a photo the product
     // already has may stay. So no store can put another store's photo on its
     // own products by pasting the address.
-    const own = base && opts.tenantId ? base + '/' + merchantPhotoPrefix(opts.tenantId) : '';
+    // Our own photos are judged by their KEY (lib/media-key: no "..", no
+    // empty segments), so `…/tenants/<me>/products/../../<other>/…` is not
+    // "mine". Photos may arrive as URLs or as `media:` keys.
+    const own = opts.tenantId ? MEDIA_KEY_PREFIX + merchantPhotoPrefix(opts.tenantId) : '';
     const kept = new Set(opts.currentImages || []);
-    if (!base || urls.some((u) => u.length > 500 || !(kept.has(u) || (own && u.startsWith(own))))) return { ok: false, error: 'Photos must be uploaded to your store first.' };
+    const mine = (u: string) => { const ref = toMediaRef(u, base); return Boolean(own && ref && ref.startsWith(own)); };
+    if (!base || urls.some((u) => u.length > 500 || !(kept.has(u) || mine(u)))) return { ok: false, error: 'Photos must be uploaded to your store first.' };
     images = urls;
   }
   return { ok: true, value: { ...(id ? { id } : {}), name, slug, tagline, description, isActive, isUpcoming, releaseEndsAt, maxPerEmail, sizes, ...(images ? { images } : {}) } };

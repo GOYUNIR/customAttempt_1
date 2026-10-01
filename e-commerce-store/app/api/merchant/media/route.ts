@@ -3,6 +3,7 @@ import { rateLimitedResponse } from '@/lib/rate-limit';
 import { writeMediaObject } from '@/lib/media-r2';
 import { sniffImage, MAX_PRODUCT_PHOTO_BYTES } from '@/lib/image-sniff';
 import { merchantPhotoPrefix } from '@/lib/merchant-product-input';
+import { MEDIA_KEY_PREFIX } from '@/lib/media-key';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +14,9 @@ export const dynamic = 'force-dynamic';
  * checked before anything is kept: an image by its own bytes (not its name or
  * claimed type), at most 8 MB. The server picks the key, under this store's
  * own prefix (tenants/<id>/products/…), so a store cannot write, overwrite or
- * name anything outside its own folder. Returns the public URL to put in the
- * product's photos; products accept only their own store's uploads.
+ * name anything outside its own folder. Returns the public URL (to show) and
+ * the domain-free key (what gets stored: lib/media-key); products accept
+ * only their own store's uploads.
  */
 export async function POST(request: Request) {
   const gate = await merchantSession(request);
@@ -39,5 +41,5 @@ export async function POST(request: Request) {
     return merchantJson({ error: 'The photo could not be saved. Try again.' }, 502);
   }
   await auditMerchant(gate.session, request, 'PHOTO_UPLOADED', key + ' (' + bytes.length + ' bytes)');
-  return merchantJson({ url: base + '/' + key }, 201);
+  return merchantJson({ url: base + '/' + key, ref: MEDIA_KEY_PREFIX + key }, 201);
 }
