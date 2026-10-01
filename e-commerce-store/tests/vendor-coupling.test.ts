@@ -48,6 +48,9 @@ const ALLOWED: Record<string, string> = {
   // body of a store's order email). The email driver only sends; there is no
   // port for inspecting a provider's sent log, and business code never does.
   'scripts/resend-readback.ts': 'proof read-back of sent emails (verification scripts only, not business logic)',
+  // Reads the sending domain's verification status (DOMAIN-MIGRATION.md):
+  // a provider dashboard fact the email drivers have no port for.
+  'scripts/verify-domain-migration.ts': 'domain-move check reads the sending domain\'s verification status (verification script only)',
 };
 
 /**
