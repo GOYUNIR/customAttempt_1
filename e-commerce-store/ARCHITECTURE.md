@@ -723,6 +723,17 @@ Gaps logged (not fixed; outside this week's scope):
     the dashboard says "checking your details". The webhook does record the
     moment Stripe clears it (demo store: within a second, 2026-09-30), but
     the page shows it only after a reload. Poll every ~20 s while pending.
+22. **Orphaned proof photos in R2** (uploaded by verify-merchant-photos,
+    referenced by no product, as of 2026-09-30):
+    - `tenants/13591c9e-…/products/ab6e4917f31b4f8bae1410290e6ecaa5.png`
+    - `tenants/ff8d5e59-…/products/a72d8efa609d4bc1b19b1042510167c1.png`
+    - `tenants/13591c9e-…/products/7899a6f028cf463c8da7f82d8a8ebbce.png`
+
+    Each further run of that proof adds about 3. Cleanup is a later job: list
+    uploads (audit action `MERCHANT_PHOTO_UPLOADED`), subtract the URLs in
+    any product's `media_gallery`, and delete the rest after a grace period.
+    The same job covers photos a merchant uploads and then removes before
+    saving.
 20. **Admin simplicity** (items 2 and 11–16 still stand). The Settings page
     and admin navigation need the Jobs-level pass; nothing was simplified
     in this batch by design.
