@@ -138,6 +138,11 @@
     // The PLATFORM's name on its own pages (stand-in until the platform has
     // its own name and domain; GOYUNIR is a tenant, STRATEGY.md §4).
     "PLATFORM_NAME": "GOYUNIR",
+    // Cloudflare Turnstile on the self-serve signup form. The SITE key is public
+    // by design; the SECRET is a Worker secret (TURNSTILE_SECRET_KEY), never
+    // here. The host the widget renders on; a token solved elsewhere is refused.
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFKwZW0C3QaCrhxK",
+    "TURNSTILE_EXPECTED_HOSTNAMES": "goyunir.com",
 
     // TENANCY.md T2 — the hosts that ARE the original (default) store, checked
     // before any merchant slug. A bare label means <label>.<PLATFORM_ROOT_DOMAIN>.

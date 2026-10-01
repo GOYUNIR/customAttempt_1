@@ -1,185 +1,115 @@
 import { NextResponse } from 'next/server';
+import { createHash, randomBytes } from 'node:crypto';
 import { getDb } from '@/lib/db/client';
 import { eq } from '@/lib/db/query';
-import { rateLimitedResponse } from '@/lib/rate-limit';
 import { isValidEmail } from '@/lib/validation';
 import { recordPlatformAudit } from '@/lib/platform-audit';
-import { createInvite, INVITE_TTL_DAYS } from '@/lib/staff-invites';
-import { sendStaffInviteEmail } from '@/lib/email';
-import { acceptInviteUrl } from '@/lib/staff-realms';
 import { merchantSignupOpen } from '@/lib/env';
-import { isReservedStoreSlug, parseLegacyHosts } from '@/lib/storefront-host';
+import { parseLegacyHosts } from '@/lib/storefront-host';
+import { checkStoreAddress } from '@/lib/store-address';
+import { verifyTurnstile } from '@/lib/turnstile';
+import { guardSignupAttempt, isDisposableEmail, signupEmailAllowed, noteSignupEmailSent, signupIp, signupPolicy } from '@/lib/signup-guard';
+import { readSupabaseEnv, supabaseRestFetch } from '@/services/config/supabase-client';
+import { sendSignupVerifyEmail, sendSignupExistingAccountEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * /api/signup/merchant — self-serve store creation. The last piece of the
- * Shopify/Stripe onboarding comparison: until now a store could only be
- * provisioned by a platform admin, and even then it had no owner.
+ * /api/signup/merchant — hands-off self-serve store creation.
  *
- * WHY THIS SENDS AN INVITE INSTEAD OF SIGNING THE MERCHANT STRAIGHT IN.
- * The alternative — take a password here and create the account immediately —
- * is one click shorter, and it hands an `owner` role to an email address nobody
- * has proven control of. An owner can read customer records and change payment
- * settings, so "prove the inbox first" is the right trade for a role at that
- * tier. The link in the email IS the proof, and it reuses the invite path that
- * is already verified end to end rather than inventing a second way in.
- *
- * DISABLED BY DEFAULT. `ALLOW_MERCHANT_SIGNUP=true` opts a deployment in.
- * Public tenant creation on a single-brand store — which is what most
- * deployments of this codebase are — would let anyone create tenants on
- * somebody's live shop. That is a decision for the operator, not a default.
+ * Step 1 (this POST) only RESERVES the store name and emails a link; nothing
+ * is created until the email is proven (step 2, ./complete). Abuse protection
+ * comes first, in order:
+ *   ALLOW_MERCHANT_SIGNUP   the instant kill switch
+ *   Turnstile               verified server-side, fail closed (lib/turnstile)
+ *   input rules             terms accepted; reserved and lookalike names
+ *                           refused (the store-address rules); no disposable email
+ *   throttles               per IP (escalating), per email, per domain, global
+ *                           breaker (lib/signup-guard; numbers are policy data)
+ *   email budget            resend cooldown, daily signup-email cap, monthly
+ *                           allowance reserve
+ * NO ENUMERATION: for a valid request the reply is the same whether the email
+ * is new, already has an account (it gets a "you already have an account"
+ * email instead), or was silently throttled. Only a taken store name, a
+ * disposable address or visible throttling get their own message.
  */
-
-const signupEnabled = merchantSignupOpen;
-
-/** A URL-safe slug from a store name, or '' when nothing usable survives. */
-function slugify(input: string): string {
-  return String(input || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 100);
-}
-
-/** Slugs that would collide with a portal host or a reserved surface. */
-/** A slug is its store's subdomain (TENANCY.md T1), so the platform's own
- *  labels and the legacy store's hosts can't be taken: one rule, shared with
- *  the host resolver (lib/storefront-host.ts), so the two can't drift. */
-function slugIsReserved(slug: string): boolean {
-  const root = process.env.PLATFORM_ROOT_DOMAIN;
-  return isReservedStoreSlug(slug, parseLegacyHosts(process.env.STOREFRONT_LEGACY_HOSTS, root), root);
-}
+const SAME_REPLY = { ok: true, message: 'Check your email: we sent a link to open your store. It can take a minute to arrive.' };
+const root = () => String(process.env.PLATFORM_ROOT_DOMAIN || '').trim().toLowerCase();
+const fail = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
 export async function GET() {
-  // So a signup page can render "closed" honestly instead of failing on submit.
-  return NextResponse.json({ enabled: signupEnabled() });
+  return NextResponse.json({ enabled: merchantSignupOpen(), siteKey: process.env.TURNSTILE_SITE_KEY || null });
 }
 
 export async function POST(request: Request) {
   try {
-    if (!signupEnabled()) {
-      return NextResponse.json(
-        { error: 'Self-serve signup is not enabled on this deployment.' },
-        { status: 403 },
-      );
-    }
-    if (!getDb().configured) {
-      return NextResponse.json({ error: 'Signup requires Supabase.' }, { status: 503 });
-    }
-
-    // Public and unauthenticated, so it creates rows for anyone who asks —
-    // limited tightly. Tenant spam is cheap to send and expensive to clean up.
-    const limited = await rateLimitedResponse('merchant_signup', request, 5, 3600);
-    if (limited) return limited;
-
+    if (!merchantSignupOpen()) return fail(403, 'Self-serve signup is not open right now.');
+    if (!getDb().configured || !root()) return fail(503, 'Signup is unavailable right now. Please try again shortly.');
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const ip = signupIp(request);
+
+    const human = await verifyTurnstile({ token: String(body?.turnstileToken || ''), ip });
+    if (!human.ok) {
+      return human.reason === 'unavailable'
+        ? fail(503, 'We could not check that you are a person right now. Please try again in a moment.')
+        : fail(400, 'Please complete the check that you are a person, then try again.', { code: 'TURNSTILE' });
+    }
+
     const email = String(body?.email || '').trim().toLowerCase();
-    const storeName = String(body?.storeName || '').trim().slice(0, 200);
-    const requestedSlug = slugify(String(body?.slug || '') || storeName);
+    const storeName = String(body?.storeName || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!isValidEmail(email)) return fail(400, 'Enter a valid email address.');
+    if (!storeName) return fail(400, 'Enter a name for your store.');
+    if (body?.acceptTerms !== true) return fail(400, 'Please accept the terms to continue.');
+    // The web address comes from the name ("Salt & Cedar Co." → salt-cedar-co):
+    // accents folded, anything else becomes a hyphen; then the address rules.
+    const fromName = String(body?.slug || storeName).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+    const address = checkStoreAddress(fromName, { legacyHosts: parseLegacyHosts(process.env.STOREFRONT_LEGACY_HOSTS, root()), rootDomain: root() });
+    if (!address.ok) return fail(400, address.reason, { field: 'storeName' });
+    if (await isDisposableEmail(email)) return fail(400, 'Please use a permanent email address: we send your store\'s orders and sign-in codes there.');
 
-    if (!isValidEmail(email)) {
-      return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 });
-    }
-    if (!storeName) {
-      return NextResponse.json({ error: 'Enter a name for your store.' }, { status: 400 });
-    }
-    if (!requestedSlug) {
-      return NextResponse.json(
-        { error: 'That store name cannot be turned into a web address. Use letters and numbers.' },
-        { status: 400 },
-      );
-    }
-    if (slugIsReserved(requestedSlug)) {
-      return NextResponse.json(
-        { error: 'That address is reserved. Choose a different store name.' },
-        { status: 409 },
-      );
-    }
+    const guard = await guardSignupAttempt({ ip, email });
+    if (!guard.ok) return NextResponse.json({ error: guard.message }, { status: guard.status, headers: guard.retryAfterSeconds ? { 'retry-after': String(guard.retryAfterSeconds) } : {} });
+    if (guard.quiet) { console.warn('[signup] quiet drop (' + guard.why + ') for a request from ' + ip); return NextResponse.json(SAME_REPLY); }
 
-    // Already staff somewhere? Then this is a person who should sign in, not a
-    // new store owner — and creating a second identity for the same address
-    // would break the one-account-per-email assumption the whole staff model
-    // rests on.
-    const existingStaff = (await getDb().select<{ id: string }>('users', {
-      where: { email: eq(email) }, select: ['id'], limit: 1,
-    })) as Array<{ id: string }>;
-    if (existingStaff.length > 0) {
-      return NextResponse.json(
-        { error: 'An account already exists for that email. Sign in instead.' },
-        { status: 409 },
-      );
+    // Resend cooldown BEFORE reserving: a cooldown must not replace (and so
+    // void) the link already sent.
+    const allowed = await signupEmailAllowed(email);
+    if (!allowed.ok) {
+      return allowed.why === 'budget'
+        ? fail(503, 'We cannot send email right now. Please try again later, or email us.')
+        : NextResponse.json(SAME_REPLY);
     }
 
-    const existingSlug = (await getDb().select<{ id: string }>('tenants', {
-      where: { slug: eq(requestedSlug) }, select: ['id'], limit: 1,
-    })) as Array<{ id: string }>;
-    if (existingSlug.length > 0) {
-      return NextResponse.json(
-        { error: 'That store address is already taken. Try another name.' },
-        { status: 409 },
-      );
+    const existing = ((await getDb().select<any>('users', { where: { email: eq(email) }, select: ['id'], limit: 1 })) as any[]).length > 0;
+    if (existing) {
+      const sent = await sendSignupExistingAccountEmail({ to: email, signInUrl: 'https://app.' + root() + '/app/login' });
+      if (sent.ok) await noteSignupEmailSent(email);
+      return NextResponse.json(SAME_REPLY);
     }
 
-    const created = (await getDb().insert('tenants', {
-      name: storeName,
-      slug: requestedSlug,
-      license_status: 'active',
-    })) as Array<{ id: string; name: string; slug: string }>;
-    if (!created?.[0]) {
-      return NextResponse.json({ error: 'Could not create the store.' }, { status: 500 });
-    }
-    const tenant = created[0];
+    const policy = await signupPolicy();
+    const token = randomBytes(32).toString('hex');
+    const rows = (await supabaseRestFetch('/rpc/claim_signup_name', {
+      key: readSupabaseEnv().serviceRoleKey, method: 'POST', prefer: 'return=representation',
+      body: {
+        p_email: email, p_store_name: storeName, p_slug: address.slug, p_token_hash: createHash('sha256').update(token).digest('hex'),
+        p_terms_version: String(policy.termsVersion), p_ip: ip, p_hold_hours: policy.holdHours,
+        p_accept_days: policy.ownerAcceptDays, p_activation_days: policy.activationDays,
+      },
+    })) as any[];
+    const r = Array.isArray(rows) ? rows[0] : rows;
+    if (r?.result === 'taken') return fail(409, 'That store name is taken. Try another.', { field: 'storeName', slug: address.slug });
+    if (r?.result !== 'claimed') return fail(500, 'Your store could not be started. Please try again.');
 
-    const invite = await createInvite({
-      email,
-      role: 'owner',
-      tenantId: tenant.id,
-      invitedByEmail: 'self-signup',
-    });
-    if (!invite.ok) {
-      // The tenant exists but has no owner. Reported honestly rather than
-      // pretending the signup worked — and NOT rolled back, because a second
-      // attempt would then hit the slug-taken check and strand the person
-      // either way. An operator can invite the owner by hand.
-      console.error('[merchant-signup] tenant ' + tenant.slug + ' created but owner invite failed: ' + invite.message);
-      return NextResponse.json(
-        { error: 'Your store was created but we could not send the invitation. Please contact support.', tenant },
-        { status: 500 },
-      );
-    }
-
-    // Absolute, staff-host URL — see acceptInviteUrl's doc for why getSiteUrl()
-    // shipped a bare relative path here (DNS_PROBE_FINISHED_NXDOMAIN on click).
-    const acceptUrl = acceptInviteUrl('owner', invite.token, process.env.PLATFORM_ROOT_DOMAIN);
-    const sent = await sendStaffInviteEmail({
-      to: email,
-      role: 'owner',
-      invitedBy: 'the ' + storeName + ' signup',
-      acceptUrl,
-      expiresInDays: INVITE_TTL_DAYS,
-    });
-
-    await recordPlatformAudit({
-      action: 'merchant_self_signup',
-      actor: email,
-      tenantId: tenant.id,
-      detail: { tenantId: tenant.id, slug: tenant.slug, storeName, emailed: sent.ok === true },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
-      // Deliberately vague about the token unless the email failed: the reply
-      // to an unauthenticated request must not hand out a credential.
-      emailed: sent.ok === true,
-      message: sent.ok
-        ? 'Check your email to finish setting up your store.'
-        : 'Your store was created, but the confirmation email could not be sent. Contact support to finish setup.',
-    });
+    const url = 'https://' + root() + '/api/signup/merchant/complete?token=' + token;
+    const sent = await sendSignupVerifyEmail({ to: email, storeName, url, holdHours: policy.holdHours });
+    if (sent.ok) await noteSignupEmailSent(email);
+    else console.error('[signup] verify email failed for signup ' + r.signup_id);
+    await recordPlatformAudit({ action: 'merchant_signup_started', actor: email, detail: { slug: address.slug, signupId: r.signup_id, ip, emailed: sent.ok === true, termsVersion: policy.termsVersion } });
+    return NextResponse.json(SAME_REPLY);
   } catch (err: any) {
     console.error('[merchant-signup] failed', err?.message || err);
-    return NextResponse.json({ error: 'Could not create your store.' }, { status: 500 });
+    return fail(500, 'Your store could not be started. Please try again.');
   }
 }

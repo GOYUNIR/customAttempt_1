@@ -940,3 +940,53 @@ export async function sendStaffInviteEmail(opts: {
     return { ok: false, error };
   }
 }
+
+const platformBrand = () => getPlatformName() || emailBrandName();
+const plainEmail = (heading: string, paragraphs: string[], cta?: { label: string; url: string }, footer?: string) => `
+  <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;color:#111;line-height:1.6;background:#fff;border-radius:16px;padding:32px 28px;border:1px solid #e5e7eb;">
+    <p style="letter-spacing:4px;font-size:12px;text-transform:uppercase;color:#6b7280;font-weight:700;margin:0 0 16px">${escapeHtml(platformBrand()).toUpperCase()}</p>
+    <h1 style="font-size:24px;font-weight:700;margin:0 0 10px">${escapeHtml(heading)}</h1>
+    ${paragraphs.map((p) => `<p style="margin:0 0 14px;color:#4b5563">${p}</p>`).join('')}
+    ${cta ? `<p style="margin:0 0 20px"><a href="${cta.url}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:13px 22px;border-radius:999px;font-weight:700;font-size:14px">${escapeHtml(cta.label)}</a></p>
+    <p style="margin:0 0 6px;color:#6b7280;font-size:12px">Or paste this link into your browser:</p>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:12px;word-break:break-all">${cta.url}</p>` : ''}
+    ${footer ? `<p style="margin:0;color:#9ca3af;font-size:12px">${footer}</p>` : ''}
+  </div>`;
+
+async function sendPlatformEmail(to: string, subject: string, html: string): Promise<{ ok: boolean; skipped?: boolean; error?: unknown }> {
+  const resend = getResend();
+  if (!resend) return { ok: false, skipped: true, error: 'No email provider configured.' };
+  try {
+    const { error } = await resend.emails.send({ from: from(), to, replyTo: replyTo(), subject, html });
+    return error ? { ok: false, error } : { ok: true };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
+/** Self-serve signup, step 1: prove the inbox. The link opens the store. */
+export async function sendSignupVerifyEmail(opts: { to: string; storeName: string; url: string; holdHours: number }) {
+  return sendPlatformEmail(opts.to, `Confirm your email to open ${opts.storeName}`, plainEmail(
+    'Open your store',
+    [`You asked to open <strong>${escapeHtml(opts.storeName)}</strong>. Confirm this is your email to create it; you will choose a password next.`],
+    { label: 'Confirm and open my store', url: opts.url },
+    `We hold the store name for ${opts.holdHours} hours. If you did not ask for this, ignore this email: nothing is created until the link is used.`,
+  ));
+}
+
+/** Signup with an email that already has an account: point to sign-in (on screen the reply is the same either way). */
+export async function sendSignupExistingAccountEmail(opts: { to: string; signInUrl: string; resetUrl?: string }) {
+  return sendPlatformEmail(opts.to, `You already have an account`, plainEmail(
+    'You already have an account',
+    ['Someone (hopefully you) tried to open a new store with this email. This email already has an account, so no new store was created.'],
+    { label: 'Sign in', url: opts.signInUrl },
+    'Forgot your password? Use "Forgot password" on the sign-in page. If this was not you, you can ignore this email.',
+  ));
+}
+
+/** To the operator (SUPPORT_EMAIL) — e.g. the signup circuit breaker tripped. */
+export async function sendOperatorAlertEmail(opts: { subject: string; lines: string[] }) {
+  const to = getSupportEmail();
+  if (!to) return { ok: false, skipped: true };
+  return sendPlatformEmail(to, '[' + platformBrand() + ' alert] ' + opts.subject, plainEmail(opts.subject, opts.lines.map((l) => escapeHtml(l))));
+}
