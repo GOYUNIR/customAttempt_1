@@ -17,7 +17,7 @@ import { classifyStorefrontHost, parseLegacyHosts } from '@/lib/storefront-host'
 export { withNeutralHero } from '@/lib/storefront-host';
 
 export type StorefrontTenant =
-  | { kind: 'store'; tenantId: string; isDefault: boolean; slug: string | null; name: string | null }
+  | { kind: 'store'; tenantId: string; isDefault: boolean; slug: string | null; name: string | null; primaryHost?: string | null }
   /** No store at this host: an unknown slug or domain, a reserved label, an expired store. */
   | { kind: 'none' }
   /** The lookup failed. Not "no store" and never "the default store": retry. */
@@ -50,7 +50,16 @@ async function lookup(where: Record<string, FilterOp>): Promise<StorefrontTenant
   const row = rows[0];
   if (!row || !SERVABLE.has(String(row.license_status || ''))) return { kind: 'none' };
   const tenantId = String(row.id);
-  return { kind: 'store', tenantId, isDefault: tenantId === DEFAULT_TENANT_ID, slug: row.slug ?? null, name: row.name ?? null };
+  // A merchant's PRIMARY custom domain (00040), when one is live: every other
+  // address of the store 301s there and the canonical tag points there.
+  let primaryHost: string | null = null;
+  if (tenantId !== DEFAULT_TENANT_ID) {
+    const p = ((await getDb().select<any>('tenant_domains', {
+      where: { tenant_id: eq(tenantId), is_primary: eq(true), status: eq('active') }, select: ['hostname'], limit: 1,
+    })) as any[])[0];
+    primaryHost = p?.hostname ? String(p.hostname) : null;
+  }
+  return { kind: 'store', tenantId, isDefault: tenantId === DEFAULT_TENANT_ID, slug: row.slug ?? null, name: row.name ?? null, primaryHost };
 }
 
 /**
@@ -85,6 +94,33 @@ export async function storefrontMovedTo(hostHeader: string | null | undefined): 
 }
 const movedCache = new Map<string, { to: string | null; at: number }>();
 
+/**
+ * A custom domain serves its store only when LIVE: Cloudflare active AND the
+ * store's own TXT ownership proof (status 'active' requires both, see
+ * lib/custom-domains.ts). Pending, failed or released: not a store.
+ */
+async function customDomainStore(host: string): Promise<StorefrontTenant> {
+  const d = ((await getDb().select<any>('tenant_domains', {
+    where: { hostname: eq(host), status: eq('active') }, select: ['tenant_id', 'ownership_verified_at'], limit: 1,
+  })) as any[])[0];
+  if (!d || !d.ownership_verified_at) return { kind: 'none' };
+  return lookup({ id: eq(String(d.tenant_id)) });
+}
+
+/**
+ * A page on a store that HAS a live primary custom domain, reached on any
+ * other address (its <slug>. address, another of its domains): 301 there,
+ * same path. Host header only (x-forwarded-host is client-settable).
+ */
+export async function redirectToPrimary(who: StorefrontTenant, pathname: string): Promise<void> {
+  if (who.kind !== 'store' || !who.primaryHost) return;
+  const { headers } = await import('next/headers');
+  const host = String((await headers()).get('host') || '').toLowerCase().split(':')[0];
+  if (host === who.primaryHost) return;
+  const { permanentRedirect } = await import('next/navigation');
+  permanentRedirect('https://' + who.primaryHost + (pathname.startsWith('/') ? pathname : '/' + pathname));
+}
+
 /** The tenant for a Host header value. */
 export async function storefrontTenantForHost(hostHeader: string | null | undefined): Promise<StorefrontTenant> {
   const cls = classifyStorefrontHost({ host: String(hostHeader || ''), rootDomain: process.env.PLATFORM_ROOT_DOMAIN, legacyHosts: legacyHosts() });
@@ -99,7 +135,7 @@ export async function storefrontTenantForHost(hostHeader: string | null | undefi
   try {
     value = cls.kind === 'slug'
       ? await lookup({ slug: eq(cls.slug) })
-      : await lookup({ custom_domain: eq(cls.host), domain_status: eq('active') });
+      : await customDomainStore(cls.host);
   } catch (err) {
     console.error('[storefront-tenant] lookup failed for ' + key, (err as Error)?.message || err);
     return { kind: 'unavailable' }; // not cached: the next request retries

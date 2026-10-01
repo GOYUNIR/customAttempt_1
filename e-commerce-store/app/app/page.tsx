@@ -24,6 +24,7 @@ type StockView = { products: { productId: string; name: string; sizes: StockSize
 type StockMove = { reason: string; change: number; after: number; shortfall: number; by: string | null; note: string | null; reference: string | null; at: string };
 type Billing = { planId: string; planName: string; status: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; graceUntil: string | null; hasBillingAccount: boolean; feeLine: string; upgrade: { planId: string; name: string; monthlyCents: number } | null };
 type AddressView = { current: { slug: string; url: string }; changesLeft: number; holdDays: number; candidate?: { slug: string; url: string; available: boolean; reason: string } };
+type DomainsView = { plan: string; limit: number | null; used: number; domains: { hostname: string; status: string; ssl: string; ownershipVerified: boolean; primary: boolean; checkedAt: string | null; records: { type: string; name: string; value: string; why: string }[] }[] };
 type Order = { ref: string; status: string; paymentStatus: string; totalCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; customerEmail: string | null; item: string | null };
 
 // Countries Stripe Connect supports for businesses (a Stripe fact, not branding).
@@ -77,6 +78,9 @@ export default function MerchantDashboard() {
   const [address, setAddress] = useState<AddressView | null>(null);
   const [addressInput, setAddressInput] = useState('');
   const [addressBusy, setAddressBusy] = useState(false);
+  const [domainsView, setDomainsView] = useState<DomainsView | null>(null);
+  const [domainInput, setDomainInput] = useState('');
+  const [domainBusy, setDomainBusy] = useState(false);
 
   const load = useCallback(async () => {
     const s = await api<Store>('/api/merchant/store');
@@ -97,6 +101,8 @@ export default function MerchantDashboard() {
       if (sf.ok) setStaff(sf.body);
       const ad = await api<AddressView>('/api/merchant/address');
       if (ad.ok) setAddress(ad.body);
+      const dm = await api<DomainsView>('/api/merchant/domains');
+      if (dm.ok) setDomainsView(dm.body);
       const bl = await api<Billing>('/api/merchant/billing');
       if (bl.ok) setBilling(bl.body);
     }
@@ -256,6 +262,15 @@ export default function MerchantDashboard() {
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addressInput]);
+
+  const domainCall = async (method: string, body?: object, query = '') => {
+    setDomainBusy(true);
+    const r = await api<DomainsView>('/api/merchant/domains' + query, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    setDomainBusy(false);
+    if (r.ok) { setDomainsView(r.body); return true; }
+    setNotice(r.body.error || 'That did not work. Try again.');
+    return false;
+  };
 
   const changeAddress = async () => {
     const next = address?.candidate;
@@ -592,6 +607,48 @@ export default function MerchantDashboard() {
               <label key={k} style={label}>{k === 'terms' ? 'Terms of service' : k === 'privacy' ? 'Privacy policy' : 'Shipping & sales policy'}<textarea style={{ ...input, minHeight: 120, paddingTop: 10 }} value={settings.legal[k]} onChange={(e) => setSettings({ ...settings, legal: { ...settings.legal, [k]: e.target.value } })} /></label>
             ))}
             <div style={{ marginTop: 14 }}><button style={btn} onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button></div>
+          </section>
+        )}
+
+        {tab === 'settings' && domainsView && store.you.role === 'owner' && (
+          <section style={card} aria-label="Custom domain">
+            <div style={{ fontWeight: 700 }}>Custom domain</div>
+            <div style={{ color: C.muted, fontSize: 14, marginTop: 4 }}>
+              {`Use a domain you own, like www.yourstore.com. Your ${domainsView.plan} plan includes ${domainsView.limit === null ? 'as many as you need' : domainsView.limit}; you are using ${domainsView.used}.`}
+            </div>
+            {domainsView.domains.map((d) => (
+              <div key={d.hostname} style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{d.hostname}{d.primary ? ' · main address' : ''}</div>
+                  <div style={{ fontSize: 13, color: d.status === 'active' ? C.good : d.status === 'error' ? C.bad : C.warn }}>
+                    {d.status === 'active' ? 'Live' : d.status === 'error' ? 'Problem: check the records below' : 'Waiting for your DNS records'}
+                  </div>
+                </div>
+                {d.status !== 'active' && (
+                  <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>
+                    Add these two records where you bought the domain (it can take up to an hour to work):
+                    {d.records.map((r) => (
+                      <div key={r.type} style={{ marginTop: 6, padding: '8px 10px', background: '#0e0e11', borderRadius: 8, overflowWrap: 'anywhere' }}>
+                        <div><strong>{r.type}</strong> · {r.why}</div>
+                        <div>Name: <code>{r.name}</code></div>
+                        <div>Value: <code>{r.value}</code></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  {d.status !== 'active' && <button style={ghost} disabled={domainBusy} onClick={() => domainCall('PATCH', { hostname: d.hostname, action: 'check' })}>Check now</button>}
+                  {d.status === 'active' && !d.primary && <button style={ghost} disabled={domainBusy} onClick={() => domainCall('PATCH', { hostname: d.hostname, action: 'primary' })}>Make it my main address</button>}
+                  <button style={ghost} disabled={domainBusy} onClick={() => { if (window.confirm('Disconnect ' + d.hostname + '? Your store stops answering on it.')) domainCall('DELETE', undefined, '?hostname=' + encodeURIComponent(d.hostname)); }}>Disconnect</button>
+                </div>
+              </div>
+            ))}
+            {(domainsView.limit === null || domainsView.used < domainsView.limit) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+                <input style={{ ...input, flex: '1 1 240px', width: 'auto' }} placeholder="www.yourstore.com" value={domainInput} autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(e) => setDomainInput(e.target.value)} />
+                <button style={btn} disabled={domainBusy || !domainInput.trim()} onClick={async () => { if (await domainCall('POST', { hostname: domainInput })) setDomainInput(''); }}>{domainBusy ? 'Connecting…' : 'Connect domain'}</button>
+              </div>
+            )}
           </section>
         )}
 

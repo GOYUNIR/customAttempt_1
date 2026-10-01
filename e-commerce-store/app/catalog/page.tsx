@@ -2,7 +2,7 @@ import LegacyCatalogPage from '@/components/storefront/LegacyCatalogPage';
 import ThemePageSections from '@/components/storefront/ThemeBlocks';
 import { readThemePage } from '@/lib/theme-page-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { storefrontTenantFromHeaders, notFoundOrMoved } from '@/lib/storefront-tenant';
+import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
 import { createKvClient, loadProducts } from '@/lib/server-config';
 
@@ -27,6 +27,7 @@ export default async function CatalogPage() {
   // standard catalog, which reads the tenant-aware /api/store.
   const who = await storefrontTenantFromHeaders();
   if (who.kind === 'none') return notFoundOrMoved('/catalog');
+  await redirectToPrimary(who, '/catalog');
   if (who.kind === 'unavailable') throw new Error('[storefront] store lookup unavailable');
   const tenantId = who.isDefault ? await ensureDefaultTenant().catch(() => null) : null;
   const sections = tenantId ? await readThemePage(tenantId, 'catalog') : [];

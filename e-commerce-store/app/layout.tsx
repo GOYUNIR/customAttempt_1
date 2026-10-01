@@ -120,6 +120,7 @@ async function canonicalFor(who: StorefrontTenant, fallbackOrigin: string): Prom
   const root = String(process.env.PLATFORM_ROOT_DOMAIN || '').trim();
   let origin = fallbackOrigin;
   if (who.kind === 'store' && who.isDefault) { const h = storefrontHostFor(); if (h) origin = 'https://' + h; }
+  else if (who.kind === 'store' && who.primaryHost) origin = 'https://' + who.primaryHost;
   else if (who.kind === 'store' && who.slug && root) origin = 'https://' + who.slug + '.' + root;
   return origin.replace(/[/]+$/, '') + (path.startsWith('/') ? path : '/' + path);
 }

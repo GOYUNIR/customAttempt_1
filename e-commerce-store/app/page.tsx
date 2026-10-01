@@ -2,7 +2,7 @@ import LegacyHomePage from '@/components/storefront/LegacyHomePage';
 import ThemeSections from '@/components/storefront/ThemeSections';
 import { readActiveTheme } from '@/lib/theme-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
-import { storefrontTenantFromHeaders, notFoundOrMoved } from '@/lib/storefront-tenant';
+import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +23,7 @@ export default async function HomePage() {
   // standard homepage, which reads the tenant-aware /api/store.
   const who = await storefrontTenantFromHeaders();
   if (who.kind === 'none') return notFoundOrMoved('/');
+  await redirectToPrimary(who, '/');
   if (who.kind === 'unavailable') throw new Error('[storefront] store lookup unavailable');
   const tenantId = who.isDefault ? await ensureDefaultTenant().catch(() => null) : null;
   const theme = tenantId ? await readActiveTheme(tenantId) : null;

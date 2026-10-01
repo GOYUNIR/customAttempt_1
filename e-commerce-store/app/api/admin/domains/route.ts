@@ -41,7 +41,17 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, configured: true, tenantId, domain: rows?.[0] || null });
 }
 
-export async function POST(request: Request) {
+
+// RETIRED (2026-09-30). Custom domains are now per store, self-serve in the
+// merchant dashboard (lib/custom-domains.ts, tenant_domains, 00040), with the
+// payments gate, the plan cap and TXT ownership proof. This admin path wrote
+// the old single-domain columns, which the storefront no longer reads, and
+// skipped every one of those checks, so it answers 410 rather than half-work.
+const retired = () => NextResponse.json({ error: "Custom domains moved to each store's dashboard (Settings → Custom domain)." }, { status: 410 });
+export async function POST(_request: Request) {
+  return retired();
+}
+async function retiredPost(request: Request) {
   try {
     const limited = await rateLimitedResponse('admin_domain_sync', request, 10, 60);
     if (limited) return limited;
@@ -96,7 +106,10 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function DELETE(_request: Request) {
+  return retired();
+}
+async function retiredDelete(request: Request) {
   try {
     if (!(await adminAuthorized(request))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

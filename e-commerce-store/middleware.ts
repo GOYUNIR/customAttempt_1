@@ -291,6 +291,17 @@ export async function middleware(request: NextRequest) {
   );
   const portal = classifyHost(publicHost, platformRootDomain);
 
+  // HTTPS only, on every host (custom domains included): a plain-HTTP request
+  // is sent to the same URL over HTTPS. Cloudflare reports the visitor's
+  // scheme in x-forwarded-proto.
+  if (request.headers.get('x-forwarded-proto') === 'http') {
+    const secure = new URL(request.url);
+    secure.protocol = 'https:';
+    secure.host = String(request.headers.get('host') || secure.host);
+    secure.port = '';
+    return NextResponse.redirect(secure, { status: 301 });
+  }
+
   // A retired store address (e.g. shop.) redirects its pages to the store's
   // one address rather than mirroring it. Host header only (x-forwarded-host is
   // client-settable).

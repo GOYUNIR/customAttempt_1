@@ -215,6 +215,14 @@ export async function syncPlanSubscription(subscriptionId: string): Promise<{ ap
   if (changed) {
     await db.update('tenants', { where: { id: eq(tenantId) } }, { plan_id: planId, plan_grace_until: grace }, { returning: 'minimal' } as any);
     await recordPlatformAudit({ action: 'PLAN_CHANGED', actor: 'stripe', tenantId, detail: { from: tenant.plan_id, to: planId, status, grace_until: grace, subscription: subscriptionId } });
+    // A smaller plan may allow fewer custom domains: release the extras now
+    // (newest first, primary kept) so none is left pointing nowhere. Best
+    // effort: a domain hiccup must never fail the billing webhook.
+    try {
+      const { enforceDomainCap } = await import('@/lib/custom-domains');
+      const released = await enforceDomainCap(tenantId);
+      if (released.length) console.log('[plan-billing] ' + tenantId + ': released custom domains over the new cap: ' + released.join(', '));
+    } catch (err) { console.error('[plan-billing] domain cap check failed for ' + tenantId, (err as Error)?.message || err); }
   }
   return { applied: true, note: 'store ' + tenantId + ': ' + status + ' -> plan ' + planId + (grace ? ' (grace until ' + grace + ')' : '') };
 }
