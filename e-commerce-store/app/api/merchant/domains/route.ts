@@ -13,12 +13,7 @@ export const dynamic = 'force-dynamic';
  *   PATCH {hostname, action}   'check' (re-verify) | 'primary'
  *   DELETE ?hostname=          release it (Cloudflare first, then ours)
  */
-async function owner(request: Request) {
-  const gate = await merchantSession(request);
-  if (!gate.ok) return { error: gate.response } as const;
-  if (gate.session.role !== 'owner') return { error: merchantJson({ error: 'Only the store owner can manage custom domains.' }, 403) } as const;
-  return { session: gate.session } as const;
-}
+const notOwner = () => merchantJson({ error: 'Only the store owner can manage custom domains.' }, 403);
 
 async function view(tenantId: string) {
   await enforceDomainCap(tenantId);  // a lapsed grace period is caught here too
@@ -33,14 +28,18 @@ async function view(tenantId: string) {
 }
 
 export async function GET(request: Request) {
-  const o = await owner(request);
-  if ('error' in o) return o.error;
+  const gate = await merchantSession(request);
+  if (!gate.ok) return gate.response;
+  if (gate.session.role !== 'owner') return notOwner();
+  const o = { session: gate.session };
   return merchantJson(await view(o.session.tenantId));
 }
 
 export async function POST(request: Request) {
-  const o = await owner(request);
-  if ('error' in o) return o.error;
+  const gate = await merchantSession(request);
+  if (!gate.ok) return gate.response;
+  if (gate.session.role !== 'owner') return notOwner();
+  const o = { session: gate.session };
   const limited = await rateLimitedResponse('merchant_domains', request, 10, 60);
   if (limited) return limited;
   const body = await request.json().catch(() => ({}));
@@ -51,8 +50,10 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const o = await owner(request);
-  if ('error' in o) return o.error;
+  const gate = await merchantSession(request);
+  if (!gate.ok) return gate.response;
+  if (gate.session.role !== 'owner') return notOwner();
+  const o = { session: gate.session };
   const limited = await rateLimitedResponse('merchant_domains', request, 30, 60);
   if (limited) return limited;
   const body = await request.json().catch(() => ({}));
@@ -63,8 +64,10 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const o = await owner(request);
-  if ('error' in o) return o.error;
+  const gate = await merchantSession(request);
+  if (!gate.ok) return gate.response;
+  if (gate.session.role !== 'owner') return notOwner();
+  const o = { session: gate.session };
   const hostname = String(new URL(request.url).searchParams.get('hostname') || '').toLowerCase();
   const r = await removeDomain(o.session.tenantId, hostname, o.session.email);
   if (!r.ok) return merchantJson({ error: r.error }, r.status);
