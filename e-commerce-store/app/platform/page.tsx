@@ -1,12 +1,11 @@
 import MerchantSignupForm from '@/components/platform/MerchantSignupForm';
 import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/components/platform/MarketingChrome';
 import CheckoutModeShowcase from '@/components/platform/CheckoutModeShowcase';
-import { CAPABILITIES, COMPARISON, PLANS, FAQS, feeSummary } from '@/lib/platform-marketing';
+import { CAPABILITIES, COMPARISON, FAQS, feeSummary, plansWithData } from '@/lib/platform-marketing';
+import { loadPlans } from '@/lib/billing';
 
 import { getSupportEmail, merchantSignupOpen } from '@/lib/env';
 
-// The per-sale fee, derived from the plan data (DEFERRED-9).
-const FEES = feeSummary();
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +39,11 @@ export const metadata = {
   twitter: { card: 'summary_large_image', title: SHARE_TITLE, description: SHARE_TEXT, images: ['/og'] },
 };
 
-export default function PlatformPage() {
+export default async function PlatformPage() {
+  // Prices, fees and which plans show come from public.plans, what billing
+  // actually charges (the words stay in lib/platform-marketing.ts).
+  const PLANS = plansWithData(await loadPlans().catch(() => []));
+  const FEES = feeSummary(PLANS);
   const rootDomain = process.env.PLATFORM_ROOT_DOMAIN || null;
 
   return (

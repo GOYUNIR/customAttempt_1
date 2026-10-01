@@ -14,13 +14,27 @@ export const LEGAL_DRAFT = {
   status: 'This is our first version; we will update it after legal review.',
 };
 
+/**
+ * Config, not text: PLATFORM_LEGAL_ENTITY names the operator ("Example Ltd");
+ * until it is set the operator is named by the domain. The draft notice stays
+ * until PLATFORM_LEGAL_REVIEWED holds the review date (then that date shows).
+ */
+export function legalNotice(): { updated: string; draft: string | null } {
+  const reviewed = String(process.env.PLATFORM_LEGAL_REVIEWED || '').trim();
+  return reviewed ? { updated: reviewed, draft: null } : { updated: LEGAL_DRAFT.reviewed, draft: LEGAL_DRAFT.status };
+}
+function operatorOf(site: string): string {
+  const entity = String(process.env.PLATFORM_LEGAL_ENTITY || '').trim();
+  return entity ? entity + ', the operator of ' + site + ',' : 'the operator of ' + site;
+}
+
 export type LegalSection = { h: string; p: string[] };
 
 export function platformTerms(site: string, inbox: string): LegalSection[] {
   const contact = inbox ? 'email ' + inbox : 'contact us through ' + site;
   return [
     { h: 'Who these terms are for', p: [
-      `These terms cover merchants who run a store on ${site} (the "platform"), and the people they invite to help run it. Shoppers buying from a store deal with that store; the store's own terms and policies apply to their purchase.`,
+      `These terms are between ${operatorOf(site)} ("we") and the merchants who run a store on ${site} (the "platform"), and the people they invite to help run it. Shoppers buying from a store deal with that store; the store's own terms and policies apply to their purchase.`,
     ] },
     { h: 'Your store, your sales', p: [
       'Each store takes payments through its own Stripe account, connected to the platform with Stripe Connect. Payments are created directly on the merchant\'s Stripe account: the merchant is the seller and the merchant of record for every sale, and the money goes to the merchant\'s Stripe balance, not through ours.',
@@ -38,7 +52,7 @@ export function platformTerms(site: string, inbox: string): LegalSection[] {
     ] },
     { h: 'Your content and data', p: [
       'You own your store\'s content (products, images, text) and your store\'s data. You give us permission to host, display and process it only to run your store and the platform.',
-      'You can ask for a full export of your store\'s data at any time and we will provide it; a self-serve export is not yet available in the dashboard.',
+      'You can export your store\'s data yourself at any time from your dashboard (products, orders and customers, as CSV or JSON).',
       'For your shoppers\' personal data, you decide what is collected and why; we process it on your behalf to run your store. Our Privacy Policy explains what we collect.',
     ] },
     { h: 'Acceptable use', p: [
@@ -63,7 +77,7 @@ export function platformPrivacy(site: string, inbox: string): LegalSection[] {
   const contact = inbox ? 'email ' + inbox : 'contact us through ' + site;
   return [
     { h: 'Who this covers', p: [
-      `This policy covers the operator of ${site} and people who use it: merchants and their staff, visitors to this site, and shoppers at stores on the platform.`,
+      `This policy covers ${operatorOf(site)} and people who use it: merchants and their staff, visitors to this site, and shoppers at stores on the platform.`,
       'For shoppers, the store you buy from decides what it collects and why, and it is responsible for that data; we process it on the store\'s behalf. Contact the store first about your data; we will help it answer.',
     ] },
     { h: 'What we collect', p: [

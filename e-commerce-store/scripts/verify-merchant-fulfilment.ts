@@ -9,6 +9,7 @@
  * (EMAIL_SINK_DOMAINS): the "shipped" email is recorded, never sent. It
  * refuses to touch an order with a real customer address.
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
@@ -17,7 +18,7 @@ process.env.USE_POSTGRES_PRIMARY = 'true';
 import { chromium } from 'playwright-core';
 import { CHROME } from './mobile-audit';
 
-const APP = 'https://app.goyunir.com';
+const APP = 'https://app.' + ROOT;
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const B = 'ff8d5e59-1a07-4e83-bc13-f949c745d9de'; // goyunir-test-1
 const B_OWNER = 'isolation-owner-b@goyunir.invalid';
@@ -84,7 +85,7 @@ const run = Date.now().toString(36);
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   try {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await ctx.addCookies([{ name: 'goyunir_admin_device', value: sA, domain: 'app.goyunir.com', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
+    await ctx.addCookies([{ name: 'goyunir_admin_device', value: sA, domain: 'app.' + ROOT, path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
     const page = await ctx.newPage();
     await page.goto(APP + '/app', { waitUntil: 'load' });
     await page.getByRole('button', { name: /^Orders/ }).click();

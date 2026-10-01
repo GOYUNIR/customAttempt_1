@@ -1,9 +1,33 @@
-# Moving the platform off goyunir.com (PLAN ONLY, not performed)
+# Moving the platform off goyunir.com (EXECUTABLE; not performed yet)
 
 The platform is borrowing goyunir.com. Eventually the platform gets its own
-name and domain (written NEWROOT below; not chosen yet) and goyunir.com goes
-back to being GOYUNIR's own store domain. Everything below is configuration
-unless marked **CODE**. Nothing is hardcoded to a specific new name.
+name and domain (written NEWROOT below; not chosen yet), and goyunir.com goes
+back to being GOYUNIR's own store domain. Nothing is hardcoded to a specific
+new name.
+
+## The move in three steps (when NEWROOT exists)
+
+1. **Set the value.** `npx tsx scripts/set-platform-domain.ts NEWROOT --name "<Name>"`
+   - It rewrites everything domain-shaped in wrangler.jsonc from one value:
+     routes (the old routes are kept), root, old-root list, Turnstile host,
+     support address, sink domain, GOYUNIR's interim address, and the name.
+   - Commit and push (deploys).
+2. **Do the dashboard steps** below, in order. The sending domain goes **add,
+   verify, flip, remove**: never a moment without a verified sender.
+3. **Check it.** `npx tsx scripts/verify-domain-migration.ts NEWROOT --old goyunir.com --goyunir-domain goyunir.com`
+   - It covers DNS (zone, apex, wildcard, proxied), the Worker on every kind of
+     host, HSTS and CSP, cookies, Turnstile, Stripe webhooks and their events,
+     Supabase Auth (with `SUPABASE_ACCESS_TOKEN`), media, links in email,
+     support@ MX, DMARC, the Resend domain and sender, the old-address 301s,
+     and GOYUNIR's own domain.
+   - Repeat until every line is PASS or checked by hand.
+   - **Rehearsed 2026-10-01 against goyunir.com:** 23 pass, 3 by hand, 1 real
+     finding (Resend's `rsend` CNAME was missing; see RELEASE-PLAN.md §5).
+
+**Lesson from the rehearsal:** the proxied wildcard `*.<root>` answers for ANY
+missing name. A forgotten email record (DKIM, the `rsend` CNAME, `send.` MX)
+therefore resolves to Cloudflare instead of failing loudly. On NEWROOT, add
+every email record explicitly, as **DNS only** (grey cloud).
 
 ## What depends on the platform domain today
 | Item | Where | Today |
@@ -23,16 +47,22 @@ unless marked **CODE**. Nothing is hardcoded to a specific new name.
 | Platform legal pages | derived from `PLATFORM_ROOT_DOMAIN` + `getPlatformName()` | automatic |
 | Internal names (not visible to shoppers) | cookie `goyunir_admin_device`, storage keys `goyunir-*`, `GOYUNIR_STORE_SUITE` | **CODE**, optional: rename at the move, since everyone signs in again anyway |
 
-## Before the move (one-time code work, not built)
-1. **CODE: old-root redirect.**
-   - Config: `PLATFORM_OLD_ROOT_DOMAINS` (a list). A request to
-     `<slug>.<old root>` 301s to `<slug>.<NEWROOT>` with path and query kept,
-     for page loads only. The same rule as `retiredHostRedirect`.
-   - Without this, every merchant's printed links and emails break on the
-     day of the move.
-2. **CODE: proof scripts.** They name `https://app.goyunir.com` etc. Read the
-   root from `PLATFORM_ROOT_DOMAIN` instead, so every proof can run against
-   NEWROOT on the day.
+## Before the move (one-time code work: DONE 2026-10-01)
+1. **Old-root redirect: BUILT** (`oldRootRedirect`, lib/edge-router.ts; 11
+   unit tests).
+   - `PLATFORM_OLD_ROOT_DOMAINS` (a list): `<label>.<old root>` 301s to
+     `<label>.<NEWROOT>`, path and query kept, page loads only. `/api/*` keeps
+     answering, so an in-flight checkout return or an old email's API link
+     never breaks.
+   - The old apex and www are NOT redirected: they become GOYUNIR's own store
+     domain.
+   - Old Stripe webhook URLs on the old apex stop being platform routes once
+     it is GOYUNIR's custom domain. So the new endpoints must be live first
+     (Stripe sends every event to every endpoint, and the dedupe handles the
+     overlap); delete the old endpoints after.
+2. **Proof scripts: DONE.** They read the root from wrangler.jsonc
+   (`scripts/proof-config.ts`, or `PROOF_ROOT_DOMAIN`), so after step 1 of the
+   move they run against NEWROOT unchanged.
 3. **Media URLs: DECIDED (owner, 2026-10-01), and the code is DONE.**
    - **`media.goyunir.com` keeps answering forever.** Never remove its route
      or DNS, even after the move.

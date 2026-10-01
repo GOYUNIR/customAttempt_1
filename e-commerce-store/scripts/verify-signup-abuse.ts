@@ -20,15 +20,16 @@
  * signup-email budget stops sends. Cleans up its counters, policy changes and
  * temporary account; its pending signups expire by themselves (48 h).
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
 if (existsSync(envPath)) for (const line of readFileSync(envPath, 'utf8').split(/\r?\n/)) { const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim()); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1'); }
 process.env.USE_POSTGRES_PRIMARY = 'true';
-process.env.PLATFORM_ROOT_DOMAIN = 'goyunir.com';
+process.env.PLATFORM_ROOT_DOMAIN = ROOT;
 process.env.STOREFRONT_LEGACY_HOSTS = 'shop,www,api,goyunir';
 process.env.ALLOW_MERCHANT_SIGNUP = 'true';           // this process only
-process.env.SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@goyunir.com'; // production's (wrangler vars): breaker alerts go there
+process.env.SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || SUPPORT_EMAIL; // production's (wrangler vars): breaker alerts go there
 process.env.EMAIL_DRIVER = 'record';                   // never real mail (see above)
 process.env.TURNSTILE_EXPECTED_HOSTNAMES = 'example.com'; // what Cloudflare's test keys report
 const PASS = '1x0000000000000000000000000000000AA', FAIL = '2x0000000000000000000000000000000AA', SPENT = '3x0000000000000000000000000000000AA';
@@ -51,7 +52,7 @@ const inbox = (label: string) => label.replace(/[^a-z0-9]/gi, '').toLowerCase() 
   const ips: string[] = [];
   const signup = async (o: { email: string; storeName: string; ip: string; token?: string; terms?: boolean }) => {
     ips.push(o.ip); emails.add(o.email.toLowerCase());
-    const res = await POST(new Request('https://goyunir.com/api/signup/merchant', {
+    const res = await POST(new Request('https://' + ROOT + '/api/signup/merchant', {
       method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': o.ip },
       body: JSON.stringify({ email: o.email, storeName: o.storeName, acceptTerms: o.terms ?? true, turnstileToken: o.token ?? 'XXXX.DUMMY.TOKEN.XXXX' }),
     }));
@@ -97,7 +98,7 @@ const inbox = (label: string) => label.replace(/[^a-z0-9]/gi, '').toLowerCase() 
     check((await signup({ email: inbox('t2'), storeName: 'Proof T2 ' + run, ip: '198.51.100.1' })).status === 400, 'a replayed (already spent) token is refused (400)');
     process.env.TURNSTILE_SECRET_KEY = '';
     check((await signup({ email: inbox('t3'), storeName: 'Proof T3 ' + run, ip: '198.51.100.1' })).status === 503, 'verification unavailable: refused, not waved through (503)');
-    process.env.TURNSTILE_SECRET_KEY = PASS; process.env.TURNSTILE_EXPECTED_HOSTNAMES = 'goyunir.com';
+    process.env.TURNSTILE_SECRET_KEY = PASS; process.env.TURNSTILE_EXPECTED_HOSTNAMES = ROOT;
     check((await signup({ email: inbox('t4'), storeName: 'Proof T4 ' + run, ip: '198.51.100.1' })).status === 400, 'a token solved on another hostname is refused (400)');
     process.env.TURNSTILE_EXPECTED_HOSTNAMES = 'example.com';
 
@@ -165,7 +166,7 @@ const inbox = (label: string) => label.replace(/[^a-z0-9]/gi, '').toLowerCase() 
     for (let i = 0; i < 6; i++) wave.push(await signup({ email: inbox('wave' + i), storeName: 'Proof Wave ' + run + ' ' + i, ip: '203.0.113.' + (10 + i) }));
     const tripped = wave.findIndex((r) => r.status === 503);
     check(tripped === 3 && wave.slice(3).every((r) => r.status === 503 && /paused/.test(r.body?.error)), 'the 4th signup over the hourly limit trips the breaker; the rest are paused: ' + wave.map((r) => r.status).join(','));
-    const alerts = await sentTo(getDb, 'support@goyunir.com', { waitMs: 30000 });
+    const alerts = await sentTo(getDb, 'support@' + ROOT, { waitMs: 30000 });
     check(alerts.filter((m: any) => /Signup paused itself/.test(m.subject) && Date.parse(m.created_at) > Date.now() - 300000).length === 1, 'the operator got ONE alert email at support@');
     await setPolicy('signup.global_per_hour', policyBefore['signup.global_per_hour']);
     await sleep(65000);

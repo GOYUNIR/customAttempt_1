@@ -8,13 +8,14 @@
  * Sets `export.page_rows` to 10 for the run (so paging is exercised) and
  * removes it afterwards.
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
 if (existsSync(envPath)) for (const line of readFileSync(envPath, 'utf8').split(/\r?\n/)) { const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim()); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"(.*)"$/, '$1'); }
 process.env.USE_POSTGRES_PRIMARY = 'true';
 
-const APP = 'https://app.goyunir.com';
+const APP = 'https://app.' + ROOT;
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const B = 'ff8d5e59-1a07-4e83-bc13-f949c745d9de'; // goyunir-test-1
 const B_OWNER = 'isolation-owner-b@goyunir.invalid';

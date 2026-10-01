@@ -8,7 +8,7 @@ import { licenseEnforced, resolveLicenseKey } from '@/lib/license';
 import { maintenanceModeEnabled, isMaintenanceExemptPath } from '@/lib/maintenance';
 import { isCsrfBlocked } from '@/lib/csrf';
 import { productionEnvHasBlockingIssues } from '@/lib/env-schema';
-import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, retiredHostRedirect, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
+import { classifyHost, isPortalPathAllowed, isStrayStorefrontPath, isStrayMarketingPath, marketingRootEnabled, storefrontHostFor, retiredHostRedirect, oldRootRedirect, portalHomeRewrite, resolveRequestHost, clientIpFromHeaders, type Portal } from '@/lib/edge-router';
 import { loginPathForPortal, isStaffLoginPath, isStaffInvitePath } from '@/lib/staff-realms';
 import { classifyStorefrontHost, parseLegacyHosts, merchantHostAllowsPath } from '@/lib/storefront-host';
 import { isForeignTenantSession } from '@/lib/default-tenant';
@@ -301,6 +301,14 @@ export async function middleware(request: NextRequest) {
     secure.port = '';
     return NextResponse.redirect(secure, { status: 301 });
   }
+
+  // The platform moved domains: an old <label>.<old root> address 301s to the
+  // same label on the new root (lib/edge-router.ts oldRootRedirect).
+  const movedTo = oldRootRedirect({
+    host: String(request.headers.get('host') || ''), pathname, search: request.nextUrl.search, method: request.method,
+    oldRoots: process.env.PLATFORM_OLD_ROOT_DOMAINS, newRoot: platformRootDomain,
+  });
+  if (movedTo) return NextResponse.redirect(movedTo, { status: 301, headers: { 'Cache-Control': 'public, max-age=3600' } });
 
   // A retired store address (e.g. shop.) redirects its pages to the store's
   // one address rather than mirroring it. Host header only (x-forwarded-host is

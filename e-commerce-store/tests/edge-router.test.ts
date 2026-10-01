@@ -430,3 +430,20 @@ test('a retired store host 301s its pages to the one store address; its API keep
   assert.equal(retiredHostRedirect({ ...base, host: 'www.example.com', pathname: '/x' }), null, 'other hosts untouched');
   assert.equal(retiredHostRedirect({ ...base, storefrontHost: null, host: 'shop.example.com', pathname: '/x' }), null, 'no configured address: nothing is guessed');
 });
+
+test('platform moved: <label>.<old root> 301s to the same label on the new root, pages only', async () => {
+  const { oldRootRedirect } = await import('../lib/edge-router.ts');
+  const r = (host: string, pathname = '/p', method = 'GET', oldRoots = 'goyunir.com', newRoot = 'newroot.example') =>
+    oldRootRedirect({ host, pathname, search: '?a=1', method, oldRoots, newRoot });
+  assert.equal(r('kestrel.goyunir.com'), 'https://kestrel.newroot.example/p?a=1');
+  assert.equal(r('app.goyunir.com', '/app/login'), 'https://app.newroot.example/app/login?a=1');
+  assert.equal(r('goyunir.com'), null, 'the old apex becomes GOYUNIR\'s own store domain: not redirected');
+  assert.equal(r('www.goyunir.com'), null, 'nor its www');
+  assert.equal(r('kestrel.goyunir.com', '/api/stripe/webhook', 'POST'), null, 'API calls keep working where they are');
+  assert.equal(r('kestrel.goyunir.com', '/api/store'), null);
+  assert.equal(r('a.b.goyunir.com'), null, 'only one label deep');
+  assert.equal(r('evilgoyunir.com'), null, 'a lookalike is not the old root');
+  assert.equal(r('kestrel.newroot.example', '/p', 'GET', 'goyunir.com'), null, 'the new root itself never redirects');
+  assert.equal(r('kestrel.goyunir.com', '/p', 'GET', ''), null, 'no old roots configured: nothing moves');
+  assert.equal(r('kestrel.goyunir.com', '/p', 'GET', 'goyunir.com', 'goyunir.com'), null, 'old = new: no loop');
+});

@@ -64,7 +64,7 @@ export const CAPABILITIES: Capability[] = [
   {
     outcome: 'Leave whenever you want, and take everything with you',
     proof:
-      'Your payments run in your own Stripe account, and your data lives in standard Postgres. Ask and we export all of it for you; self-serve export is coming. Nothing here is designed to make leaving hard.',
+      'Your payments run in your own Stripe account, and your data lives in standard Postgres. Export your products, orders and customers yourself, any time, from your dashboard. Nothing here is designed to make leaving hard.',
   },
 ];
 
@@ -102,7 +102,7 @@ export const COMPARISON: ComparisonRow[] = [
   {
     question: 'Getting your data out',
     today: 'A CSV export, and an API you pay for',
-    here: 'Your own Stripe account; standard Postgres, exported for you on request (self-serve export coming)',
+    here: 'Your own Stripe account; standard Postgres; export products, orders and customers yourself as CSV or JSON',
   },
 ];
 
@@ -270,8 +270,29 @@ export function graduatedFeeWords(plans: (FeePlan & { name: string })[]): { band
   return { bands, cap, capPlan: capPlan ? { name: capPlan.name, monthlyCents: capPlan.monthlyCents } : null };
 }
 
-export function feeSummary(): { freeLine: string; footnote: string } {
-  const plans = PLANS
+/**
+ * The shop window with the NUMBERS from the database (`public.plans`, what
+ * billing actually charges): name, price, per-sale fee and whether it is
+ * listed come from the row; only the words (tagline, points, button) stay
+ * here. A plan with no row keeps its built-in numbers.
+ */
+export function plansWithData(rows: Array<{ id: string; name: string; baseCents: number; platformFeeBps: number | null; feeMode: string; listed: boolean }>): Plan[] {
+  if (!rows.length) return PLANS;
+  return PLANS.map((p) => {
+    const r = rows.find((x) => x.id === p.id);
+    if (!r) return p;
+    return {
+      ...p,
+      name: r.name || p.name,
+      monthlyUsd: r.feeMode === 'custom' ? null : r.baseCents / 100,
+      platformFeeBps: r.platformFeeBps === null ? undefined : r.platformFeeBps,
+      listed: r.listed,
+    };
+  });
+}
+
+export function feeSummary(source: Plan[] = PLANS): { freeLine: string; footnote: string } {
+  const plans = source
     .filter((p) => p.monthlyUsd !== null && p.platformFeeBps !== undefined)
     .map((p) => ({ id: p.id, name: p.name, monthlyCents: Math.round((p.monthlyUsd as number) * 100), feeBps: p.platformFeeBps as number }));
   const { bands, cap, capPlan } = graduatedFeeWords(plans);

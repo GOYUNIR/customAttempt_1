@@ -9,6 +9,7 @@
  * Uses test4's hidden draft fixture (never shown to shoppers) and leaves its
  * photos as they were. Uploaded test objects stay in storage (unreferenced).
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
@@ -17,7 +18,7 @@ process.env.USE_POSTGRES_PRIMARY = 'true';
 import { chromium } from 'playwright-core';
 import { CHROME } from './mobile-audit';
 
-const APP = 'https://app.goyunir.com';
+const APP = 'https://app.' + ROOT;
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const B = 'ff8d5e59-1a07-4e83-bc13-f949c745d9de'; // goyunir-test-1
 const B_OWNER = 'isolation-owner-b@goyunir.invalid';
@@ -89,7 +90,7 @@ const run = Date.now().toString(36);
 
     console.log('\nIn the dashboard');
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await ctx.addCookies([{ name: 'goyunir_admin_device', value: sA, domain: 'app.goyunir.com', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
+    await ctx.addCookies([{ name: 'goyunir_admin_device', value: sA, domain: 'app.' + ROOT, path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
     const page = await ctx.newPage();
     await page.goto(APP + '/app', { waitUntil: 'load' });
     await page.getByRole('button', { name: /^Products/ }).waitFor({ timeout: 30_000 });
@@ -123,7 +124,7 @@ const run = Date.now().toString(36);
     const DEMO = '3b6f7db1-7645-4c52-aefe-cc8be563c359';
     const legacy = ((await getDb().select<any>('products', { where: { tenant_id: eq(DEMO), status: eq('live') }, select: ['media_gallery'] })) as any[])
       .flatMap((p) => (p.media_gallery || []).map((m: any) => String(m?.url || ''))).filter((u: string) => /^https:\/\//.test(u));
-    const demoPage = await (await fetch('https://demo.goyunir.com/api/store')).text();
+    const demoPage = await (await fetch('https://demo.' + ROOT + '/api/store')).text();
     check(legacy.length > 0 && legacy.every((u: string) => demoPage.includes(u)) && (await fetch(legacy[0])).status === 200, 'older photos stored as full URLs are served exactly as stored (' + legacy.length + ' on the demo storefront)');
     const bShown = (await products(sB)).flatMap((p) => p.images || []);
     check(!bShown.some((u: string) => u.includes('/tenants/' + A + '/')) && !demoPage.includes(A), 'nothing of test4\'s appears in another store\'s catalog');

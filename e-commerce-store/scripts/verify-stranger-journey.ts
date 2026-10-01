@@ -12,6 +12,7 @@
  * Free store with no payments, so it releases its name by itself after the
  * activation window (policy data) — nothing is left for the operator.
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
@@ -20,8 +21,8 @@ process.env.USE_POSTGRES_PRIMARY = 'true';
 import { chromium, type Page } from 'playwright-core';
 import { CHROME } from './mobile-audit';
 
-const ROOT = 'https://goyunir.com';
-const APP = 'https://app.goyunir.com';
+const SITE = 'https://' + ROOT;
+const APP = 'https://app.' + ROOT;
 let failures = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  FAIL ') + what); if (!ok) failures++; };
 const run = Date.now().toString(36);
@@ -52,11 +53,11 @@ async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   try {
     console.log('\nSignup (real form, real Turnstile) — ' + storeName);
-    await page.goto(ROOT + '/#start', { waitUntil: 'load' });
+    await page.goto(SITE + '/#start', { waitUntil: 'load' });
     await page.getByPlaceholder('Atelier Nord').fill(storeName);
     await page.getByPlaceholder('you@brand.com').fill(email);
-    const preview = await page.getByText(/Your store: .*\.goyunir\.com/).innerText().catch(() => '');
-    check(/Your store: [a-z0-9-]+\.goyunir\.com/.test(preview), 'the address is previewed as you type: ' + preview);
+    const preview = await page.getByText(new RegExp('Your store: .*\\.' + ROOT_RE)).innerText().catch(() => '');
+    check(new RegExp('Your store: [a-z0-9-]+\\.' + ROOT_RE).test(preview), 'the address is previewed as you type: ' + preview);
     await page.locator('input[type=checkbox]').first().check();
     check(await waitForTurnstile(page), 'Turnstile issued a token for a real browser');
     await page.getByRole('button', { name: /Email me a link/ }).click();
@@ -65,7 +66,7 @@ async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
 
     console.log('\nVerify email → choose password');
     const mail = (await sentTo(getDb, email, { waitMs: 90_000 }))[0];
-    const link = (String(mail?.html || mail?.text || '').match(/https:\/\/goyunir\.com\/api\/signup\/merchant\/complete\?token=[0-9a-f]{64}/) || [])[0] || '';
+    const link = (String(mail?.html || mail?.text || '').match(new RegExp('https://' + ROOT_RE + '/api/signup/merchant/complete\\?token=[0-9a-f]{64}')) || [])[0] || '';
     check(Boolean(link) && /Confirm your email to open/.test(mail?.subject || ''), 'the email arrived with its link: "' + (mail?.subject || 'none') + '"');
     await page.goto(link, { waitUntil: 'load' });
     check(/\/admin\/accept-invite\?token=/.test(page.url()), 'the link creates the store and opens "choose a password": ' + new URL(page.url()).host);
@@ -94,7 +95,7 @@ async function waitForTurnstile(page: Page, ms = 60_000): Promise<boolean> {
     const list = page.getByRole('region', { name: 'Get your store ready' });
     const listText = (await list.innerText({ timeout: 15_000 }).catch(() => '')).replace(/\s+/g, ' ');
     check(/Connect payments/.test(listText) && /Add your first product/.test(listText) && /store address/.test(listText) && /plan/i.test(listText), 'the checklist shows the four steps: ' + listText.slice(0, 160));
-    check(/support@goyunir\.com/.test(listText), 'and where to get help (support@)');
+    check(listText.includes(SUPPORT_EMAIL), 'and where to get help (' + SUPPORT_EMAIL + ')');
 
     console.log('\nFirst product, with a photo');
     await list.getByRole('button', { name: 'Add a product' }).click();

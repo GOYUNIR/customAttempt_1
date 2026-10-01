@@ -1,5 +1,5 @@
 import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/components/platform/MarketingChrome';
-import { LEGAL_DRAFT, type LegalSection } from '@/lib/platform-legal';
+import { legalNotice, type LegalSection } from '@/lib/platform-legal';
 
 /** The platform's own legal pages (never a store's): terms and privacy. */
 export default function PlatformLegalPage({ title, sections }: { title: string; sections: LegalSection[] }) {
@@ -10,7 +10,7 @@ export default function PlatformLegalPage({ title, sections }: { title: string; 
       <main style={{ maxWidth: 760, margin: '0 auto', padding: '64px 20px 80px' }}>
         <h1 style={{ fontSize: 36, margin: '0 0 12px', fontWeight: 800 }}>{title}</h1>
         <p role="note" style={{ margin: '0 0 36px', padding: '10px 14px', border: `1px solid ${INK.border}`, borderRadius: 10, color: INK.muted, fontSize: 14 }}>
-          Last updated {LEGAL_DRAFT.reviewed}. {LEGAL_DRAFT.status}
+          Last updated {legalNotice().updated}.{legalNotice().draft ? ' ' + legalNotice().draft : ''}
         </p>
         {sections.map((s) => (
           <section key={s.h} style={{ marginBottom: 28 }}>

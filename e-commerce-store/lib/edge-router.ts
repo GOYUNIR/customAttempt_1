@@ -450,6 +450,32 @@ export function clientIpFromHeaders(
 }
 
 /**
+ * THE PLATFORM MOVED (DOMAIN-MIGRATION.md): `<label>.<old root>` 301s to
+ * `<label>.<new root>` (stores, app., admin., sales.), path and query kept,
+ * for page loads only (an /api call from an old email or an in-flight
+ * checkout keeps working where it is). The old root's apex and www are NOT
+ * moved: the old domain becomes GOYUNIR's own store domain (a custom domain),
+ * so they are served by that, not redirected. PLATFORM_OLD_ROOT_DOMAINS is a
+ * comma list; empty = nothing moves.
+ */
+export function oldRootRedirect(input: {
+  host: string; pathname: string; search: string; method: string;
+  oldRoots: string | undefined; newRoot: string | undefined;
+}): string | null {
+  const host = String(input.host || '').toLowerCase().split(':')[0].replace(/\.$/, '');
+  const newRoot = String(input.newRoot || '').trim().toLowerCase();
+  if (!newRoot || input.method !== 'GET' && input.method !== 'HEAD') return null;
+  if (input.pathname === '/api' || input.pathname.startsWith('/api/')) return null;
+  for (const old of String(input.oldRoots || '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean)) {
+    if (old === newRoot || !host.endsWith('.' + old)) continue;
+    const label = host.slice(0, -(old.length + 1));
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label) || label === 'www') return null;
+    return 'https://' + label + '.' + newRoot + input.pathname + (input.search || '');
+  }
+  return null;
+}
+
+/**
  * A RETIRED storefront host (STOREFRONT_REDIRECT_HOSTS, e.g. "shop") sends its
  * pages to the store's one address (PLATFORM_STOREFRONT_HOST) with a 301,
  * path and query kept, instead of silently mirroring it. Only page loads:

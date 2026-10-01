@@ -19,6 +19,7 @@
  *   exactly (D5) and took the sale off the month's running total.
  * With the dispute card: the dispute lands on the merchant; our fee is kept (T11).
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
@@ -30,7 +31,7 @@ import { CHROME, IPHONE_UA } from './mobile-audit';
 
 // Defaults: test4. Any connected store: TENANT_ID, TENANT_STORE_URL, PRODUCT_SLUG, PRODUCT_ID, PRODUCT_SIZE (a $19.00 instant-buy size).
 const TENANT = process.env.TENANT_ID || '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
-const STORE = process.env.TENANT_STORE_URL || 'https://test4.goyunir.com';
+const STORE = process.env.TENANT_STORE_URL || 'https://test4.' + ROOT;
 const PRODUCT_SLUG = process.env.PRODUCT_SLUG || 'connect-test-item';
 const PRODUCT_ID = process.env.PRODUCT_ID || 'prod_tenant_test_1';
 const SIZE = process.env.PRODUCT_SIZE || 'One Size';

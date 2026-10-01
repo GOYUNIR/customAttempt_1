@@ -15,17 +15,18 @@
  *   sessions are refused; revocation is immediate; host fences and CSRF hold;
  *   the admin tree still refuses a merchant.
  */
+import { ROOT, ROOT_RE, SUPPORT_EMAIL } from './proof-config';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const envPath = join(process.cwd(), '.env.local');
 if (existsSync(envPath)) for (const line of readFileSync(envPath, 'utf8').split(/\r?\n/)) { const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim()); if (m && !process.env[m[1]]) process.env[m[1]] = m[2]; }
 process.env.USE_POSTGRES_PRIMARY = process.env.USE_POSTGRES_PRIMARY || 'true';
 
-const APP = 'https://app.goyunir.com';
+const APP = 'https://app.' + ROOT;
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4
 const B = 'ff8d5e59-1a07-4e83-bc13-f949c745d9de'; // goyunir-test-1
 const B_OWNER = 'isolation-owner-b@goyunir.invalid';
-const SALES = 'https://sales.goyunir.com';
+const SALES = 'https://sales.' + ROOT;
 const RAFFLE_VARIANT_A = '1e02eebc-af34-4f52-b57d-5227b6633589'; // test4's raffle size (already drawn)
 // Resend's official test inbox: accepts mail without delivering it anywhere.
 // On the sink domain: the governed driver records it, never sends it.
@@ -151,7 +152,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     // VISIBLE text only: the embedded page data (RSC) streams in a varying order
     // between identical requests, so raw HTML differs even when nothing changed.
     const pageText = async (url: string) => { const r = await fetch(url); return { status: r.status, text: (await r.text()).replace(/<script[\s\S]*?<\/script>/g, ' ').replace(/<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]+>/g, ' ') }; };
-    const shopTermsBefore = await pageText('https://shop.goyunir.com/terms');
+    const shopTermsBefore = await pageText('https://shop.' + ROOT + '/terms');
     const defaultRowBefore = JSON.stringify((await db.select<any>('tenant_store_config', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['config'] })) as any[]);
     const markA = 'TEST4-TERMS-' + run, markB = 'STOREB-TERMS-' + run;
     const setA = await call('/api/merchant/settings', sA, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ brandName: 'test4', legal: { companyName: 'Test Four Co', supportEmail: 'help@test4.example', terms: 'Terms heading\n' + markA, privacy: '', shipping: '' } }) });
@@ -163,20 +164,20 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     check(String(getB.body?.legal?.terms).includes(markB) && !String(getB.body?.legal?.terms).includes(markA), 'store B reads back only its own (the smuggled tenant id was ignored)');
     const defaultRowAfter = JSON.stringify((await db.select<any>('tenant_store_config', { where: { tenant_id: eq(DEFAULT_TENANT_ID) }, select: ['config'] })) as any[]);
     check(defaultRowAfter === defaultRowBefore, 'the original store\'s config row is byte-identical');
-    const t4Terms = await pageText('https://test4.goyunir.com/terms');
-    const bTerms = await pageText('https://goyunir-test-1.goyunir.com/terms');
-    const t4Privacy = await pageText('https://test4.goyunir.com/privacy');
-    check(t4Terms.status === 200 && t4Terms.text.includes(markA) && !t4Terms.text.includes(markB), 'test4.goyunir.com/terms shows test4\'s own terms only');
+    const t4Terms = await pageText('https://test4.' + ROOT + '/terms');
+    const bTerms = await pageText('https://goyunir-test-1.' + ROOT + '/terms');
+    const t4Privacy = await pageText('https://test4.' + ROOT + '/privacy');
+    check(t4Terms.status === 200 && t4Terms.text.includes(markA) && !t4Terms.text.includes(markB), 'test4.' + ROOT + '/terms shows test4\'s own terms only');
     check(bTerms.status === 200 && bTerms.text.includes(markB) && !bTerms.text.includes(markA), 'store B\'s /terms shows store B\'s own terms only');
     check(t4Privacy.status === 200 && /has not published its privacy policy yet/.test(t4Privacy.text) && t4Privacy.text.includes('help@test4.example'), 'an unset policy says it is not published (with the store\'s own contact), no template text');
-    const shopTermsAfter = await pageText('https://shop.goyunir.com/terms');
+    const shopTermsAfter = await pageText('https://shop.' + ROOT + '/terms');
     const strip = (t: string) => t.replace(/Last updated: \d{4}-\d{2}-\d{2}/, '').replace(/\s+/g, ' ');
     check(shopTermsAfter.status === 200 && strip(shopTermsAfter.text) === strip(shopTermsBefore.text) && !shopTermsAfter.text.includes(markA) && !shopTermsAfter.text.includes(markB), 'the original store\'s /terms is unchanged (identical text before and after)');
-    check((await pageText('https://nosuchstore-xyz.goyunir.com/terms')).status === 404, 'an unknown address still gets 404 for /terms');
+    check((await pageText('https://nosuchstore-xyz.' + ROOT + '/terms')).status === 404, 'an unknown address still gets 404 for /terms');
 
     console.log('\nFences');
-    check((await call('/api/merchant/store', sA, {}, 'https://shop.goyunir.com')).status === 404, 'the merchant API does not answer on the original store\'s host');
-    check((await call('/api/merchant/store', sA, {}, 'https://test4.goyunir.com')).status === 404, 'nor on a merchant\'s storefront address');
+    check((await call('/api/merchant/store', sA, {}, 'https://shop.' + ROOT)).status === 404, 'the merchant API does not answer on the original store\'s host');
+    check((await call('/api/merchant/store', sA, {}, 'https://test4.' + ROOT)).status === 404, 'nor on a merchant\'s storefront address');
     const csrf = await post(sB, { name: 'CSRF', sizes: [{ size: 'M', price: 5 }] }, { origin: 'https://evil.example' });
     check(csrf.status === 403, 'a cross-site write is blocked: ' + csrf.status);
     check((await call('/api/admin/products?includeArchived=true', sA)).status === 403, 'the admin tree still refuses a merchant session');
