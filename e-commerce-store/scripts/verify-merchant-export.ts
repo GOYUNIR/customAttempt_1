@@ -92,11 +92,21 @@ const same = (a: string[], b: string[]) => a.length === b.length && [...a].sort(
 
     console.log('\nWho may export');
     check((await get('dataset=customers&format=json&page=0', null)).status === 401, 'no session: 401');
-    const staff = ((await db.select<any>('users', { where: { tenant_id: eq(A), role: eq('staff') }, select: ['email'], limit: 1 })) as any[])[0];
-    if (staff && await readStaffIdentity(staff.email)) {
-      const sS = (await issueAdminDevice(kv, staff.email, false, deviceMetaFor((await readStaffIdentity(staff.email))!), 900)).token;
-      check((await get('dataset=customers&format=json&page=0', sS)).status === 403, 'staff: 403 (the customer list is the owner\'s)');
-    } else console.log('  (no test4 staff account right now: the owner-only rule is covered by the code path and the structural test)');
+    // A temporary staff member of test4, through the real invite + accept
+    // flow, removed again through the owner's own route.
+    const { createInvite } = await import('../lib/staff-invites');
+    const staffEmail = 'export-staff-' + Date.now() + '@goyunir.invalid';
+    const inv: any = await createInvite({ email: staffEmail, role: 'staff', tenantId: A, invitedByEmail: ownerA });
+    const acc = await fetch(APP + '/api/admin/accept-invite', { method: 'POST', headers: { 'content-type': 'application/json', origin: APP }, body: JSON.stringify({ token: inv.token, password: 'Exp-' + crypto.randomUUID() + '-Aa1!' }) });
+    const idS = await readStaffIdentity(staffEmail);
+    check(acc.status === 200 && idS?.role === 'staff', 'a test4 staff member (real accept route): ' + acc.status);
+    try {
+      const sS = (await issueAdminDevice(kv, staffEmail, false, deviceMetaFor(idS!), 900)).token;
+      for (const ds of ['customers', 'orders', 'products']) check((await get('dataset=' + ds + '&format=json&page=0', sS)).status === 403, 'staff exporting ' + ds + ': 403 (owner only)');
+    } finally {
+      const rm = await fetch(APP + '/api/merchant/staff/remove', { method: 'POST', headers: { 'content-type': 'application/json', origin: APP, cookie: 'goyunir_admin_device=' + sA }, body: JSON.stringify({ email: staffEmail }) });
+      check(rm.status === 200, 'the temporary staff member is removed again');
+    }
     check((await get('dataset=tenants&format=json&page=0', sA)).status === 400, 'an unknown dataset: 400');
     check((await get('dataset=orders&format=xml&page=0', sA)).status === 400, 'an unknown format: 400');
 
