@@ -8,7 +8,9 @@
  * nothing real is charged or emailed):
  *   typecheck, unit tests, readiness check (with production's config values),
  *   merchant isolation, a real test-mode purchase (+ refund), fulfilment,
- *   data export, product photos, signup abuse (record mode).
+ *   data export, product photos, webhook tolerance, portals at phone width,
+ *   signup abuse (record mode); then it removes the data the proofs created
+ *   (launch-reset --proof-only, backed up first).
  * Prints a go/no-go table; exit code 0 only when every step passed. Each
  * step's full output is kept in tenant-checkout-out/release-gate/<time>/.
  */
@@ -67,13 +69,21 @@ function runStep(s: Step): Promise<{ code: number; out: string; secs: number }> 
   const rows: Array<{ name: string; ok: boolean; secs: number; note: string }> = [];
   for (const s of steps) {
     process.stdout.write('… ' + s.name + '\n');
-    const r = await runStep(s);
+    let r = await runStep(s);
+    // One retry, and only for a network-level failure on THIS machine (DNS,
+    // reset, connect timeout): not a product failure. Shown in the table.
+    let retried = false;
+    if (!s.pass(r.code, r.out) && /fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|EAI_AGAIN/.test(r.out)) {
+      writeFileSync(join(outDir, s.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.network-error.log'), r.out);
+      retried = true;
+      r = await runStep(s);
+    }
     const file = join(outDir, s.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.log');
     writeFileSync(file, r.out);
     const ok = s.pass(r.code, r.out);
     const fails = r.out.split(/\r?\n/).filter((l) => /^\s*FAIL\b/.test(l)).map((l) => l.trim());
     const tail = r.out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).filter((l) => !/npm notice/.test(l)).slice(-1)[0] || '';
-    rows.push({ name: s.name, ok, secs: r.secs, note: ok ? tail.slice(0, 60) : (fails[0] || tail).slice(0, 110) });
+    rows.push({ name: s.name, ok, secs: r.secs, note: (retried ? '(retried after a network error) ' : '') + (ok ? tail.slice(0, 60) : (fails[0] || tail).slice(0, 110)) });
   }
   const w = Math.max(...rows.map((r) => r.name.length));
   console.log('\nRELEASE GATE  ' + new Date().toISOString() + '\n');
