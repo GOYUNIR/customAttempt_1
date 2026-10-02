@@ -4,8 +4,6 @@ import { readActiveTheme } from '@/lib/theme-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
-import { preload } from 'react-dom';
-import { firstPaintImages } from '@/lib/store-payload';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,8 +31,5 @@ export default async function HomePage() {
   if (theme && theme.sections.length > 0) {
     return <ThemeSections sections={theme.sections} />;
   }
-  // The first products' photos are the page's largest paint: start them with
-  // the HTML (lib/store-payload.ts firstPaintImages).
-  for (const href of await firstPaintImages(who, '')) preload(href, { as: 'image', fetchPriority: 'high' });
   return <LegacyHomePage />;
 }

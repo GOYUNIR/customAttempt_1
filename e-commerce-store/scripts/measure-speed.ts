@@ -6,7 +6,7 @@
  * cache-control and cf-cache-status.
  *
  *   npx tsx scripts/measure-speed.ts [--runs 5] [--json out.json] [--ab]
- *   --ab alternates loads with and without the server-side photo preloads
+ *   --ab alternates loads with and without <link rel="preload" as="image"> tags (stripped in the browser)
  */
 import { ROOT } from './proof-config';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
@@ -58,13 +58,14 @@ const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); retu
         await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 1.6 * 1024 * 1024 / 8, uploadThroughput: 750 * 1024 / 8 });
         await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
         await page.addInitScript(`window.__lcp = 0; new PerformanceObserver(function (l) { var e = l.getEntries(); window.__lcp = e[e.length - 1].startTime; }).observe({ type: 'largest-contentful-paint', buffered: true });`);
-        // --ab: every other load has the server-side photo preloads
-        // stripped from the HTML, so the two variants share the same network.
+        // --ab: every other load has its image preloads
+        // stripped from the HTML. Both variants fetch the document the same way
+        // (route.fetch is not throttled), so only the tags differ between them.
         const strip = AB && i % 2 === 1;
-        if (strip) await page.route(p.url, async (route) => {
+        if (AB) await page.route(p.url, async (route) => {
           const r = await route.fetch();
-          const body = (await r.text()).replace(/<link rel="preload" href="\/api\/store"[^>]*>/, '').replace(/<link rel="preconnect" href="https:\/\/media\.[^"]*"[^>]*>/, '');
-          await route.fulfill({ response: r, body });
+          const html = await r.text();
+          await route.fulfill({ response: r, body: strip ? html.replace(/<link rel="preload"[^>]*as="image"[^>]*>/g, '') : html });
         });
         const resp = await page.goto(p.url, { waitUntil: 'load', timeout: 90_000 });
         await page.waitForTimeout(2500);

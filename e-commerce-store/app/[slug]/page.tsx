@@ -5,8 +5,6 @@ import { readThemePage } from '@/lib/theme-page-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
-import { preload } from 'react-dom';
-import { firstPaintImages } from '@/lib/store-payload';
 import { createKvClient, loadProducts } from '@/lib/server-config';
 
 export const dynamic = 'force-dynamic';
@@ -63,9 +61,6 @@ export default async function ProductPage({
   // Storefront asks for `/api/store?slug=…` only after it hydrates; start that
   // request with the HTML instead (lib/client-store-cache.ts picks it up by
   // the exact URL). JSON.stringify + the '<' escape keep the slug inert.
-  // The product's first photo is the page's largest paint: start it with the
-  // HTML too (lib/store-payload.ts firstPaintImages).
-  for (const href of await firstPaintImages(who, slug)) preload(href, { as: 'image', fetchPriority: 'high' });
   const productUrl = JSON.stringify(`/api/store?slug=${slug}`).replace(/</g, '\\u003c');
   return (
     <>
