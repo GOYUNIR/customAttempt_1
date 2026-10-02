@@ -102,6 +102,33 @@ const capacity: CapacityStore = {
   },
 };
 
+/**
+ * Operator alerts' own daily budget (owner, 2026-10-02: about 5 a day),
+ * counted in KV, not Postgres, so it keeps working when the database (and
+ * with it the capacity counter) does not. If KV is unreachable too, each
+ * isolate allows the same budget on its own: an alert going out matters more
+ * than the exact count, and the signup breaker already sends at most one an
+ * hour.
+ */
+const ALERTS_PER_DAY = 5;
+const isolateAlerts = new Map<string, number>();
+async function takeAlertSlot(day: string, perDay: number): Promise<boolean> {
+  try {
+    const { createKvClient } = await import('@/lib/server-config');
+    const kv: any = createKvClient();
+    if (!kv) throw new Error('no KV');
+    const key = 'email:operator_alerts:' + day;
+    const n = Number(await kv.incr(key));
+    if (n === 1) await kv.expire(key, 2 * 86400);
+    return n <= perDay;
+  } catch (err) {
+    console.error('[email] alert budget counter unreachable, counting in this isolate', (err as Error)?.message || err);
+    const n = (isolateAlerts.get(day) || 0) + 1;
+    isolateAlerts.set(day, n);
+    return n <= perDay;
+  }
+}
+
 async function storeInSink(m: EmailMessage): Promise<string | void> {
   const { getDb } = await import('@/lib/db/client');
   const rows = (await getDb().insert<any>('email_sink', {
@@ -185,6 +212,7 @@ export class EmailFactory {
       onSent: recordSent,
       defaultFrom: options.from,
       brandName: options.brandName,
+      alertBudget: { perDay: ALERTS_PER_DAY, take: takeAlertSlot },
     });
   }
 }

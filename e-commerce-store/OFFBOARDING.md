@@ -2,7 +2,7 @@
 
 What happens when a merchant leaves. Written 2026-10-02 so the promises in
 the Terms and Privacy pages have a concrete process behind them. Nothing here
-is built yet; the decisions marked **[decision]** are the owner's.
+is built yet. Owner decisions (2026-10-02): 30-day grace, 90-day name hold, anonymised order records kept 7 years pending legal review, support-only closure for v1; design only.
 
 ## What we already promised (lib/platform-legal.ts)
 
@@ -23,7 +23,7 @@ is built yet; the decisions marked **[decision]** are the owner's.
 
 ## The flow
 
-**1. Request (day 0).** Only the store owner can request closure, from Settings, by re-entering their password. Support can start it for an owner who emails from the owner address. **[decision]** Self-serve, or support-only at first? I recommend support-only until the first few closures, because the volume will be tiny.
+**1. Request (day 0).** Only the store owner can request closure, from Settings, by re-entering their password. Support can start it for an owner who emails from the owner address. **Decided:** support-only for v1.
 
 **2. Final export (day 0).** Before anything changes, the platform makes the same export the owner can already download and emails the owner a signed link, valid for the grace period. The Terms promise is "you can ask for your export before the store is closed"; doing it automatically means nobody has to ask.
 
@@ -34,18 +34,18 @@ is built yet; the decisions marked **[decision]** are the owner's.
 - Open stock holds are released, open discount reservations are released, and running draws are cancelled with entrants told by email.
 - The dashboard stays open read-only for orders, refunds and export: the merchant still owes refunds and disputes on past orders.
 
-**5. Grace period (day 0 to N).** The owner can reopen with one click, and everything is intact. **[decision]** N = 30 days (my recommendation). That matches the 30 days' notice we give when we end the terms.
+**5. Grace period (day 0 to N).** The owner can reopen with one click, and everything is intact. **Decided:** N = 30 days, matching the 30 days' notice we give when we end the terms.
 
 **6. Close (day N).**
 - `license_status = 'expired'`.
-- The slug becomes `x--<id>` and the old name goes into `tenant_slug_aliases` for 90 days (pointing nowhere). Nobody can register it straight away and impersonate the store to its returning customers. **[decision]** The 90-day hold.
+- The slug becomes `x--<id>` and the old name goes into `tenant_slug_aliases` for 90 days (pointing nowhere). Nobody can register it straight away and impersonate the store to its returning customers. **Decided:** 90 days.
 - Custom hostnames are deleted from Cloudflare for SaaS, and the domain is released.
 - Staff accounts are unlinked. Their sign-in accounts are deleted unless they belong to another store.
 - The Stripe connected account is disconnected, never deleted by us: it is the merchant's account, and refunds or disputes can arrive for up to about 120 days.
 
 **7. Delete or anonymise (day N, the Privacy promise).**
 - **Deleted:** products, photos and media (storage prefix `tenants/<id>/`), store config and themes, discount codes, holds, raffle entries, alert subscribers, invites, and the customers' marketing data.
-- **Kept, anonymised:** orders and billing charges keep amounts, dates, tax and Stripe IDs for the legal retention period. The buyer's name, email and address are replaced with a stable hash. **[decision]** How long? I recommend 7 years for the financial fields (a common tax-record period), then a full delete; your legal review should confirm it for your jurisdiction.
+- **Kept, anonymised:** orders and billing charges keep amounts, dates, tax and Stripe IDs for the legal retention period. The buyer's name, email and address are replaced with a stable hash. **Decided:** 7 years for the financial fields, then a full delete, pending legal review for the jurisdiction.
 - **Kept:** audit logs (Privacy already says so) and webhook dedupe rows.
 - A backup is taken first, as launch-reset.ts does. The backup itself is deleted after 30 days, so it isn't a copy that outlives the promise.
 

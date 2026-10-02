@@ -96,6 +96,14 @@ export interface GovernorOptions {
   defaultFrom?: string;
   brandName?: string;
   now?: () => Date;
+  /**
+   * Operator alerts (category 'operator_alert') skip the capacity counter, so
+   * a full provider allowance or an unreachable counter never silences them.
+   * Instead they spend this fixed daily budget (owner, 2026-10-02: about 5 a
+   * day). `take` answers whether one more fits today; without it, alerts go
+   * through the counter like everything else.
+   */
+  alertBudget?: { perDay: number; take: (day: string, perDay: number) => Promise<boolean> };
 }
 
 export class GovernedEmailDriver implements EmailDriver {
@@ -157,8 +165,29 @@ export class GovernedEmailDriver implements EmailDriver {
     if (links.length === 0) return { ok: false, skipped: true, error: 'No email provider configured.', provider: this.provider };
     let last: SendFailure | null = null;
     let shareOnly = true;
+    const alertBypass = category === 'operator_alert' && Boolean(this.o.alertBudget);
+    if (alertBypass) {
+      const budget = this.o.alertBudget!;
+      if (!(await budget.take(day, budget.perDay).catch(() => false))) {
+        console.error('[email] operator alert NOT sent: today\'s alert budget (' + budget.perDay + ') is used: ' + msg.subject);
+        return { ok: false, provider: this.provider, error: 'operator alert budget used', limited: 'capacity' };
+      }
+      console.log('[email] operator alert, outside the capacity counter (budget ' + budget.perDay + '/day): ' + msg.subject);
+    }
     for (const link of links) {
       const p = link.plan.provider;
+      if (alertBypass) {
+        let result: EmailSendResult;
+        try { result = await link.driver.sendTransactional(msg); }
+        catch (error) { result = { ok: false, error, provider: link.driver.provider, failure: 'transient' } as SendFailure; }
+        if (result.ok) {
+          if (this.o.onSent) await this.o.onSent({ provider: p, message: msg }).catch(() => undefined);
+          return result;
+        }
+        last = { ...(result as SendFailure), failure: (result as SendFailure).failure || 'transient' };
+        if (last.failure === 'rejected') return last;
+        continue;
+      }
       const got = await this.o.capacity.reserve({ provider: p, day, month, dailyLimit: link.plan.dailyLimit, monthlyLimit: link.plan.monthlyLimit, category, categoryDailyLimit: this.categoryLimit(link.plan, category) });
       if (got !== 'ok') {
         if (got !== 'category') shareOnly = false;

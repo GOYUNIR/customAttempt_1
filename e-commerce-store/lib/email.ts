@@ -966,5 +966,5 @@ export async function sendSignupExistingAccountEmail(opts: { to: string; signInU
 export async function sendOperatorAlertEmail(opts: { subject: string; lines: string[] }) {
   const to = getSupportEmail();
   if (!to) return { ok: false, skipped: true };
-  return sendPlatformEmail(to, '[' + platformBrand() + ' alert] ' + opts.subject, plainEmail(opts.subject, opts.lines.map((l) => escapeHtml(l))));
+  return sendPlatformEmail(to, '[' + platformBrand() + ' alert] ' + opts.subject, plainEmail(opts.subject, opts.lines.map((l) => escapeHtml(l))), 'operator_alert');
 }

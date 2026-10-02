@@ -195,3 +195,30 @@ test('Resend failures are classified the same way', () => {
   assert.equal(resendFailureKind(500, ''), 'transient');
   assert.equal(resendFailureKind(403, 'domain not verified'), 'transient');
 });
+
+test('operator alerts bypass a full counter, within their own small daily budget (owner, 2026-10-02)', async () => {
+  const { gov, capacity, rs, cf } = setup({ cfDaily: 1, rsDaily: 1 });
+  // Use up both providers' daily allowance with ordinary mail.
+  assert.ok((await gov.sendTransactional(msg('a@real.io'))).ok);
+  assert.ok((await gov.sendTransactional(msg('b@real.io'))).ok);
+  assert.equal((await gov.sendTransactional(msg('c@real.io'))).ok, false, 'ordinary mail is stopped by the counter');
+  // Same governor, now with an alert budget of 2.
+  const taken = new Map<string, number>();
+  const withBudget = new GovernedEmailDriver({ ...(gov as any).o, alertBudget: { perDay: 2, take: async (day: string, perDay: number) => { const n = (taken.get(day) || 0) + 1; taken.set(day, n); return n <= perDay; } } });
+  const alert = (s: string) => withBudget.sendTransactional({ to: 'ops@real.io', from: '', subject: s, html: '<p>x</p>', meta: { category: 'operator_alert' } });
+  const before = new Map(capacity.counts);
+  assert.ok((await alert('one')).ok, 'an alert goes out although the allowance is used');
+  assert.ok((await alert('two')).ok);
+  const third = await alert('three');
+  assert.equal(third.ok, false, 'the third alert of the day is over the budget');
+  assert.deepEqual(capacity.counts, before, 'alerts never touch the capacity counter');
+  assert.equal([...cf.sent, ...rs.sent].filter((m) => m.meta?.category === 'operator_alert').length, 2);
+  assert.equal((await withBudget.sendTransactional(msg('d@real.io'))).ok, false, 'ordinary mail still respects the counter');
+});
+
+test('a budget store that throws counts as no room (the factory store falls back per isolate instead of throwing)', async () => {
+  const { gov } = setup();
+  const g = new GovernedEmailDriver({ ...(gov as any).o, alertBudget: { perDay: 5, take: async () => { throw new Error('down'); } } });
+  const r = await g.sendTransactional({ to: 'ops@real.io', from: '', subject: 's', html: '<p>x</p>', meta: { category: 'operator_alert' } });
+  assert.equal(r.ok, false, 'the factory\'s store never throws (it falls back per isolate); a raw throw is refused');
+});

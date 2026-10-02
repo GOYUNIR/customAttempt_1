@@ -1,23 +1,47 @@
-# Resume note (autonomous launch work order, started 2026-10-01)
+# Resume note
 
-Read this first when picking the work back up. Owner's guardrails: no real
-email, no spending, Stripe test mode only, no secret changes; destructive
-cleanup of TEST data is authorized (with a backup first).
+Read this first when picking the work back up.
+
+Guardrails:
+- No real email (record-mode stub only); signup stays off.
+- No spending or new cloud resources; Stripe stays in test mode.
+- No secrets pasted or rotated.
+- Destructive cleanup of TEST data is authorized, with a local backup first.
+
+The platform name and domain are NOT chosen. They are variables read from config. Anything that needs the final values goes on RELEASE-PLAN.md's "BLOCKED ON NAME" list.
+
+Owner decisions (2026-10-02):
+- The move to new accounts is a fresh install, and the old stack stays until the new one passes the gate.
+- Workers Paid will be bought on the new account; Error 1102s on the old Free stack are not regressions.
+- Offboarding is design only (decisions recorded in OFFBOARDING.md).
+- Discount codes stay built and OFF.
+
+## Work order 2 (2026-10-02)
 
 | # | Task | State |
 |---|---|---|
-| 1 | Remove one-click destructive admin actions | DONE: "Wipe & Rebuild" route and UI removed; Seed stays hard-blocked in production |
-| 2 | Launch reset, self-cleaning proofs, tolerant webhooks, storage + Stripe test cleanup | DONE: reset run (backup in launch-backups/), Stripe test cleaned, gate ends with --proof-only teardown (also removes proof-made products in the fixtures; the photo proof makes its own when store B is empty); fixture stores test4 + goyunir-test-1 kept (Connect onboarding is not hands-free) |
-| 3 | Health endpoint + uptime monitor list | DONE: /api/health live; monitors in RELEASE-PLAN §10 |
-| 4 | Staff/sales portals at phone width | DONE: drawer under 800px; verify-portal-phone.ts (375/390/414) in the gate |
-| 5 | Discount codes (flag off) | DONE: built, flag OFF on every plan; verify-discounts.ts ALL PASS live (in the gate) |
-| 6 | Hick's Law cheap fixes (DEFERRED-11) | DONE: stock panel, sales pickers, promotions form; logged the rest in ARCHITECTURE DEFERRED-11 |
-| 7 | Speed: measure, safe caching | DONE: measured (RELEASE-PLAN "Speed"); two hint changes A/B-tested and reverted (no gain); no HTML caching (money pages stay uncached); verify-no-stale-money.ts in the gate |
-| 8 | CSP enforcement plan | DONE: frames/images/media/fonts/object/base enforced; plan in RELEASE-PLAN "CSP plan"; csp-scan.ts in the gate |
-| 9 | Store offboarding design | DONE (design only): OFFBOARDING.md, 4 owner decisions |
-| 10 | Lean always-loaded context | DONE: STRATEGY.md 14,056 -> ~10.3KB (go-live list now points to RELEASE-PLAN); CLAUDE.md 24 B; AGENTS.md 142 B |
-| 11 | Final full release gate on the clean database | DONE: GO 2026-10-02 10:55Z, 16/16, 0 retries (logs release-gate/2026-10-02T10-29-39-005Z). Five earlier runs that day were NO-GO: Error 1102 / 503 bursts (Workers Free CPU limit), Supabase request timeouts from this machine, a proof whose expectation depended on the 30s checkout window (fixed), and my own manual runs overlapping a gate run. On Workers Free a GO is partly luck: see RELEASE-PLAN item 0. |
+| 0 | Decided items | DONE: operator-alert budget (5/day, outside the counter, tests mutation-checked); offboarding decisions recorded; BLOCKED ON NAME list added |
+| 1 | Storefront first screen server-rendered, behind a flag | |
+| 2 | Bootstrap-in-a-box, runbook, ownership migration | |
+| 3 | Speed-to-lead for our sales team | |
+| 4 | Merchant day-one gaps: ranked list, then build the top ones | |
+| 5 | Industry starter presets as data | |
+| 6 | BOOKINGS-DESIGN.md (design only) | |
+| 7 | Homepage and marketing copy pass, stranger-eye audit | |
+| 8 | t() helper and ImageProvider abstraction | |
+| 9 | Discount codes stay OFF | standing |
+| 10 | (the owner's message ended at "10." with nothing after it) | ask |
 
-Running the gate: run nothing else against production while it runs (two proofs that toggle the same flag interfere with each other), and push nothing during a run, because every push redeploys the Worker, scripts-only pushes included. The gate takes about 30 minutes (signup abuse about 17 of them). Poll it until it finishes; never end a session while it's running.
+## Work order 1 (2026-10-01/02): all 11 items done
 
-The owner's open items are in RELEASE-PLAN.md under "WAITING ON ME".
+The final release gate was GO on 2026-10-02 at 10:55Z: 16/16 steps, 0 retries.
+
+## Running the gate
+
+- Run nothing else against production while it runs: two proofs that toggle the same flag interfere with each other.
+- Push nothing during a run: every push redeploys the Worker, scripts-only pushes included.
+- It takes about 30 minutes, about 17 of them in the signup-abuse step.
+- Poll it until it finishes; never end a turn while it's running.
+- Retry rule (in release-gate.ts): a step is retried once, only on a connection timeout with no failed check. A step that needs it two runs in a row is NO-GO.
+
+The owner's open items are in RELEASE-PLAN.md under "BLOCKED ON NAME" and "WAITING ON ME".

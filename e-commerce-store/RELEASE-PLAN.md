@@ -1,18 +1,24 @@
 # Release plan: the critical path to public launch
 
+## BLOCKED ON NAME (waits for the platform name and domain)
+
+The name and domain are variables until chosen; code reads them from config (`PLATFORM_NAME`, `PLATFORM_ROOT_DOMAIN`, operator addresses). These need the real values:
+
+1. Register the domain; create the new Cloudflare, Supabase, Stripe and Resend accounts under it (fresh install, BOOTSTRAP-RUNBOOK.md).
+2. Sending-domain DNS (SPF, DKIM, DMARC) and verification, for the new domain.
+3. Stripe live application and Connect platform profile under the new name.
+4. Legal: entity name in the Terms and Privacy pages, trademark search, legal review.
+5. Support and alert inboxes at the new domain (`SUPPORT_EMAIL`, operator alert address).
+6. Workers Paid ($5/month), bought on the NEW Cloudflare account after the move (owner, 2026-10-02). Error 1102s on the old Free stack are known and not regressions.
+
 ## WAITING ON ME (the owner), in priority order
 
-0. **[decision] Workers Paid ($5/month) now rather than at signup.** On 2026-10-02 Cloudflare's own tail showed 5-20% of production requests failing with **Error 1102** (CPU limit). Every surface was affected, including /api/health. Median CPU is 25ms on the store home and 34ms on the marketing home, against Free's 10ms limit. Customers on the demo store see those failures now, and the release gate can't pass reliably while they happen. This is spending, so it's yours to approve; the runbook is §5.
-1. **Resend DNS record:** Cloudflare DNS, CNAME `rsend` → `send.forge.rmta.net`, DNS only (grey cloud); then Resend → Domains → Verify. This unblocks the stranger journey.
+1. **Resend DNS record** for the current stand-in domain: Cloudflare DNS, CNAME `rsend` → `send.forge.rmta.net`, DNS only (grey cloud); then Resend → Domains → Verify. This unblocks the stranger journey on the old stack.
 2. **Stranger-journey address** (`STRANGER_EMAIL`): an inbox you control. Plus-addresses work.
-3. **R2 API token replacement before 2026-10-16** (§1). Send me the new keys.
-4. **Stripe live activation and the Connect platform profile** (§3).
-5. **Supabase Pro ($25/month) for backups:** yes or no (§7).
-6. **Uptime monitor:** sign up and add the monitors listed in §10.
-7. **Signup WAF rule** (§12).
-8. **Platform name and domain** (§2); then the move runs from §13.
-9. **Legal review** (§4).
-10. (Workers Paid moved to item 0.)
+3. **R2 API token replacement before 2026-10-16** (§1). Enter the new keys yourself in the Worker's secrets; don't paste them to me.
+4. **Supabase Pro ($25/month) for backups:** yes or no (§7). On the new account.
+5. **Uptime monitor:** sign up and add the monitors listed in §10 (after the move, against the new domain).
+6. **Signup WAF rule** (§12), on the new account.
 
 Written 2026-10-01. Owner: **you** (the owner), **me** (the coding agent), or
 **both**. Lead time is the elapsed wait (review, propagation, warm-up), not the
@@ -281,5 +287,5 @@ Evidence: `scripts/csp-scan.ts` loads 13 real pages (marketing, legal, two store
 - Storefront first screen rendered on the server (see Speed).
 - The original store's admin "trigger drop" charge path has never been proven with a real charge (EVIDENCE.md). It can't take money today, because the GOYUNIR shell has no products. Prove it before GOYUNIR sells through it.
 - Store offboarding: designed in OFFBOARDING.md (four owner decisions), not built.
-- **[decision] Operator alerts share the email capacity counter.** On 2026-10-02 the counter call (`email_reserve`) timed out and the signup breaker's alert to support@ was dropped. The trip was still logged, and the alert retries on the next trip. A database outage silences alerts at exactly the wrong moment. Option: let operator alerts bypass the counter with a small fixed daily budget. That changes email governance, so it's yours to decide.
+- Operator alerts: built 2026-10-02 (owner decision). Category `operator_alert` skips the capacity counter and spends its own budget of 5 a day, counted in KV (per-isolate fallback); every alert is logged. Correction to the earlier note: an unreachable counter already let ordinary mail through; the alert lost in a gate run was dropped by record mode's own sink write, which needs the same database.
 - The custom-domain real-domain proof.

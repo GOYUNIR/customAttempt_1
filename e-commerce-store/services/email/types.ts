@@ -27,7 +27,9 @@ export type EmailProviderId = MailProvider | 'cloudflare' | 'sink';
  * 'signup' may use only its share of the daily limit; 'standard' (sign-in
  * codes, orders, winners, alerts, everything else) keeps the rest.
  */
-export type EmailCategory = 'standard' | 'signup';
+/** 'operator_alert': mail to the platform operator; bypasses the capacity
+ *  counter with its own small daily budget (governor.ts, owner 2026-10-02). */
+export type EmailCategory = 'standard' | 'signup' | 'operator_alert';
 
 /** Who a send is for, so the governed driver can count and cost it once. */
 export interface EmailMeta {
