@@ -11,7 +11,7 @@ cleanup of TEST data is authorized (with a backup first).
 | 3 | Health endpoint + uptime monitor list | DONE: /api/health live; monitors in RELEASE-PLAN §10 |
 | 4 | Staff/sales portals at phone width | DONE: drawer under 800px; verify-portal-phone.ts (375/390/414) in the gate |
 | 5 | Discount codes (flag off) | DONE: built, flag OFF on every plan; verify-discounts.ts ALL PASS live (in the gate) |
-| 6 | Hick's Law cheap fixes (DEFERRED-11) | |
+| 6 | Hick's Law cheap fixes (DEFERRED-11) | DONE: stock panel, sales pickers, promotions form; logged the rest in ARCHITECTURE DEFERRED-11 |
 | 7 | Speed: measure, safe caching | |
 | 8 | CSP enforcement plan | |
 | 9 | Store offboarding design | |

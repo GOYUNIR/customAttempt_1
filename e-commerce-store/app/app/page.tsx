@@ -81,7 +81,8 @@ export default function MerchantDashboard() {
   const [billing, setBilling] = useState<Billing | null>(null);
   const [billingBusy, setBillingBusy] = useState(false);
   const [stock, setStock] = useState<StockView | null>(null);
-  const [stockEdit, setStockEdit] = useState<Record<string, { count: string; delta: string; reason: string; note: string }>>({});
+  const [stockEdit, setStockEdit] = useState<Record<string, { count: string; delta: string; reason: string; note: string; mode: string }>>({});
+  const [adjusting, setAdjusting] = useState<string | null>(null);
   const [history, setHistory] = useState<{ variantId: string; rows: StockMove[] } | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -189,8 +190,8 @@ export default function MerchantDashboard() {
   }, []);
 
   const stockFor = (productId: string, size: string) => stock?.products.find((p) => p.productId === productId)?.sizes.find((z) => z.size === size) || null;
-  const editOf = (variantId: string) => stockEdit[variantId] || { count: '', delta: '', reason: 'restock', note: '' };
-  const putEdit = (variantId: string, patch: Partial<{ count: string; delta: string; reason: string; note: string }>) => setStockEdit({ ...stockEdit, [variantId]: { ...editOf(variantId), ...patch } });
+  const editOf = (variantId: string) => stockEdit[variantId] || { count: '', delta: '', reason: 'restock', note: '', mode: 'count' };
+  const putEdit = (variantId: string, patch: Partial<{ count: string; delta: string; reason: string; note: string; mode: string }>) => setStockEdit({ ...stockEdit, [variantId]: { ...editOf(variantId), ...patch } });
   const refreshStock = async () => { const sk = await api<StockView>('/api/merchant/stock'); if (sk.ok) setStock(sk.body); };
 
   const countStock = async (variantId: string) => {
@@ -660,20 +661,31 @@ export default function MerchantDashboard() {
                   return (
                     <div key={s.size} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0' }}>
                       <div style={{ fontWeight: 600 }}>{s.size} <span style={{ color: C.muted, fontWeight: 400, fontSize: 13 }}>{`${st.onHand} on hand · ${st.held} in checkout · ${st.available} available`}</span></div>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                        <input aria-label={'Counted units for ' + s.size} type="number" min="0" inputMode="numeric" placeholder="Count" style={{ ...input, width: 110 }} value={e.count} onChange={(ev) => putEdit(v, { count: ev.target.value })} />
-                        <button style={ghost} disabled={e.count.trim() === ''} onClick={() => countStock(v)}>Set count</button>
+                      {/* One action per size (Hick's Law, DEFERRED-11 #1): "Adjust stock"
+                          opens one small form; History is a link. */}
+                      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginTop: 6 }}>
+                        <button style={{ ...ghost, minHeight: 36 }} aria-expanded={adjusting === v} onClick={() => setAdjusting(adjusting === v ? null : v)}>{adjusting === v ? 'Close' : 'Adjust stock'}</button>
+                        <button style={{ background: 'none', border: 'none', color: C.muted, textDecoration: 'underline', cursor: 'pointer', fontSize: 13, padding: 0 }} onClick={() => showHistory(v)}>{history?.variantId === v ? 'Hide history' : 'History'}</button>
                       </div>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                        <input aria-label={'Units to add or remove for ' + s.size} type="number" min="1" inputMode="numeric" placeholder="Units" style={{ ...input, width: 110 }} value={e.delta} onChange={(ev) => putEdit(v, { delta: ev.target.value })} />
-                        <button style={ghost} disabled={!(Number(e.delta) > 0)} onClick={() => adjust(v, 1)}>Add</button>
-                        <select aria-label={'Reason for removing ' + s.size} style={{ ...input, width: 'auto' }} value={e.reason === 'restock' ? 'adjust' : e.reason} onChange={(ev) => putEdit(v, { reason: ev.target.value })}>
-                          <option value="adjust">Damaged / lost</option><option value="correction">Correction</option>
-                        </select>
-                        <button style={ghost} disabled={!(Number(e.delta) > 0)} onClick={() => adjust(v, -1)}>Remove</button>
-                        <button style={ghost} onClick={() => showHistory(v)}>{history?.variantId === v ? 'Hide history' : 'History'}</button>
-                      </div>
-                      <input aria-label={'Note for ' + s.size} placeholder="Note (optional)" maxLength={200} style={{ ...input, marginTop: 8 }} value={e.note} onChange={(ev) => putEdit(v, { note: ev.target.value })} />
+                      {adjusting === v && (
+                        <div style={{ display: 'grid', gap: 8, marginTop: 8, maxWidth: 420 }}>
+                          <select aria-label={'How to adjust ' + s.size} style={input} value={e.mode} onChange={(ev) => putEdit(v, { mode: ev.target.value })}>
+                            <option value="count">Set the count (what is on the shelf)</option>
+                            <option value="add">Add units (a delivery)</option>
+                            <option value="remove">Remove units</option>
+                          </select>
+                          <input aria-label={'Units for ' + s.size} type="number" min="0" inputMode="numeric" placeholder={e.mode === 'count' ? 'Count' : 'Units'} style={input}
+                            value={e.mode === 'count' ? e.count : e.delta} onChange={(ev) => putEdit(v, e.mode === 'count' ? { count: ev.target.value } : { delta: ev.target.value })} />
+                          {e.mode === 'remove' && (
+                            <select aria-label={'Reason for removing ' + s.size} style={input} value={e.reason === 'restock' ? 'adjust' : e.reason} onChange={(ev) => putEdit(v, { reason: ev.target.value })}>
+                              <option value="adjust">Damaged / lost</option><option value="correction">Correction</option>
+                            </select>
+                          )}
+                          <input aria-label={'Note for ' + s.size} placeholder="Note (optional)" maxLength={200} style={input} value={e.note} onChange={(ev) => putEdit(v, { note: ev.target.value })} />
+                          <button style={btn} aria-label={'Save stock for ' + s.size} disabled={e.mode === 'count' ? e.count.trim() === '' : !(Number(e.delta) > 0)}
+                            onClick={async () => { if (e.mode === 'count') await countStock(v); else await adjust(v, e.mode === 'add' ? 1 : -1); }}>Save</button>
+                        </div>
+                      )}
                       {history?.variantId === v && (
                         <div style={{ marginTop: 8 }}>
                           {history.rows.length === 0 && <div style={{ color: C.muted, fontSize: 13 }}>No changes yet.</div>}

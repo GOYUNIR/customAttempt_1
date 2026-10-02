@@ -7019,17 +7019,23 @@ export default function AdminPortal() {
               <strong style={{ color: '#ccc' }}> Codes now work on raffle entries too</strong> — a percentage discount is applied &quot;if selected&quot; when the draw charges a winner, and direct purchases get the discount immediately at checkout. Set <code style={{ color: '#7dd3fc' }}>eligibleProductSlugs</code>/<code style={{ color: '#7dd3fc' }}>eligibleSizes</code> to restrict, or leave empty to work on everything.
             </p>
             
+            {/* A first code needs two things (Hick's Law, DEFERRED-11 #14):
+                the code and the discount. Everything else is under More options. */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-              <input placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} style={inputStyle} />
+              <input aria-label="Code" placeholder="Code" value={promoForm.code} onChange={(e) => setPromoForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} style={inputStyle} />
+              <input aria-label="Customer discount %" type="number" min="0" max="50" placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
+            </div>
+            <details style={{ marginBottom: 10 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11, color: '#aaa' }}>More options (promoter and payout, limits, dates, sharing)</summary>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, margin: '8px 0 10px' }}>
               <input placeholder="Promoter Name" value={promoForm.promoterName} onChange={(e) => setPromoForm((f) => ({ ...f, promoterName: e.target.value }))} style={inputStyle} />
               <input placeholder="Promoter Email" value={promoForm.promoterEmail} onChange={(e) => setPromoForm((f) => ({ ...f, promoterEmail: e.target.value }))} style={inputStyle} />
-              <input type="number" min="0" max="50" placeholder="Customer Discount %" value={promoForm.customerDiscountPercent} onChange={(e) => setPromoForm((f) => ({ ...f, customerDiscountPercent: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" max="50" placeholder="Promoter Payout %" value={promoForm.promoterPayoutPercent} onChange={(e) => setPromoForm((f) => ({ ...f, promoterPayoutPercent: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Max uses per email (0=unlimited)" value={promoForm.maxUsesPerEmail} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesPerEmail: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Total max uses (0=unlimited)" value={promoForm.maxUsesTotal} onChange={(e) => setPromoForm((f) => ({ ...f, maxUsesTotal: e.target.value }))} style={inputStyle} />
               <input type="number" min="0" placeholder="Min items in cart (0=none)" title="Require the cart to contain at least this many items before the code unlocks (prevents single low-value item abuse)." value={promoForm.minimumItemCount} onChange={(e) => setPromoForm((f) => ({ ...f, minimumItemCount: e.target.value }))} style={inputStyle} />
             </div>
-            
+
             <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
               <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={promoForm.timeLimited} onChange={(e) => setPromoForm((f) => ({ ...f, timeLimited: e.target.checked }))} />
@@ -7050,7 +7056,8 @@ export default function AdminPortal() {
                 </>
               )}
             </div>
-            
+            </details>
+
             <button onClick={savePromo} style={buttonPrimary}>{promoForm.code && promos.some((p) => p.code === promoForm.code) ? 'Update Promo' : 'Create Promo'}</button>
             {promoMsg && <p style={{ fontSize: 12, color: '#34d399' }}>{promoMsg}</p>}
 

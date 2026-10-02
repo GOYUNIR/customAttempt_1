@@ -678,6 +678,28 @@ Needs design work (Jobs-level simplification, with 2 and 11):
     home page. It should start from what the store shows today, and preview
     before activating.
 
+Fourth batch (2026-10-02, launch work order). Fixed:
+- #1 **Stock panel:** one "Adjust stock" action per size opens one small
+  form (set the count / add / remove, reason only when removing, note, one
+  Save); History is a link.
+- #3 **Portal shell on phones:** the sidebar is a drawer behind "Menu" under
+  800px (verify-portal-phone.ts, 375/390/414).
+- #6 **Sales pickers:** stores and companies are chosen by name
+  (/api/admin/sales/picklists). Impersonation asks only for the password:
+  the email comes from the session, and the password stays as deliberate
+  step-up.
+- #8 **Order detail:** built with fulfilment (2026-10-01).
+- #9 **Proofs leave data behind:** the release gate ends with
+  `launch-reset --proof-only`; the photo fixture is self-cleaning.
+- #13 **"Wipe & Rebuild":** removed (route and UI).
+- #14 **Promotions form:** Code and Discount % up front; promoter, payout,
+  limits, dates and sharing under "More options".
+
+Still needs design work (not cheap, post-launch): #2, #10, #11, #12 (admin
+information architecture and Settings sections), #15 (Setup tab), #16
+(Theme Editor preview), and the Quote Desk's new-line item still takes a
+raw variant id (needs a product/size picker).
+
 Fourth batch, the "working version" pass (2026-09-30). Fixed:
 - **Sales reps could not sign in.** The emailed-code step 404'd on the sales
   host (portal fence), so every rep was stuck after the password. The code

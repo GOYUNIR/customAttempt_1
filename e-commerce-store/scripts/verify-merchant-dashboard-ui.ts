@@ -88,8 +88,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
       check(/available/.test(listText), 'the product list shows available stock per size');
       const row = page.locator('div', { hasText: /^Stock race fixture \(hidden\)/ }).locator('xpath=ancestor::div[button][1]');
       await row.getByRole('button', { name: 'Edit' }).first().tap(); await page.waitForTimeout(800);
-      await page.getByLabel('Counted units for One').fill('3');
-      await page.getByRole('button', { name: 'Set count' }).first().tap(); await page.waitForTimeout(2500);
+      await page.getByRole('button', { name: 'Adjust stock' }).first().tap(); await page.waitForTimeout(400);
+      await page.getByLabel('Units for One').fill('3');
+      await page.getByRole('button', { name: 'Save stock for One' }).tap(); await page.waitForTimeout(2500);
       const afterCount = await page.evaluate(() => document.body.innerText);
       await page.screenshot({ path: join(OUT, 'dash-test4-stock.png'), fullPage: true });
       check(/Count saved: 3 on hand/.test(afterCount) && /3 on hand · 0 in checkout · 3 available/.test(afterCount), 'counting 3 in the editor saves and shows 3 on hand / 3 available');
@@ -97,8 +98,9 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
       const hist = await page.evaluate(() => document.body.innerText);
       check(/counted \+?\d+ → 3/.test(hist) && hist.includes(aEmail), 'the history shows the count, by the owner');
       check(!(await wide()), 'stock editor: no sideways scrolling');
-      await page.getByLabel('Units to add or remove for One').fill('3');
-      await page.getByRole('button', { name: 'Remove' }).first().tap(); await page.waitForTimeout(2500);
+      await page.getByLabel('How to adjust One').selectOption('remove');
+      await page.getByLabel('Units for One').fill('3');
+      await page.getByRole('button', { name: 'Save stock for One' }).tap(); await page.waitForTimeout(2500);
       check(/Stock removed: 0 on hand/.test(await page.evaluate(() => document.body.innerText)), 'removing 3 brings it back to 0');
       await ctx.close(); }
 

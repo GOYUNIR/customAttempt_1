@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { inputStyle, buttonPrimary, buttonGhost, labelStyle, statusPill, adminApiFetch } from '@/components/admin/portalStyles';
+import { CompanyPicker } from '@/components/sales/SalesPickers';
 
 /**
  * QUOTE DESK — the B2B draft-quote builder, backed by the real
@@ -96,8 +97,8 @@ export default function QuoteDeskPanel({ password = '' }: { password?: string })
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={labelStyle}>Company ID</span>
-            <input style={{ ...inputStyle, minWidth: 260 }} value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="uuid" />
+            <span style={labelStyle}>Company</span>
+            <CompanyPicker value={companyId} onChange={setCompanyId} />
           </div>
           <button type="button" style={buttonGhost} onClick={loadQuotes} disabled={loading || !companyId.trim()}>
             {loading ? 'Loading…' : 'Load Quotes'}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { inputStyle, buttonGhost, labelStyle, statusPill, adminApiFetch } from '@/components/admin/portalStyles';
+import { CompanyPicker } from '@/components/sales/SalesPickers';
 import { tiersForVariant, type PriceListEntry } from '@/lib/b2b/pricing';
 
 /**
@@ -53,8 +54,8 @@ export default function VolumeDiscountMatrix() {
       </p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={labelStyle}>Company ID</span>
-          <input style={{ ...inputStyle, minWidth: 260 }} value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="uuid" />
+          <span style={labelStyle}>Company</span>
+          <CompanyPicker value={companyId} onChange={setCompanyId} />
         </div>
         <button type="button" style={buttonGhost} onClick={load} disabled={loading || !companyId.trim()}>
           {loading ? 'Loading…' : 'Load'}
