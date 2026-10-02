@@ -77,6 +77,11 @@ const run = Date.now().toString(36);
 
     console.log('\nOnly a store\'s own photos');
     const pA = (await products(sA)).find((p) => p.slug === 'stock-race-fixture');
+    // Store B needs one product to try photos on: made here if it has none
+    // (the release gate's teardown removes "Photo proof B …" products).
+    if (!(await products(sB)).length) {
+      await fetch(APP + '/api/merchant/products', { method: 'POST', headers: hdr(sB, { 'content-type': 'application/json' }), body: JSON.stringify({ name: 'Photo proof B ' + run, slug: 'photo-b-' + run, sizes: [{ size: 'One', price: 10, mode: 'FCFS', stock: 1 }] }) });
+    }
     const pB = (await products(sB))[0];
     if (!pA || !pB) throw new Error('fixtures missing: ' + JSON.stringify({ a: !!pA, b: !!pB }));
     // Self-cleaning: start from a fixture with NO photos (a run that died

@@ -34,7 +34,7 @@ work itself. The longest waits come first, because they decide the date.
 | 11 | Support runbook (below) | me (written), you (inbox) | none | support@ inbox | written |
 | 12 | Cloudflare WAF rate-limit rule for signup | you | minutes | nothing | steps below |
 | 13 | Domain move (if the platform domain is not goyunir.com) | both | 1 day | 2, 5 | executable (DOMAIN-MIGRATION.md) |
-| 14 | Launch cleanup (proof data) | you approve, I run | minutes | the fixture decision | SQL in LAUNCH-CLEANUP.md |
+| 14 | Launch cleanup (proof data) | done 2026-10-02 | - | - | scripts/launch-reset.ts (dry run default; re-run --apply at launch) |
 | 15 | Stranger journey on the real email path | me | minutes | Resend reset, your address | waiting |
 | 16 | Release gate GO, then switch signup on | me, you confirm | 15 minutes | all above | gate built |
 

@@ -95,7 +95,11 @@ type Step = { what: string; table: string; col: string; ids: string[] };
   // Accounts: proof accounts only, never the fixture owners (store B's owner is a proof address but owns a kept store).
   const fixtureOwnerIds = new Set(users.filter((u: any) => [FIXTURE_CONNECT, FIXTURE_B, DEMO].includes(u.tenant_id) && u.role === 'owner').map((u: any) => u.id));
   const usersGo = users.filter((u: any) => proofUser(u) && !fixtureOwnerIds.has(u.id) || deadTenants.includes(u.tenant_id) && proofUser(u));
-  const productsGo = PROOF_ONLY ? [] : products.filter((p: any) => p.tenant_id === DEFAULT || deadTenants.includes(p.tenant_id));
+  // Products the proofs make in the fixture stores (they never remove them
+  // themselves): "Isolation B Tee <run>", "Form Made Cap <run>", "Photo proof B <run>".
+  const PROOF_PRODUCT = /^(Isolation B Tee|Form Made Cap|Photo proof B) [a-z0-9]+$/i;
+  const proofProduct = (p: any) => [FIXTURE_CONNECT, FIXTURE_B].includes(p.tenant_id) && PROOF_PRODUCT.test(String(p.name || ''));
+  const productsGo = products.filter((p: any) => proofProduct(p) || (!PROOF_ONLY && (p.tenant_id === DEFAULT || deadTenants.includes(p.tenant_id))));
 
   const plan: Step[] = [
     { what: 'billing rows of removed orders (billing keeps a row when its order goes)', table: 'tenant_billing_charges', col: 'payment_intent_id', ids: billing.filter((b: any) => ordersGo.some((o: any) => o.stripe_payment_intent_id === b.payment_intent_id) || deadTenants.includes(b.tenant_id)).map((b: any) => b.payment_intent_id) },
@@ -107,7 +111,7 @@ type Step = { what: string; table: string; col: string; ids: string[] };
     { what: 'release-list subscribers', table: 'alert_subscribers', col: 'id', ids: alerts.filter((a: any) => PROOF_ONLY ? PROOF_EMAIL.test(String(a.email || '')) : true).map((a: any) => a.id) },
     { what: 'staff invites', table: 'staff_invites', col: 'id', ids: invites.filter((i: any) => PROOF_ONLY ? PROOF_EMAIL.test(String(i.email || '')) : true).map((i: any) => i.id) },
     { what: 'self-serve signups (all from proofs)', table: 'merchant_signups', col: 'id', ids: signups.filter((s: any) => PROOF_ONLY ? PROOF_EMAIL.test(String(s.email || '')) : true).map((s: any) => s.id) },
-    { what: 'products of the GOYUNIR shell (to be rebuilt) and removed stores', table: 'products', col: 'id', ids: productsGo.map((p: any) => p.id) },
+    { what: 'products: proof-made ones in the fixtures, plus (full reset) the GOYUNIR shell and removed stores', table: 'products', col: 'id', ids: productsGo.map((p: any) => p.id) },
     { what: 'proof accounts (staff rows)', table: 'users', col: 'id', ids: usersGo.map((u: any) => u.id) },
     { what: 'stores not kept', table: 'tenants', col: 'id', ids: deadTenants },
   ];
