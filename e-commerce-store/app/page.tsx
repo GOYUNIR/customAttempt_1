@@ -6,6 +6,8 @@ import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from 
 import { notFound } from 'next/navigation';
 import { storefrontSsrEnabled } from '@/lib/storefront-ssr';
 import { storePayloadFor } from '@/lib/store-payload';
+import { homeDisplay, heroCoverOf } from '@/lib/home-display';
+import { preload } from 'react-dom';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +42,13 @@ export default async function HomePage({ searchParams }: { searchParams?: Promis
       console.error('[storefront] first screen not server-rendered', (err as Error)?.message || err);
       return null;
     });
-    if (payload) return <LegacyHomePage initialStore={{ payload, renderedAt: Date.now() }} />;
+    if (payload) {
+      // The hero's cover photo is the page's largest paint, and with the first
+      // screen in the HTML it no longer waits for the JS: fetch it first.
+      const cover = heroCoverOf(homeDisplay(payload));
+      if (cover) preload(cover, { as: 'image', fetchPriority: 'high' });
+      return <LegacyHomePage initialStore={{ payload, renderedAt: Date.now() }} />;
+    }
   }
   return <LegacyHomePage />;
 }

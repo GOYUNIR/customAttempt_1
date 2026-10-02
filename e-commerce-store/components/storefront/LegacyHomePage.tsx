@@ -17,6 +17,7 @@ import { GOYUNIR_STORE_SUITE } from '@/goyunir.config';
 import ReleaseWaitlist from '@/components/ReleaseWaitlist';
 import HeroShaderCanvas from '@/components/HeroShaderCanvas';
 import { fetchStoreJson } from '@/lib/client-store-cache';
+import { homeDisplay } from '@/lib/home-display';
 import { notifyDropDue } from '@/lib/client-auto-draw';
 import { useLiveTheme } from '@/components/ThemeProvider';
 import { cardLabel } from '@/lib/buy-labels';
@@ -61,29 +62,6 @@ const HERO_ANIMATION_CSS = fallbackAnimation('drift').css || '';
  * every entrance uses `backwards` fill so a lingering transform (which would
  * trap the orbs behind the section surfaces) is impossible.
  */
-
-/**
- * The releases the home page shows, from an /api/store payload: the active
- * ones, else the configured fallback (upcoming, then archived) so the site is
- * never empty.
- */
-function homeDisplay(data: any): any[] {
-  const all = Array.isArray(data?.allProducts) ? data.allProducts : [];
-  const sortFn = (a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name));
-  let display = [...all]
-    .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
-    .sort(sortFn);
-  if (display.length === 0) {
-    const fallback = String(data?.config?.layout?.homepageFallback || 'upcoming');
-    if (fallback === 'upcoming' || fallback === 'upcoming_then_archived') {
-      display = [...all].filter((p: any) => p.isUpcoming === true && p.isArchived !== true).sort(sortFn);
-    }
-    if (display.length === 0 && (fallback === 'archived' || fallback === 'upcoming_then_archived')) {
-      display = [...all].filter((p: any) => p.isArchived === true).sort(sortFn);
-    }
-  }
-  return display;
-}
 
 /**
  * `initialStore` (lib/storefront-ssr.ts, flag): the /api/store payload the
