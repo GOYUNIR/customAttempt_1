@@ -7,6 +7,8 @@
  *
  *   npx tsx scripts/measure-speed.ts [--runs 5] [--json out.json] [--ab]
  *   --ab alternates loads with and without <link rel="preload" as="image"> tags (stripped in the browser)
+ *   --ssr-ab alternates ?ssr=1 / ?ssr=0 on the storefront pages (lib/storefront-ssr.ts);
+ *     both variants go through the same throttled network
  */
 import { ROOT } from './proof-config';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
@@ -20,6 +22,7 @@ import { CHROME } from './mobile-audit';
 const arg = (n: string) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : ''; };
 const RUNS = Number(arg('--runs') || 5);
 const AB = process.argv.includes('--ab');
+const SSR_AB = process.argv.includes('--ssr-ab');
 const A = '13591c9e-82e4-4c23-8d94-249cef6fa775'; // test4: the dashboard is measured as its owner
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
 
@@ -61,21 +64,22 @@ const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); retu
         // --ab: every other load has its image preloads
         // stripped from the HTML. Both variants fetch the document the same way
         // (route.fetch is not throttled), so only the tags differ between them.
-        const strip = AB && i % 2 === 1;
+        const strip = (AB || SSR_AB) && i % 2 === 1;
+        const url = SSR_AB && !p.cookie && p.url.includes('demo.') ? p.url + (strip ? '?ssr=0' : '?ssr=1') : p.url;
         if (AB) await page.route(p.url, async (route) => {
           const r = await route.fetch();
           const html = await r.text();
           await route.fulfill({ response: r, body: strip ? html.replace(/<link rel="preload"[^>]*as="image"[^>]*>/g, '') : html });
         });
-        const resp = await page.goto(p.url, { waitUntil: 'load', timeout: 90_000 });
+        const resp = await page.goto(url, { waitUntil: 'load', timeout: 90_000 });
         await page.waitForTimeout(2500);
         const m: any = await page.evaluate(`(() => { var n = performance.getEntriesByType('navigation')[0]; var s = performance.getEntriesByType('resource').filter(function (r) { return /\\/api\\/store/.test(r.name); })[0]; return { ttfb: n.responseStart, lcp: window.__lcp, data: s ? s.startTime : 0 }; })()`);
-        (strip ? ab.without : ab.with).push({ afterTtfb: Math.round(m.lcp - m.ttfb), dataAfterTtfb: m.data ? Math.round(m.data - m.ttfb) : null });
+        (strip ? ab.without : ab.with).push({ lcp: Math.round(m.lcp), afterTtfb: Math.round(m.lcp - m.ttfb), dataAfterTtfb: m.data ? Math.round(m.data - m.ttfb) : null });
         ttfb.push(Math.round(m.ttfb)); lcp.push(Math.round(m.lcp));
         if (i === 0 && resp) { const h = resp.headers(); headers = { status: String(resp.status()), 'cache-control': h['cache-control'] || '', 'cf-cache-status': h['cf-cache-status'] || '' }; }
         await ctx.close();
       }
-      if (AB) for (const [k, xs] of Object.entries(ab)) if (xs.length) console.log('   ' + (k === 'with' ? 'with hints   ' : 'hints removed') + '  LCP after first byte ' + median(xs.map((x) => x.afterTtfb)) + 'ms  data request starts ' + median(xs.map((x) => x.dataAfterTtfb ?? -1)) + 'ms after first byte  (n=' + xs.length + ')');
+      if (AB || SSR_AB) for (const [k, xs] of Object.entries(ab)) if (xs.length) console.log('   ' + (SSR_AB ? (k === 'with' ? 'ssr on ' : 'ssr off') : k === 'with' ? 'with hints   ' : 'hints removed') + '  LCP ' + median(xs.map((x) => x.lcp)) + 'ms, after first byte ' + median(xs.map((x) => x.afterTtfb)) + 'ms  data request starts ' + median(xs.map((x) => x.dataAfterTtfb ?? -1)) + 'ms after first byte  (n=' + xs.length + ')');
       const row = { page: p.name, url: p.url, ttfbMs: median(ttfb), lcpMs: median(lcp), ttfbRuns: ttfb, lcpRuns: lcp, ab, ...headers };
       out.push(row);
       console.log(p.name.padEnd(15) + ' TTFB ' + String(row.ttfbMs).padStart(5) + 'ms  LCP ' + String(row.lcpMs).padStart(5) + 'ms   runs ttfb ' + ttfb.join('/') + ' lcp ' + lcp.join('/') + '   ' + headers.status + ' cc="' + headers['cache-control'] + '" cf=' + (headers['cf-cache-status'] || '-'));

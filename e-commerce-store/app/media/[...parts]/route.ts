@@ -66,6 +66,11 @@ function serve(media: { mime: string; bytes: Uint8Array<ArrayBuffer> }): Respons
     headers: {
       'Content-Type': media.mime,
       'Content-Length': String(media.bytes.byteLength),
+      // Public, credential-free bytes: any storefront (every store host, custom
+      // domains) may read them in CORS mode. The hero shader needs that to use
+      // a photo as a WebGL texture (components/HeroShaderCanvas.tsx); without
+      // it the browser blocked the photo and the shader fell back.
+      'Access-Control-Allow-Origin': '*',
       ...edgeCacheHeaders('public, max-age=31536000, s-maxage=31536000, immutable'),
     },
   });
