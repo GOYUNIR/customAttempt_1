@@ -2,6 +2,7 @@
 
 ## WAITING ON ME (the owner), in priority order
 
+0. **[decision] Workers Paid ($5/month) now rather than at signup.** On 2026-10-02 Cloudflare's own tail showed 5-20% of production requests failing with **Error 1102** (CPU limit). Every surface was affected, including /api/health. Median CPU is 25ms on the store home and 34ms on the marketing home, against Free's 10ms limit. Customers on the demo store see those failures now, and the release gate can't pass reliably while they happen. This is spending, so it's yours to approve; the runbook is §5.
 1. **Resend DNS record:** Cloudflare DNS, CNAME `rsend` → `send.forge.rmta.net`, DNS only (grey cloud); then Resend → Domains → Verify. This unblocks the stranger journey.
 2. **Stranger-journey address** (`STRANGER_EMAIL`): an inbox you control. Plus-addresses work.
 3. **R2 API token replacement before 2026-10-16** (§1). Send me the new keys.
@@ -11,7 +12,7 @@
 7. **Signup WAF rule** (§12).
 8. **Platform name and domain** (§2); then the move runs from §13.
 9. **Legal review** (§4).
-10. **Workers Paid**, 5–7 days before opening signup (§5 runbook).
+10. (Workers Paid moved to item 0.)
 
 Written 2026-10-01. Owner: **you** (the owner), **me** (the coding agent), or
 **both**. Lead time is the elapsed wait (review, propagation, warm-up), not the
