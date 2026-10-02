@@ -149,6 +149,11 @@ export function isPortalPathAllowed(pathname: string, portal: Portal, rootDomain
   if (isSharedStaffAuthPath(pathname)) {
     return portal === 'admin' || portal === 'merchant' || portal === 'sales';
   }
+  // The Sales Hub's own APIs live under /api/admin (B2B pricing and quotes,
+  // its pick-lists) and each one checks sales access itself. Fenced off the
+  // sales host, Volume Pricing and the Quote Desk 404'd there since they
+  // were built (found 2026-10-02).
+  if (pathname.startsWith('/api/admin/b2b/') || pathname.startsWith('/api/admin/sales/')) return portal === 'sales' || portal === 'admin';
   const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
   const isSalesPath = pathname.startsWith('/sales') || pathname.startsWith('/api/sales');
   if (isAdminPath) return portal === 'admin' || portal === 'merchant';

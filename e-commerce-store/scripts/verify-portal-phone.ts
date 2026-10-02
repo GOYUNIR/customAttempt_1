@@ -34,6 +34,14 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
   if (acc.status !== 200 || !id) throw new Error('could not make the sales account: ' + acc.status);
   const token = (await issueAdminDevice(createKvClient() as any, email, false, deviceMetaFor(id), 600)).token;
 
+  console.log('\nThe Sales Hub\'s APIs answer on the sales host (they 404\'d there until 2026-10-02)');
+  const hdr = { cookie: 'goyunir_admin_device=' + token, origin: SALES };
+  const pick = await fetch(SALES + '/api/admin/sales/picklists', { headers: hdr });
+  const pickBody: any = await pick.json().catch(() => null);
+  check(pick.status === 200 && pickBody?.email === email && Array.isArray(pickBody?.stores), 'pick-lists: 200, signed in as the rep, stores by name (' + (pickBody?.stores?.length ?? '?') + ' assigned)');
+  check((await fetch(SALES + '/api/admin/b2b/price-list', { headers: hdr })).status === 400, 'Volume Pricing\'s API answers (400: choose a company), not 404');
+  check((await fetch(SALES + '/api/admin/sales/picklists')).status === 401, 'without a session: 401');
+
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   try {
     for (const width of [375, 390, 414]) {

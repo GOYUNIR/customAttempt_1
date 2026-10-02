@@ -447,3 +447,12 @@ test('platform moved: <label>.<old root> 301s to the same label on the new root,
   assert.equal(r('kestrel.goyunir.com', '/p', 'GET', ''), null, 'no old roots configured: nothing moves');
   assert.equal(r('kestrel.goyunir.com', '/p', 'GET', 'goyunir.com', 'goyunir.com'), null, 'old = new: no loop');
 });
+
+test('the Sales Hub\'s own APIs answer on the sales host (and admin), nowhere else', () => {
+  for (const p of ['/api/admin/b2b/price-list', '/api/admin/b2b/quotes', '/api/admin/sales/picklists']) {
+    assert.equal(isPortalPathAllowed(p, 'sales', 'goyunir.com'), true, 'sales ' + p);
+    assert.equal(isPortalPathAllowed(p, 'admin', 'goyunir.com'), true, 'admin ' + p);
+    assert.equal(isPortalPathAllowed(p, 'merchant', 'goyunir.com'), false, 'merchant ' + p);
+  }
+  assert.equal(isPortalPathAllowed('/api/admin/products', 'sales', 'goyunir.com'), false, 'the rest of /api/admin stays off the sales host');
+});
