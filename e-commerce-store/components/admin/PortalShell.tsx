@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 /**
  * PORTAL SHELL — the high-density dashboard chrome shared by the Platform
@@ -54,20 +54,37 @@ export default function PortalShell({
   actorEmail?: string;
   children: ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Picking a destination on a phone closes the drawer, so the content shows.
+  const wrap = (item: PortalNavItem): PortalNavItem => (item.onClick ? { ...item, onClick: () => { setMenuOpen(false); item.onClick!(); } } : item);
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#08080a', color: '#e5e5e8', fontFamily: 'system-ui, sans-serif' }}>
+    <div className="ps-root" style={{ display: 'flex', minHeight: '100vh', background: '#08080a', color: '#e5e5e8', fontFamily: 'system-ui, sans-serif' }}>
+      {/* Layout that inline styles cannot express: under 800px the sidebar
+          is an off-canvas drawer behind a "Menu" button, so the content gets
+          the full width (it used to keep ~135px of a 375px phone). */}
+      <style>{`
+        .ps-aside { width: 240px; flex-shrink: 0; position: sticky; top: 0; height: 100vh; }
+        .ps-topbar { display: none; }
+        .ps-scrim { display: none; }
+        @media (max-width: 799px) {
+          .ps-aside { position: fixed; left: 0; top: 0; z-index: 60; width: min(280px, 85vw); background: #08080a; transform: translateX(-100%); transition: transform .2s ease; }
+          .ps-aside.ps-open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+          .ps-scrim.ps-open { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.5); }
+          .ps-topbar { display: flex; position: sticky; top: 0; z-index: 40; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; background: #08080a; border-bottom: 1px solid #1f1f24; }
+          .ps-main { padding: 16px 16px 40px !important; }
+        }
+      `}</style>
+      <div className={'ps-scrim' + (menuOpen ? ' ps-open' : '')} onClick={() => setMenuOpen(false)} aria-hidden="true" />
       <aside
+        id="portal-menu"
+        className={'ps-aside' + (menuOpen ? ' ps-open' : '')}
+        aria-label="Portal menu"
         style={{
-          width: 240,
-          flexShrink: 0,
           borderRight: '1px solid #1f1f24',
           padding: '18px 12px',
           display: 'flex',
           flexDirection: 'column',
           gap: 20,
-          position: 'sticky',
-          top: 0,
-          height: '100vh',
           overflowY: 'auto',
         }}
       >
@@ -106,7 +123,7 @@ export default function PortalShell({
           <div key={group.label}>
             <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase', color: '#565660', padding: '0 8px 6px' }}>{group.label}</div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {group.items.map((item) => {
+              {group.items.map(wrap).map((item) => {
                 const itemStyle = {
                   display: 'flex' as const,
                   alignItems: 'center' as const,
@@ -152,7 +169,14 @@ export default function PortalShell({
         </div>
       </aside>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <main style={{ flex: 1, padding: '22px 28px 40px', minWidth: 0 }}>{children}</main>
+        <div className="ps-topbar">
+          <div style={{ fontSize: 13, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+          <button type="button" onClick={() => setMenuOpen(true)} aria-expanded={menuOpen} aria-controls="portal-menu"
+            style={{ minHeight: 40, padding: '0 14px', borderRadius: 999, border: '1px solid #2a2a31', background: '#141417', color: '#e5e5e8', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Menu
+          </button>
+        </div>
+        <main className="ps-main" style={{ flex: 1, padding: '22px 28px 40px', minWidth: 0 }}>{children}</main>
       </div>
     </div>
   );
