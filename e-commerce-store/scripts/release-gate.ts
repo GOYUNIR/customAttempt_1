@@ -50,6 +50,7 @@ const steps: Step[] = [
   { name: 'Webhooks tolerate deleted data', cmd: tsx('verify-webhook-tolerance.ts'), pass: allPass },
   { name: 'Prices and stock never stale at checkout', cmd: tsx('verify-no-stale-money.ts'), pass: allPass },
   { name: 'Portals at phone width', cmd: tsx('verify-portal-phone.ts'), pass: allPass },
+  { name: 'Content policy blocks nothing real', cmd: tsx('csp-scan.ts'), pass: allPass },
   ...(quick ? [] : [{ name: 'Signup abuse (record mode)', cmd: tsx('verify-signup-abuse.ts'), pass: allPass }]),
   // Last: the proofs leave nothing behind (their orders, customers, signups,
   // accounts and recorded mail), backed up first like every reset.

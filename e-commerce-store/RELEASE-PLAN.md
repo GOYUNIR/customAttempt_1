@@ -232,7 +232,7 @@ Rehearsed on 2026-10-01 against goyunir.com: 23 pass, 3 for a dashboard look, an
 
 ## 14. Launch cleanup
 
-LAUNCH-CLEANUP.md has the inventory, the decision on the two proof fixture stores, and reviewed SQL. You approve, then I run it.
+Done 2026-10-02 with `scripts/launch-reset.ts` (dry run by default; `--apply` backs up to launch-backups/ first, then deletes and verifies). Re-run it at launch: `npx tsx scripts/launch-reset.ts`, read the plan, then `--apply`. Stripe test leftovers: `scripts/stripe-test-cleanup.ts` (test keys only).
 
 ## 15. Stranger journey
 
@@ -242,6 +242,32 @@ It runs after Resend's daily reset (midnight UTC), with at most 3 real sends to 
 
 `npm run release:gate` (about 15 minutes) must print **GO** before any deploy that touches money or identity. Then you confirm, I set `ALLOW_MERCHANT_SIGNUP=true`, and I watch the first signups.
 
+## Speed (measured 2026-10-02, not on the path)
+
+`npx tsx scripts/measure-speed.ts --runs 10` (throttled phone: 150ms RTT, 1.6 Mbps, 4x CPU; median, cold cache):
+
+| Page | TTFB | LCP |
+|---|---|---|
+| Marketing home | ~0.4s | ~0.9s |
+| Store home | ~0.5s | ~3.8s |
+| Product page | ~0.6s | ~2.7s |
+| Dashboard | ~0.4-1.1s | ~3.3s |
+
+- Server work is small: store home ~200ms, marketing ~100ms above a static file. TTFB on this link swings 0.3-1.6s run to run, which is network, not code.
+- Caching HTML would not move LCP, and every page that shows money or stock must stay uncached. `scripts/verify-no-stale-money.ts` (in the gate) proves a price change and sold-out reach checkout at once, while the catalog display may lag up to 10s.
+- Two hint changes were measured with an interleaved A/B (`--ab`) and reverted: preloading /api/store, and preloading the first photos from the server. Neither gave a gain above the noise, and the photo preload made product pages ~700ms slower.
+- The real cost is client-side: ~220KB of JS must download and hydrate before the storefront draws its hero, which is a CSS background. The fix is to render the storefront's first screen on the server, a refactor logged below.
+
+## CSP plan (2026-10-02)
+
+Evidence: `scripts/csp-scan.ts` loads 13 real pages (marketing, legal, two storefronts with home, product, catalog, account and login, the dashboard with every tab clicked, the admin and sales sign-ins) and records every violation. The policy has no report endpoint, so this scan is the report-only data. Result: one source on every page, Cloudflare Web Analytics' beacon (static.cloudflareinsights.com), now allowed in the report-only policy. Nothing else.
+
+| Step | Directives | State |
+|---|---|---|
+| 1 | frame-ancestors, frame-src (Turnstile, Stripe), img-src, media-src, font-src, object-src 'none', base-uri | **Enforced 2026-10-02**. The scan runs in the release gate and fails on any enforced violation. |
+| 2 | connect-src, form-action | Enforce after one clean scan with signup on (Turnstile) and one Stripe embedded-onboarding session. Both wait on the stranger journey. |
+| 3 | script-src, style-src | Need nonces instead of 'unsafe-inline' (the layout's inline theme and prefetch scripts). That's a code change; until then enforcing them adds little, because 'unsafe-inline' allows the main attack. |
+
 ## After launch (logged, not on the path)
 
 - A staging copy (second Worker on workers.dev, second Supabase project, Stripe test keys) so the release gate can keep running after live mode. Without it, purchase proofs can't run against live production.
@@ -250,5 +276,6 @@ It runs after Resend's daily reset (midnight UTC), with at most 3 real sends to 
   - admin.<root> is both the platform admin and GOYUNIR's admin;
   - GOYUNIR is still "the default tenant" in code;
   - internal names (`goyunir_admin_device` cookie, `goyunir-theme-json`).
-- The discount-codes build (decisions approved; DISCOUNT-CODES.md).
+- Discount codes are built and OFF on every plan (`plans.discount_codes_enabled`); turning them on for a plan is a one-row change.
+- Storefront first screen rendered on the server (see Speed).
 - The custom-domain real-domain proof.

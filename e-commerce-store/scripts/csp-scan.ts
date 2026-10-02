@@ -5,6 +5,7 @@
  * directive and blocked origin. The evidence for what is safe to enforce.
  *
  *   npx tsx scripts/csp-scan.ts [--json out.json]
+ *   exits 1 if the ENFORCED policy blocked anything (in the release gate)
  *
  * Signed in as test4's owner for the dashboard (every tab clicked).
  */
@@ -82,5 +83,9 @@ const arg = (n: string) => { const i = process.argv.indexOf(n); return i > 0 ? p
   for (const [k, g] of [...groups].sort((a, b) => b[1].n - a[1].n)) console.log('  ' + String(g.n).padStart(4) + '  ' + k + '   on ' + [...g.pages].slice(0, 4).join(', ') + (g.sample ? '   e.g. ' + JSON.stringify(g.sample) : ''));
   if (!groups.size) console.log('  none');
   if (arg('--json')) writeFileSync(arg('--json'), JSON.stringify(seen, null, 2));
-  process.exit(0);
+  // Report-only findings are evidence; an ENFORCED violation is something the
+  // policy actually broke on a real page.
+  const enforced = seen.filter((v) => v.disposition === 'enforce');
+  console.log('\n' + (enforced.length ? enforced.length + ' ENFORCED violation(s): the policy blocked something real' : 'ALL PASS (no enforced violations; ' + seen.length + ' report-only)'));
+  process.exit(enforced.length ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
