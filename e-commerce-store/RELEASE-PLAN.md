@@ -281,4 +281,5 @@ Evidence: `scripts/csp-scan.ts` loads 13 real pages (marketing, legal, two store
 - Storefront first screen rendered on the server (see Speed).
 - The original store's admin "trigger drop" charge path has never been proven with a real charge (EVIDENCE.md). It can't take money today, because the GOYUNIR shell has no products. Prove it before GOYUNIR sells through it.
 - Store offboarding: designed in OFFBOARDING.md (four owner decisions), not built.
+- **[decision] Operator alerts share the email capacity counter.** On 2026-10-02 the counter call (`email_reserve`) timed out and the signup breaker's alert to support@ was dropped. The trip was still logged, and the alert retries on the next trip. A database outage silences alerts at exactly the wrong moment. Option: let operator alerts bypass the counter with a small fixed daily budget. That changes email governance, so it's yours to decide.
 - The custom-domain real-domain proof.

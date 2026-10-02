@@ -16,7 +16,7 @@ cleanup of TEST data is authorized (with a backup first).
 | 8 | CSP enforcement plan | DONE: frames/images/media/fonts/object/base enforced; plan in RELEASE-PLAN "CSP plan"; csp-scan.ts in the gate |
 | 9 | Store offboarding design | DONE (design only): OFFBOARDING.md, 4 owner decisions |
 | 10 | Lean always-loaded context | DONE: STRATEGY.md 14,056 -> ~10.3KB (go-live list now points to RELEASE-PLAN); CLAUDE.md 24 B; AGENTS.md 142 B |
-| 11 | Final full release gate on the clean database | IN PROGRESS. Three full runs on 2026-10-02 were NO-GO, each on 503s from production, never a wrong answer: Cloudflare Error 1102 (CPU limit, Workers Free), seen at 5-20% of requests in wrangler tail. Waits on Workers Paid (RELEASE-PLAN item 0). |
+| 11 | Final full release gate on the clean database | DONE: GO 2026-10-02 10:55Z, 16/16, 0 retries (logs release-gate/2026-10-02T10-29-39-005Z). Five earlier runs that day were NO-GO: Error 1102 / 503 bursts (Workers Free CPU limit), Supabase request timeouts from this machine, a proof whose expectation depended on the 30s checkout window (fixed), and my own manual runs overlapping a gate run. On Workers Free a GO is partly luck: see RELEASE-PLAN item 0. |
 
 Running the gate: run nothing else against production while it runs (two proofs that toggle the same flag interfere with each other), and push nothing during a run, because every push redeploys the Worker, scripts-only pushes included. The gate takes about 30 minutes (signup abuse about 17 of them). Poll it until it finishes; never end a session while it's running.
 
