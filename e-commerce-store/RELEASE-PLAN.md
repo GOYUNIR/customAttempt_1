@@ -21,6 +21,7 @@ The name and domain are variables until chosen; code reads them from config (`PL
 4. **Supabase Pro ($25/month) for backups:** yes or no (§7). On the new account.
 5. **Uptime monitor:** sign up and add the monitors listed in §10 (after the move, against the new domain).
 6. **Signup WAF rule** (§12), on the new account.
+7. **[decision] Switch on the "talk to us" form** when you want leads: set `PLATFORM_LEADS_ENABLED=true` (and `SALES_LEADS_EMAIL` if not the alert inbox), and deploy the cron worker once (`cron-worker/`, now every 10 minutes) so cold-lead reminders run. Built and proven with the flag off.
 
 Written 2026-10-01. Owner: **you** (the owner), **me** (the coding agent), or
 **both**. Lead time is the elapsed wait (review, propagation, warm-up), not the

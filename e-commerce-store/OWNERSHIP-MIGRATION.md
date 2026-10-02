@@ -11,6 +11,7 @@ Who runs the platform (its name, domain, legal entity and addresses) is configur
 | Old roots | `PLATFORM_OLD_ROOT_DOMAINS` | answers with a 301 to the same address on the new root (never shown) |
 | Support address | `SUPPORT_EMAIL` | contact lines, reply-to on platform mail, legal pages |
 | Alert address | `OPERATOR_ALERT_EMAIL` (falls back to `SUPPORT_EMAIL`) | operator alerts (e.g. the signup breaker); never shown to customers |
+| Sales inbox | `SALES_LEADS_EMAIL` (falls back to the alert, then the support address) | new-lead notices and cold-lead reminders (lib/leads.ts); internal |
 | Platform sender | `RESEND_FROM` (secret) | the From of platform mail: `NAME <notifications@DOMAIN>` |
 | Legal entity | `PLATFORM_LEGAL_ENTITY`, `PLATFORM_LEGAL_REVIEWED` | Terms and Privacy |
 | Description | `PLATFORM_DESCRIPTION` | marketing metadata |
