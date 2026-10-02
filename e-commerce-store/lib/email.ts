@@ -962,9 +962,13 @@ export async function sendSignupExistingAccountEmail(opts: { to: string; signInU
   ), 'signup');
 }
 
-/** To the operator (SUPPORT_EMAIL) — e.g. the signup circuit breaker tripped. */
+/**
+ * To the operator — e.g. the signup circuit breaker tripped. OPERATOR_ALERT_EMAIL
+ * when set (OWNERSHIP-MIGRATION.md: alerts can go to a different inbox from
+ * customer support), else SUPPORT_EMAIL.
+ */
 export async function sendOperatorAlertEmail(opts: { subject: string; lines: string[] }) {
-  const to = getSupportEmail();
+  const to = String(process.env.OPERATOR_ALERT_EMAIL || '').trim() || getSupportEmail();
   if (!to) return { ok: false, skipped: true };
   return sendPlatformEmail(to, '[' + platformBrand() + ' alert] ' + opts.subject, plainEmail(opts.subject, opts.lines.map((l) => escapeHtml(l))), 'operator_alert');
 }

@@ -51,6 +51,13 @@ const ALLOWED: Record<string, string> = {
   // Reads the sending domain's verification status (DOMAIN-MIGRATION.md):
   // a provider dashboard fact the email drivers have no port for.
   'scripts/verify-domain-migration.ts': 'domain-move check reads the sending domain\'s verification status (verification script only)',
+  // Bootstrap PROVISIONS the accounts a fresh install runs on (BOOTSTRAP-RUNBOOK.md):
+  // the sending domain, the webhook endpoints. Operator tooling run once per
+  // install, not business logic; the drivers have no port for creating accounts'
+  // infrastructure, and must not (the running app never provisions itself).
+  'scripts/bootstrap/steps.ts': 'fresh-install provisioning of the vendor accounts (operator tooling, run once per install)',
+  // The in-memory stand-ins for those same vendor APIs (tests and the rehearsal).
+  'scripts/bootstrap/fakes.ts': 'fakes of the provisioning APIs for tests and the local rehearsal (no network)',
 };
 
 /**
