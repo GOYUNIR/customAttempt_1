@@ -57,7 +57,7 @@ The media bucket's S3 credentials (`MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_AC
 3. **Specify bucket(s):** only the media bucket (the `MEDIA_BUCKET` value).
 4. **TTL:** *Forever*, or a date at least a year out with a calendar reminder. Client IP filtering: none.
 5. Create, then copy the **Access Key ID** and **Secret Access Key** (shown once).
-6. Give them to me through the same channel as other credentials. I set both Worker secrets and your `.env.local`, then run `verify-r2-roundtrip.ts` and the photo proof.
+6. Enter them yourself (secrets are never pasted to me): Cloudflare → Workers → the Worker → Settings → Variables and Secrets, the two `MEDIA_S3_*` secrets; and the same two lines in your `.env.local`. Then I run `verify-r2-roundtrip.ts` and the photo proof.
 7. Once both pass, **delete the old token** on the same page.
 
 ## 2. Platform name and domain
