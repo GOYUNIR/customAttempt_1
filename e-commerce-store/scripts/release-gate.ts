@@ -46,6 +46,7 @@ const steps: Step[] = [
   { name: 'Fulfilment', cmd: tsx('verify-merchant-fulfilment.ts'), pass: allPass },
   { name: 'Data export', cmd: tsx('verify-merchant-export.ts'), pass: allPass },
   { name: 'Product photos', cmd: tsx('verify-merchant-photos.ts'), pass: allPass },
+  { name: 'Discount codes (flag on for the run)', cmd: tsx('verify-discounts.ts'), pass: allPass },
   { name: 'Webhooks tolerate deleted data', cmd: tsx('verify-webhook-tolerance.ts'), pass: allPass },
   { name: 'Portals at phone width', cmd: tsx('verify-portal-phone.ts'), pass: allPass },
   ...(quick ? [] : [{ name: 'Signup abuse (record mode)', cmd: tsx('verify-signup-abuse.ts'), pass: allPass }]),
