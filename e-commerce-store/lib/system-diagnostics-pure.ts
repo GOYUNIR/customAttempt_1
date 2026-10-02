@@ -31,9 +31,9 @@ export function checkCsrf(): Check {
   };
 }
 
-/** In production, destructive admin actions (wipe, seed) must be
+/** In production, destructive admin actions (seed) must be
  *  hard-blocked unless explicitly opted in for THIS deployment right now
- *  (see app/api/admin/wipe/route.ts) — a readiness check should fail loud
+ *  (see app/api/admin/seed/route.ts) — a readiness check should fail loud
  *  if that opt-in was left on from a previous one-off operation. */
 export function checkNoDestructiveActionsAllowed(env: Record<string, string | undefined> = process.env): Check {
   const inProduction = env.NODE_ENV === 'production';

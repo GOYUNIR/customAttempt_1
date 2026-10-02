@@ -1750,10 +1750,6 @@ export default function AdminPortal() {
   const [pwdTroubleshoot, setPwdTroubleshoot] = useState<any>(null);
   const [pwdTroubleshootBusy, setPwdTroubleshootBusy] = useState(false);
   const [organizeMsg, setOrganizeMsg] = useState('');
-  const [wipeMsg, setWipeMsg] = useState('');
-  const [wipeBusy, setWipeBusy] = useState(false);
-  const [wipeConfirm, setWipeConfirm] = useState('');
-  const [wipeRebuild, setWipeRebuild] = useState(true);
   const [envStatus, setEnvStatus] = useState<any>(null);
   const [envStatusLoading, setEnvStatusLoading] = useState(false);
   // Provider keys & APIs — mirrors the Setup Wizard's optional-providers card
@@ -3923,38 +3919,6 @@ export default function AdminPortal() {
     }
   };
 
-  /** Wipe & Rebuild Redis — requires the password AND typing the confirmation phrase. */
-  const runWipe = async () => {
-    if (!requireUnlocked()) return;
-    if (!requireUnlocked()) return;
-    if (wipeConfirm.trim().toUpperCase() !== 'WIPE') {
-      showToast('Type WIPE in the confirmation box to erase Redis');
-      return;
-    }
-    setWipeBusy(true);
-    setWipeMsg('Wiping Redis... this permanently deletes every key.');
-    try {
-      const res = await adminFetch('/api/admin/wipe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, confirm: wipeConfirm.trim(), rebuild: wipeRebuild }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setWipeMsg(data.message || 'Redis wiped.');
-        showToast('REDIS WIPED' + (wipeRebuild ? ' · REBUILT' : ''));
-        setWipeConfirm('');
-        await refreshAll();
-      } else {
-        setWipeMsg(data.error || 'Wipe failed.');
-      }
-    } catch (err: any) {
-      setWipeMsg(err.message || 'Wipe failed.');
-    } finally {
-      setWipeBusy(false);
-    }
-  };
-
   /** Load env-var status for the SetUp tab (never returns secret values). */
   const fetchEnvStatus = async () => {
     setEnvStatusLoading(true);
@@ -4581,7 +4545,7 @@ export default function AdminPortal() {
 
   // The ACTIVE data store (Supabase / Redis / Cloudflare KV) drives several
   // labels that used to be hardcoded to "Redis" — the System-tab maintenance
-  // card, its migrate button, and the destructive wipe action below.
+  // card, its migrate button. (The one-click "Wipe & Rebuild" was removed 2026-10-01: scripts/launch-reset.ts, with a backup and a dry run, replaces it.)
   const activeStorageProvider = status?.storageProvider || envStatus?.storageProvider || null;
   const isRedisStore = activeStorageProvider === 'upstash' || activeStorageProvider === 'redis';
   const tidyActionLabel = tidyDataStoreActionLabel(activeStorageProvider);
@@ -7430,32 +7394,6 @@ export default function AdminPortal() {
                 <p style={{ fontSize: 11, color: '#888', margin: 0 }}>No {dataStoreName}-specific migration action is required.</p>
               )}
               {organizeMsg && <p style={{ fontSize: 11, color: organizeMsg.includes('Failed') ? '#f87171' : '#34d399', marginTop: 10 }}>{organizeMsg}</p>}
-            </div>
-
-            <div style={{ ...cardStyle, borderColor: 'rgba(248,113,113,0.35)' }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: 13, textTransform: 'uppercase', color: '#f87171' }}>Wipe &amp; Rebuild {dataStoreName}</h2>
-              <p style={{ fontSize: 11, color: '#888', marginTop: 0, marginBottom: 10 }}>
-                <strong style={{ color: '#f87171' }}>DESTRUCTIVE.</strong> Deletes <em>every key</em> in this {dataStoreName} database — products, config, entries, ledger, promos, users, sessions, analytics, everything. Use it to reset a demo store or hand a clean slate to a new buyer. Requires the admin password <em>and</em> typing <strong>WIPE</strong> to confirm (two-step verification). Streamer mode must be OFF.
-              </p>
-              {isRedisStore ? (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input type="text" value={wipeConfirm} onChange={(e) => setWipeConfirm(e.target.value)} placeholder="Type WIPE to confirm"
-                    style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
-                  <label style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input type="checkbox" checked={wipeRebuild} onChange={(e) => setWipeRebuild(e.target.checked)} />
-                    Rebuild with Seed Defaults after wipe
-                  </label>
-                  <button onClick={runWipe} disabled={wipeBusy}
-                    style={{ ...buttonPrimary, background: '#ef4444', color: '#fff' }}>
-                    {wipeBusy ? 'Wiping…' : `Wipe ${dataStoreName}`}
-                  </button>
-                </div>
-              ) : (
-                <p style={{ fontSize: 11, color: '#888', margin: 0 }}>
-                  This destructive reset is a Redis-only action and is not available for a {dataStoreName}-backed install.
-                </p>
-              )}
-              {wipeMsg && <p style={{ fontSize: 11, color: wipeMsg.includes('Failed') || wipeMsg.includes('Type') ? '#f87171' : '#34d399', marginTop: 10 }}>{wipeMsg}</p>}
             </div>
           </div>
         )}

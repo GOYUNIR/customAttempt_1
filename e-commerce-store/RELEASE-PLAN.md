@@ -1,5 +1,18 @@
 # Release plan: the critical path to public launch
 
+## WAITING ON ME (the owner), in priority order
+
+1. **Resend DNS record:** Cloudflare DNS, CNAME `rsend` → `send.forge.rmta.net`, DNS only (grey cloud); then Resend → Domains → Verify. This unblocks the stranger journey.
+2. **Stranger-journey address** (`STRANGER_EMAIL`): an inbox you control. Plus-addresses work.
+3. **R2 API token replacement before 2026-10-16** (§1). Send me the new keys.
+4. **Stripe live activation and the Connect platform profile** (§3).
+5. **Supabase Pro ($25/month) for backups:** yes or no (§7).
+6. **Uptime monitor:** sign up and add the monitors listed in §10.
+7. **Signup WAF rule** (§12).
+8. **Platform name and domain** (§2); then the move runs from §13.
+9. **Legal review** (§4).
+10. **Workers Paid**, 5–7 days before opening signup (§5 runbook).
+
 Written 2026-10-01. Owner: **you** (the owner), **me** (the coding agent), or
 **both**. Lead time is the elapsed wait (review, propagation, warm-up), not the
 work itself. The longest waits come first, because they decide the date.

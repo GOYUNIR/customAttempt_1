@@ -89,7 +89,7 @@ test('a legitimate same-origin admin write is never blocked', () => {
   assert.equal(
     isCsrfBlocked({
       method: 'POST',
-      pathname: '/api/admin/wipe',
+      pathname: '/api/admin/seed',
       cookieHeader: 'goyunir_admin_device=abc',
       origin: 'https://admin.example',
       referer: null,
