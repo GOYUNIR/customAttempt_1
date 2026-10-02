@@ -8,8 +8,8 @@ cleanup of TEST data is authorized (with a backup first).
 |---|---|---|
 | 1 | Remove one-click destructive admin actions | DONE: "Wipe & Rebuild" route and UI removed; Seed stays hard-blocked in production |
 | 2 | Launch reset, self-cleaning proofs, tolerant webhooks, storage + Stripe test cleanup | DONE: reset run (backup in launch-backups/), Stripe test cleaned, gate ends with --proof-only teardown; fixture stores test4 + goyunir-test-1 kept (Connect onboarding is not hands-free) |
-| 3 | Health endpoint + uptime monitor list | |
-| 4 | Staff/sales portals at phone width | |
+| 3 | Health endpoint + uptime monitor list | DONE: /api/health live; monitors in RELEASE-PLAN §10 |
+| 4 | Staff/sales portals at phone width | DONE: drawer under 800px; verify-portal-phone.ts (375/390/414) in the gate |
 | 5 | Discount codes (flag off) | |
 | 6 | Hick's Law cheap fixes (DEFERRED-11) | |
 | 7 | Speed: measure, safe caching | |
