@@ -659,3 +659,19 @@ export async function storePayloadFor(who: { tenantId: string; name: string | nu
 export { withReleasedSizes };
 export type { StorePayload, PublicStoreProduct };
 
+
+/**
+ * The product page's payload: exactly the body /api/store?slug= returns
+ * (config + the one product, sizes released as the catalog shows them), for
+ * the page's server-rendered first screen (lib/storefront-ssr.ts).
+ */
+export async function productPagePayload(who: { tenantId: string; name: string | null; isDefault: boolean }, slug: string) {
+  const payload = await storePayloadFor(who, slug);
+  return {
+    config: payload.config,
+    product: withReleasedSizes(payload.product, payload.allProducts),
+    scheduleOverride: payload.scheduleOverride,
+    socialOverride: payload.socialOverride,
+    timestamp: payload.timestamp,
+  };
+}

@@ -265,10 +265,16 @@ function notify(detail: { id?: string; type: string; message: string; persist?: 
   window.dispatchEvent(new CustomEvent('goyunir-notify', { detail }));
 }
 
-export default function Storefront({ initialSlug }: { initialSlug?: string }) {
+/**
+ * `initialProduct` (lib/storefront-ssr.ts, flag): the /api/store?slug= body
+ * the server already read, so the first screen is in the HTML. The page still
+ * refreshes it once running; checkout reads prices and stock live.
+ */
+export default function Storefront({ initialSlug, initialProduct }: { initialSlug?: string; initialProduct?: any }) {
   const router = useRouter();
-  const [product, setProduct] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const seed = initialProduct?.product ? initialProduct : null;
+  const [product, setProduct] = useState<any>(seed?.product || null);
+  const [loading, setLoading] = useState(!seed);
   const [error, setError] = useState<string | null>(null);
   const [selectedVariantIndex, setSelectedVariantIndex] = useState<number>(0);
   const [email, setEmail] = useState('');
@@ -308,21 +314,22 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
     intervalSeconds: 4,
     zoom: true,
     zoomDurationSeconds: 14,
+    ...(seed?.config?.gallery || {}),
   });
   // Rewards economy (admin → Settings → Rewards & Points): used to show the
   // "You'll earn X points" incentive on the product page + cart. Absent →
   // rewards are not advertised.
-  const [rewardsCfg, setRewardsCfg] = useState<{ purchasePointsPerDollar?: number } | null>(null);
+  const [rewardsCfg, setRewardsCfg] = useState<{ purchasePointsPerDollar?: number } | null>(seed?.config?.rewards || null);
 
   // Remembers which product is currently loaded so re-fetches of the SAME product
   // (e.g. the countdown-zero refresh) never reset the visitor's selected size or
   // flip the gallery back to photo 1. Only a real product switch resets those.
-  const productIdRef = useRef<string>('');
+  const productIdRef = useRef<string>(String(seed?.product?.id || ''));
   // Per-size raffle configs mean the countdown depends on the SELECTED size. The
   // anchor is recomputed by an effect on [product, selectedSize]; these refs
   // bridge the fetch (which knows the store timezone from the payload) to that
   // effect without another network round-trip.
-  const storeTimezoneRef = useRef<string>(String(GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'));
+  const storeTimezoneRef = useRef<string>(String(seed?.config?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'));
   const selectedSizeRef = useRef<string>('');
   // Guards the draw-trigger block (notify + re-fetch) so it fires at most once per
   // product + cycle boundary, re-arming after DRAW_TRIGGER_REARM_MS. Persists across
@@ -374,11 +381,12 @@ export default function Storefront({ initialSlug }: { initialSlug?: string }) {
   // editable from the admin portal without a redeploy.
   const liveCtx = useLiveTheme();
   const [configPalette, setConfigPalette] = useState<any>(
-    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+    seed?.config?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...seed.config.themeColors }
+      : liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
   );
   // Storefront copy overrides — admin → Settings → Storefront copy. A non-empty
   // value overrides the built-in labels (entry CTA etc.).
-  const [copySettings, setCopySettings] = useState<Record<string, any>>(liveCtx?.copy || {});
+  const [copySettings, setCopySettings] = useState<Record<string, any>>({ ...(liveCtx?.copy || {}), ...(seed?.config?.copy || {}) });
   // Header action label ("Bag" vs "Cart"). The admin value is mirrored into
   // localStorage by SiteChrome; reading it here during RENDER caused a React
   // hydration mismatch (#418 — SSR says "cart", client says "bag") whenever the

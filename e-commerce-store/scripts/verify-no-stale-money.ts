@@ -76,7 +76,9 @@ const run = Date.now().toString(36);
     for (let i = 0; i < 3; i++) await shown(); // warm the display cache
     check(await savePrice(p0, NEW) === 200, 'price changed ' + price0 + ' -> ' + NEW);
     const display = await shown();
-    console.log('     (the display right after the change shows ' + display.price + '; up to 10s old is allowed there)');
+    const ssrHtml = await (await fetch(STORE_A + '/' + SLUG + '?ssr=1')).text();
+    const ssrShows = ssrHtml.includes('$' + NEW) ? NEW : ssrHtml.includes('$' + price0) ? price0 : '?';
+    console.log('     (the display right after the change shows ' + display.price + ', the server-rendered page ' + ssrShows + '; up to 10s old is allowed there)');
     const c1 = await checkout('price-' + run + '@' + SINK);
     const s1 = c1.body?.sessionId ? await stripe.checkout.sessions.retrieve(c1.body.sessionId, { expand: ['line_items'] }, on) : null;
     if (s1) sessions.push(s1.id);
@@ -97,7 +99,7 @@ const run = Date.now().toString(36);
     const cc = async (url: string, init?: RequestInit) => ((await fetch(url, init)).headers.get('cache-control') || '');
     const noStore = (v: string) => /no-store|private|no-cache/.test(v);
     const noBrowser = (v: string) => !/max-age=[1-9]/.test(v.replace(/s-maxage=\d+/, ''));
-    for (const [what, url] of [['store home', STORE_A + '/'], ['product page', STORE_A + '/' + SLUG], ['dashboard', APP + '/app']] as const) {
+    for (const [what, url] of [['store home', STORE_A + '/'], ['product page', STORE_A + '/' + SLUG], ['server-rendered store home (?ssr=1)', STORE_A + '/?ssr=1'], ['server-rendered product page (?ssr=1)', STORE_A + '/' + SLUG + '?ssr=1'], ['dashboard', APP + '/app']] as const) {
       const v = await cc(url);
       check(noStore(v), what + ' HTML: "' + v + '"');
     }

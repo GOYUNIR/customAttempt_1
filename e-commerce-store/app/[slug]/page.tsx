@@ -6,6 +6,10 @@ import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
 import { createKvClient, loadProducts } from '@/lib/server-config';
+import { storefrontSsrEnabled } from '@/lib/storefront-ssr';
+import { productPagePayload } from '@/lib/store-payload';
+import { isImageMedia } from '@/lib/media';
+import { preload } from 'react-dom';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +32,10 @@ export const dynamic = 'force-dynamic';
  */
 export default async function ProductPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
 
@@ -62,6 +68,18 @@ export default async function ProductPage({
   // request with the HTML instead (lib/client-store-cache.ts picks it up by
   // the exact URL). JSON.stringify + the '<' escape keep the slug inert.
   const productUrl = JSON.stringify(`/api/store?slug=${slug}`).replace(/</g, '\\u003c');
+  // First screen in the server HTML (flag, lib/storefront-ssr.ts): the same
+  // payload /api/store?slug= serves, and the product's first photo (its
+  // largest paint) fetched first.
+  let initialProduct: any = null;
+  if (storefrontSsrEnabled((await searchParams)?.ssr)) {
+    initialProduct = await productPagePayload(who, slug).catch((err) => {
+      console.error('[storefront] product first screen not server-rendered', (err as Error)?.message || err);
+      return null;
+    });
+    const cover = ((initialProduct?.product?.images || []) as unknown[]).find((src) => isImageMedia(src));
+    if (typeof cover === 'string') preload(cover, { as: 'image', fetchPriority: 'high' });
+  }
   return (
     <>
       <script
@@ -70,7 +88,7 @@ export default async function ProductPage({
         }}
       />
       <Suspense fallback={null}>
-        <Storefront initialSlug={slug} />
+        <Storefront initialSlug={slug} initialProduct={initialProduct?.product ? initialProduct : undefined} />
       </Suspense>
     </>
   );
