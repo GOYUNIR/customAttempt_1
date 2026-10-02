@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 // there. The Postgres storefront path read tenant_store_config instead, a copy
 // last synced by hand, so admin saves never reached the page (2026-09-29).
 test("the Postgres storefront path takes the original store's settings from where the admin writes them", () => {
-  const src = readFileSync('app/api/store/route.ts', 'utf8');
+  const src = readFileSync('lib/store-payload.ts', 'utf8') // the payload builder (was in app/api/store/route.ts);
   const fn = src.slice(src.indexOf('async function tryBuildStorePayloadFromPostgres'));
   const body = fn.slice(0, fn.indexOf('\n}\n'));
   const kvRead = body.indexOf('readDefaultStoreSettingsFromKv()');

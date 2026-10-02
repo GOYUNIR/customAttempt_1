@@ -4,6 +4,8 @@ import { readActiveTheme } from '@/lib/theme-read';
 import { ensureDefaultTenant } from '@/lib/tenant-context';
 import { storefrontTenantFromHeaders, notFoundOrMoved, redirectToPrimary } from '@/lib/storefront-tenant';
 import { notFound } from 'next/navigation';
+import { storefrontSsrEnabled } from '@/lib/storefront-ssr';
+import { storePayloadFor } from '@/lib/store-payload';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * "additive, opt-in, nothing regresses for an existing deployment" pattern
  * every Postgres-backed feature this session uses.
  */
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   // Whose store (TENANCY.md). Unknown address: 404, never the default store.
   // Themed layouts load products from the DEFAULT catalog, so only the default
   // store gets them until they are tenant-aware; other stores render the
@@ -30,6 +32,15 @@ export default async function HomePage() {
 
   if (theme && theme.sections.length > 0) {
     return <ThemeSections sections={theme.sections} />;
+  }
+  // First screen in the server HTML (flag, lib/storefront-ssr.ts): the same
+  // cached payload /api/store serves; the page still refreshes it once running.
+  if (storefrontSsrEnabled((await searchParams)?.ssr)) {
+    const payload = await storePayloadFor(who, '').catch((err) => {
+      console.error('[storefront] first screen not server-rendered', (err as Error)?.message || err);
+      return null;
+    });
+    if (payload) return <LegacyHomePage initialStore={{ payload, renderedAt: Date.now() }} />;
   }
   return <LegacyHomePage />;
 }

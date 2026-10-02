@@ -62,20 +62,51 @@ const HERO_ANIMATION_CSS = fallbackAnimation('drift').css || '';
  * trap the orbs behind the section surfaces) is impossible.
  */
 
-export default function LegacyHomePage() {
+/**
+ * The releases the home page shows, from an /api/store payload: the active
+ * ones, else the configured fallback (upcoming, then archived) so the site is
+ * never empty.
+ */
+function homeDisplay(data: any): any[] {
+  const all = Array.isArray(data?.allProducts) ? data.allProducts : [];
+  const sortFn = (a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name));
+  let display = [...all]
+    .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
+    .sort(sortFn);
+  if (display.length === 0) {
+    const fallback = String(data?.config?.layout?.homepageFallback || 'upcoming');
+    if (fallback === 'upcoming' || fallback === 'upcoming_then_archived') {
+      display = [...all].filter((p: any) => p.isUpcoming === true && p.isArchived !== true).sort(sortFn);
+    }
+    if (display.length === 0 && (fallback === 'archived' || fallback === 'upcoming_then_archived')) {
+      display = [...all].filter((p: any) => p.isArchived === true).sort(sortFn);
+    }
+  }
+  return display;
+}
+
+/**
+ * `initialStore` (lib/storefront-ssr.ts, flag): the /api/store payload the
+ * server already read, plus `renderedAt`, the server's clock for this render.
+ * With it the first screen is in the HTML and the clock starts at the same
+ * instant on both sides, so countdowns hydrate without a mismatch.
+ */
+export default function LegacyHomePage({ initialStore }: { initialStore?: { payload: any; renderedAt: number } } = {}) {
   const liveCtx = useLiveTheme();
-  const [loading, setLoading] = useState(true);
-  const [activeProducts, setActiveProducts] = useState<any[]>([]);
+  const seed = initialStore?.payload || null;
+  const seedConfig = seed?.config || null;
+  const [loading, setLoading] = useState(!seed);
+  const [activeProducts, setActiveProducts] = useState<any[]>(() => (seed ? homeDisplay(seed) : []));
   const [socialProofDisplay, setSocialProofDisplay] = useState<number>(0);
-  const [nowTick, setNowTick] = useState<number>(() => (typeof window !== 'undefined' ? Date.now() : 0));
+  const [nowTick, setNowTick] = useState<number>(() => (initialStore ? initialStore.renderedAt : typeof window !== 'undefined' ? Date.now() : 0));
   // Store drop timezone — naive product timestamps are interpreted in this zone
   // (never the viewer's local zone) so countdowns + draw triggers agree with the
   // server. Updated from /api/store config; defaults to the static config.
   const [storeTimezone, setStoreTimezone] = useState<string>(
-    String(liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
+    String(seedConfig?.dropSchedule?.timezone || liveCtx?.dropSchedule?.timezone || GOYUNIR_STORE_SUITE.dropSchedule?.timezone || 'America/Los_Angeles'),
   );
   const [authUser, setAuthUser] = useState<any>(null);
-  const [branding, setBranding] = useState<any>(liveCtx?.branding || null);
+  const [branding, setBranding] = useState<any>(seedConfig?.branding || liveCtx?.branding || null);
   // Real AI hero animation for the featured product's cover image. Starts on the
   // built-in fallback so the hero is never blank, then upgrades to the AI engine's
   // keyframes/SVG once `/api/ai/hero-animation` responds (generated + cached via
@@ -86,17 +117,18 @@ export default function LegacyHomePage() {
   // theme (no flash), then upgraded by /api/store on mount so edits pick up
   // within the ~10s cache window without a redeploy.
   const [configPalette, setConfigPalette] = useState<any>(
-    liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
+    seedConfig?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...seedConfig.themeColors }
+      : liveCtx?.themeColors ? { ...GOYUNIR_STORE_SUITE.themeColors, ...liveCtx.themeColors } : GOYUNIR_STORE_SUITE.themeColors,
   );
   // Hero copy is fully editable from /admin → Settings → Hero Content.
-  const [heroContent, setHeroContent] = useState<any>(liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
+  const [heroContent, setHeroContent] = useState<any>(seedConfig?.heroContent ? { ...GOYUNIR_STORE_SUITE.heroContent, ...seedConfig.heroContent } : liveCtx?.heroContent || GOYUNIR_STORE_SUITE.heroContent);
   // Social-proof counter settings (admin → Draws → Automation → Social Proof
   // Counter) — `showSection`/`showCaption` hide the counter or its caption.
-  const [socialProofCfg, setSocialProofCfg] = useState<any>((liveCtx as any)?.socialProof || GOYUNIR_STORE_SUITE.socialProof);
+  const [socialProofCfg, setSocialProofCfg] = useState<any>(seedConfig?.socialProof || (liveCtx as any)?.socialProof || GOYUNIR_STORE_SUITE.socialProof);
   // AI Hero Banner & Shader Animation (admin → Settings → AI Hero). Initialized
   // from the server-baked theme, then refreshed from /api/store so admin edits
   // apply within the ~10s cache window. Colors come from the live theme accents.
-  const [aiHero, setAiHero] = useState<any>((liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'dark_organic', opacity: 0.55 });
+  const [aiHero, setAiHero] = useState<any>(seedConfig?.aiHero ? { ...(GOYUNIR_STORE_SUITE as any).aiHero, ...seedConfig.aiHero } : (liveCtx as any)?.aiHero || (GOYUNIR_STORE_SUITE as any).aiHero || { enabled: true, preset: 'dark_organic', opacity: 0.55 });
   // The resolved `<video>` source for the pre-rendered hero clip. Clips flagged
   // `storedLocally` live in browser IndexedDB (client storage) rather than the
   // Redis/Edge config — resolving them here keeps the Cloudflare Edge payload tiny
@@ -128,12 +160,12 @@ export default function LegacyHomePage() {
   // Storefront copy overrides — editable from /admin → Settings → Storefront copy.
   // A non-empty value overrides the built-in default below (hero title/subtitle and
   // the "Priority drops" section header/subtitle).
-  const [copyOverrides, setCopyOverrides] = useState<Record<string, any>>(liveCtx?.copy || {});
+  const [copyOverrides, setCopyOverrides] = useState<Record<string, any>>({ ...(liveCtx?.copy || {}), ...(seedConfig?.copy || {}) });
   // Home-page layout (admin → Settings → Home Layout): how many featured
   // releases share a row — 1 = full width, 2 = side by side (default). Baked
   // into the SSR shell, then refreshed from /api/store so admin edits apply.
   const [productsPerRow, setProductsPerRow] = useState<1 | 2>(
-    (liveCtx as any)?.layout?.productsPerRow === 1 ? 1 : 2,
+    (seedConfig?.layout?.productsPerRow ?? (liveCtx as any)?.layout?.productsPerRow) === 1 ? 1 : 2,
   );
 
   const brandName = String(branding?.brandName || branding?.shareTitle || neutralBrandName());
@@ -193,24 +225,8 @@ export default function LegacyHomePage() {
         if (data?.config?.layout?.productsPerRow) setProductsPerRow(data.config.layout.productsPerRow === 1 ? 1 : 2);
         if (data?.config?.aiHero) setAiHero({ ...(GOYUNIR_STORE_SUITE as any).aiHero, ...data.config.aiHero });
         // `/api/store` returns ONE canonical `allProducts` array (lifecycle
-        // flags on each product) — derive the active releases here, then apply
-        // the Home-page fallback when there are no active releases (show
-        // upcoming/archived to build hype instead of an empty site).
-        const all = Array.isArray(data.allProducts) ? data.allProducts : [];
-        const sortFn = (a: any, b: any) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.name).localeCompare(String(b.name));
-        let display = [...all]
-          .filter((p: any) => p.isActive === true && p.isArchived !== true && p.isUpcoming !== true)
-          .sort(sortFn);
-        if (display.length === 0) {
-          const fallback = String(data?.config?.layout?.homepageFallback || 'upcoming');
-          if (fallback === 'upcoming' || fallback === 'upcoming_then_archived') {
-            display = [...all].filter((p: any) => p.isUpcoming === true && p.isArchived !== true).sort(sortFn);
-          }
-          if (display.length === 0 && (fallback === 'archived' || fallback === 'upcoming_then_archived')) {
-            display = [...all].filter((p: any) => p.isArchived === true).sort(sortFn);
-          }
-        }
-        setActiveProducts(display);
+        // flags on each product); homeDisplay derives the releases to show.
+        setActiveProducts(homeDisplay(data));
       } catch (err) {
         console.error('[HomePage] Error checking products:', err);
       } finally {
