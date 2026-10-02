@@ -3,6 +3,7 @@
  *
  *   npx tsx scripts/release-gate.ts            (everything, ~15 min)
  *   npx tsx scripts/release-gate.ts --quick    (skips the signup abuse simulation)
+ *   npx tsx scripts/release-gate.ts --selftest (fake steps: exercises the retry rule)
  *
  * Runs, in order, against PRODUCTION (test-mode Stripe, sink-domain email:
  * nothing real is charged or emailed):
@@ -68,29 +69,71 @@ function runStep(s: Step): Promise<{ code: number; out: string; secs: number }> 
   });
 }
 
+/**
+ * RETRY RULE (owner, 2026-10-02). A step is re-run once only when ALL hold:
+ * - it failed with a CONNECTION timeout from this machine (the TCP connect
+ *   never completed). Not a request timeout, because a slow server is a real
+ *   finding. Not an HTTP error, a 1102 or an HTML page where JSON belonged:
+ *   customers see those too.
+ * - no check in it had failed (no FAIL line). An assertion about money,
+ *   stock, isolation or auth is never retried.
+ * Every retry is logged (retries.log, <step>.first-attempt.log) and counted
+ * in the report. A step that needed a retry in the previous run too is a
+ * real finding: NO-GO, not retried again.
+ */
+const CONNECT_TIMEOUT = /UND_ERR_CONNECT_TIMEOUT|Connect Timeout Error|\bETIMEDOUT\b/;
+// --selftest: fake steps that exercise the retry rule itself (own history file).
+const SELFTEST = process.argv.includes('--selftest');
+const HISTORY = join(root, 'tenant-checkout-out', 'release-gate', SELFTEST ? 'selftest-retry-history.json' : 'retry-history.json');
+if (SELFTEST) {
+  const say = (text: string, code: number) => 'node -e "console.log(process.argv[1]); process.exit(' + code + ')" "' + text + '"';
+  steps.splice(0, steps.length,
+    { name: 'connect timeout, no failed check', cmd: say('code: UND_ERR_CONNECT_TIMEOUT', 1), pass: allPass },
+    { name: 'connect timeout after a FAIL', cmd: say('FAIL money check / UND_ERR_CONNECT_TIMEOUT', 1), pass: allPass },
+    { name: 'a 1102 page', cmd: say('error code: 1102', 1), pass: allPass },
+    { name: 'a request timeout', cmd: say('timed out after 5000ms: The operation was aborted due to timeout', 1), pass: allPass },
+    { name: 'a passing step', cmd: say('ALL PASS', 0), pass: allPass },
+  );
+}
+const slug = (name: string) => name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+const failLines = (out: string) => out.split(/\r?\n/).filter((l) => /^\s*FAIL\b/.test(l)).map((l) => l.trim());
+
 (async () => {
+  let lastRetried: string[] = [];
+  try { lastRetried = JSON.parse(readFileSync(HISTORY, 'utf8')).retried || []; } catch { /* first run */ }
+  const retries: Array<{ step: string; reason: string; secondAttempt: string }> = [];
   const rows: Array<{ name: string; ok: boolean; secs: number; note: string }> = [];
   for (const s of steps) {
     process.stdout.write('… ' + s.name + '\n');
     let r = await runStep(s);
-    // One retry, and only for a network-level failure on THIS machine (DNS,
-    // reset, connect timeout): not a product failure. Shown in the table.
-    let retried = false;
-    if (!s.pass(r.code, r.out) && /fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|EAI_AGAIN/.test(r.out)) {
-      writeFileSync(join(outDir, s.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.network-error.log'), r.out);
-      retried = true;
-      r = await runStep(s);
+    let note = '';
+    let forcedNoGo = false;
+    if (!s.pass(r.code, r.out) && CONNECT_TIMEOUT.test(r.out) && failLines(r.out).length === 0) {
+      const reason = (r.out.split(/\r?\n/).find((l) => CONNECT_TIMEOUT.test(l)) || '').trim().slice(0, 160);
+      writeFileSync(join(outDir, slug(s.name) + '.first-attempt.log'), r.out);
+      if (lastRetried.includes(s.name)) {
+        forcedNoGo = true;
+        note = '(connection timeout again: also retried last run, a real finding) ';
+        retries.push({ step: s.name, reason, secondAttempt: 'not retried (two runs in a row)' });
+      } else {
+        r = await runStep(s);
+        note = '(retried once: connection timeout) ';
+        retries.push({ step: s.name, reason, secondAttempt: s.pass(r.code, r.out) ? 'passed' : 'failed' });
+      }
     }
-    const file = join(outDir, s.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.log');
-    writeFileSync(file, r.out);
-    const ok = s.pass(r.code, r.out);
-    const fails = r.out.split(/\r?\n/).filter((l) => /^\s*FAIL\b/.test(l)).map((l) => l.trim());
+    writeFileSync(join(outDir, slug(s.name) + '.log'), r.out);
+    const ok = !forcedNoGo && s.pass(r.code, r.out);
+    const fails = failLines(r.out);
     const tail = r.out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).filter((l) => !/npm notice/.test(l)).slice(-1)[0] || '';
-    rows.push({ name: s.name, ok, secs: r.secs, note: (retried ? '(retried after a network error) ' : '') + (ok ? tail.slice(0, 60) : (fails[0] || tail).slice(0, 110)) });
+    rows.push({ name: s.name, ok, secs: r.secs, note: note + (ok ? tail.slice(0, 60) : (fails[0] || tail).slice(0, 110)) });
   }
+  writeFileSync(HISTORY, JSON.stringify({ at: stamp, retried: retries.map((x) => x.step) }, null, 2));
+  writeFileSync(join(outDir, 'retries.log'), retries.map((x) => x.step + '\n  reason: ' + x.reason + '\n  second attempt: ' + x.secondAttempt).join('\n') + '\n');
   const w = Math.max(...rows.map((r) => r.name.length));
   console.log('\nRELEASE GATE  ' + new Date().toISOString() + '\n');
   for (const r of rows) console.log((r.ok ? ' GO    ' : ' NO-GO ') + r.name.padEnd(w) + '  ' + String(r.secs).padStart(4) + 's  ' + r.note);
+  console.log('\nRetries: ' + retries.length + (retries.length ? '' : ' (none)'));
+  for (const x of retries) console.log('  ' + x.step + ': ' + x.reason + '  -> ' + x.secondAttempt);
   const go = rows.every((r) => r.ok);
   console.log('\n' + (go ? 'GO: every step passed.' : 'NO-GO: ' + rows.filter((r) => !r.ok).length + ' step(s) failed.') + '  Logs: ' + outDir);
   process.exit(go ? 0 : 1);

@@ -56,7 +56,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     (await fetch(store + '/api/promo/validate?code=' + encodeURIComponent(code) + '&email=' + encodeURIComponent(email) + '&orderSubtotal=' + subtotal)).json() as Promise<any>;
   const checkout = async (email: string, promoCode: string) => {
     const r = await fetch(STORE_A + '/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json', origin: STORE_A }, body: JSON.stringify({ productId: PRODUCT, size: SIZE, email, address: '1600 Pennsylvania Avenue NW, Washington, DC 20500, United States', mode: 'direct', promoCode }) });
-    let b: any = null; try { b = await r.json(); } catch { /* */ } return { status: r.status, body: b };
+    const text = await r.text();
+    let b: any = null; try { b = JSON.parse(text); } catch { /* */ }
+    // Every non-200 is printed, so a failed check says what the store answered.
+    if (r.status !== 200) console.log('     (checkout answered ' + r.status + ': ' + (b ? JSON.stringify(b) : text.replace(/\s+/g, ' ')).slice(0, 160) + ')');
+    return { status: r.status, body: b };
   };
   const planA = (await tenantPlan(A)).id;
   const flagBefore = ((await db.select<any>('plans', { where: { id: eq(planA) }, select: ['discount_codes_enabled'], limit: 1 })) as any[])[0]?.discount_codes_enabled === true;
@@ -72,10 +76,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     await db.update('plans', { where: { id: eq(planA) } }, { discount_codes_enabled: true }, { returning: 'minimal' } as any);
     await sleep(1500);
     // Stock for the purchases below (the fixture sells one unit per run).
-    const { adjustStock } = await import('../lib/stock');
+    // Set, not added: the fixture's count stays the same however many runs.
+    const { setStock } = await import('../lib/stock');
     const { resolveVariantId } = await import('../lib/inventory');
     const vid = await resolveVariantId(A, PRODUCT, SIZE);
-    if (vid) await adjustStock(A, vid, 5, 'restock', 'verify-discounts', 'proof fixture restock');
+    if (vid) await setStock(A, vid, 5, 'verify-discounts', 'proof fixture stock');
 
     console.log('\nCreating codes (test4) and isolation from store B');
     const TEN = 'TEN' + run.slice(-5);
