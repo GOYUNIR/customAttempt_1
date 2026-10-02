@@ -33,6 +33,8 @@ test('wrangler config: every name, domain and address comes from the inputs', ()
   assert.equal(c.vars.EMAIL_SINK_DOMAINS, 'proof.larkspur.example');
   assert.equal(c.vars.MEDIA_S3_PUBLIC_BASE_URL, 'https://media.larkspur.example/media/r2');
   assert.equal(c.vars.STOREFRONT_SSR, 'off', 'new features start off');
+  assert.equal(c.vars.ALLOW_MERCHANT_SIGNUP, 'false', 'signup starts off');
+  assert.equal(c.vars.PLATFORM_MARKETING_ROOT, 'true', 'the root is the platform site');
   for (const v of Object.values(c.vars)) assert.ok(!/sk_|whsec_|re_[A-Za-z0-9]{8}/.test(String(v)), 'no secret-shaped value in vars');
 });
 

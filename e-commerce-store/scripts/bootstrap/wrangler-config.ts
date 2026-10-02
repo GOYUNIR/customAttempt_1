@@ -23,7 +23,11 @@ export function wranglerConfig(i: BootstrapInputs): Record<string, unknown> {
     // Storefront routing: labels relative to the root, not names.
     STOREFRONT_LEGACY_HOSTS: 'shop,www,api',
     STOREFRONT_REDIRECT_HOSTS: 'shop',
-    // New features stay off on a fresh install until switched on.
+    // The root domain is the platform's marketing site (on the old stack this
+    // was a Worker secret; it is a switch, not a secret).
+    PLATFORM_MARKETING_ROOT: 'true',
+    // New features and signup stay off on a fresh install until switched on.
+    ALLOW_MERCHANT_SIGNUP: 'false',
     STOREFRONT_SSR: 'off',
   };
   if (i.turnstileSiteKey) vars.TURNSTILE_SITE_KEY = i.turnstileSiteKey;

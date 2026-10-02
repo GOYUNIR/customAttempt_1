@@ -121,7 +121,7 @@ export function withNeutralHero(stored: Record<string, any>, storeName: string |
  */
 export const APP_TOP_LEVEL_ROUTES: readonly string[] = [
   'account', 'admin', 'api', 'app', 'auth', 'catalog', 'maintenance', 'media', 'og',
-  'platform', 'privacy', 'sales', 'shipping', 'story', 'terms', 'icon',
+  'platform', 'privacy', 'sales', 'shipping', 'story', 'terms', 'icon', 'sitemap.xml',
 ];
 
 /**
