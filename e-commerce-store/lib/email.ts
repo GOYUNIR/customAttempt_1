@@ -962,6 +962,20 @@ export async function sendSignupExistingAccountEmail(opts: { to: string; signInU
   ), 'signup');
 }
 
+/** Where our own sales team hears about leads (lib/leads.ts): SALES_LEADS_EMAIL,
+ *  else the alert inbox, else support. Internal; never a customer address. */
+export function salesLeadsInbox(): string {
+  return String(process.env.SALES_LEADS_EMAIL || process.env.OPERATOR_ALERT_EMAIL || '').trim() || getSupportEmail();
+}
+
+/** To the sales inbox: a new lead, or leads going cold. Ordinary internal mail
+ *  (the governed driver's normal capacity), not an operator alert. */
+export async function sendSalesLeadEmail(opts: { subject: string; lines: string[] }) {
+  const to = salesLeadsInbox();
+  if (!to) return { ok: false, skipped: true };
+  return sendPlatformEmail(to, '[' + platformBrand() + ' sales] ' + opts.subject, plainEmail(opts.subject, opts.lines.map((l) => escapeHtml(l))));
+}
+
 /**
  * To the operator — e.g. the signup circuit breaker tripped. OPERATOR_ALERT_EMAIL
  * when set (OWNERSHIP-MIGRATION.md: alerts can go to a different inbox from

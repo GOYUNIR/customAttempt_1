@@ -28,6 +28,7 @@ export function wranglerConfig(i: BootstrapInputs): Record<string, unknown> {
     PLATFORM_MARKETING_ROOT: 'true',
     // New features and signup stay off on a fresh install until switched on.
     ALLOW_MERCHANT_SIGNUP: 'false',
+    PLATFORM_LEADS_ENABLED: 'false',
     STOREFRONT_SSR: 'off',
   };
   if (i.turnstileSiteKey) vars.TURNSTILE_SITE_KEY = i.turnstileSiteKey;

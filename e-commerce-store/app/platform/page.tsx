@@ -1,4 +1,6 @@
 import MerchantSignupForm from '@/components/platform/MerchantSignupForm';
+import LeadForm from '@/components/platform/LeadForm';
+import { leadsEnabled } from '@/lib/leads';
 import { MarketingHeader, MarketingFooter, MARKETING_INK as INK } from '@/components/platform/MarketingChrome';
 import CheckoutModeShowcase from '@/components/platform/CheckoutModeShowcase';
 import { CAPABILITIES, COMPARISON, FAQS, feeSummary, plansWithData } from '@/lib/platform-marketing';
@@ -186,7 +188,11 @@ export default async function PlatformPage() {
             // conversation, never the signup form.
             const quoteTier = plan.monthlyUsd === null || plan.contactOnly === true;
             const inbox = getSupportEmail();
-            const ctaHref = quoteTier && inbox
+            // With the lead form on (PLATFORM_LEADS_ENABLED), a quote tier opens it,
+            // saying which plan they came from; otherwise a real email.
+            const ctaHref = quoteTier && leadsEnabled()
+              ? '?plan=' + encodeURIComponent(plan.id) + '#talk'
+              : quoteTier && inbox
               ? 'mailto:' + inbox + '?subject=' + encodeURIComponent(plan.name + ' plan enquiry')
               : '#start';
             // The label is the plan's own promise (lib/platform-marketing.ts).
@@ -275,6 +281,17 @@ export default async function PlatformPage() {
           <MerchantSignupForm contactEmail={getSupportEmail() || null} />
         </div>
       </section>
+
+      {/* ── TALK TO US (lead form; only when PLATFORM_LEADS_ENABLED) ──────── */}
+      {leadsEnabled() && (
+        <section id="talk" style={{ ...SHELL, padding: '76px 20px 0' }}>
+          <h2 style={SECTION_LABEL}>Talk to us</h2>
+          <p style={{ fontSize: 15, lineHeight: 1.65, color: INK.muted, margin: '0 0 16px', maxWidth: 560 }}>
+            Tell us what you sell and what you need. A person reads every message and replies by email.
+          </p>
+          <LeadForm siteKey={process.env.TURNSTILE_SITE_KEY || null} palette={{ text: INK.text, muted: INK.muted, panel: INK.panel, border: INK.border, accent: INK.text }} />
+        </section>
+      )}
 
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
       <section id="faq" style={{ ...SHELL, padding: '76px 20px 0' }}>

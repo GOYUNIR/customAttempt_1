@@ -13,6 +13,6 @@
     "TARGET_URL": "https://goyunir.com"
   },
   "triggers": {
-    "crons": ["0 0 * * *"]
+    "crons": ["0 0 * * *", "*/10 * * * *"]
   }
 }

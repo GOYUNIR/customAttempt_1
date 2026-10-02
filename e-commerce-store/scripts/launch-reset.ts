@@ -119,6 +119,9 @@ type Step = { what: string; table: string; col: string; ids: string[] };
   const usage = PROOF_ONLY ? [] : await all('usage_events', 'select=id');
   const sinkCounts = await all('email_send_counts', 'provider=eq.sink');
   plan.push({ what: 'recorded proof mail (email_sink)', table: 'email_sink', col: 'id', ids: sink.map((s: any) => s.id) });
+  // Platform leads: proof leads always; a full reset clears every test lead.
+  const leads = await all('platform_leads', 'select=id,email');
+  plan.push({ what: 'platform leads' + (PROOF_ONLY ? ' (proof addresses)' : ''), table: 'platform_leads', col: 'id', ids: leads.filter((l: any) => !PROOF_ONLY || PROOF_EMAIL.test(String(l.email || ''))).map((l: any) => l.id) });
   plan.push({ what: 'usage ledger rows (all test traffic)', table: 'usage_events', col: 'id', ids: usage.map((u: any) => u.id) });
 
   // Storage: objects nothing kept refers to (brand assets always kept).

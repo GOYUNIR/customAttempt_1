@@ -5,7 +5,7 @@ import PortalShell from '@/components/admin/PortalShell';
 import QuoteDeskPanel from '@/components/sales/QuoteDeskPanel';
 import VolumeDiscountMatrix from '@/components/sales/VolumeDiscountMatrix';
 import ImpersonationLauncher from '@/components/sales/ImpersonationLauncher';
-import InDevelopment from '@/components/platform/InDevelopment';
+import LeadsPipelinePanel from '@/components/sales/LeadsPipelinePanel';
 
 type SalesTab = 'pipeline' | 'quotes' | 'pricing' | 'impersonate';
 
@@ -13,9 +13,8 @@ type SalesTab = 'pipeline' | 'quotes' | 'pricing' | 'impersonate';
  *  that page can be a Server Component doing the RBAC redirect (see its
  *  header) before any client JS for the portal ships. */
 export default function SalesHubView() {
-  // Opens on a tool that works today; the in-development pipeline is last
-  // (a rep's first screen should not be a placeholder).
-  const [tab, setTab] = useState<SalesTab>('quotes');
+  // Opens on the Pipeline: the first job is answering whoever is waiting.
+  const [tab, setTab] = useState<SalesTab>('pipeline');
 
   return (
     <PortalShell
@@ -25,10 +24,10 @@ export default function SalesHubView() {
         {
           label: 'Deal Desk',
           items: [
+            { label: 'Pipeline', href: '#', icon: '📥', active: tab === 'pipeline', onClick: () => setTab('pipeline') },
             { label: 'Quote Builder', href: '#', icon: '📝', active: tab === 'quotes', onClick: () => setTab('quotes') },
             { label: 'Volume Pricing', href: '#', icon: '📊', active: tab === 'pricing', onClick: () => setTab('pricing') },
             { label: 'Impersonation', href: '#', icon: '🔑', active: tab === 'impersonate', onClick: () => setTab('impersonate') },
-            { label: 'Pipeline (coming)', href: '#', icon: '📥', active: tab === 'pipeline', onClick: () => setTab('pipeline') },
           ],
         },
         // No "Admin Panel" link: /admin does not exist on the sales host (404).
@@ -50,28 +49,7 @@ export default function SalesHubView() {
       </div>
       {/* One navigation: the sidebar. (A second row of tab pills to the same four
           places doubled every choice.) */}
-      {tab === 'pipeline' && (
-        <InDevelopment
-          title="Inbound pipeline and speed to lead"
-          worksToday={
-            <>
-              Quote Builder, Volume Pricing and Impersonation are live — a rep who already
-              knows their buyer can price, quote and support them today.
-            </>
-          }
-        >
-          <p style={{ margin: '0 0 10px' }}>
-            This will list everyone who has asked to talk to us, oldest first, with how long
-            they have been waiting. A rep claims a lead, replies, and the time from arrival to
-            first reply is recorded — the same speed-to-lead measurement we sell to merchants,
-            run on ourselves first.
-          </p>
-          <p style={{ margin: 0 }}>
-            The table that stores these leads is deployed. The capture form and this queue are
-            the next thing being built.
-          </p>
-        </InDevelopment>
-      )}
+      {tab === 'pipeline' && <LeadsPipelinePanel />}
       {tab === 'quotes' && <QuoteDeskPanel />}
       {tab === 'pricing' && <VolumeDiscountMatrix />}
       {tab === 'impersonate' && <ImpersonationLauncher />}
