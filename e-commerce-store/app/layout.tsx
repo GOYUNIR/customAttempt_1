@@ -285,6 +285,8 @@ export default async function RootLayout({
   } catch {
     mapToken = '';
   }
+  let mediaOrigin = '';
+  try { mediaOrigin = process.env.MEDIA_S3_PUBLIC_BASE_URL ? new URL(process.env.MEDIA_S3_PUBLIC_BASE_URL).origin : ''; } catch { mediaOrigin = ''; }
   const colors = liveValue.themeColors || {};
   // Keep the inline JSON safe for a <script> block (escape any "</" sequences).
   const safeJson = JSON.stringify({ ...liveValue, mapToken }).replace(/</g, '\\u003c');
@@ -333,6 +335,18 @@ export default async function RootLayout({
             so the moment the data lands, the photo starts downloading too —
             this product's on a product page, the first two on the homepage
             (both are drawn there). Same URL, so the render reuses it. */}
+        {/* The inline script below cannot run until the stylesheets above have
+            loaded (scripts wait for pending CSS), which held the data request
+            ~400ms back on a phone. A preload is not held: the browser starts
+            /api/store as soon as it reads this line, and the script's fetch()
+            (same URL, same mode) picks up that response. The preconnect opens
+            the photo host's connection while the data is still on its way. */}
+        {!hideStorefrontChrome && (
+          <>
+            <link rel="preload" href="/api/store" as="fetch" crossOrigin="anonymous" />
+            {mediaOrigin && <link rel="preconnect" href={mediaOrigin} />}
+          </>
+        )}
         {!hideStorefrontChrome && (
           <script
             dangerouslySetInnerHTML={{
