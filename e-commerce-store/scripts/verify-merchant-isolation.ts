@@ -172,7 +172,11 @@ const check = (ok: boolean, what: string) => { console.log((ok ? '  PASS ' : '  
     check(t4Privacy.status === 200 && /has not published its privacy policy yet/.test(t4Privacy.text) && t4Privacy.text.includes('help@test4.example'), 'an unset policy says it is not published (with the store\'s own contact), no template text');
     const shopTermsAfter = await pageText('https://shop.' + ROOT + '/terms');
     const strip = (t: string) => t.replace(/Last updated: \d{4}-\d{2}-\d{2}/, '').replace(/\s+/g, ' ');
-    check(shopTermsAfter.status === 200 && strip(shopTermsAfter.text) === strip(shopTermsBefore.text) && !shopTermsAfter.text.includes(markA) && !shopTermsAfter.text.includes(markB), 'the original store\'s /terms is unchanged (identical text before and after)');
+    const termsLeaked = shopTermsAfter.text.includes(markA) || shopTermsAfter.text.includes(markB);
+    const same = strip(shopTermsAfter.text) === strip(shopTermsBefore.text);
+    check(shopTermsAfter.status === 200 && shopTermsBefore.status === 200 && same && !termsLeaked,
+      'the original store\'s /terms is unchanged (identical text before and after): status ' + shopTermsBefore.status + ' -> ' + shopTermsAfter.status + ', identical ' + same + ', another store\'s terms in it ' + termsLeaked
+      + (same ? '' : ' | before: ' + JSON.stringify(strip(shopTermsBefore.text).slice(0, 80)) + ' after: ' + JSON.stringify(strip(shopTermsAfter.text).slice(0, 80))));
     check((await pageText('https://nosuchstore-xyz.' + ROOT + '/terms')).status === 404, 'an unknown address still gets 404 for /terms');
 
     console.log('\nFences');
