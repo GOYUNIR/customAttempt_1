@@ -44,7 +44,11 @@ const steps: Step[] = [
   { name: 'Fulfilment', cmd: tsx('verify-merchant-fulfilment.ts'), pass: allPass },
   { name: 'Data export', cmd: tsx('verify-merchant-export.ts'), pass: allPass },
   { name: 'Product photos', cmd: tsx('verify-merchant-photos.ts'), pass: allPass },
+  { name: 'Webhooks tolerate deleted data', cmd: tsx('verify-webhook-tolerance.ts'), pass: allPass },
   ...(quick ? [] : [{ name: 'Signup abuse (record mode)', cmd: tsx('verify-signup-abuse.ts'), pass: allPass }]),
+  // Last: the proofs leave nothing behind (their orders, customers, signups,
+  // accounts and recorded mail), backed up first like every reset.
+  { name: 'Clean up proof data', cmd: tsx('launch-reset.ts', '--apply --proof-only'), pass: (c, o) => c === 0 && /ALL CHECKS PASS/.test(o) },
 ];
 
 function runStep(s: Step): Promise<{ code: number; out: string; secs: number }> {

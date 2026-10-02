@@ -153,6 +153,38 @@ export function presignGet(config: MediaS3Config, key: string, expiresSeconds = 
   return presignPut({ config, key, expiresSeconds, method: 'GET' }).uploadUrl;
 }
 
+/**
+ * Presign a ListObjectsV2 on the bucket (path-style/R2 endpoint), for
+ * maintenance scripts only (launch-reset's storage manifest), never request
+ * paths. The query parameters are part of the signature, sorted by name.
+ */
+export function presignList(config: MediaS3Config, opts: { prefix?: string; continuationToken?: string; expiresSeconds?: number; now?: Date } = {}): string {
+  const now = opts.now || new Date();
+  const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${config.region}/s3/aws4_request`;
+  const endpoint = String(config.endpoint || '').replace(/\/+$/, '');
+  if (!endpoint) throw new Error('presignList needs a path-style endpoint (R2)');
+  const host = new URL(endpoint).host;
+  const enc = (v: string) => encodeURIComponent(v).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  const params: Array<[string, string]> = [
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${config.accessKeyId}/${credentialScope}`],
+    ['X-Amz-Date', amzDate],
+    ['X-Amz-Expires', String(opts.expiresSeconds || 300)],
+    ['X-Amz-SignedHeaders', 'host'],
+    ['list-type', '2'],
+    ['max-keys', '1000'],
+    ...(opts.prefix ? [['prefix', opts.prefix] as [string, string]] : []),
+    ...(opts.continuationToken ? [['continuation-token', opts.continuationToken] as [string, string]] : []),
+  ];
+  const canonicalQuery = params.map(([k, v]) => [enc(k), enc(v)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([k, v]) => k + '=' + v).join('&');
+  const canonicalRequest = ['GET', '/' + encodeSegment(config.bucket), canonicalQuery, `host:${host}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
+  const kSigning = hmac(hmac(hmac(hmac(`AWS4${config.secretAccessKey}`, dateStamp), config.region), 's3'), 'aws4_request');
+  return `${new URL(endpoint).origin}/${encodeSegment(config.bucket)}?${canonicalQuery}&X-Amz-Signature=${hmacHex(kSigning, stringToSign)}`;
+}
+
 /** Presign a DELETE. Used by verification/cleanup, never by request paths. */
 export function presignDelete(config: MediaS3Config, key: string, expiresSeconds = 300): string {
   return presignPut({ config, key, expiresSeconds, method: 'DELETE' }).uploadUrl;
