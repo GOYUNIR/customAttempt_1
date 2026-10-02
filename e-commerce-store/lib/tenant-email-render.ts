@@ -53,8 +53,11 @@ function textHelp(store: StoreIdentity): string {
 
 export function renderOrderConfirmed(store: StoreIdentity, o: {
   orderRef: string; lines: Array<{ productName: string; size: string; quantity: number; amountCents: number }>; totalCents: number; currency: string;
+  /** A discount code applied (the line amounts are already discounted). */
+  discount?: { code: string; cents: number } | null;
 }): StoreEmail {
-  const rows = o.lines.map((l) => `<tr><td style="padding:6px 0">${esc(l.productName)}${l.size ? ' (' + esc(l.size) + ')' : ''}${l.quantity > 1 ? ' &times; ' + l.quantity : ''}</td><td style="padding:6px 0;text-align:right">${esc(money(l.amountCents, o.currency))}</td></tr>`).join('');
+  const rows = o.lines.map((l) => `<tr><td style="padding:6px 0">${esc(l.productName)}${l.size ? ' (' + esc(l.size) + ')' : ''}${l.quantity > 1 ? ' &times; ' + l.quantity : ''}</td><td style="padding:6px 0;text-align:right">${esc(money(l.amountCents, o.currency))}</td></tr>`).join('')
+    + (o.discount && o.discount.cents > 0 ? `<tr><td style="padding:6px 0;color:#6b7280">Discount (${esc(o.discount.code)}), included above</td><td style="padding:6px 0;text-align:right;color:#6b7280">&minus;${esc(money(o.discount.cents, o.currency))}</td></tr>` : '');
   const html = frame(store, 'Thanks for your order', `
 <p style="margin:0 0 14px;color:#374151">Your payment went through. Order <strong>${esc(o.orderRef)}</strong>.</p>
 <table style="width:100%;border-collapse:collapse;font-size:15px">${rows}

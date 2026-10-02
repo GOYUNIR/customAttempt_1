@@ -25,6 +25,8 @@ type StockMove = { reason: string; change: number; after: number; shortfall: num
 type Billing = { planId: string; planName: string; status: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; graceUntil: string | null; hasBillingAccount: boolean; feeLine: string; upgrade: { planId: string; name: string; monthlyCents: number } | null };
 type AddressView = { current: { slug: string; url: string }; changesLeft: number; holdDays: number; candidate?: { slug: string; url: string; available: boolean; reason: string } };
 type DomainsView = { plan: string; limit: number | null; used: number; domains: { hostname: string; status: string; ssl: string; ownershipVerified: boolean; primary: boolean; checkedAt: string | null; records: { type: string; name: string; value: string; why: string }[] }[] };
+type DiscountCode = { id: string; code: string; kind: 'percent' | 'fixed'; percent: number | null; amountCents: number | null; currency: string | null; minSubtotalCents: number; endsAt: string | null; maxUses: number | null; maxUsesPerCustomer: number; active: boolean; uses: number; discountGivenCents: number };
+type Discounts = { enabled: boolean; limit: number | null; codes: DiscountCode[] };
 type Stage = 'to_ship' | 'shipped' | 'refunded' | 'unpaid';
 type Order = { ref: string; status: string; paymentStatus: string; stage: Stage; totalCents: number; refundedCents: number; currency: string; platformFeeCents: number | null; mode: string | null; createdAt: string; shippedAt: string | null; customerEmail: string | null; item: string | null };
 type OrderDetail = {
@@ -70,7 +72,7 @@ export default function MerchantDashboard() {
   const [fatal, setFatal] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tab, setTab] = useState<'products' | 'drops' | 'orders' | 'settings' | 'staff' | 'billing'>('products');
+  const [tab, setTab] = useState<'products' | 'drops' | 'orders' | 'discounts' | 'settings' | 'staff' | 'billing'>('products');
   const [drops, setDrops] = useState<Drops | null>(null);
   const [openDrop, setOpenDrop] = useState<Drop | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -94,6 +96,24 @@ export default function MerchantDashboard() {
   const [domainsView, setDomainsView] = useState<DomainsView | null>(null);
   const [domainInput, setDomainInput] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
+  const [disc, setDisc] = useState<Discounts | null>(null);
+  const blankCode = { code: '', kind: 'percent', amount: '', minSubtotal: '', endsAt: '', maxUses: '', maxUsesPerCustomer: '1' };
+  const [newCode, setNewCode] = useState(blankCode);
+  const [discBusy, setDiscBusy] = useState(false);
+  const saveCode = async () => {
+    setDiscBusy(true);
+    const r = await api<{ codes: DiscountCode[] }>('/api/merchant/discounts', { method: 'POST', body: JSON.stringify(newCode) });
+    setDiscBusy(false);
+    if (!r.ok) { setNotice(r.body.error || 'The code could not be saved.'); return; }
+    setDisc((d) => (d ? { ...d, codes: r.body.codes } : d));
+    setNewCode(blankCode);
+    setNotice('Code ' + newCode.code.trim().toUpperCase() + ' is live.');
+  };
+  const toggleCode = async (id: string, active: boolean) => {
+    const r = await api<{ codes: DiscountCode[] }>('/api/merchant/discounts', { method: 'POST', body: JSON.stringify({ id, active }) });
+    if (!r.ok) { setNotice(r.body.error || 'The code could not be changed.'); return; }
+    setDisc((d) => (d ? { ...d, codes: r.body.codes } : d));
+  };
   const [exp, setExp] = useState({ dataset: 'orders', format: 'csv', busy: false, done: 0 });
   // Pages are fetched one by one and joined here: a big store never times a request out.
   const runExport = async () => {
@@ -152,6 +172,8 @@ export default function MerchantDashboard() {
     if (d.ok) setDrops(d.body);
     if (p.ok) setProducts(p.body.products || []);
     if (o.ok) setOrders(o.body.orders || []);
+    const dc = await api<Discounts>('/api/merchant/discounts');
+    if (dc.ok) setDisc(dc.body);
     const sk = await api<StockView>('/api/merchant/stock');
     if (sk.ok) setStock(sk.body);
     if (s.body.you.role === 'owner') {
@@ -454,8 +476,8 @@ export default function MerchantDashboard() {
         </section>
 
         <nav style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          {(['products', 'drops', 'orders', 'settings', ...(store.you.role === 'owner' ? ['staff' as const, 'billing' as const] : [])] as const).map((t) => (
-            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); setOpenOrder(null); }} aria-current={tab === t ? 'page' : undefined} style={tab === t ? tabOn : tabOff}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : 'Settings'}</button>
+          {(['products', 'drops', 'orders', ...(disc?.enabled ? ['discounts' as const] : []), 'settings', ...(store.you.role === 'owner' ? ['staff' as const, 'billing' as const] : [])] as const).map((t) => (
+            <button key={t} onClick={() => { setTab(t); setOpenDrop(null); setOpenOrder(null); }} aria-current={tab === t ? 'page' : undefined} style={tab === t ? tabOn : tabOff}>{t === 'products' ? `Products (${products.length})` : t === 'drops' ? `Raffles & waitlists (${drops?.drops.length ?? 0})` : t === 'orders' ? `Orders (${orders.length})` : t === 'staff' ? 'Staff' : t === 'billing' ? 'Plan & billing' : t === 'discounts' ? 'Discounts' : 'Settings'}</button>
           ))}
         </nav>
 
@@ -774,6 +796,42 @@ export default function MerchantDashboard() {
                 {addressBusy ? 'Changing…' : address.candidate?.available && address.candidate.slug === addressInput.trim() ? 'Move my store to ' + address.candidate.url.replace('https://', '') : 'Change address'}
               </button>
             </div>
+          </section>
+        )}
+
+        {tab === 'discounts' && disc?.enabled && (
+          <section style={card} aria-label="Discounts">
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>New discount code</div>
+            <p style={{ color: C.muted, fontSize: 13, margin: '0 0 10px' }}>One code per order, off the whole order. The total never goes below the card network&apos;s minimum charge.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+              <input aria-label="Code" placeholder="Code, e.g. SPRING10" value={newCode.code} onChange={(e) => setNewCode({ ...newCode, code: e.target.value.toUpperCase() })} style={input} />
+              <select aria-label="Type" value={newCode.kind} onChange={(e) => setNewCode({ ...newCode, kind: e.target.value })} style={input}>
+                <option value="percent">Percent off</option><option value="fixed">Amount off</option>
+              </select>
+              <input aria-label="Amount" inputMode="decimal" placeholder={newCode.kind === 'percent' ? '10 (%)' : '5.00'} value={newCode.amount} onChange={(e) => setNewCode({ ...newCode, amount: e.target.value })} style={input} />
+            </div>
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ cursor: 'pointer', color: C.muted, fontSize: 13 }}>More options</summary>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 8 }}>
+                <label style={{ fontSize: 13, color: C.muted }}>Minimum order<input aria-label="Minimum order" inputMode="decimal" placeholder="none" value={newCode.minSubtotal} onChange={(e) => setNewCode({ ...newCode, minSubtotal: e.target.value })} style={input} /></label>
+                <label style={{ fontSize: 13, color: C.muted }}>Ends<input aria-label="Ends" type="date" value={newCode.endsAt} onChange={(e) => setNewCode({ ...newCode, endsAt: e.target.value })} style={input} /></label>
+                <label style={{ fontSize: 13, color: C.muted }}>Total uses<input aria-label="Total uses" inputMode="numeric" placeholder="unlimited" value={newCode.maxUses} onChange={(e) => setNewCode({ ...newCode, maxUses: e.target.value })} style={input} /></label>
+                <label style={{ fontSize: 13, color: C.muted }}>Uses per customer<input aria-label="Uses per customer" inputMode="numeric" value={newCode.maxUsesPerCustomer} onChange={(e) => setNewCode({ ...newCode, maxUsesPerCustomer: e.target.value })} style={input} /></label>
+              </div>
+            </details>
+            <button onClick={saveCode} disabled={discBusy || !newCode.code.trim() || !newCode.amount.trim()} style={{ ...btn, marginTop: 12 }}>{discBusy ? 'Saving…' : 'Create code'}</button>
+
+            <div style={{ fontWeight: 700, margin: '20px 0 6px' }}>Your codes{disc.limit !== null ? ` (up to ${disc.limit} active on your plan)` : ''}</div>
+            {disc.codes.length === 0 && <p style={{ color: C.muted }}>No codes yet.</p>}
+            {disc.codes.map((c) => (
+              <div key={c.id} style={{ borderTop: `1px solid ${C.line}`, padding: '10px 0', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{c.code} <span style={{ color: C.muted, fontWeight: 400 }}>{c.kind === 'percent' ? c.percent + '% off' : money(c.amountCents || 0, c.currency || 'usd') + ' off'}</span></div>
+                  <div style={{ color: C.muted, fontSize: 13 }}>Used {c.uses}{c.maxUses ? ' of ' + c.maxUses : ''}{c.discountGivenCents ? ' · ' + money(c.discountGivenCents, c.currency || 'usd') + ' given' : ''}{c.endsAt ? ' · ends ' + new Date(c.endsAt).toLocaleDateString() : ''}</div>
+                </div>
+                <button onClick={() => toggleCode(c.id, !c.active)} aria-label={(c.active ? 'Switch off ' : 'Switch on ') + c.code} style={ghost}>{c.active ? 'On' : 'Off'}</button>
+              </div>
+            ))}
           </section>
         )}
 

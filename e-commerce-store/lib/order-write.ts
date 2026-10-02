@@ -76,6 +76,10 @@ export type RecordOrderInput = {
   platformFeeCents?: number | null;
   /** The buyer's shipping address as entered (one line), for fulfilment. */
   shippingAddress?: string | null;
+  /** A discount code applied at checkout (00045): the lines are the charged
+   *  (discounted) amounts; this is what came off, recorded on the order. */
+  discountCents?: number | null;
+  discountCode?: string | null;
 } & (
   // Single-line callers (direct checkout, the raffle draw, the webhook's
   // non-cart branch) sell exactly one thing and keep the original shape.
@@ -149,7 +153,8 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
         order_ref: orderRef,
         status: 'confirmed',
         payment_status: 'paid',
-        subtotal_cents: amountCents,
+        subtotal_cents: amountCents + Math.max(0, Math.round(Number(input.discountCents) || 0)),
+        discount_cents: Math.max(0, Math.round(Number(input.discountCents) || 0)),
         total_cents: amountCents,
         currency: String(input.currency || 'usd').toLowerCase(),
         ...(typeof input.platformFeeCents === 'number' ? { platform_fee_cents: Math.max(0, Math.round(input.platformFeeCents)) } : {}),
@@ -158,6 +163,7 @@ export async function recordOrder(input: RecordOrderInput): Promise<RecordOrderR
         metadata: {
           checkoutMode: input.checkoutMode || null,
           promoCode: input.promoCode || null,
+          ...(input.discountCode ? { discountCode: String(input.discountCode) } : {}),
           // Kept for the single-line readers that already index on these.
           productName: lines[0].productName || null,
           size: lines[0].size || null,

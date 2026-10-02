@@ -46,6 +46,10 @@ export type PlanTerms = {
   feeMode: 'graduated' | 'flat' | 'custom';
   inFeeEnvelope: boolean;
   listed: boolean;
+  /** Discount codes on this plan (00045; off everywhere until switched on). */
+  discountCodesEnabled: boolean;
+  /** Most active codes a store may have; null = no cap. */
+  discountCodeLimit: number | null;
 };
 
 function toTerms(r: any): PlanTerms {
@@ -57,10 +61,12 @@ function toTerms(r: any): PlanTerms {
     feeMode: r.fee_mode,
     inFeeEnvelope: Boolean(r.in_fee_envelope),
     listed: Boolean(r.listed),
+    discountCodesEnabled: r.discount_codes_enabled === true,
+    discountCodeLimit: r.discount_code_limit === null || r.discount_code_limit === undefined ? null : Number(r.discount_code_limit),
   };
 }
 
-const PLAN_COLUMNS = ['id', 'name', 'base_price_cents', 'platform_fee_bps', 'fee_mode', 'in_fee_envelope', 'listed', 'sort_order', 'active'];
+const PLAN_COLUMNS = ['id', 'name', 'base_price_cents', 'platform_fee_bps', 'fee_mode', 'in_fee_envelope', 'listed', 'sort_order', 'active', 'discount_codes_enabled', 'discount_code_limit'];
 
 /** Every active plan, in display order. */
 export async function loadPlans(): Promise<PlanTerms[]> {

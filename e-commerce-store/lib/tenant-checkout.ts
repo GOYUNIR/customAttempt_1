@@ -36,6 +36,7 @@ import { validateShippingAddress } from '@/lib/address-validation';
 import { encodeCartMetadata, decodeCartMetadata } from '@/lib/cart-metadata';
 import { startTenantEntry } from '@/lib/tenant-drops';
 import { sendStoreEmailOnce, renderOrderConfirmed } from '@/lib/tenant-email';
+import { discountForCheckout, releaseDiscount, redeemDiscount } from '@/lib/discounts';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -143,9 +144,8 @@ export async function startTenantCheckout(input: {
   if (!isValidEmail(email)) return json({ error: 'A valid email is required.' }, 400);
   const addrError = validateShippingAddress(String(address || ''));
   if (addrError) return json({ error: addrError }, 400);
-  if (String(promoCode || ref || '').trim()) {
-    return json({ error: "Promo codes aren't available in this store yet." }, 409);
-  }
+  // Referral codes are the original store's (global KV); never here.
+  if (String(ref || '').trim()) return json({ error: "Promo codes aren't available in this store yet." }, 409);
   const products = await loadProducts(null, { tenantId });
   const product = products[String(productId)];
   if (!product) return json({ error: 'Product not found' }, 404);
@@ -203,17 +203,27 @@ export async function startTenantCheckout(input: {
   const currency = String(account?.defaults?.currency || '').toLowerCase();
   if (!currency) return json({ error: 'This store cannot take orders yet.' }, 409);
 
-  // Fixed now, from the month's running total as it stands (PRICING.md §6).
-  const fee = await platformFeeForCharge(tenantId, priceCents);
-
-  const existing = await stripe.customers.list({ email: normalizedEmail, limit: 1 }, on);
-  const customer = existing.data[0] || await stripe.customers.create({ email: normalizedEmail }, on);
-
   // One attempt per 30s window: a double tap reuses the same session (same
   // key, same params), and the ref is derived from the same window so a
   // Stripe retry of this call is byte-identical.
   const window = String(Math.floor(Date.now() / 30_000));
   const orderRef = buildOrderRef(normalizedEmail, String(product.id), String(size), await tenantRefPrefix(tenantId, tenantSlug), window);
+
+  // A discount code (00045, plan flag): reserved for THIS attempt on the same
+  // key as its stock hold, applied by lowering the price we send Stripe, never
+  // below Stripe's minimum. Our fee is then on what is actually charged.
+  const discount = await discountForCheckout({
+    tenantId, code: promoCode, email: normalizedEmail, holdKey: 'co:' + orderRef,
+    lines: [{ unitCents: priceCents, quantity: 1 }], currency, ttlSeconds: CHECKOUT_HOLD_SECONDS,
+  });
+  if (!discount.ok) return json({ error: discount.error }, discount.status);
+  const chargeCents = discount.applied ? discount.lines[0].unitCents : priceCents;
+
+  // Fixed now, from the month's running total as it stands (PRICING.md §6).
+  const fee = await platformFeeForCharge(tenantId, chargeCents);
+
+  const existing = await stripe.customers.list({ email: normalizedEmail, limit: 1 }, on);
+  const customer = existing.data[0] || await stripe.customers.create({ email: normalizedEmail }, on);
   const productSlug = String(product.slug || product.id);
   const metadata = {
     tenant_id: tenantId,
@@ -228,11 +238,15 @@ export async function startTenantCheckout(input: {
     platform_fee_cents: String(fee.feeCents),
     platform_fee_basis: fee.basis,
     hold_key: 'co:' + orderRef,
+    ...(discount.applied ? { discount_code: discount.code, discount_cents: String(discount.discountCents) } : {}),
   };
 
   // The unit is set aside for this buyer BEFORE they are sent to pay.
   const held = await holdForCheckout(tenantId, metadata.hold_key, normalizedEmail, [{ productId: String(product.id), size: String(size), quantity: 1, name: String(product.name || product.id) }]);
-  if (!held.ok) return held.response;
+  if (!held.ok) {
+    if (discount.applied) await releaseDiscount(tenantId, metadata.hold_key);
+    return held.response;
+  }
 
   let session: any;
   try {
@@ -245,9 +259,9 @@ export async function startTenantCheckout(input: {
       quantity: 1,
       price_data: {
         currency,
-        unit_amount: priceCents,
+        unit_amount: chargeCents,
         product_data: {
-          name: `${product.name} - ${size}`,
+          name: `${product.name} - ${size}` + (discount.applied ? ` · code ${discount.code}` : ''),
           ...(product.tagline || product.desc ? { description: String(product.tagline || product.desc).slice(0, 300) } : {}),
         },
       },
@@ -261,10 +275,11 @@ export async function startTenantCheckout(input: {
     success_url: `${origin}/${productSlug}?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/${productSlug}?purchase=cancel`,
     metadata,
-  }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-checkout:${route.stripeAccount}:${normalizedEmail}:${product.id}:${size}:${window}`) });
+  }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-checkout:${route.stripeAccount}:${normalizedEmail}:${product.id}:${size}:${window}` + (discount.applied ? ':' + discount.code : '')) });
   } catch (err) {
-    // No session, no reason to keep the unit from everyone else.
+    // No session, no reason to keep the unit (or the code's use) from everyone else.
     await releaseStock(tenantId, metadata.hold_key).catch(() => 0);
+    if (discount.applied) await releaseDiscount(tenantId, metadata.hold_key);
     throw err;
   }
 
@@ -281,6 +296,7 @@ export async function handleConnectCheckoutExpired(session: any, tenantId: strin
   const key = session?.metadata?.hold_key ? String(session.metadata.hold_key) : '';
   if (session?.mode !== 'payment' || !key) return { handled: false, note: 'no checkout hold' };
   const released = await releaseStock(tenantId, key);
+  await releaseDiscount(tenantId, key); // nobody paid: the code's use goes back too (a no-op without one)
   return { handled: true, note: 'hold ' + key + ' released (' + released + ' line(s))' };
 }
 
@@ -346,9 +362,13 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
     currency: String(session.currency || ''),
     platformFeeCents: feeCents,
     shippingAddress: String(md.address || '') || null,
+    discountCents: md.discount_code ? Number(md.discount_cents || 0) : 0,
+    discountCode: md.discount_code ? String(md.discount_code) : null,
   });
   // Retry rather than acknowledge a payment with no order behind it.
   if (!recorded.ok) throw new Error('CHARGED BUT NOT RECORDED ' + session.id + ': ' + recorded.message);
+  // The code's held use becomes a redemption (idempotent; a throw retries the event).
+  if (md.discount_code && md.hold_key) await redeemDiscount(tenantId, String(md.hold_key), orderRef, Number(md.discount_cents || 0));
 
   // Volume is what Stripe charged, not our line arithmetic.
   const billing = await recordBillingCharge({ paymentIntentId: piId, tenantId, volumeCents: amountCents, feeCents, orderId: recorded.orderId });
@@ -390,7 +410,7 @@ export async function handleConnectCheckoutCompleted(session: any, tenantId: str
     afterCommit: async () => {
       const m = await sendStoreEmailOnce({
         tenantId, kind: 'order', key: orderRef, to: customerEmail,
-        build: (store) => renderOrderConfirmed(store, { orderRef, lines, totalCents: amountCents, currency: String(session.currency || '') }),
+        build: (store) => renderOrderConfirmed(store, { orderRef, lines, totalCents: amountCents, currency: String(session.currency || ''), discount: md.discount_code ? { code: String(md.discount_code), cents: Number(md.discount_cents || 0) } : null }),
       });
       return m.status + (m.note ? ' (' + m.note + ')' : '');
     },
@@ -464,9 +484,8 @@ export async function startTenantCartCheckout(input: {
   if (items.length > 50) return json({ error: 'Too many items in the cart.' }, 400);
   const addrError = validateShippingAddress(address);
   if (addrError) return json({ error: addrError }, 400);
-  if (String(body?.promoCode || body?.ref || '').trim()) {
-    return json({ error: "Promo codes aren't available in this store yet. Remove it to continue." }, 409);
-  }
+  // Referral codes are the original store's (global KV); never here.
+  if (String(body?.ref || '').trim()) return json({ error: "Promo codes aren't available in this store yet. Remove it to continue." }, 409);
 
   // One line per product/size, quantities summed.
   const agg = new Map<string, { productId: string; size: string; quantity: number }>();
@@ -513,21 +532,11 @@ export async function startTenantCartCheckout(input: {
     lines.push({ productId: String(product.id), size: item.size, quantity: item.quantity, unitCents: Math.round(Number(cat.price) * 100), name: String(product.name || product.id) });
   }
 
-  const cartMd = encodeCartMetadata(lines);
-  if (!cartMd) return json({ error: 'Too many different items for one checkout. Split the order.' }, 400);
-  const totalCents = lines.reduce((s, l) => s + l.unitCents * l.quantity, 0);
-
   const stripe: any = await resolveStripeClient();
   if (!stripe) return json({ error: 'Payment provider is not configured.' }, 500);
   const account = await stripe.v2.core.accounts.retrieve(route.stripeAccount, { include: ['defaults'] });
   const currency = String(account?.defaults?.currency || '').toLowerCase();
   if (!currency) return json({ error: 'This store cannot take orders yet.' }, 409);
-
-  // Fixed now, on the whole cart, from the month's running total (PRICING §6).
-  const fee = await platformFeeForCharge(tenantId, totalCents);
-
-  const existing = await stripe.customers.list({ email, limit: 1 }, on);
-  const customer = existing.data[0] || await stripe.customers.create({ email }, on);
 
   // Same 30s-window idempotency as the single-product path: a double tap
   // reuses one session, and the ref is derived from the same inputs.
@@ -535,11 +544,37 @@ export async function startTenantCartCheckout(input: {
   const cartSignature = lines.map((l) => l.productId + ':' + l.size + ':' + l.quantity).sort().join('|');
   const orderRef = buildOrderRef(email, lines[0].productId, lines[0].size, await tenantRefPrefix(tenantId, tenantSlug), cartSignature + ':' + window);
   const returnSlug = String(products[lines[0].productId]?.slug || lines[0].productId);
+  const holdKey = 'co:' + orderRef;
+
+  // A discount code: reserved for this attempt, spread over the lines per
+  // unit, never below Stripe's minimum (lib/discount-rules.ts). The lines
+  // sent to Stripe, the cart metadata (what the order records) and our fee
+  // all use the DISCOUNTED prices, so they agree with what is charged.
+  const discount = await discountForCheckout({
+    tenantId, code: body?.promoCode, email, holdKey, lines: lines.map((l) => ({ unitCents: l.unitCents, quantity: l.quantity })), currency, ttlSeconds: CHECKOUT_HOLD_SECONDS,
+  });
+  if (!discount.ok) return json({ error: discount.error }, discount.status);
+  if (discount.applied) discount.lines.forEach((d, i) => { lines[i].unitCents = d.unitCents; });
+
+  const cartMd = encodeCartMetadata(lines);
+  if (!cartMd) {
+    if (discount.applied) await releaseDiscount(tenantId, holdKey);
+    return json({ error: 'Too many different items for one checkout. Split the order.' }, 400);
+  }
+  const totalCents = lines.reduce((s, l) => s + l.unitCents * l.quantity, 0);
+
+  // Fixed now, on the whole cart, from the month's running total (PRICING §6).
+  const fee = await platformFeeForCharge(tenantId, totalCents);
+
+  const existing = await stripe.customers.list({ email, limit: 1 }, on);
+  const customer = existing.data[0] || await stripe.customers.create({ email }, on);
 
   // Every line set aside, or none, BEFORE the buyer is sent to pay.
-  const holdKey = 'co:' + orderRef;
   const held = await holdForCheckout(tenantId, holdKey, email, lines.map((l) => ({ productId: l.productId, size: l.size, quantity: l.quantity, name: l.name })));
-  if (!held.ok) return held.response;
+  if (!held.ok) {
+    if (discount.applied) await releaseDiscount(tenantId, holdKey);
+    return held.response;
+  }
 
   let session: any;
   try {
@@ -550,7 +585,7 @@ export async function startTenantCartCheckout(input: {
     payment_method_types: ['card'],
     line_items: lines.map((l) => ({
       quantity: l.quantity,
-      price_data: { currency, unit_amount: l.unitCents, product_data: { name: `${l.name} - ${l.size}` } },
+      price_data: { currency, unit_amount: l.unitCents, product_data: { name: `${l.name} - ${l.size}` + (discount.applied ? ` · code ${discount.code}` : "") } },
     })),
     payment_intent_data: {
       ...(fee.feeCents > 0 ? { application_fee_amount: fee.feeCents } : {}),
@@ -570,11 +605,13 @@ export async function startTenantCartCheckout(input: {
       platform_fee_cents: String(fee.feeCents),
       platform_fee_basis: fee.basis,
       hold_key: holdKey,
+      ...(discount.applied ? { discount_code: discount.code, discount_cents: String(discount.discountCents) } : {}),
       ...cartMd,
     },
-  }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-cart:${route.stripeAccount}:${email}:${cartSignature}:${window}`) });
+  }, { ...on, idempotencyKey: boundIdempotencyKey(`tenant-cart:${route.stripeAccount}:${email}:${cartSignature}:${window}` + (discount.applied ? ":" + discount.code : "")) });
   } catch (err) {
     await releaseStock(tenantId, holdKey).catch(() => 0);
+    if (discount.applied) await releaseDiscount(tenantId, holdKey);
     throw err;
   }
 

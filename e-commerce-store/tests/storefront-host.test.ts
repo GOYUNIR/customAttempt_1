@@ -97,11 +97,13 @@ import { merchantHostAllowsPath, APP_TOP_LEVEL_ROUTES } from '../lib/storefront-
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+// /api/promo/validate became tenant-aware on 2026-10-02 (a merchant store's own codes,
+// lib/discounts.ts previewDiscount); before that it served the original store's KV promos.
 test('LEAK GUARD: a merchant address serves only tenant-aware paths', () => {
-  for (const p of ['/', '/catalog', '/catalog/', '/terms', '/privacy', '/shipping', '/api/store', '/api/catalog/status', '/api/checkout', '/api/checkout/cart', '/api/checkout/confirm-setup', '/api/checkout/auto-draw', '/roccstar', '/some-product']) {
+  for (const p of ['/', '/catalog', '/catalog/', '/terms', '/privacy', '/shipping', '/api/store', '/api/catalog/status', '/api/checkout', '/api/checkout/cart', '/api/checkout/confirm-setup', '/api/checkout/auto-draw', '/api/promo/validate', '/roccstar', '/some-product']) {
     assert.equal(merchantHostAllowsPath(p), true, p);
   }
-  for (const p of ['/api/store/config', '/api/config/public', '/api/promo/validate', '/api/auth/me', '/api/ai/hero-animation',
+  for (const p of ['/api/store/config', '/api/config/public', '/api/auth/me', '/api/ai/hero-animation',
     '/api/analytics/heartbeat', '/api/checkout/direct', '/api/checkout/cron-draw', '/api/cron/auto-draw', '/api/account/lookup', '/story', '/account', '/admin', '/og', '/icon',
     '/auth/login', '/a/b', '/platform']) {
     assert.equal(merchantHostAllowsPath(p), false, p);

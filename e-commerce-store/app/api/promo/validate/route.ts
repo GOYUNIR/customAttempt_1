@@ -23,6 +23,20 @@ export async function GET(request: Request) {
 
   if (!code) return NextResponse.json({ valid: false, error: 'No code' });
 
+  // A MERCHANT store's own discount codes (00045, plan flag), never the
+  // original store's KV promos: the store comes from the Host header.
+  const { storefrontTenantForRequest } = await import('@/lib/storefront-tenant');
+  const who = await storefrontTenantForRequest(request);
+  if (who.kind === 'store' && !who.isDefault) {
+    if (await isRateLimited('merchant_promo_validate', request, 30, 60)) return NextResponse.json({ valid: false, error: 'Too many requests' }, { status: 429 });
+    const { previewDiscount } = await import('@/lib/discounts');
+    const r = await previewDiscount(who.tenantId, code, email, orderSubtotalCents);
+    return NextResponse.json(r.valid
+      ? { valid: true, ...(r.percent !== null ? { customerDiscountPercent: r.percent } : {}), ...(r.amountCents !== null ? { fixedDiscountCents: r.amountCents } : {}) }
+      : { valid: false, error: r.error });
+  }
+  if (who.kind !== 'store') return NextResponse.json({ valid: false, error: 'Unknown store' }, { status: 404 });
+
   // The non-quiet path increments the click counter (writes state), so cap
   // abuse while leaving page-load re-validation (quiet=1) untouched.
   if (!quiet && (await isRateLimited('promo_validate', request, 60, 60))) {
