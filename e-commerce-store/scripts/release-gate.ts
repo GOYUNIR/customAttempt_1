@@ -4,6 +4,8 @@
  *   npx tsx scripts/release-gate.ts            (everything, ~15 min)
  *   npx tsx scripts/release-gate.ts --quick    (skips the signup abuse simulation)
  *   npx tsx scripts/release-gate.ts --selftest (fake steps: exercises the retry rule)
+ *   npx tsx scripts/release-gate.ts --fresh    (a NEW install: also checks no old identity
+ *                                              is left; GATE_OLD_IDENTITY="OldName,old.example,...")
  *
  * Runs, in order, against PRODUCTION (test-mode Stripe, sink-domain email:
  * nothing real is charged or emailed):
@@ -20,6 +22,8 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const quick = process.argv.includes('--quick');
+const fresh = process.argv.includes('--fresh');
+if (fresh && !String(process.env.GATE_OLD_IDENTITY || '').trim()) { console.error('--fresh needs GATE_OLD_IDENTITY (the old name, domain and addresses that must be gone)'); process.exit(2); }
 const root = process.cwd();
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outDir = join(root, 'tenant-checkout-out', 'release-gate', stamp);
@@ -41,6 +45,10 @@ const steps: Step[] = [
   { name: 'Typecheck', cmd: 'npx tsc --noEmit -p .', pass: (c) => c === 0 },
   { name: 'Unit tests', cmd: 'npm test', pass: (c, o) => c === 0 && /ℹ fail 0/.test(o) },
   { name: 'Readiness check (production config)', cmd: tsx('production-readiness-check.ts'), env: { ...productionVars(), NODE_ENV: 'production' }, pass: (c, o) => c === 0 && /0 error\(s\)/.test(o) },
+  { name: 'Schema matches the migrations', cmd: tsx('bootstrap/schema-parity.ts'), pass: (c, o) => c === 0 && /SCHEMA PARITY OK/.test(o) },
+  { name: 'Secrets present (names only)', cmd: tsx('bootstrap/check-secrets.ts'), pass: (c, o) => /ALL REQUIRED SECRETS SET/.test(o) },
+  { name: 'Proof fixtures present', cmd: tsx('bootstrap/check-fixtures.ts'), pass: allPass },
+  ...(fresh ? [{ name: 'No old identity on platform surfaces', cmd: tsx('bootstrap/identity-check.ts', '--old "' + String(process.env.GATE_OLD_IDENTITY) + '"'), pass: (c: number, o: string) => c === 0 && /IDENTITY CLEAN/.test(o) }] : []),
   { name: 'Merchant isolation', cmd: tsx('verify-merchant-isolation.ts'), pass: allPass },
   { name: 'Purchase + refund (test mode)', cmd: tsx('verify-tenant-checkout.ts', '--refund'), pass: allPass },
   { name: 'Purchase (order to ship)', cmd: tsx('verify-tenant-checkout.ts'), pass: allPass },

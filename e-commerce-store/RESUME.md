@@ -22,7 +22,7 @@ Owner decisions (2026-10-02):
 |---|---|---|
 | 0 | Decided items | DONE: operator-alert budget (5/day, outside the counter, tests mutation-checked); offboarding decisions recorded; BLOCKED ON NAME list added |
 | 1 | Storefront first screen server-rendered, behind a flag | DONE: STOREFRONT_SSR (off), ?ssr=1 override; store home 3.35s -> 2.07s, product 2.87s -> 1.55s LCP; CPU +10-20ms (Paid fine); verify-storefront-ssr.ts + no-stale-money in the gate |
-| 2 | Bootstrap-in-a-box, runbook, ownership migration | |
+| 2 | Bootstrap-in-a-box, runbook, ownership migration | DONE: scripts/bootstrap/ (run.ts dry-run default, 6 idempotent steps, PGlite+fakes rehearsal --twice; secrets manifest+checker; schema parity; identity check; wrangler-dev name rehearsal; tenant transfer + media copy; fixtures check); gate: parity, secrets, fixtures every run, identity in --fresh; BOOTSTRAP-RUNBOOK.md, OWNERSHIP-MIGRATION.md, ci/github-deploy.example.yml. Found+fixed: ai3d_model column missing on live (Setup Wizard save broken), RLS on 2 policy tables (00046), marketing-root flag missing from config, /sitemap.xml 200 store page |
 | 3 | Speed-to-lead for our sales team | |
 | 4 | Merchant day-one gaps: ranked list, then build the top ones | |
 | 5 | Industry starter presets as data | |

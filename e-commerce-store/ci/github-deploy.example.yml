@@ -1,0 +1,35 @@
+# PROPOSAL (BOOTSTRAP-RUNBOOK.md §9), INACTIVE: GitHub only runs workflows in
+# <repo>/.github/workflows/. To use it: copy to .github/workflows/deploy.yml at
+# the repository root, add the repository secret CLOUDFLARE_API_TOKEN (Workers
+# Scripts: Edit on this one Worker) and CLOUDFLARE_ACCOUNT_ID, then disconnect
+# the Cloudflare dashboard's git build so there is one deployer.
+#
+# A push to main deploys only after the typecheck and the unit tests pass.
+name: deploy
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e-commerce-store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e-commerce-store/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npm test
+      - run: npm run build:cloudflare
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

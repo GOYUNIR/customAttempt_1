@@ -1,4 +1,7 @@
-# Moving the platform off goyunir.com (EXECUTABLE; not performed yet)
+# Moving the platform off goyunir.com: SUPERSEDED for the move by BOOTSTRAP-RUNBOOK.md
+
+> 2026-10-02: the owner chose a FRESH INSTALL on new accounts (BOOTSTRAP-RUNBOOK.md). This file describes the earlier plan (same accounts, new domain). Its check, `scripts/verify-domain-migration.ts`, is still the right tool for verifying the new domain on move day (runbook §7).
+
 
 The platform is borrowing goyunir.com. Eventually the platform gets its own
 name and domain (written NEWROOT below; not chosen yet), and goyunir.com goes

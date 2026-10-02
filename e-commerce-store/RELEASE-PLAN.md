@@ -10,6 +10,8 @@ The name and domain are variables until chosen; code reads them from config (`PL
 4. Legal: entity name in the Terms and Privacy pages, trademark search, legal review.
 5. Support and alert inboxes at the new domain (`SUPPORT_EMAIL`, operator alert address).
 6. Workers Paid ($5/month), bought on the NEW Cloudflare account after the move (owner, 2026-10-02). Error 1102s on the old Free stack are known and not regressions.
+7. Search engines: open `public/robots.txt` and serve a real, host-aware `/sitemap.xml` on DOMAIN (today both keep crawlers out on purpose).
+8. The move itself: BOOTSTRAP-RUNBOOK.md (fresh install; bootstrap, transfer, rehearsal and checks are built and tested).
 
 ## WAITING ON ME (the owner), in priority order
 
@@ -283,10 +285,9 @@ Evidence: `scripts/csp-scan.ts` loads 13 real pages (marketing, legal, two store
 
 - A staging copy (second Worker on workers.dev, second Supabase project, Stripe test keys) so the release gate can keep running after live mode. Without it, purchase proofs can't run against live production.
 - Sentry or similar error alerting.
-- PLATFORM-IDENTITY beyond the release minimum:
-  - admin.<root> is both the platform admin and GOYUNIR's admin;
-  - GOYUNIR is still "the default tenant" in code;
-  - internal names (`goyunir_admin_device` cookie, `goyunir-theme-json`).
+- PLATFORM-IDENTITY beyond the release minimum (OWNERSHIP-MIGRATION.md, "What remains"):
+  - admin.<root> is both the platform admin and GOYUNIR's admin, and the staff sign-in pages embed the default tenant's theme data (on a fresh install that tenant is a neutral shell, so nothing shows; the clean fix is for sign-in pages to embed no store's theme);
+  - code identifiers built from the old name (CSS classes, element ids, the `goyunir_admin_device` cookie, localStorage keys): invisible, but renaming cookies and storage keys signs people out, so it's a planned change.
 - Discount codes are built and OFF on every plan (`plans.discount_codes_enabled`); turning them on for a plan is a one-row change.
 - Storefront first screen rendered on the server (see Speed).
 - The original store's admin "trigger drop" charge path has never been proven with a real charge (EVIDENCE.md). It can't take money today, because the GOYUNIR shell has no products. Prove it before GOYUNIR sells through it.
