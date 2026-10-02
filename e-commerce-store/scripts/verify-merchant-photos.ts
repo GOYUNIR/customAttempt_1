@@ -79,6 +79,11 @@ const run = Date.now().toString(36);
     const pA = (await products(sA)).find((p) => p.slug === 'stock-race-fixture');
     const pB = (await products(sB))[0];
     if (!pA || !pB) throw new Error('fixtures missing: ' + JSON.stringify({ a: !!pA, b: !!pB }));
+    // Self-cleaning: start from a fixture with NO photos (a run that died
+    // part-way used to leave its photo on it, and the next run then compared
+    // against the wrong image), and leave it that way at the end.
+    if ((pA.images || []).length) await save(sA, pA, { images: [] });
+    pA.images = [];
     const beforeB = JSON.stringify(pB.images || []);
     const steal = await save(sB, pB, { images: [url] });
     check(steal.status === 400, 'store B cannot put test4\'s photo on its own product: ' + steal.status + ' ' + JSON.stringify(steal.body?.error));
@@ -132,7 +137,7 @@ const run = Date.now().toString(36);
     const keep = await save(sA, saved, {});
     check(keep.status === 200 && ((await products(sA)).find((p) => p.id === pA.id)?.images || []).length === 1, 'a later edit that does not touch photos keeps them');
     const clear = await save(sA, saved, { images: pA.images || [] });
-    check(clear.status === 200 && JSON.stringify((await products(sA)).find((p) => p.id === pA.id)?.images || []) === JSON.stringify(pA.images || []), 'the fixture is back to its original photos');
+    check(clear.status === 200 && JSON.stringify((await products(sA)).find((p) => p.id === pA.id)?.images || []) === JSON.stringify(pA.images || []), 'the fixture is back to no photos (self-cleaning)');
   } finally {
     await browser.close();
   }
