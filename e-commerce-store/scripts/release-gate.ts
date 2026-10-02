@@ -50,6 +50,7 @@ const steps: Step[] = [
   { name: 'Discount codes (flag on for the run)', cmd: tsx('verify-discounts.ts'), pass: allPass },
   { name: 'Webhooks tolerate deleted data', cmd: tsx('verify-webhook-tolerance.ts'), pass: allPass },
   { name: 'Prices and stock never stale at checkout', cmd: tsx('verify-no-stale-money.ts'), pass: allPass },
+  { name: 'Storefront first screen on the server (flag, ?ssr=1)', cmd: tsx('verify-storefront-ssr.ts'), pass: allPass },
   { name: 'Portals at phone width', cmd: tsx('verify-portal-phone.ts'), pass: allPass },
   { name: 'Content policy blocks nothing real', cmd: tsx('csp-scan.ts'), pass: allPass },
   ...(quick ? [] : [{ name: 'Signup abuse (record mode)', cmd: tsx('verify-signup-abuse.ts'), pass: allPass }]),

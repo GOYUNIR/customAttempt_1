@@ -36,7 +36,8 @@ const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); retu
   const token = (await issueAdminDevice(createKvClient() as any, owner, false, deviceMetaFor((await readStaffIdentity(owner))!), 1800)).token;
 
   const store = await (await fetch('https://demo.' + ROOT + '/api/store')).json() as any;
-  const slug = (store.products || []).find((p: any) => p.slug && p.isActive !== false)?.slug;
+  const slug = (store.allProducts || []).find((p: any) => p.slug && p.isActive === true)?.slug;
+  if (!slug) throw new Error('no live product on the demo store to measure');
   const pages: { name: string; url: string; cookie?: boolean }[] = [
     { name: 'marketing home', url: 'https://' + ROOT + '/' },
     { name: 'store home', url: 'https://demo.' + ROOT + '/' },

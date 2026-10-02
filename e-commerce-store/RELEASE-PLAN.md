@@ -251,19 +251,23 @@ It runs after Resend's daily reset (midnight UTC), with at most 3 real sends to 
 
 ## Speed (measured 2026-10-02, not on the path)
 
-`npx tsx scripts/measure-speed.ts --runs 10` (throttled phone: 150ms RTT, 1.6 Mbps, 4x CPU; median, cold cache):
+`npx tsx scripts/measure-speed.ts --runs 12 --ssr-ab`. The profile is a throttled phone: 150ms RTT, 1.6 Mbps, 4x CPU, cold cache. Each figure is the median of 6, with the two variants interleaved on the same network.
 
-| Page | TTFB | LCP |
-|---|---|---|
-| Marketing home | ~0.4s | ~0.9s |
-| Store home | ~0.5s | ~3.8s |
-| Product page | ~0.6s | ~2.7s |
-| Dashboard | ~0.4-1.1s | ~3.3s |
+| Page | LCP, client-rendered (today) | LCP, first screen on the server (flag) | CPU per request, off → on |
+|---|---|---|---|
+| Marketing home | ~0.9s | (not affected) | |
+| Store home | 3.35s | **2.07s** | 29 → 39ms |
+| Product page | 2.87s | **1.55s** | 24 → 44ms |
 
-- Server work is small: store home ~200ms, marketing ~100ms above a static file. TTFB on this link swings 0.3-1.6s run to run, which is network, not code.
-- Caching HTML would not move LCP, and every page that shows money or stock must stay uncached. `scripts/verify-no-stale-money.ts` (in the gate) proves a price change and sold-out reach checkout at once, while the catalog display may lag up to 10s.
-- Two hint changes were measured with an interleaved A/B (`--ab`) and reverted: preloading /api/store, and preloading the first photos from the server. Neither gave a gain above the noise, and the photo preload made product pages ~700ms slower.
-- The real cost is client-side: ~220KB of JS must download and hydrate before the storefront draws its hero, which is a CSS background. The fix is to render the storefront's first screen on the server, a refactor logged below.
+- **The flag:** `STOREFRONT_SSR=on` (wrangler var), OFF by default; `?ssr=1` forces it per request. Turn it on after the move, on the new account with Workers Paid: 44ms of CPU is far inside Paid's 30s default limit, and on Free every page already exceeds 10ms.
+- **How it works:** the server renders the first screen from the same 10s display payload /api/store serves, and preloads the hero or product photo at high priority. The page still refreshes from /api/store once running, and the HTML is never stored.
+- **Proofs:**
+  - `verify-storefront-ssr.ts` (gate): the products are in the HTML, the store shows only its own products, and hydration has no mismatch.
+  - `verify-no-stale-money.ts` (gate): a price change and a sold-out item reach checkout at once, on the server-rendered pages too.
+- **Correction:** the "product page" figures in the first measurement (~2.7s) and in the hint A/B came from a not-found page; `measure-speed.ts` asked for the wrong field when picking a slug, and now does it right.
+- **Earlier hints, reverted:** preloading /api/store, and preloading photos while the page was still client-rendered. Neither beat the noise, because the page couldn't paint until its JS ran.
+- **Also fixed:** public media now sends `Access-Control-Allow-Origin: *`; the hero shader's CORS load was being blocked.
+- **Wasted requests on store pages, not fixed:** /api/auth/me, the analytics heartbeat, /api/ai/hero-animation and /icon each return 404 on merchant hosts. They're cheap to remove later.
 
 ## CSP plan (2026-10-02)
 
