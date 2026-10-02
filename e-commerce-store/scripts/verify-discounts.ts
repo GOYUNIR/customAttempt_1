@@ -110,6 +110,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     if (fs) await stripe.checkout.sessions.expire(fs.id, {}, on).catch(() => null);
 
     const buyer = 'disc' + run.toLowerCase() + '@' + SINK;
+    const s1Started = Date.now();
     const s1 = await checkout(buyer, TEN);
     const session = s1.body?.sessionId ? await stripe.checkout.sessions.retrieve(s1.body.sessionId, { expand: ['line_items'] }, on) : null;
     const expectedFee = (await platformFeeForCharge(A, 1710)).feeCents;
@@ -144,6 +145,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     check(Boolean(mail) && String(mail.html).includes('Discount (' + TEN + ')'), 'the confirmation email shows the discount (recorded in the sink)');
 
     console.log('\nLimits after a purchase');
+    // Checkout keys an attempt to a 30s window (a double tap reuses one hold,
+    // one code use and one Stripe session). Inside the paid attempt's window
+    // the same buyer gets that same, already-paid session back; the
+    // per-customer rule applies to a NEW attempt, so wait for the next window.
+    const paidWindow = Math.floor(s1Started / 30_000);
+    if (Math.floor(Date.now() / 30_000) === paidWindow) {
+      const replay = await checkout(buyer, TEN);
+      check(replay.status === 200 && replay.body?.sessionId === s1.body?.sessionId, 'same window: the buyer gets their own paid session back, not a new discount');
+      while (Math.floor(Date.now() / 30_000) === paidWindow) await sleep(1000);
+    }
     check((await checkout(buyer, TEN)).body?.error === "That code isn't valid.", 'the same customer again: refused (1 per customer)');
     const s2 = await checkout('second' + run.toLowerCase() + '@' + SINK, TEN);
     check(s2.status === 200, 'a second customer: allowed (use 2 of 2, held)');
