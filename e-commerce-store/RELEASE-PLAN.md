@@ -168,10 +168,29 @@ Stripe Dashboard (live mode) → Developers → Webhooks → **Add endpoint**:
 
 ## 10. Uptime and errors (free first)
 
+**Health endpoint (built 2026-10-02):** `GET https://<root>/api/health`.
+- It returns 200 `{"status":"ok","db":"ok","ms":…}`, or 503 `degraded` when the database doesn't answer within 2 seconds.
+- It reveals nothing else, and is never cached.
+
+**UptimeRobot (Free: 50 monitors, 5-minute checks). Add these monitors:**
+
+| Monitor | Type | URL | Expect | Interval |
+|---|---|---|---|---|
+| Health (Worker + database) | HTTP(s) – keyword | `https://<root>/api/health` | status 200 **and** keyword `"status":"ok"` | 5 min |
+| Marketing site | HTTP(s) | `https://<root>/` | 200 | 5 min |
+| Merchant sign-in | HTTP(s) | `https://app.<root>/app/login` | 200 | 5 min |
+| A merchant storefront | HTTP(s) | `https://demo.<root>/` | 200 | 5 min |
+| Signup API | HTTP(s) – keyword | `https://<root>/api/signup/merchant` | 200 and keyword `siteKey` | 15 min |
+
+**Alert path:**
+1. UptimeRobot alert contact: email to the support address (Email Routing forwards it to you). Optionally, the UptimeRobot mobile app's push notifications.
+2. Alert after 2 failed checks (avoids one-off blips).
+3. When "Health" is down but "Marketing site" is up, the database is the problem (Supabase status page). When everything is down, it's the Worker or DNS (Cloudflare status page, then Workers → customattempt-1 → Logs).
+
 - **Uptime:** UptimeRobot Free (50 monitors, 5-minute checks) or Better Stack Free (10 monitors, 3-minute checks), alerting by email to support@. Monitors:
   - `https://<root>/`;
   - `https://app.<root>/app/login`;
-  - `https://<root>/api/health`, if present, else `/api/signup/merchant` (it answers JSON);
+  - `https://<root>/api/health` (built: see above);
   - one merchant store page.
 - **Errors:** Workers Logs are already on (`observability.enabled`; free, short retention). For alerts, Sentry's free plan (5,000 errors a month) needs a small SDK addition on Workers. That's half a day, and **post-launch** unless you want it before. Until then, the breaker alert and Stripe's own webhook-failure emails are the alarms.
 
