@@ -12,10 +12,10 @@ cleanup of TEST data is authorized (with a backup first).
 | 4 | Staff/sales portals at phone width | DONE: drawer under 800px; verify-portal-phone.ts (375/390/414) in the gate |
 | 5 | Discount codes (flag off) | DONE: built, flag OFF on every plan; verify-discounts.ts ALL PASS live (in the gate) |
 | 6 | Hick's Law cheap fixes (DEFERRED-11) | DONE: stock panel, sales pickers, promotions form; logged the rest in ARCHITECTURE DEFERRED-11 |
-| 7 | Speed: measure, safe caching | |
-| 8 | CSP enforcement plan | |
-| 9 | Store offboarding design | |
-| 10 | Lean always-loaded context | |
+| 7 | Speed: measure, safe caching | DONE: measured (RELEASE-PLAN "Speed"); two hint changes A/B-tested and reverted (no gain); no HTML caching (money pages stay uncached); verify-no-stale-money.ts in the gate |
+| 8 | CSP enforcement plan | DONE: frames/images/media/fonts/object/base enforced; plan in RELEASE-PLAN "CSP plan"; csp-scan.ts in the gate |
+| 9 | Store offboarding design | DONE (design only): OFFBOARDING.md, 4 owner decisions |
+| 10 | Lean always-loaded context | DONE: STRATEGY.md 14,056 -> ~10.3KB (go-live list now points to RELEASE-PLAN); CLAUDE.md 24 B; AGENTS.md 142 B |
 | 11 | Final full release gate on the clean database | |
 
 The owner's open items are in RELEASE-PLAN.md under "WAITING ON ME".

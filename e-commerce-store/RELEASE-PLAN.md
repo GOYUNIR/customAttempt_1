@@ -278,4 +278,6 @@ Evidence: `scripts/csp-scan.ts` loads 13 real pages (marketing, legal, two store
   - internal names (`goyunir_admin_device` cookie, `goyunir-theme-json`).
 - Discount codes are built and OFF on every plan (`plans.discount_codes_enabled`); turning them on for a plan is a one-row change.
 - Storefront first screen rendered on the server (see Speed).
+- The original store's admin "trigger drop" charge path has never been proven with a real charge (EVIDENCE.md). It can't take money today, because the GOYUNIR shell has no products. Prove it before GOYUNIR sells through it.
+- Store offboarding: designed in OFFBOARDING.md (four owner decisions), not built.
 - The custom-domain real-domain proof.

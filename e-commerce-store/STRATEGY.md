@@ -102,12 +102,12 @@ Read this before any commerce-mode or industry-specific work.
 - **Pricing is data, not code.** Plans, fees (the tier-to-basis-points mapping),
   limits and copy live in `lib/platform-marketing.ts`; the graduated mechanism
   is designed in `PRICING.md`.
-- **Graduated pricing (in progress).** As a free-tier merchant's volume grows,
+- **Graduated pricing (built, PRICING.md §9).** As a free-tier merchant's volume grows,
   their effective percentage should move smoothly toward flat pricing. Show it
   to them as an approaching milestone, not a sales push. It should feel
   premium: the kind of thing a merchant screenshots.
 - **The platform fee is a real revenue line**, collected through Stripe Connect
-  (in progress). Connect is not just friction removal. It is also what makes
+  (built; CONNECT.md). Connect is not just friction removal. It is also what makes
   multi-merchant legal, which is why no new merchant is onboarded until it
   ships.
 - **Growth modules report proven incremental impact only**, measured against
@@ -172,75 +172,12 @@ architecture doesn't rule it out.
 
 ## 9. Go-live trigger — the event, not a date
 
-Real customer transactions must not be possible until every pending item below
-is done. The trigger is the moment real traffic *becomes possible*, not a date.
-Add an item whenever a gap is found; tick it only with evidence, recorded in
-`EVIDENCE.md` (not auto-loaded), not here.
-
-**Done (evidence in EVIDENCE.md / TENANCY.md):**
-- Stock holds + movement ledger, all checkout, raffle and waitlist paths,
-  merchant and original store (2026-09-27).
-- Merchant stock tools in /app (count, add/remove, history, oversold).
-- Stripe Connect for merchants: single, cart, raffle/waitlist, fees, refunds,
-  disputes, order emails.
-- Merchant dashboard with per-route isolation proofs; public signup closed.
-- Pooled stock is refused by every gate (real pool support is a separate feature).
-- The original store's admin Stock tab (count, add/remove, history, oversold)
-  on the same ledger (2026-09-27).
-- The pricing page states the per-sale fee, derived from the plan data
-  (DEFERRED-9, 2026-09-27).
-- Plan billing: Growth by Stripe subscription, 7-day grace, proven in test
-  mode with real sales at 0% and graduated (PRICING.md §9, 2026-09-27).
-
-**Pending:**
-- **PLATFORM-IDENTITY (own session, not a quick fix).** GOYUNIR is a
-  tenant, not the platform; goyunir.com is a stand-in for both. Audit
-  2026-09-27:
-  - No platform domain is hardcoded in code: it comes from
-    `PLATFORM_ROOT_DOMAIN` (the `goyunir.com` literals are only in comments
-    and wrangler routes, which are config).
-  - The platform's name is now config (`PLATFORM_NAME`, marketing chrome).
-  - Still tangled:
-    (a) The root layout's metadata and title suffix, the staff sign-in
-        header, and the `/og` share image take the ORIGINAL STORE's
-        settings, so platform pages say "| GOYUNIR" from store data.
-    (b) admin.<root> is BOTH the platform admin and the original store's
-        admin (`app/admin/page.tsx` seeds from `GOYUNIR_STORE_SUITE`).
-    (c) The original store is the "default tenant" in code paths
-        (`DEFAULT_TENANT_ID`, `ensureDefaultTenant`) rather than an
-        ordinary tenant.
-    (d) System emails' from-name and auth pages (`app/auth/*`) use store
-        branding.
-    (e) Platform Terms/Privacy name the operator only by domain; the
-        platform's legal entity name must replace that at legal review.
-  - Target: the platform on its own domain, and GOYUNIR at
-    goyunir.<platform-domain> or its own custom domain.
-- 🛑 Cloudflare Workers Paid (50-subrequest ceiling on Free): the first
-  go-live action; staying on Free until then is deliberate (owner).
-- 🛑 **Workers Paid AND a verified, working email path, with a MEASURED daily
-  limit big enough for signup** (owner, 2026-10-01). Hard blocker for opening
-  signup and for go-live. Found 2026-10-01: Resend Free caps at 100/day as well
-  as 3,000/month, and our proof runs used the whole day.
-  - Primary: Cloudflare Email Service (needs Workers Paid; public beta;
-    3,000/month included then $0.35 per 1,000; the daily quota is per account
-    and not published). Fallback: Resend. Both behind the governed driver
-    (services/email/governor.ts); limits are data (`email_provider_plans`).
-  - Done only when: the sending domain is onboarded to Email Service; a test
-    send to the owner's verified address passes SPF, DKIM and DMARC in Gmail
-    "Show original" and lands in the inbox; the account's real daily limit is
-    known and entered in `email_provider_plans`; signup's 40% share of it covers
-    the expected signups.
-  - Resend Pro ($20/month, 50,000/month, no daily cap) only if Cloudflare's
-    limit turns out too low.
-- 🛑 Live-mode Stripe webhooks (platform + Connect) must subscribe to
-  `checkout.session.expired`, as the test-mode ones do. The live PLATFORM
-  webhook must also subscribe to `customer.subscription.created/updated/deleted`
-  and `invoice.paid/payment_failed` (plan billing).
-- 🛑 Stripe Tax on plan invoices before real subscription revenue (PRICING.md §9).
-- 🛑 support@goyunir.com must receive mail (goyunir.com has no MX), then set
-  `SUPPORT_EMAIL`.
-- Every charge path writes an order: admin trigger-drop not yet proven with a
-  real charge.
+Real customer transactions must not be possible until every item on the
+critical path in `RELEASE-PLAN.md` is done (its "WAITING ON ME" list is the
+owner's part). The trigger is the moment real traffic *becomes possible*, not a
+date. Add an item there whenever a gap is found; tick it only with evidence,
+recorded in `EVIDENCE.md`. Neither file is auto-loaded: read RELEASE-PLAN.md
+before any go-live work.
 
 ## 10. Where things live
 
